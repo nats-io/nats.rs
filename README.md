@@ -12,10 +12,6 @@ Rust may be the most interesting new language the NATS ecosystem has seen. We be
 This is a new client, and I and the team are new to Rust, so all feedback welcome!
 We encourage all folks in the NATS and Rust ecosystems to help us improve this library. Please open issues, submit PRs, etc.
 
-## Installation
-
-Currently you need to build from source. We will place on crates.io soon.
-
 ## Documentation
 
 ```bash
