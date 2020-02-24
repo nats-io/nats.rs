@@ -1,5 +1,5 @@
 [package]
-name = "nats"
+name = "natsio"
 version = "0.1.0"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>"]
@@ -8,8 +8,11 @@ license = "Apache-2.0"
 homepage = "https://github.com/nats-io/nats.rs"
 repository = "https://github.com/nats-io/nats.rs"
 readme = "README.md"
-keywords = ["nats", "client", "messaging", "api", "cloud-native", "distributed-computing"]
+keywords = ["nats", "client", "messaging", "api", "distributed-computing"]
 categories = ["network-programming", "api-bindings"]
+
+[lib]
+name = "nats"
 
 [badges]
 maintenance = { status = "actively-developed" }
