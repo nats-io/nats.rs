@@ -114,7 +114,7 @@ The following is a list of features currently supported and planned for the near
 * [ ] Reconnect logic
 * [ ] TLS support
 * [ ] Direct async support
-* [ ] Crates.io listing
+* [X] Crates.io listing
 
 ### Miscellaneous TODOs
 * [ ] Ping timer
