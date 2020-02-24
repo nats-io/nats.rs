@@ -15,6 +15,7 @@ categories = ["network-programming", "api-bindings"]
 name = "nats"
 
 [badges]
+travis-ci = { repository = "nats-io/nats.rs", branch = "master" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
