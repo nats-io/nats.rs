@@ -2,6 +2,7 @@
 A [Rust](https://www.rust-lang.org/) client for the [NATS messaging system](https://nats.io).
 
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Build Status](https://travis-ci.org/nats-io/nats.rs.svg?branch=master)](http://travis-ci.org/nats-io/nats.rs)
 
 ## Motivation
 Rust may be the most interesting new language the NATS ecosystem has seen. We believe this client will have a large impact on NATS, distributed systems, and embedded and IoT environments. With Rust we wanted to be as idiomatic as we could be and embrace the language. We moved many things that would have been runtime checks and errors to the compiler, most notably options on connections, and having subscriptions generate multiple styles of iterators, since iterators are a first class citizen in Rust. We also wanted to be aligned with the NATS philosophy of simple, secure, and fast! (The security is coming soon!)
