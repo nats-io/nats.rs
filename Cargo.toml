@@ -1,0 +1,37 @@
+[package]
+name = "nats"
+version = "0.1.0"
+description = "A Rust NATS client"
+authors = ["Derek Collison <derek@nats.io>"]
+edition = "2018"
+license = "Apache-2.0"
+homepage = "https://github.com/nats-io/nats.rs"
+repository = "https://github.com/nats-io/nats.rs"
+readme = "README.md"
+keywords = ["nats", "client", "messaging", "api", "cloud-native", "distributed-computing"]
+categories = ["network-programming", "api-bindings"]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1"
+nuid = "~0.2"
+lazy_static = "1.4"
+nom = "5.1"
+crossbeam-channel = "0.4"
+
+[dev-dependencies]
+criterion = "0.3"
+quicli = "0.4"
+structopt = "0.3.5"
+
+[[bench]]
+name = "nats_bench"
+harness = false
+
+[[example]]
+name = "nats-box"
+path = "examples/nats-box/main.rs"
