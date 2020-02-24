@@ -1,4 +1,4 @@
-# NATS - Rust Client (Beta, work in progress)
+# NATS - Rust Client (Beta)
 A [Rust](https://www.rust-lang.org/) client for the [NATS messaging system](https://nats.io).
 
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
