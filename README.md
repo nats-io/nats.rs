@@ -123,4 +123,4 @@ The following is a list of features currently supported and planned for the near
 * [ ] COW for received messages
 * [ ] Sub w/ handler can't do iter()
 * [ ] Backup servers for option
-* [ ] Travis integration
+* [X] Travis integration
