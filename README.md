@@ -20,7 +20,7 @@ We encourage all folks in the NATS and Rust ecosystems to help us improve this l
 
 ## Example Usage
 
-`> cargo run --example nats-box -h`
+`> cargo run --example nats-box -- -h`
 
 Basic connections, and those with options. The compiler will force these to be correct.
 
@@ -33,7 +33,7 @@ let nc2 = nats::Connection::new()
     .connect("127.0.0.1")?;
 ```
 
-Publish
+### Publish
 
 ```rust
 nc.publish("foo", "Hello World!")?;
@@ -54,7 +54,7 @@ let rsub = nc.subscribe(reply)?;
 nc.publish_request("foo", reply, "Help me!")?;
 ```
 
-Subscribe
+### Subscribe
 
 ```rust
 let sub = nc.subscribe("foo")?;
@@ -76,7 +76,7 @@ let sub = nc.subscribe("bar")?.with_handler(move |msg| {
 let qsub = nc.queue_subscribe("foo", "my_group")?;
 ```
 
-Request/Response
+### Request/Response
 
 ```rust
 let resp = nc.request("foo", "Help me?")?;
