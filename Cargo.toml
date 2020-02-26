@@ -39,3 +39,7 @@ harness = false
 [[example]]
 name = "nats-box"
 path = "examples/nats-box/main.rs"
+
+[[example]]
+name = "serde-json"
+path = "examples/serde-json/main.rs"
