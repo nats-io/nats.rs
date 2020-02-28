@@ -383,7 +383,7 @@ impl Message {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.subscribe("help.request")?.with_handler(move |m| {
+    /// nc.subscribe("help.request")?.with_handler(move |m| {
     ///     m.respond("ans=42")?; Ok(())
     /// });
     /// # Ok(())
@@ -432,6 +432,7 @@ pub struct Subscription {
     recv: Receiver<Message>,
     subs: Arc<RwLock<HashMap<usize, Sender<Message>>>>,
     writer: Arc<Mutex<Outbound>>,
+    unsub: bool,
 }
 
 impl Subscription {
@@ -548,23 +549,27 @@ impl Subscription {
 
     /// Attach a closure to handle messages.
     /// This closure will execute in a separate thread.
+    /// The result of this call is a `SubscriptionHandler` which can not be
+    /// iterated and must be unsubscribed or closed directly to unregister interest.
+    /// A SubscriptionHandler will not unregister interest with the server when `drop(&mut self)` is called.
     ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.subscribe("bar")?.with_handler(move |msg| {
+    /// nc.subscribe("bar")?.with_handler(move |msg| {
     ///     println!("Received {}", &msg);
     ///     Ok(())
     /// });
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_handler<F>(self, handler: F) -> Self
+    pub fn with_handler<F>(mut self, handler: F) -> SubscriptionHandler
     where
         F: Fn(Message) -> io::Result<()> + Sync + Send,
         F: 'static,
     {
+        self.unsub = false;
         let r = self.recv.clone();
         thread::spawn(move || {
             for m in r.iter() {
@@ -574,10 +579,11 @@ impl Subscription {
                 }
             }
         });
-        self
+        SubscriptionHandler { sub: self }
     }
 
-    fn unsub(&self) -> io::Result<()> {
+    fn unsub(&mut self) -> io::Result<()> {
+        self.unsub = false;
         self.subs.write().unwrap().remove(&self.sid);
         let w = &mut self.writer.lock().unwrap().writer;
         write!(w, "UNSUB {}\r\n", self.sid)?;
@@ -596,7 +602,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn unsubscribe(self) -> io::Result<()> {
+    pub fn unsubscribe(mut self) -> io::Result<()> {
         self.unsub()
     }
 
@@ -611,17 +617,63 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn close(self) -> io::Result<()> {
+    pub fn close(mut self) -> io::Result<()> {
         self.unsub()
     }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        match self.unsub() {
-            Ok(_) => {}
-            Err(_) => {}
+        if self.unsub {
+            match self.unsub() {
+                Ok(_) => {}
+                Err(_) => {}
+            }
         }
+    }
+}
+
+pub struct SubscriptionHandler {
+    sub: Subscription,
+}
+
+impl SubscriptionHandler {
+    /// Unsubscribe a subscription.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let sub = nc.subscribe("foo")?.with_handler(move |msg| {
+    ///     println!("Received {}", &msg);
+    ///     Ok(())
+    /// });
+    /// sub.unsubscribe()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn unsubscribe(mut self) -> io::Result<()> {
+        self.sub.unsub = true;
+        self.sub.unsub()
+    }
+
+    /// Close a subscription. Same as `unsubscribe`
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let sub = nc.subscribe("foo")?.with_handler(move |msg| {
+    ///     println!("Received {}", &msg);
+    ///     Ok(())
+    /// });
+    /// sub.close()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn close(mut self) -> io::Result<()> {
+        self.sub.unsub = true;
+        self.sub.unsub()
     }
 }
 
@@ -693,6 +745,7 @@ impl Connection<Connected> {
             recv: r,
             writer: self.state.writer.clone(),
             subs: self.state.subs.clone(),
+            unsub: true,
         })
     }
 
@@ -778,7 +831,7 @@ impl Connection<Connected> {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # let sub = nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// let resp = nc.request("foo", "Help me?")?;
     /// # Ok(())
     /// # }
@@ -800,7 +853,7 @@ impl Connection<Connected> {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # let sub = nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// let resp = nc.request_timeout("foo", "Help me?", std::time::Duration::from_secs(2))?;
     /// # Ok(())
     /// # }
@@ -826,7 +879,7 @@ impl Connection<Connected> {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # let sub = nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// for msg in nc.request_multi("foo", "Help")?.iter().take(1) {}
     /// # Ok(())
     /// # }
