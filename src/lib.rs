@@ -779,7 +779,7 @@ impl Connection<Connected> {
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let sub = nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// let resp = nc.request_timeout("foo", "Help me?", std::time::Duration::from_secs(2))?;
+    /// let resp = nc.request("foo", "Help me?")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -793,7 +793,8 @@ impl Connection<Connected> {
         }
     }
 
-    /// Publish a message on the given subject as a request and receive the response. This call will return after the timeout duration if no response is received.
+    /// Publish a message on the given subject as a request and receive the response.
+    /// This call will return after the timeout duration if no response is received.
     ///
     /// # Example
     /// ```
