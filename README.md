@@ -118,6 +118,6 @@ The following is a list of features currently supported and planned for the near
 * [X] msg.respond
 * [ ] Drain mode
 * [ ] COW for received messages
-* [ ] Sub w/ handler can't do iter()
+* [X] Sub w/ handler can't do iter()
 * [ ] Backup servers for option
 * [X] Travis integration
