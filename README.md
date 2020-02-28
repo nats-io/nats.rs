@@ -3,7 +3,7 @@ A [Rust](https://www.rust-lang.org/) client for the [NATS messaging system](http
 
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Crates.io](https://img.shields.io/crates/v/natsio.svg)](https://crates.io/crates/natsio)
-[![Documentation](https://docs.rs/bustle/badge.svg)](https://docs.rs/bustle/)
+[![Documentation](https://docs.rs/natsio/badge.svg)](https://docs.rs/natsio/)
 [![Build Status](https://travis-ci.org/nats-io/nats.rs.svg?branch=master)](http://travis-ci.org/nats-io/nats.rs)
 
 ## Motivation
