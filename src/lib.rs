@@ -432,7 +432,7 @@ pub struct Subscription {
     recv: Receiver<Message>,
     subs: Arc<RwLock<HashMap<usize, Sender<Message>>>>,
     writer: Arc<Mutex<Outbound>>,
-    unsub: bool,
+    do_unsub: bool,
 }
 
 impl Subscription {
@@ -569,7 +569,9 @@ impl Subscription {
         F: Fn(Message) -> io::Result<()> + Sync + Send,
         F: 'static,
     {
-        self.unsub = false;
+        // This will allow us to not have to capture the return. When it is dropped it
+        // will not unsubscribe from the server.
+        self.do_unsub = false;
         let r = self.recv.clone();
         thread::spawn(move || {
             for m in r.iter() {
@@ -583,7 +585,7 @@ impl Subscription {
     }
 
     fn unsub(&mut self) -> io::Result<()> {
-        self.unsub = false;
+        self.do_unsub = false;
         self.subs.write().unwrap().remove(&self.sid);
         let w = &mut self.writer.lock().unwrap().writer;
         write!(w, "UNSUB {}\r\n", self.sid)?;
@@ -624,7 +626,7 @@ impl Subscription {
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        if self.unsub {
+        if self.do_unsub {
             match self.unsub() {
                 Ok(_) => {}
                 Err(_) => {}
@@ -653,7 +655,6 @@ impl SubscriptionHandler {
     /// # }
     /// ```
     pub fn unsubscribe(mut self) -> io::Result<()> {
-        self.sub.unsub = true;
         self.sub.unsub()
     }
 
@@ -672,7 +673,6 @@ impl SubscriptionHandler {
     /// # }
     /// ```
     pub fn close(mut self) -> io::Result<()> {
-        self.sub.unsub = true;
         self.sub.unsub()
     }
 }
@@ -745,7 +745,7 @@ impl Connection<Connected> {
             recv: r,
             writer: self.state.writer.clone(),
             subs: self.state.subs.clone(),
-            unsub: true,
+            do_unsub: true,
         })
     }
 
