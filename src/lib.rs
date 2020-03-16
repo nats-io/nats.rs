@@ -211,8 +211,11 @@ impl Outbound {
 }
 
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct NotConnected;
+
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct Authenticated;
 
 #[derive(Debug)]
