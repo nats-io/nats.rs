@@ -721,9 +721,8 @@ impl Subscription {
 impl Drop for Subscription {
     fn drop(&mut self) {
         if self.do_unsub {
-            match self.unsub() {
-                Ok(_) => {}
-                Err(_) => {}
+            if let Err(error) = self.unsub() {
+                eprintln!("error unsubscribing during Subscription Drop: {:?}", error);
             }
         }
     }
