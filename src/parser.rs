@@ -136,7 +136,7 @@ fn parse_msg_args(args: &[u8]) -> io::Result<ControlOp> {
     let a = String::from_utf8_lossy(args);
     // subject sid <reply> msg_len
     // TODO(dlc) - convert to nom.
-    let args: Vec<&str> = a.split(" ").collect();
+    let args: Vec<&str> = a.split(' ').collect();
     let (subject, len_index, reply) = match args.len() {
         3 => (args[0], 2, None),
         4 => (args[0], 3, Some(args[2].to_owned())),
