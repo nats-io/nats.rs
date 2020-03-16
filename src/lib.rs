@@ -423,7 +423,7 @@ impl Connection<Authenticated> {
             thread::yield_now();
             let mut cur_len = wbuf.lock().unwrap().writer.buffer().len();
             if cur_len != start_len {
-                for d in wait.iter() {
+                for d in &wait {
                     thread::sleep(*d);
                     {
                         let w = wbuf.lock().unwrap();
