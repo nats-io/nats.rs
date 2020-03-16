@@ -855,12 +855,7 @@ impl Connection<Connected> {
     }
 
     #[inline]
-    fn write_pub_msg(
-        &self,
-        subj: &str,
-        reply: Option<&str>,
-        msgb: &[u8],
-    ) -> io::Result<()> {
+    fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
         let mut w = self.state.writer.lock().unwrap();
         if let Some(reply) = reply {
             write!(w.writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
