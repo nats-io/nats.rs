@@ -1058,16 +1058,18 @@ impl Connection<Connected> {
         );
         self.state.stream.write_all(op.as_bytes())?;
 
-        match parser::parse_control_op(reader)? {
+        let parsed_op = parser::parse_control_op(reader)?;
+
+        match parsed_op {
             parser::ControlOp::Pong => Ok(()),
             parser::ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            other @ parser::ControlOp::Ping
-            | other @ parser::ControlOp::Msg(_)
-            | other @ parser::ControlOp::Info(_)
-            | other @ parser::ControlOp::Unknown(_) => {
+            parser::ControlOp::Ping
+            | parser::ControlOp::Msg(_)
+            | parser::ControlOp::Info(_)
+            | parser::ControlOp::Unknown(_) => {
                 eprintln!(
                     "encountered unexpected control op during connection: {:?}",
-                    other
+                    parsed_op
                 );
                 Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
             }

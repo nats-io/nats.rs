@@ -34,13 +34,14 @@ pub(crate) struct ReadLoopState {
 
 pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
     loop {
-        match parse_control_op(&mut state.reader)? {
+        let parsed_op = parse_control_op(&mut state.reader)?;
+        match parsed_op {
             ControlOp::Msg(msg_args) => state.process_msg(msg_args)?,
             ControlOp::Ping => state.send_pong()?,
             ControlOp::Pong => state.process_pong(),
-            other @ ControlOp::Info(_)
-            | other @ ControlOp::Err(_)
-            | other @ ControlOp::Unknown(_) => eprintln!("Received unhandled message: {:?}", other),
+            ControlOp::Info(_) | ControlOp::Err(_) | ControlOp::Unknown(_) => {
+                eprintln!("Received unhandled message: {:?}", parsed_op)
+            }
         }
     }
 }
