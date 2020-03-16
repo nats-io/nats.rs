@@ -1130,6 +1130,7 @@ const fn if_true(field: &bool) -> bool {
     *field
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
 #[inline]
 fn empty_or_none(field: &Option<&String>) -> bool {
     match field {
