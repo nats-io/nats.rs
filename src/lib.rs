@@ -1146,15 +1146,15 @@ struct ServerInfo {
     connect_urls: Vec<String>,
 }
 
-#[inline]
-fn default_false() -> bool {
+const fn default_false() -> bool {
     false
 }
+
 #[inline]
 fn default_empty() -> String {
     "".to_string()
 }
-#[inline]
-fn default_no_urls() -> Vec<String> {
-    vec![]
+
+const fn default_no_urls() -> Vec<String> {
+    Vec::new()
 }
