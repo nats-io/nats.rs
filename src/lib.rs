@@ -116,6 +116,7 @@ impl ConnectionState for NotConnected {}
 impl ConnectionState for Authenticated {}
 impl ConnectionState for Connected {}
 
+/// A NATS connection.
 #[derive(Debug)]
 pub struct Connection<S: ConnectionState> {
     options: Options,
@@ -165,12 +166,18 @@ where
     }
 }
 
-#[derive(Debug, PartialEq)]
+/// A `ConnectionStatus` describes the current sub-status of a `Connected` connection.
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ConnectionStatus {
+    /// A connection in the process of establishing a connection.
     Connecting,
+    /// An established connection.
     Connected,
+    /// A permanently closed connection.
     Closed,
+    /// A connection that has lost connectivity, but may reestablish connectivity.
     Disconnected,
+    /// A connection in the process of reestablishing connectivity after a disconnect.
     Reconnecting,
 }
 
@@ -443,10 +450,15 @@ fn start_flush_cycle(wbuf: &Arc<Mutex<Outbound>>) -> usize {
     w.writer.buffer().len()
 }
 
+/// A `Message` that has been published to a NATS `Subject`.
 #[derive(Debug)]
 pub struct Message {
+    /// The NATS `Subject` that this `Message` has been published to.
     pub subject: String,
+    /// The optional unique reply inbox that may be used for
+    /// receiving responses when using the request/reply pattern.
     pub reply: Option<String>,
+    /// The `Message` contents.
     pub data: Vec<u8>,
     pub(crate) writer: Option<Arc<Mutex<Outbound>>>,
 }
@@ -501,6 +513,7 @@ impl fmt::Display for Message {
     }
 }
 
+/// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
 pub struct Subscription {
     sid: usize,
@@ -511,7 +524,8 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    /// Get the next message, or None if the subscription has been unsubscribed or the connection closed.
+    /// Get the next message, or None if the subscription
+    /// has been unsubscribed or the connection closed.
     ///
     /// # Example
     /// ```
@@ -527,7 +541,9 @@ impl Subscription {
         self.recv.iter().next()
     }
 
-    /// Try to get the next message, or None if no messages are present or if the subscription has been unsubscribed or the connection closed.
+    /// Try to get the next message, or None if no messages
+    /// are present or if the subscription has been unsubscribed
+    /// or the connection closed.
     ///
     /// # Example
     /// ```
@@ -710,6 +726,7 @@ impl Drop for Subscription {
     }
 }
 
+/// A `SubscriptionHandler` may be used to unsubscribe a handler thread.
 pub struct SubscriptionHandler {
     sub: Subscription,
 }
