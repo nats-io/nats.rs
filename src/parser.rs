@@ -182,8 +182,8 @@ const CRLF: &str = "\r\n";
 
 #[inline]
 fn control_args(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    let (input, (_, args, _)) = tuple((take_while(is_space), take_until(CRLF), crlf))(input)?;
-    Ok((input, args))
+    let (remainder, (_, args, _)) = tuple((take_while(is_space), take_until(CRLF), crlf))(input)?;
+    Ok((remainder, args))
 }
 
 use super::Message;
