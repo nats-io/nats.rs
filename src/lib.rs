@@ -781,10 +781,7 @@ pub struct SubscriptionDeadlineIterator {
 impl Iterator for SubscriptionDeadlineIterator {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        match self.r.recv_timeout(self.to) {
-            Ok(m) => Some(m),
-            _ => None,
-        }
+        self.r.recv_timeout(self.to).ok()
     }
 }
 
