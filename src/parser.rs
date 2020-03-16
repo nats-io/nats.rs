@@ -32,13 +32,13 @@ pub(crate) struct ReadLoopState {
     pub(crate) pongs: Arc<Mutex<VecDeque<Sender<bool>>>>,
 }
 
-pub(crate) fn read_loop(mut state: &mut ReadLoopState) -> io::Result<()> {
+pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
     loop {
         match parse_control_op(&mut state.reader)? {
-            ControlOp::Msg(msg_args) => process_msg(&mut state, msg_args)?,
+            ControlOp::Msg(msg_args) => state.process_msg(msg_args)?,
             ControlOp::Ping => state.send_pong()?,
             ControlOp::Pong => state.process_pong(),
-            _ => println!("Got something else"),
+            other => eprintln!("Received unhandled message: {:?}", other),
         }
     }
 }
@@ -53,41 +53,41 @@ impl ReadLoopState {
 
     fn send_pong(&self) -> io::Result<()> {
         let w = &mut self.writer.lock().unwrap().writer;
-        w.write(b"PONG\r\n")?;
+        w.write_all(b"PONG\r\n")?;
         w.flush()?;
         Ok(())
     }
-}
 
-fn process_msg(state: &mut ReadLoopState, msg_args: MsgArgs) -> io::Result<()> {
-    let mut msg = Message {
-        subject: msg_args.subject,
-        reply: msg_args.reply,
-        data: Vec::with_capacity(msg_args.mlen as usize),
-        writer: None,
-    };
+    fn process_msg(&mut self, msg_args: MsgArgs) -> io::Result<()> {
+        let mut msg = Message {
+            subject: msg_args.subject,
+            reply: msg_args.reply,
+            data: Vec::with_capacity(msg_args.mlen as usize),
+            writer: None,
+        };
 
-    // Setup so we can send responses.
-    if let Some(_) = msg.reply {
-        msg.writer = Some(state.writer.clone());
+        // Setup so we can send responses.
+        if msg.reply.is_some() {
+            msg.writer = Some(self.writer.clone());
+        }
+
+        let reader = &mut self.reader;
+        // FIXME(dlc) - avoid copy if possible.
+        // FIXME(dlc) - Just read CRLF? Buffered so should be ok.
+        reader
+            .take(u64::from(msg_args.mlen))
+            .read_to_end(&mut msg.data)?;
+
+        let mut crlf = [0; 2];
+        reader.read_exact(&mut crlf)?;
+
+        // Now lookup the subscription's channel.
+        let subs = self.subs.read().unwrap();
+        if let Some(tx) = subs.get(&msg_args.sid) {
+            tx.send(msg).unwrap();
+        }
+        Ok(())
     }
-
-    let reader = &mut state.reader;
-    // FIXME(dlc) - avoid copy if possible.
-    // FIXME(dlc) - Just read CRLF? Buffered so should be ok.
-    reader
-        .take(msg_args.mlen as u64)
-        .read_to_end(&mut msg.data)?;
-
-    let mut crlf = [0; 2];
-    reader.read_exact(&mut crlf)?;
-
-    // Now lookup the subscription's channel.
-    let subs = state.subs.read().unwrap();
-    if let Some(tx) = subs.get(&msg_args.sid) {
-        tx.send(msg).unwrap();
-    }
-    Ok(())
 }
 
 pub(crate) fn parse_control_op(reader: &mut BufReader<TcpStream>) -> io::Result<ControlOp> {
