@@ -671,7 +671,7 @@ impl Subscription {
             for m in r.iter() {
                 if let Err(e) = handler(m) {
                     // TODO(dlc) - Capture for last error?
-                    println!("Error in callback! {:?}", e);
+                    eprintln!("Error in callback! {:?}", e);
                 }
             }
         });
