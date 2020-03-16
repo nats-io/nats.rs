@@ -146,16 +146,16 @@ fn parse_msg_args(args: &[u8]) -> io::Result<ControlOp> {
         Ok(sid) => sid,
         _ => return Err(parse_error()),
     };
-    let msg_len = match u32::from_str(args[len_index]) {
-        Ok(msg_len) => msg_len,
+    let mlen = match u32::from_str(args[len_index]) {
+        Ok(mlen) => mlen,
         _ => return Err(parse_error()),
     };
     let m = MsgArgs {
         subject: subject.to_owned(),
-        reply: reply,
-        //        data: Vec::with_capacity(msg_len as usize),
-        mlen: msg_len,
-        sid: sid,
+        reply,
+        //        data: Vec::with_capacity(mlen as usize),
+        mlen,
+        sid,
     };
     Ok(ControlOp::Msg(m))
 }
