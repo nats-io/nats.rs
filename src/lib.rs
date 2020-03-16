@@ -271,7 +271,8 @@ impl Connection<NotConnected> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new() -> Connection<NotConnected> {
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Connection<NotConnected> {
         Connection {
             state: NotConnected {},
             options: Options {
@@ -1122,9 +1123,9 @@ struct Connect<'a> {
     auth_token: Option<&'a String>,
 }
 
-#[inline]
-fn if_true(field: &bool) -> bool {
-    *field == true
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn if_true(field: &bool) -> bool {
+    *field
 }
 
 #[inline]
