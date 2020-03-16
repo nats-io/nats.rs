@@ -14,11 +14,11 @@ use std::sync::{Arc, Mutex, RwLock};
 #[deny(unsafe_code)]
 
 // Protocol
-const INFO: &'static [u8] = b"INFO";
-const MSG: &'static [u8] = b"MSG";
-const PING: &'static [u8] = b"PING";
-const PONG: &'static [u8] = b"PONG";
-const ERR: &'static [u8] = b"-ERR";
+const INFO: &[u8] = b"INFO";
+const MSG: &[u8] = b"MSG";
+const PING: &[u8] = b"PING";
+const PONG: &[u8] = b"PONG";
+const ERR: &[u8] = b"-ERR";
 
 #[inline]
 fn is_valid_op_char(c: u8) -> bool {
