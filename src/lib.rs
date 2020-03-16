@@ -294,7 +294,7 @@ impl Connection<NotConnected> {
     /// # }
     /// ```
     pub fn with_token(self, token: &str) -> Connection<Authenticated> {
-        let mut opts = self.options.clone();
+        let mut opts = self.options;
         opts.auth = AuthStyle::Token(token.to_string());
         Connection {
             state: Authenticated {},
@@ -314,7 +314,7 @@ impl Connection<NotConnected> {
     /// # }
     /// ```
     pub fn with_user_pass(self, user: &str, password: &str) -> Connection<Authenticated> {
-        let mut opts = self.options.clone();
+        let mut opts = self.options;
         opts.auth = AuthStyle::UserPass(user.to_string(), password.to_string());
         Connection {
             state: Authenticated {},
@@ -388,7 +388,7 @@ impl Connection<Authenticated> {
                 })),
                 reader: None,
             },
-            options: self.options.clone(),
+            options: self.options,
         };
         conn.send_connect(&mut reader)?;
         conn.state.status = ConnectionStatus::Connected;
