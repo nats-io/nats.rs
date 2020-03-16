@@ -110,9 +110,10 @@ pub(crate) fn parse_control_op(reader: &mut BufReader<TcpStream>) -> io::Result<
         } else {
             reader.read_until(b'\n', &mut buf)?;
             let r = tuple((take_while1(is_valid_op_char), control_args))(&mut buf);
-            let (input, (op, args)) = match r {
-                Ok((input, (op, args))) => (input, (op, args)),
-                _ => return Err(parse_error()),
+            let (input, (op, args)) = if let Ok((input, (op, args))) = r {
+                (input, (op, args))
+            } else {
+                return Err(parse_error());
             };
             (input, 0, (op, args))
         }
