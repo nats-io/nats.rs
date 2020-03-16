@@ -194,8 +194,8 @@ impl Outbound {
     #[inline]
     fn write_response(&mut self, subj: &str, msgb: &[u8]) -> io::Result<()> {
         write!(self.writer, "PUB {} {}\r\n", subj, msgb.len())?;
-        self.writer.write(msgb)?;
-        self.writer.write(b"\r\n")?;
+        self.writer.write_all(msgb)?;
+        self.writer.write_all(b"\r\n")?;
         if self.should_flush && !self.in_flush {
             self.kick_flusher();
         }
@@ -861,8 +861,8 @@ impl Connection<Connected> {
         } else {
             write!(w.writer, "PUB {} {}\r\n", subj, msgb.len())?;
         }
-        w.writer.write(msgb)?;
-        w.writer.write(b"\r\n")?;
+        w.writer.write_all(msgb)?;
+        w.writer.write_all(b"\r\n")?;
         if w.should_flush && !w.in_flush {
             w.kick_flusher();
         }
@@ -1010,7 +1010,7 @@ impl Connection<Connected> {
 
     fn send_ping(&self) -> io::Result<()> {
         let w = &mut self.state.writer.lock().unwrap().writer;
-        w.write(b"PING\r\n")?;
+        w.write_all(b"PING\r\n")?;
         // Flush in place on pings.
         w.flush()?;
         Ok(())
