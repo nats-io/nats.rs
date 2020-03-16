@@ -665,8 +665,7 @@ impl Subscription {
     /// ```
     pub fn with_handler<F>(mut self, handler: F) -> SubscriptionHandler
     where
-        F: Fn(Message) -> io::Result<()> + Sync + Send,
-        F: 'static,
+        F: Fn(Message) -> io::Result<()> + Sync + Send + 'static,
     {
         // This will allow us to not have to capture the return. When it is dropped it
         // will not unsubscribe from the server.
