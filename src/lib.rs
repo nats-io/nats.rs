@@ -395,7 +395,7 @@ impl Connection<Authenticated> {
 
         // Setup the state we will move to the readloop thread
         let mut state = parser::ReadLoopState {
-            reader: reader,
+            reader,
             writer: conn.state.writer.clone(),
             subs: conn.state.subs.clone(),
             pongs: conn.state.pongs.clone(),
@@ -829,15 +829,15 @@ impl Connection<Connected> {
                 w.kick_flusher();
             }
         }
-        let (s, r) = crossbeam_channel::unbounded();
+        let (sub, recv) = crossbeam_channel::unbounded();
         {
             let mut subs = self.state.subs.write().unwrap();
-            subs.insert(sid, s);
+            subs.insert(sid, sub);
         }
         // TODO(dlc) - Should we do a flush and check errors?
         Ok(Subscription {
-            sid: sid,
-            recv: r,
+            sid,
+            recv,
             writer: self.state.writer.clone(),
             subs: self.state.subs.clone(),
             do_unsub: true,
