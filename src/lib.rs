@@ -337,10 +337,13 @@ impl Connection<Authenticated> {
     fn check_port(&self, nats_url: &str) -> String {
         match nats_url.parse::<SocketAddr>() {
             Ok(_) => nats_url.to_string(),
-            Err(_) => match nats_url.find(':') {
-                Some(_) => nats_url.to_string(),
-                None => format!("{}:4222", nats_url),
-            },
+            Err(_) => {
+                if nats_url.find(':').is_some() {
+                    nats_url.to_string()
+                } else {
+                    format!("{}:4222", nats_url)
+                }
+            }
         }
     }
 
