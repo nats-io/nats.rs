@@ -145,13 +145,15 @@ fn parse_msg_args(args: &[u8]) -> io::Result<ControlOp> {
         4 => (args[0], 3, Some(args[2].to_owned())),
         _ => return Err(parse_error()),
     };
-    let sid = match usize::from_str(args[1]) {
-        Ok(sid) => sid,
-        _ => return Err(parse_error()),
+    let sid = if let Ok(sid) = usize::from_str(args[1]) {
+        sid
+    } else {
+        return Err(parse_error());
     };
-    let mlen = match u32::from_str(args[len_index]) {
-        Ok(mlen) => mlen,
-        _ => return Err(parse_error()),
+    let mlen = if let Ok(mlen) = u32::from_str(args[len_index]) {
+        mlen
+    } else {
+        return Err(parse_error());
     };
     let m = MsgArgs {
         subject: subject.to_owned(),
@@ -175,9 +177,11 @@ fn parse_err(args: &[u8]) -> ControlOp {
 
 pub(crate) fn expect_info(reader: &mut BufReader<TcpStream>) -> io::Result<ServerInfo> {
     let op = parse_control_op(reader)?;
-    match op {
-        ControlOp::Info(info) => Ok(info),
-        _ => Err(Error::new(ErrorKind::Other, "INFO proto not found")),
+
+    if let ControlOp::Info(info) = op {
+        Ok(info)
+    } else {
+        Err(Error::new(ErrorKind::Other, "INFO proto not found"))
     }
 }
 
