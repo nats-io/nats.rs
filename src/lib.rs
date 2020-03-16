@@ -463,8 +463,8 @@ fn start_flush_cycle(wbuf: &Arc<Mutex<Outbound>>) -> usize {
 pub struct Message {
     /// The NATS `Subject` that this `Message` has been published to.
     pub subject: String,
-    /// The optional unique reply inbox that may be used for
-    /// receiving responses when using the request/reply pattern.
+    /// The optional reply `Subject` that may be used for receiving
+    /// responses when using the request/reply pattern.
     pub reply: Option<String>,
     /// The `Message` contents.
     pub data: Vec<u8>,
