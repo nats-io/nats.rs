@@ -433,7 +433,8 @@ impl Connection<Authenticated> {
             let mut w = wbuf.lock().unwrap();
             w.in_flush = false;
             if cur_len > 0 {
-                if let Err(_) = w.writer.flush() {
+                if let Err(error) = w.writer.flush() {
+                    eprintln!("Flusher thread failed to flush: {:?}", error);
                     break;
                 }
             }
