@@ -1,6 +1,6 @@
 //! A Rust client for the NATS.io ecosystem.
 //!
-//! <code>git clone https://github.com/nats-io/nats.rs</code>
+//! `git clone https://github.com/nats-io/nats.rs`
 //!
 //! NATS.io is a simple, secure and high performance open source messaging system for cloud native applications,
 //! IoT messaging, and microservices architectures.
@@ -25,6 +25,7 @@
     // over time, consider enabling the following commented-out lints:
     // clippy::else_if_without_else,
     // clippy::indexing_slicing,
+    // clippy::multiple_crate_versions,
     clippy::cast_lossless,
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -53,7 +54,6 @@
     clippy::mem_forget,
     clippy::missing_const_for_fn,
     clippy::module_name_repetitions,
-    clippy::multiple_crate_versions,
     clippy::multiple_inherent_impl,
     clippy::mut_mut,
     clippy::needless_borrow,
