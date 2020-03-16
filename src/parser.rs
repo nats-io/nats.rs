@@ -38,7 +38,9 @@ pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
             ControlOp::Msg(msg_args) => state.process_msg(msg_args)?,
             ControlOp::Ping => state.send_pong()?,
             ControlOp::Pong => state.process_pong(),
-            other => eprintln!("Received unhandled message: {:?}", other),
+            other @ ControlOp::Info(_)
+            | other @ ControlOp::Err(_)
+            | other @ ControlOp::Unknown(_) => eprintln!("Received unhandled message: {:?}", other),
         }
     }
 }
