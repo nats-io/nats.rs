@@ -326,10 +326,9 @@ impl Connection<NotConnected> {
     pub fn connect(self, nats_url: &str) -> io::Result<Connection<Connected>> {
         let conn = Connection {
             state: Authenticated {},
-            options: self.options.clone(),
+            options: self.options,
         };
-        let conn = conn.connect(nats_url)?;
-        Ok(conn)
+        conn.connect(nats_url)
     }
 }
 
