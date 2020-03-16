@@ -3,7 +3,7 @@
 //! `git clone https://github.com/nats-io/nats.rs`
 //!
 //! NATS.io is a simple, secure and high performance open source messaging system for cloud native applications,
-//! IoT messaging, and microservices architectures.
+//! `IoT` messaging, and microservices architectures.
 //!
 //! For more information see [https://nats.io/].
 //!
@@ -646,7 +646,7 @@ impl Subscription {
     /// This closure will execute in a separate thread.
     /// The result of this call is a `SubscriptionHandler` which can not be
     /// iterated and must be unsubscribed or closed directly to unregister interest.
-    /// A SubscriptionHandler will not unregister interest with the server when `drop(&mut self)` is called.
+    /// A `SubscriptionHandler` will not unregister interest with the server when `drop(&mut self)` is called.
     ///
     /// # Example
     /// ```
