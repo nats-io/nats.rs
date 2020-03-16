@@ -1,14 +1,89 @@
 //! A Rust client for the NATS.io ecosystem.
 //!
-//! <code>git clone https://github.com/nats-io/nats.rs</code>
+//! `git clone https://github.com/nats-io/nats.rs`
 //!
 //! NATS.io is a simple, secure and high performance open source messaging system for cloud native applications,
-//! IoT messaging, and microservices architectures.
+//! `IoT` messaging, and microservices architectures.
 //!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
 //!
+#![cfg_attr(test, deny(warnings))]
+#![deny(
+    missing_docs,
+    future_incompatible,
+    nonstandard_style,
+    rust_2018_idioms,
+    missing_copy_implementations,
+    trivial_casts,
+    trivial_numeric_casts,
+    unsafe_code,
+    unused_qualifications
+)]
+#![deny(
+    // over time, consider enabling the following commented-out lints:
+    // clippy::else_if_without_else,
+    // clippy::indexing_slicing,
+    // clippy::multiple_crate_versions,
+    // clippy::multiple_inherent_impl,
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::checked_conversions,
+    clippy::decimal_literal_representation,
+    clippy::doc_markdown,
+    clippy::empty_enum,
+    clippy::explicit_into_iter_loop,
+    clippy::explicit_iter_loop,
+    clippy::expl_impl_clone_on_copy,
+    clippy::fallible_impl_from,
+    clippy::filter_map,
+    clippy::filter_map_next,
+    clippy::find_map,
+    clippy::float_arithmetic,
+    clippy::get_unwrap,
+    clippy::if_not_else,
+    clippy::inline_always,
+    clippy::invalid_upcast_comparisons,
+    clippy::items_after_statements,
+    clippy::map_flatten,
+    clippy::match_same_arms,
+    clippy::maybe_infinite_iter,
+    clippy::mem_forget,
+    clippy::missing_const_for_fn,
+    clippy::module_name_repetitions,
+    clippy::mut_mut,
+    clippy::needless_borrow,
+    clippy::needless_continue,
+    clippy::needless_pass_by_value,
+    clippy::non_ascii_literal,
+    clippy::option_map_unwrap_or,
+    clippy::option_map_unwrap_or_else,
+    clippy::path_buf_push_overwrite,
+    clippy::print_stdout,
+    clippy::pub_enum_variant_names,
+    clippy::redundant_closure_for_method_calls,
+    clippy::replace_consts,
+    clippy::result_map_unwrap_or_else,
+    clippy::shadow_reuse,
+    clippy::shadow_same,
+    clippy::shadow_unrelated,
+    clippy::single_match_else,
+    clippy::string_add,
+    clippy::string_add_assign,
+    clippy::type_repetition_in_bounds,
+    clippy::unicode_not_nfc,
+    clippy::unimplemented,
+    clippy::unseparated_literal_suffix,
+    clippy::used_underscore_binding,
+    clippy::wildcard_dependencies,
+    clippy::wildcard_enum_match_arm,
+    clippy::wrong_pub_self_convention,
+)]
+
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufReader, BufWriter, Error, ErrorKind, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
@@ -41,6 +116,7 @@ impl ConnectionState for NotConnected {}
 impl ConnectionState for Authenticated {}
 impl ConnectionState for Connected {}
 
+/// A NATS connection.
 #[derive(Debug)]
 pub struct Connection<S: ConnectionState> {
     options: Options,
@@ -90,12 +166,18 @@ where
     }
 }
 
-#[derive(Debug, PartialEq)]
+/// A `ConnectionStatus` describes the current sub-status of a `Connected` connection.
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ConnectionStatus {
+    /// A connection in the process of establishing a connection.
     Connecting,
+    /// An established connection.
     Connected,
+    /// A permanently closed connection.
     Closed,
+    /// A connection that has lost connectivity, but may reestablish connectivity.
     Disconnected,
+    /// A connection in the process of reestablishing connectivity after a disconnect.
     Reconnecting,
 }
 
@@ -109,18 +191,18 @@ pub(crate) struct Outbound {
 }
 
 impl Outbound {
-    #[inline(always)]
+    #[inline]
     fn write_response(&mut self, subj: &str, msgb: &[u8]) -> io::Result<()> {
         write!(self.writer, "PUB {} {}\r\n", subj, msgb.len())?;
-        self.writer.write(msgb)?;
-        self.writer.write(b"\r\n")?;
+        self.writer.write_all(msgb)?;
+        self.writer.write_all(b"\r\n")?;
         if self.should_flush && !self.in_flush {
             self.kick_flusher();
         }
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     fn kick_flusher(&self) {
         if let Some(flusher) = &self.flusher {
             flusher.thread().unpark();
@@ -129,8 +211,11 @@ impl Outbound {
 }
 
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct NotConnected;
+
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct Authenticated;
 
 #[derive(Debug)]
@@ -186,7 +271,8 @@ impl Connection<NotConnected> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new() -> Connection<NotConnected> {
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Connection<NotConnected> {
         Connection {
             state: NotConnected {},
             options: Options {
@@ -209,7 +295,7 @@ impl Connection<NotConnected> {
     /// # }
     /// ```
     pub fn with_token(self, token: &str) -> Connection<Authenticated> {
-        let mut opts = self.options.clone();
+        let mut opts = self.options;
         opts.auth = AuthStyle::Token(token.to_string());
         Connection {
             state: Authenticated {},
@@ -229,7 +315,7 @@ impl Connection<NotConnected> {
     /// # }
     /// ```
     pub fn with_user_pass(self, user: &str, password: &str) -> Connection<Authenticated> {
-        let mut opts = self.options.clone();
+        let mut opts = self.options;
         opts.auth = AuthStyle::UserPass(user.to_string(), password.to_string());
         Connection {
             state: Authenticated {},
@@ -241,10 +327,9 @@ impl Connection<NotConnected> {
     pub fn connect(self, nats_url: &str) -> io::Result<Connection<Connected>> {
         let conn = Connection {
             state: Authenticated {},
-            options: self.options.clone(),
+            options: self.options,
         };
-        let conn = conn.connect(nats_url)?;
-        Ok(conn)
+        conn.connect(nats_url)
     }
 }
 
@@ -252,10 +337,13 @@ impl Connection<Authenticated> {
     fn check_port(&self, nats_url: &str) -> String {
         match nats_url.parse::<SocketAddr>() {
             Ok(_) => nats_url.to_string(),
-            Err(_) => match nats_url.find(':') {
-                Some(_) => nats_url.to_string(),
-                None => format!("{}:4222", nats_url),
-            },
+            Err(_) => {
+                if nats_url.find(':').is_some() {
+                    nats_url.to_string()
+                } else {
+                    format!("{}:4222", nats_url)
+                }
+            }
         }
     }
 
@@ -303,14 +391,14 @@ impl Connection<Authenticated> {
                 })),
                 reader: None,
             },
-            options: self.options.clone(),
+            options: self.options,
         };
         conn.send_connect(&mut reader)?;
         conn.state.status = ConnectionStatus::Connected;
 
         // Setup the state we will move to the readloop thread
         let mut state = parser::ReadLoopState {
-            reader: reader,
+            reader,
             writer: conn.state.writer.clone(),
             subs: conn.state.subs.clone(),
             pongs: conn.state.pongs.clone(),
@@ -318,7 +406,8 @@ impl Connection<Authenticated> {
 
         let read_loop = thread::spawn(move || {
             // FIXME(dlc) - Capture?
-            if let Err(_) = parser::read_loop(&mut state) {
+            if let Err(error) = parser::read_loop(&mut state) {
+                eprintln!("error encountered in the parser read_loop: {:?}", error);
                 return;
             }
         });
@@ -334,7 +423,7 @@ impl Connection<Authenticated> {
             thread::yield_now();
             let mut cur_len = wbuf.lock().unwrap().writer.buffer().len();
             if cur_len != start_len {
-                for d in wait.iter() {
+                for d in &wait {
                     thread::sleep(*d);
                     {
                         let w = wbuf.lock().unwrap();
@@ -348,7 +437,8 @@ impl Connection<Authenticated> {
             let mut w = wbuf.lock().unwrap();
             w.in_flush = false;
             if cur_len > 0 {
-                if let Err(_) = w.writer.flush() {
+                if let Err(error) = w.writer.flush() {
+                    eprintln!("Flusher thread failed to flush: {:?}", error);
                     break;
                 }
             }
@@ -368,10 +458,15 @@ fn start_flush_cycle(wbuf: &Arc<Mutex<Outbound>>) -> usize {
     w.writer.buffer().len()
 }
 
+/// A `Message` that has been published to a NATS `Subject`.
 #[derive(Debug)]
 pub struct Message {
+    /// The NATS `Subject` that this `Message` has been published to.
     pub subject: String,
+    /// The optional reply `Subject` that may be used for sending
+    /// responses when using the request/reply pattern.
     pub reply: Option<String>,
+    /// The `Message` contents.
     pub data: Vec<u8>,
     pub(crate) writer: Option<Arc<Mutex<Outbound>>>,
 }
@@ -426,6 +521,7 @@ impl fmt::Display for Message {
     }
 }
 
+/// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
 pub struct Subscription {
     sid: usize,
@@ -436,7 +532,8 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    /// Get the next message, or None if the subscription has been unsubscribed or the connection closed.
+    /// Get the next message, or None if the subscription
+    /// has been unsubscribed or the connection closed.
     ///
     /// # Example
     /// ```
@@ -452,7 +549,9 @@ impl Subscription {
         self.recv.iter().next()
     }
 
-    /// Try to get the next message, or None if no messages are present or if the subscription has been unsubscribed or the connection closed.
+    /// Try to get the next message, or None if no messages
+    /// are present or if the subscription has been unsubscribed
+    /// or the connection closed.
     ///
     /// # Example
     /// ```
@@ -551,7 +650,7 @@ impl Subscription {
     /// This closure will execute in a separate thread.
     /// The result of this call is a `SubscriptionHandler` which can not be
     /// iterated and must be unsubscribed or closed directly to unregister interest.
-    /// A SubscriptionHandler will not unregister interest with the server when `drop(&mut self)` is called.
+    /// A `SubscriptionHandler` will not unregister interest with the server when `drop(&mut self)` is called.
     ///
     /// # Example
     /// ```
@@ -566,8 +665,7 @@ impl Subscription {
     /// ```
     pub fn with_handler<F>(mut self, handler: F) -> SubscriptionHandler
     where
-        F: Fn(Message) -> io::Result<()> + Sync + Send,
-        F: 'static,
+        F: Fn(Message) -> io::Result<()> + Sync + Send + 'static,
     {
         // This will allow us to not have to capture the return. When it is dropped it
         // will not unsubscribe from the server.
@@ -577,7 +675,7 @@ impl Subscription {
             for m in r.iter() {
                 if let Err(e) = handler(m) {
                     // TODO(dlc) - Capture for last error?
-                    println!("Error in callback! {:?}", e);
+                    eprintln!("Error in callback! {:?}", e);
                 }
             }
         });
@@ -627,14 +725,14 @@ impl Subscription {
 impl Drop for Subscription {
     fn drop(&mut self) {
         if self.do_unsub {
-            match self.unsub() {
-                Ok(_) => {}
-                Err(_) => {}
+            if let Err(error) = self.unsub() {
+                eprintln!("error unsubscribing during Subscription Drop: {:?}", error);
             }
         }
     }
 }
 
+/// A `SubscriptionHandler` may be used to unsubscribe a handler thread.
 pub struct SubscriptionHandler {
     sub: Subscription,
 }
@@ -686,10 +784,7 @@ pub struct SubscriptionDeadlineIterator {
 impl Iterator for SubscriptionDeadlineIterator {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        match self.r.recv_timeout(self.to) {
-            Ok(m) => Some(m),
-            _ => None,
-        }
+        self.r.recv_timeout(self.to).ok()
     }
 }
 
@@ -734,15 +829,15 @@ impl Connection<Connected> {
                 w.kick_flusher();
             }
         }
-        let (s, r) = crossbeam_channel::unbounded();
+        let (sub, recv) = crossbeam_channel::unbounded();
         {
             let mut subs = self.state.subs.write().unwrap();
-            subs.insert(sid, s);
+            subs.insert(sid, sub);
         }
         // TODO(dlc) - Should we do a flush and check errors?
         Ok(Subscription {
-            sid: sid,
-            recv: r,
+            sid,
+            recv,
             writer: self.state.writer.clone(),
             subs: self.state.subs.clone(),
             do_unsub: true,
@@ -759,7 +854,7 @@ impl Connection<Connected> {
         self.state.writer.lock().unwrap().should_flush = true;
     }
 
-    #[inline(always)]
+    #[inline]
     fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
         let mut w = self.state.writer.lock().unwrap();
         if let Some(reply) = reply {
@@ -767,8 +862,8 @@ impl Connection<Connected> {
         } else {
             write!(w.writer, "PUB {} {}\r\n", subj, msgb.len())?;
         }
-        w.writer.write(msgb)?;
-        w.writer.write(b"\r\n")?;
+        w.writer.write_all(msgb)?;
+        w.writer.write_all(b"\r\n")?;
         if w.should_flush && !w.in_flush {
             w.kick_flusher();
         }
@@ -916,7 +1011,7 @@ impl Connection<Connected> {
 
     fn send_ping(&self) -> io::Result<()> {
         let w = &mut self.state.writer.lock().unwrap().writer;
-        w.write(b"PING\r\n")?;
+        w.write_all(b"PING\r\n")?;
         // Flush in place on pings.
         w.flush()?;
         Ok(())
@@ -963,10 +1058,21 @@ impl Connection<Connected> {
         );
         self.state.stream.write_all(op.as_bytes())?;
 
-        match parser::parse_control_op(reader)? {
+        let parsed_op = parser::parse_control_op(reader)?;
+
+        match parsed_op {
             parser::ControlOp::Pong => Ok(()),
             parser::ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            _ => Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error")),
+            parser::ControlOp::Ping
+            | parser::ControlOp::Msg(_)
+            | parser::ControlOp::Info(_)
+            | parser::ControlOp::Unknown(_) => {
+                eprintln!(
+                    "encountered unexpected control op during connection: {:?}",
+                    parsed_op
+                );
+                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
+            }
         }
     }
 }
@@ -978,12 +1084,16 @@ impl Connected {
         let flusher = self.writer.lock().unwrap().flusher.take();
         if let Some(ft) = flusher {
             ft.thread().unpark();
-            if let Err(_) = ft.join() {}
+            if let Err(error) = ft.join() {
+                eprintln!("error encountered in flusher thread: {:?}", error);
+            }
         }
         // Shutdown socket.
         self.stream.shutdown(Shutdown::Both)?;
         if let Some(rt) = self.reader.take() {
-            if let Err(_) = rt.join() {}
+            if let Err(error) = rt.join() {
+                eprintln!("error encountered in reader thread: {:?}", error);
+            }
         }
         Ok(())
     }
@@ -991,8 +1101,8 @@ impl Connected {
 
 impl Drop for Connected {
     fn drop(&mut self) {
-        match self.close() {
-            _ => {}
+        if let Err(error) = self.close() {
+            eprintln!("error closing Connected during Drop: {:?}", error);
         }
     }
 }
@@ -1017,12 +1127,13 @@ struct Connect<'a> {
     auth_token: Option<&'a String>,
 }
 
-#[inline(always)]
-fn if_true(field: &bool) -> bool {
-    *field == true
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn if_true(field: &bool) -> bool {
+    *field
 }
 
-#[inline(always)]
+#[allow(clippy::trivially_copy_pass_by_ref)]
+#[inline]
 fn empty_or_none(field: &Option<&String>) -> bool {
     match field {
         Some(_) => false,
@@ -1051,15 +1162,15 @@ struct ServerInfo {
     connect_urls: Vec<String>,
 }
 
-#[inline(always)]
-fn default_false() -> bool {
+const fn default_false() -> bool {
     false
 }
-#[inline(always)]
+
+#[inline]
 fn default_empty() -> String {
     "".to_string()
 }
-#[inline(always)]
-fn default_no_urls() -> Vec<String> {
-    vec![]
+
+const fn default_no_urls() -> Vec<String> {
+    Vec::new()
 }
