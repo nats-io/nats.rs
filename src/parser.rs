@@ -22,7 +22,7 @@ const ERR: &[u8] = b"-ERR";
 
 #[inline]
 fn is_valid_op_char(c: u8) -> bool {
-    (c >= 0x41 && c <= 0x5A) || c == '-' as u8 || c == '+' as u8
+    (c >= 0x41 && c <= 0x5A) || c == b'-' || c == b'+'
 }
 
 pub(crate) struct ReadLoopState {
