@@ -191,7 +191,7 @@ pub(crate) struct Outbound {
 }
 
 impl Outbound {
-    #[inline(always)]
+    #[inline]
     fn write_response(&mut self, subj: &str, msgb: &[u8]) -> io::Result<()> {
         write!(self.writer, "PUB {} {}\r\n", subj, msgb.len())?;
         self.writer.write(msgb)?;
@@ -202,7 +202,7 @@ impl Outbound {
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     fn kick_flusher(&self) {
         if let Some(flusher) = &self.flusher {
             flusher.thread().unpark();
@@ -851,8 +851,13 @@ impl Connection<Connected> {
         self.state.writer.lock().unwrap().should_flush = true;
     }
 
-    #[inline(always)]
-    fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
+    #[inline]
+    fn write_pub_msg(
+        &self,
+        subj: &str,
+        reply: Option<&str>,
+        msgb: &[u8],
+    ) -> io::Result<()> {
         let mut w = self.state.writer.lock().unwrap();
         if let Some(reply) = reply {
             write!(w.writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
@@ -1109,12 +1114,12 @@ struct Connect<'a> {
     auth_token: Option<&'a String>,
 }
 
-#[inline(always)]
+#[inline]
 fn if_true(field: &bool) -> bool {
     *field == true
 }
 
-#[inline(always)]
+#[inline]
 fn empty_or_none(field: &Option<&String>) -> bool {
     match field {
         Some(_) => false,
@@ -1143,15 +1148,15 @@ struct ServerInfo {
     connect_urls: Vec<String>,
 }
 
-#[inline(always)]
+#[inline]
 fn default_false() -> bool {
     false
 }
-#[inline(always)]
+#[inline]
 fn default_empty() -> String {
     "".to_string()
 }
-#[inline(always)]
+#[inline]
 fn default_no_urls() -> Vec<String> {
     vec![]
 }

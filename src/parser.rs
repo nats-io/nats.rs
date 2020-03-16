@@ -20,7 +20,7 @@ const PING: &'static [u8] = b"PING";
 const PONG: &'static [u8] = b"PONG";
 const ERR: &'static [u8] = b"-ERR";
 
-#[inline(always)]
+#[inline]
 fn is_valid_op_char(c: u8) -> bool {
     (c >= 0x41 && c <= 0x5A) || c == '-' as u8 || c == '+' as u8
 }
