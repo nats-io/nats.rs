@@ -1058,7 +1058,16 @@ impl Connection<Connected> {
         match parser::parse_control_op(reader)? {
             parser::ControlOp::Pong => Ok(()),
             parser::ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            _ => Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error")),
+            other @ parser::ControlOp::Ping
+            | other @ parser::ControlOp::Msg(_)
+            | other @ parser::ControlOp::Info(_)
+            | other @ parser::ControlOp::Unknown(_) => {
+                eprintln!(
+                    "encountered unexpected control op during connection: {:?}",
+                    other
+                );
+                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
+            }
         }
     }
 }
