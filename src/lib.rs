@@ -402,7 +402,8 @@ impl Connection<Authenticated> {
 
         let read_loop = thread::spawn(move || {
             // FIXME(dlc) - Capture?
-            if let Err(_) = parser::read_loop(&mut state) {
+            if let Err(error) = parser::read_loop(&mut state) {
+                eprintln!("error encountered in the parser read_loop: {:?}", error);
                 return;
             }
         });
@@ -1071,12 +1072,16 @@ impl Connected {
         let flusher = self.writer.lock().unwrap().flusher.take();
         if let Some(ft) = flusher {
             ft.thread().unpark();
-            if let Err(_) = ft.join() {}
+            if let Err(error) = ft.join() {
+                eprintln!("error encountered in flusher thread: {:?}", error);
+            }
         }
         // Shutdown socket.
         self.stream.shutdown(Shutdown::Both)?;
         if let Some(rt) = self.reader.take() {
-            if let Err(_) = rt.join() {}
+            if let Err(error) = rt.join() {
+                eprintln!("error encountered in reader thread: {:?}", error);
+            }
         }
         Ok(())
     }
@@ -1084,8 +1089,8 @@ impl Connected {
 
 impl Drop for Connected {
     fn drop(&mut self) {
-        match self.close() {
-            _ => {}
+        if let Err(error) = self.close() {
+            eprintln!("error closing Connected during Drop: {:?}", error);
         }
     }
 }
