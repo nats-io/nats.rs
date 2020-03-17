@@ -88,7 +88,7 @@ impl ReadLoopState {
         let subs = self.subs.read().unwrap();
         match subs.get(&msg_args.sid) {
             Some(tx) => tx.send(msg).unwrap(),
-            _ => panic!(":["),
+            _ => panic!(":("),
         }
         Ok(())
     }
