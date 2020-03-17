@@ -86,8 +86,9 @@ impl ReadLoopState {
 
         // Now lookup the subscription's channel.
         let subs = self.subs.read().unwrap();
-        if let Some(tx) = subs.get(&msg_args.sid) {
-            tx.send(msg).unwrap();
+        match subs.get(&msg_args.sid) {
+            Some(tx) => tx.send(msg).unwrap(),
+            _ => panic!(":("),
         }
         Ok(())
     }
