@@ -87,6 +87,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
+    marker::PhantomData,
     net::{Shutdown, SocketAddr, TcpStream},
     sync::atomic::{AtomicUsize, Ordering},
     sync::{Arc, Mutex, RwLock},
@@ -104,7 +105,98 @@ mod parser;
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
 
-impl Options {
+#[doc(hidden)]
+pub mod options_typestate {
+    /// `Options` typestate indicating
+    /// that there has not yet been
+    /// any auth-related configuration
+    /// provided yet.
+    #[derive(Debug, Copy, Clone, Default)]
+    pub struct Unauthenticated;
+
+    /// `Options` typestate indicating
+    /// that auth-related configuration
+    /// has been provided, and may not
+    /// be provided again.
+    #[derive(Debug, Copy, Clone)]
+    pub struct Authenticated;
+
+    /// `Options` typestate indicating that
+    /// this `Options` has been used to create
+    /// a `Connection` and may not be changed.
+    #[derive(Debug, Copy, Clone)]
+    pub struct Finalized;
+}
+
+/// A configuration object for a NATS connection.
+#[derive(Clone, Debug, Default)]
+pub struct Options<Typestate = options_typestate::Unauthenticated> {
+    auth: AuthStyle,
+    name: Option<String>,
+    no_echo: bool,
+    typestate: PhantomData<Typestate>,
+}
+
+impl Options<options_typestate::Unauthenticated> {
+    /// Create a new NATS connection. This will not be a connected connection.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new().connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new() -> Options<options_typestate::Unauthenticated> {
+        Options::default()
+    }
+
+    /// Authenticate this NATS connection with a token.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .with_token("t0k3n!")
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_token(self, token: &str) -> Options<options_typestate::Authenticated> {
+        Options {
+            auth: AuthStyle::Token(token.to_string()),
+            typestate: PhantomData,
+            no_echo: self.no_echo,
+            name: self.name,
+        }
+    }
+
+    /// Authenticate this NATS connection with a username and password.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .with_user_pass("derek", "s3cr3t!")
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_user_pass(
+        self,
+        user: &str,
+        password: &str,
+    ) -> Options<options_typestate::Authenticated> {
+        Options {
+            auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
+            typestate: PhantomData,
+            no_echo: self.no_echo,
+            name: self.name,
+        }
+    }
+}
+
+impl<TypeState> Options<TypeState> {
     /// Add a name option for the unconnected connection.
     ///
     /// # Example
@@ -116,7 +208,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_name(mut self, name: &str) -> Options {
+    pub fn with_name(mut self, name: &str) -> Options<TypeState> {
         self.name = Some(name.to_string());
         self
     }
@@ -132,58 +224,8 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn no_echo(mut self) -> Options {
+    pub const fn no_echo(mut self) -> Options<TypeState> {
         self.no_echo = true;
-        self
-    }
-
-    /// Create a new NATS connection. This will not be a connected connection.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new().connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[allow(clippy::new_without_default)]
-    pub const fn new() -> Options {
-        Options {
-            auth: AuthStyle::None,
-            name: None,
-            no_echo: false,
-        }
-    }
-
-    /// Authenticate this NATS connection with a token.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
-    ///     .with_token("t0k3n!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_token(mut self, token: &str) -> Options {
-        self.auth = AuthStyle::Token(token.to_string());
-        self
-    }
-
-    /// Authenticate this NATS connection with a username and poassword.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
-    ///     .with_user_pass("derek", "s3cr3t!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_user_pass(mut self, user: &str, password: &str) -> Options {
-        self.auth = AuthStyle::UserPass(user.to_string(), password.to_string());
         self
     }
 
@@ -242,7 +284,12 @@ impl Options {
                 closed: false,
             })),
             reader: None,
-            options: self,
+            options: Options {
+                typestate: PhantomData,
+                no_echo: self.no_echo,
+                name: self.name,
+                auth: self.auth,
+            },
         };
         conn.send_connect(&mut reader)?;
         conn.status = ConnectionStatus::Connected;
@@ -359,7 +406,7 @@ pub struct Connection {
     pongs: Arc<Mutex<VecDeque<Sender<bool>>>>,
     writer: Arc<Mutex<Outbound>>,
     reader: Option<thread::JoinHandle<()>>,
-    options: Options,
+    options: Options<options_typestate::Finalized>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -370,12 +417,10 @@ enum AuthStyle {
     None,
 }
 
-/// A configuration object for a NATS connection.
-#[derive(Clone, Debug)]
-pub struct Options {
-    auth: AuthStyle,
-    name: Option<String>,
-    no_echo: bool,
+impl Default for AuthStyle {
+    fn default() -> AuthStyle {
+        AuthStyle::None
+    }
 }
 
 /// Connect to a NATS server at the given url.
