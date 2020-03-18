@@ -138,7 +138,7 @@ pub struct Options<Typestate = options_typestate::Unauthenticated> {
 }
 
 impl Options<options_typestate::Unauthenticated> {
-    /// Create a new NATS connection. This will not be a connected connection.
+    /// `Options` for establishing a new NATS `Connection`.
     ///
     /// # Example
     /// ```
@@ -151,7 +151,7 @@ impl Options<options_typestate::Unauthenticated> {
         Options::default()
     }
 
-    /// Authenticate this NATS connection with a token.
+    /// Authenticate with NATS using a token.
     ///
     /// # Example
     /// ```
@@ -171,7 +171,7 @@ impl Options<options_typestate::Unauthenticated> {
         }
     }
 
-    /// Authenticate this NATS connection with a username and password.
+    /// Authenticate with NATS using a username and password.
     ///
     /// # Example
     /// ```
@@ -197,7 +197,7 @@ impl Options<options_typestate::Unauthenticated> {
 }
 
 impl<TypeState> Options<TypeState> {
-    /// Add a name option for the unconnected connection.
+    /// Add a name option to this configuration.
     ///
     /// # Example
     /// ```
@@ -242,7 +242,7 @@ impl<TypeState> Options<TypeState> {
         }
     }
 
-    /// Connect an unconnected NATS connection.
+    /// Connect to a NATS server and establish a `Connection`.
     ///
     /// # Example
     /// ```
@@ -350,7 +350,7 @@ impl<TypeState> Options<TypeState> {
     }
 }
 
-/// A `ConnectionStatus` describes the current sub-status of a `Connected` connection.
+/// A `ConnectionStatus` describes the current sub-status of a `Connection`.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ConnectionStatus {
     /// A connection in the process of establishing a connection.
