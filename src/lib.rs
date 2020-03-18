@@ -84,13 +84,15 @@
     clippy::wrong_pub_self_convention,
 )]
 
-use std::collections::{HashMap, VecDeque};
-use std::io::{self, BufReader, BufWriter, Error, ErrorKind, Write};
-use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
-use std::{fmt, str, thread};
+use std::{
+    collections::{HashMap, VecDeque},
+    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
+    net::{Shutdown, SocketAddr, TcpStream},
+    sync::atomic::{AtomicUsize, Ordering},
+    sync::{Arc, Mutex, RwLock},
+    time::Duration,
+    {fmt, str, thread},
+};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use serde::{Deserialize, Serialize};
@@ -102,50 +104,20 @@ mod parser;
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
 
-#[doc(hidden)]
-pub trait ConnectionState: private::Sealed {}
-mod private {
-    pub trait Sealed {}
-    impl Sealed for super::NotConnected {}
-    impl Sealed for super::Authenticated {}
-    impl Sealed for super::Connected {}
-    impl Sealed for dyn super::OptionState {}
-}
-
-impl ConnectionState for NotConnected {}
-impl ConnectionState for Authenticated {}
-impl ConnectionState for Connected {}
-
-/// A NATS connection.
-#[derive(Debug)]
-pub struct Connection<S: ConnectionState> {
-    options: Options,
-    state: S,
-}
-
-#[doc(hidden)]
-pub trait OptionState {}
-impl OptionState for NotConnected {}
-impl OptionState for Authenticated {}
-
-// General Options
-impl<S> Connection<S>
-where
-    S: OptionState + ConnectionState,
-{
+impl Options {
     /// Add a name option for the unconnected connection.
     ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Connection::new()
+    /// let nc = nats::Options::new()
     ///     .with_name("My App")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_name(mut self, name: &str) -> Self {
-        self.options.name = Some(name.to_string());
+    pub fn with_name(mut self, name: &str) -> Options {
+        self.name = Some(name.to_string());
         self
     }
 
@@ -154,15 +126,180 @@ where
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Connection::new()
+    /// let nc = nats::Options::new()
     ///     .no_echo()
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn no_echo(mut self) -> Self {
-        self.options.no_echo = true;
+    pub const fn no_echo(mut self) -> Options {
+        self.no_echo = true;
         self
+    }
+
+    /// Create a new NATS connection. This will not be a connected connection.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new().connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Options {
+        Options {
+            auth: AuthStyle::None,
+            name: None,
+            no_echo: false,
+        }
+    }
+
+    /// Authenticate this NATS connection with a token.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .with_token("t0k3n!")
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_token(mut self, token: &str) -> Options {
+        self.auth = AuthStyle::Token(token.to_string());
+        self
+    }
+
+    /// Authenticate this NATS connection with a username and poassword.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .with_user_pass("derek", "s3cr3t!")
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_user_pass(mut self, user: &str, password: &str) -> Options {
+        self.auth = AuthStyle::UserPass(user.to_string(), password.to_string());
+        self
+    }
+
+    fn check_port(&self, nats_url: &str) -> String {
+        match nats_url.parse::<SocketAddr>() {
+            Ok(_) => nats_url.to_string(),
+            Err(_) => {
+                if nats_url.find(':').is_some() {
+                    nats_url.to_string()
+                } else {
+                    format!("{}:4222", nats_url)
+                }
+            }
+        }
+    }
+
+    /// Connect an unconnected NATS connection.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new().connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
+        let connect_url = self.check_port(nats_url);
+        let stream = TcpStream::connect(connect_url)?;
+
+        let mut reader = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
+        let server_info = parser::expect_info(&mut reader)?;
+
+        // TODO(dlc) - Fix, but for now at least signal properly.
+        if server_info.tls_required {
+            return Err(Error::new(
+                ErrorKind::ConnectionRefused,
+                "TLS currently not supported",
+            ));
+        }
+
+        let mut n = nuid::NUID::new();
+
+        let mut conn = Connection {
+            id: n.next(),
+            status: ConnectionStatus::Connecting,
+            stream: stream.try_clone()?,
+            info: server_info,
+            sid: AtomicUsize::new(1),
+            subs: Arc::new(RwLock::new(HashMap::new())),
+            pongs: Arc::new(Mutex::new(VecDeque::new())),
+            writer: Arc::new(Mutex::new(Outbound {
+                writer: BufWriter::with_capacity(64 * 1024, stream.try_clone()?),
+                flusher: None,
+                should_flush: true,
+                in_flush: false,
+                closed: false,
+            })),
+            reader: None,
+            options: self,
+        };
+        conn.send_connect(&mut reader)?;
+        conn.status = ConnectionStatus::Connected;
+
+        // Setup the state we will move to the readloop thread
+        let mut state = parser::ReadLoopState {
+            reader,
+            writer: conn.writer.clone(),
+            subs: conn.subs.clone(),
+            pongs: conn.pongs.clone(),
+        };
+
+        let read_loop = thread::spawn(move || {
+            // FIXME(dlc) - Capture?
+            if let Err(error) = parser::read_loop(&mut state) {
+                eprintln!("error encountered in the parser read_loop: {:?}", error);
+                return;
+            }
+        });
+        conn.reader = Some(read_loop);
+
+        let usec = Duration::new(0, 1_000);
+        let wait: [Duration; 5] = [10 * usec, 100 * usec, 500 * usec, 1000 * usec, 5000 * usec];
+        let wbuf = conn.writer.clone();
+
+        let flusher_loop = thread::spawn(move || loop {
+            thread::park();
+            let start_len = start_flush_cycle(&wbuf);
+            thread::yield_now();
+            let mut cur_len = wbuf.lock().unwrap().writer.buffer().len();
+            if cur_len != start_len {
+                for d in &wait {
+                    thread::sleep(*d);
+                    {
+                        let w = wbuf.lock().unwrap();
+                        cur_len = w.writer.buffer().len();
+                        if cur_len == 0 || cur_len == start_len || w.closed {
+                            break;
+                        }
+                    }
+                }
+            }
+            let mut w = wbuf.lock().unwrap();
+            w.in_flush = false;
+            if cur_len > 0 {
+                if let Err(error) = w.writer.flush() {
+                    eprintln!("Flusher thread failed to flush: {:?}", error);
+                    break;
+                }
+            }
+            if w.closed {
+                break;
+            }
+        });
+        conn.writer.lock().unwrap().flusher = Some(flusher_loop);
+
+        Ok(conn)
     }
 }
 
@@ -210,17 +347,9 @@ impl Outbound {
     }
 }
 
-#[doc(hidden)]
-#[derive(Clone, Copy)]
-pub struct NotConnected;
-
-#[doc(hidden)]
-#[derive(Clone, Copy)]
-pub struct Authenticated;
-
+/// A NATS connection.
 #[derive(Debug)]
-#[doc(hidden)]
-pub struct Connected {
+pub struct Connection {
     id: String,
     status: ConnectionStatus,
     stream: TcpStream,
@@ -230,6 +359,7 @@ pub struct Connected {
     pongs: Arc<Mutex<VecDeque<Sender<bool>>>>,
     writer: Arc<Mutex<Outbound>>,
     reader: Option<thread::JoinHandle<()>>,
+    options: Options,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -240,8 +370,8 @@ enum AuthStyle {
     None,
 }
 
+/// A configuration object for a NATS connection.
 #[derive(Clone, Debug)]
-#[doc(hidden)]
 pub struct Options {
     auth: AuthStyle,
     name: Option<String>,
@@ -257,199 +387,8 @@ pub struct Options {
 /// # Ok(())
 /// # }
 /// ```
-pub fn connect(nats_url: &str) -> io::Result<Connection<Connected>> {
-    Connection::new().connect(nats_url)
-}
-
-impl Connection<NotConnected> {
-    /// Create a new NATS connection. This will not be a connected connection.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Connection::new().connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[allow(clippy::new_without_default)]
-    pub const fn new() -> Connection<NotConnected> {
-        Connection {
-            state: NotConnected {},
-            options: Options {
-                auth: AuthStyle::None,
-                name: None,
-                no_echo: false,
-            },
-        }
-    }
-
-    /// Authenticate this NATS connection with a token.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Connection::new()
-    ///     .with_token("t0k3n!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_token(self, token: &str) -> Connection<Authenticated> {
-        let mut opts = self.options;
-        opts.auth = AuthStyle::Token(token.to_string());
-        Connection {
-            state: Authenticated {},
-            options: opts,
-        }
-    }
-
-    /// Authenticate this NATS connection with a username and poassword.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Connection::new()
-    ///     .with_user_pass("derek", "s3cr3t!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_user_pass(self, user: &str, password: &str) -> Connection<Authenticated> {
-        let mut opts = self.options;
-        opts.auth = AuthStyle::UserPass(user.to_string(), password.to_string());
-        Connection {
-            state: Authenticated {},
-            options: opts,
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn connect(self, nats_url: &str) -> io::Result<Connection<Connected>> {
-        let conn = Connection {
-            state: Authenticated {},
-            options: self.options,
-        };
-        conn.connect(nats_url)
-    }
-}
-
-impl Connection<Authenticated> {
-    fn check_port(&self, nats_url: &str) -> String {
-        match nats_url.parse::<SocketAddr>() {
-            Ok(_) => nats_url.to_string(),
-            Err(_) => {
-                if nats_url.find(':').is_some() {
-                    nats_url.to_string()
-                } else {
-                    format!("{}:4222", nats_url)
-                }
-            }
-        }
-    }
-
-    /// Connect an unconnected NATS connection.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Connection::new().connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn connect(self, nats_url: &str) -> io::Result<Connection<Connected>> {
-        let connect_url = self.check_port(nats_url);
-        let stream = TcpStream::connect(connect_url)?;
-
-        let mut reader = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
-        let server_info = parser::expect_info(&mut reader)?;
-
-        // TODO(dlc) - Fix, but for now at least signal properly.
-        if server_info.tls_required {
-            return Err(Error::new(
-                ErrorKind::ConnectionRefused,
-                "TLS currently not supported",
-            ));
-        }
-
-        let mut n = nuid::NUID::new();
-
-        let mut conn = Connection {
-            state: Connected {
-                id: n.next(),
-                status: ConnectionStatus::Connecting,
-                stream: stream.try_clone()?,
-                info: server_info,
-                sid: AtomicUsize::new(1),
-                subs: Arc::new(RwLock::new(HashMap::new())),
-                pongs: Arc::new(Mutex::new(VecDeque::new())),
-                writer: Arc::new(Mutex::new(Outbound {
-                    writer: BufWriter::with_capacity(64 * 1024, stream.try_clone()?),
-                    flusher: None,
-                    should_flush: true,
-                    in_flush: false,
-                    closed: false,
-                })),
-                reader: None,
-            },
-            options: self.options,
-        };
-        conn.send_connect(&mut reader)?;
-        conn.state.status = ConnectionStatus::Connected;
-
-        // Setup the state we will move to the readloop thread
-        let mut state = parser::ReadLoopState {
-            reader,
-            writer: conn.state.writer.clone(),
-            subs: conn.state.subs.clone(),
-            pongs: conn.state.pongs.clone(),
-        };
-
-        let read_loop = thread::spawn(move || {
-            // FIXME(dlc) - Capture?
-            if let Err(error) = parser::read_loop(&mut state) {
-                eprintln!("error encountered in the parser read_loop: {:?}", error);
-                return;
-            }
-        });
-        conn.state.reader = Some(read_loop);
-
-        let usec = Duration::new(0, 1_000);
-        let wait: [Duration; 5] = [10 * usec, 100 * usec, 500 * usec, 1000 * usec, 5000 * usec];
-        let wbuf = conn.state.writer.clone();
-
-        let flusher_loop = thread::spawn(move || loop {
-            thread::park();
-            let start_len = start_flush_cycle(&wbuf);
-            thread::yield_now();
-            let mut cur_len = wbuf.lock().unwrap().writer.buffer().len();
-            if cur_len != start_len {
-                for d in &wait {
-                    thread::sleep(*d);
-                    {
-                        let w = wbuf.lock().unwrap();
-                        cur_len = w.writer.buffer().len();
-                        if cur_len == 0 || cur_len == start_len || w.closed {
-                            break;
-                        }
-                    }
-                }
-            }
-            let mut w = wbuf.lock().unwrap();
-            w.in_flush = false;
-            if cur_len > 0 {
-                if let Err(error) = w.writer.flush() {
-                    eprintln!("Flusher thread failed to flush: {:?}", error);
-                    break;
-                }
-            }
-            if w.closed {
-                break;
-            }
-        });
-        conn.state.writer.lock().unwrap().flusher = Some(flusher_loop);
-
-        Ok(conn)
-    }
+pub fn connect(nats_url: &str) -> io::Result<Connection> {
+    Options::new().connect(nats_url)
 }
 
 fn start_flush_cycle(wbuf: &Arc<Mutex<Outbound>>) -> usize {
@@ -788,7 +727,7 @@ impl Iterator for SubscriptionDeadlineIterator {
     }
 }
 
-impl Connection<Connected> {
+impl Connection {
     /// Create a subscription for the given NATS connection.
     ///
     /// # Example
@@ -818,9 +757,9 @@ impl Connection<Connected> {
     }
 
     fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
-        let sid = self.state.sid.fetch_add(1, Ordering::Relaxed);
+        let sid = self.sid.fetch_add(1, Ordering::Relaxed);
         {
-            let w = &mut self.state.writer.lock().unwrap();
+            let w = &mut self.writer.lock().unwrap();
             match queue {
                 Some(q) => write!(w.writer, "SUB {} {} {}\r\n", subject, q, sid)?,
                 None => write!(w.writer, "SUB {} {}\r\n", subject, sid)?,
@@ -831,32 +770,32 @@ impl Connection<Connected> {
         }
         let (sub, recv) = crossbeam_channel::unbounded();
         {
-            let mut subs = self.state.subs.write().unwrap();
+            let mut subs = self.subs.write().unwrap();
             subs.insert(sid, sub);
         }
         // TODO(dlc) - Should we do a flush and check errors?
         Ok(Subscription {
             sid,
             recv,
-            writer: self.state.writer.clone(),
-            subs: self.state.subs.clone(),
+            writer: self.writer.clone(),
+            subs: self.subs.clone(),
             do_unsub: true,
         })
     }
 
     #[doc(hidden)]
     pub fn batch(&self) {
-        self.state.writer.lock().unwrap().should_flush = false;
+        self.writer.lock().unwrap().should_flush = false;
     }
 
     #[doc(hidden)]
     pub fn unbatch(&self) {
-        self.state.writer.lock().unwrap().should_flush = true;
+        self.writer.lock().unwrap().should_flush = true;
     }
 
     #[inline]
     fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
-        let mut w = self.state.writer.lock().unwrap();
+        let mut w = self.writer.lock().unwrap();
         if let Some(reply) = reply {
             write!(w.writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
         } else {
@@ -917,7 +856,7 @@ impl Connection<Connected> {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}.{}", self.state.id, nuid::next())
+        format!("_INBOX.{}.{}", self.id, nuid::next())
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -1001,7 +940,7 @@ impl Connection<Connected> {
         self.unbatch();
         let (s, r) = crossbeam_channel::unbounded();
         {
-            let mut pongs = self.state.pongs.lock().unwrap();
+            let mut pongs = self.pongs.lock().unwrap();
             pongs.push_back(s);
         }
         self.send_ping()?;
@@ -1010,7 +949,7 @@ impl Connection<Connected> {
     }
 
     fn send_ping(&self) -> io::Result<()> {
-        let w = &mut self.state.writer.lock().unwrap().writer;
+        let w = &mut self.writer.lock().unwrap().writer;
         w.write_all(b"PING\r\n")?;
         // Flush in place on pings.
         w.flush()?;
@@ -1056,7 +995,7 @@ impl Connection<Connected> {
             "CONNECT {}\r\nPING\r\n",
             serde_json::to_string(&connect_op)?
         );
-        self.state.stream.write_all(op.as_bytes())?;
+        self.stream.write_all(op.as_bytes())?;
 
         let parsed_op = parser::parse_control_op(reader)?;
 
@@ -1077,8 +1016,8 @@ impl Connection<Connected> {
     }
 }
 
-impl Connected {
-    fn close(&mut self) -> io::Result<()> {
+impl Drop for Connection {
+    fn drop(&mut self) {
         self.status = ConnectionStatus::Closed;
         self.writer.lock().unwrap().closed = true;
         let flusher = self.writer.lock().unwrap().flusher.take();
@@ -1089,19 +1028,13 @@ impl Connected {
             }
         }
         // Shutdown socket.
-        self.stream.shutdown(Shutdown::Both)?;
+        let ret = self.stream.shutdown(Shutdown::Both);
         if let Some(rt) = self.reader.take() {
             if let Err(error) = rt.join() {
                 eprintln!("error encountered in reader thread: {:?}", error);
             }
         }
-        Ok(())
-    }
-}
-
-impl Drop for Connected {
-    fn drop(&mut self) {
-        if let Err(error) = self.close() {
+        if let Err(error) = ret {
             eprintln!("error closing Connected during Drop: {:?}", error);
         }
     }
