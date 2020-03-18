@@ -107,22 +107,22 @@ const LANG: &str = "rust";
 
 #[doc(hidden)]
 pub mod options_typestate {
-    /// `Options` typestate indicating
+    /// `ConnectionOptions` typestate indicating
     /// that there has not yet been
     /// any auth-related configuration
     /// provided yet.
     #[derive(Debug, Copy, Clone, Default)]
     pub struct Unauthenticated;
 
-    /// `Options` typestate indicating
+    /// `ConnectionOptions` typestate indicating
     /// that auth-related configuration
     /// has been provided, and may not
     /// be provided again.
     #[derive(Debug, Copy, Clone)]
     pub struct Authenticated;
 
-    /// `Options` typestate indicating that
-    /// this `Options` has been used to create
+    /// `ConnectionOptions` typestate indicating that
+    /// this `ConnectionOptions` has been used to create
     /// a `Connection` and may not be changed.
     #[derive(Debug, Copy, Clone)]
     pub struct Finalized;
@@ -130,25 +130,25 @@ pub mod options_typestate {
 
 /// A configuration object for a NATS connection.
 #[derive(Clone, Debug, Default)]
-pub struct Options<Typestate = options_typestate::Unauthenticated> {
+pub struct ConnectionOptions<TypeState = options_typestate::Unauthenticated> {
     auth: AuthStyle,
     name: Option<String>,
     no_echo: bool,
-    typestate: PhantomData<Typestate>,
+    typestate: PhantomData<TypeState>,
 }
 
-impl Options<options_typestate::Unauthenticated> {
-    /// `Options` for establishing a new NATS `Connection`.
+impl ConnectionOptions<options_typestate::Unauthenticated> {
+    /// `ConnectionOptions` for establishing a new NATS `Connection`.
     ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new().connect("demo.nats.io")?;
+    /// let nc = nats::ConnectionOptions::new().connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new() -> Options<options_typestate::Unauthenticated> {
-        Options::default()
+    pub fn new() -> ConnectionOptions<options_typestate::Unauthenticated> {
+        ConnectionOptions::default()
     }
 
     /// Authenticate with NATS using a token.
@@ -156,14 +156,14 @@ impl Options<options_typestate::Unauthenticated> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
+    /// let nc = nats::ConnectionOptions::new()
     ///     .with_token("t0k3n!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_token(self, token: &str) -> Options<options_typestate::Authenticated> {
-        Options {
+    pub fn with_token(self, token: &str) -> ConnectionOptions<options_typestate::Authenticated> {
+        ConnectionOptions {
             auth: AuthStyle::Token(token.to_string()),
             typestate: PhantomData,
             no_echo: self.no_echo,
@@ -176,7 +176,7 @@ impl Options<options_typestate::Unauthenticated> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
+    /// let nc = nats::ConnectionOptions::new()
     ///     .with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -186,8 +186,8 @@ impl Options<options_typestate::Unauthenticated> {
         self,
         user: &str,
         password: &str,
-    ) -> Options<options_typestate::Authenticated> {
-        Options {
+    ) -> ConnectionOptions<options_typestate::Authenticated> {
+        ConnectionOptions {
             auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
             typestate: PhantomData,
             no_echo: self.no_echo,
@@ -196,19 +196,19 @@ impl Options<options_typestate::Unauthenticated> {
     }
 }
 
-impl<TypeState> Options<TypeState> {
+impl<TypeState> ConnectionOptions<TypeState> {
     /// Add a name option to this configuration.
     ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
+    /// let nc = nats::ConnectionOptions::new()
     ///     .with_name("My App")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_name(mut self, name: &str) -> Options<TypeState> {
+    pub fn with_name(mut self, name: &str) -> ConnectionOptions<TypeState> {
         self.name = Some(name.to_string());
         self
     }
@@ -218,13 +218,13 @@ impl<TypeState> Options<TypeState> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
+    /// let nc = nats::ConnectionOptions::new()
     ///     .no_echo()
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn no_echo(mut self) -> Options<TypeState> {
+    pub const fn no_echo(mut self) -> ConnectionOptions<TypeState> {
         self.no_echo = true;
         self
     }
@@ -247,7 +247,7 @@ impl<TypeState> Options<TypeState> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new().connect("demo.nats.io")?;
+    /// let nc = nats::ConnectionOptions::new().connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -284,7 +284,7 @@ impl<TypeState> Options<TypeState> {
                 closed: false,
             })),
             reader: None,
-            options: Options {
+            options: ConnectionOptions {
                 typestate: PhantomData,
                 no_echo: self.no_echo,
                 name: self.name,
@@ -406,7 +406,7 @@ pub struct Connection {
     pongs: Arc<Mutex<VecDeque<Sender<bool>>>>,
     writer: Arc<Mutex<Outbound>>,
     reader: Option<thread::JoinHandle<()>>,
-    options: Options<options_typestate::Finalized>,
+    options: ConnectionOptions<options_typestate::Finalized>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -433,7 +433,7 @@ impl Default for AuthStyle {
 /// # }
 /// ```
 pub fn connect(nats_url: &str) -> io::Result<Connection> {
-    Options::new().connect(nats_url)
+    ConnectionOptions::new().connect(nats_url)
 }
 
 fn start_flush_cycle(wbuf: &Arc<Mutex<Outbound>>) -> usize {
