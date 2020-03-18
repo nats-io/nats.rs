@@ -28,7 +28,7 @@ enum Command {
 
 fn main() -> CliResult {
     let args = Cli::from_args();
-    let nc = nats::Connection::new()
+    let nc = nats::Options::new()
         .with_name("nats-box rust example")
         .connect(&args.server)?;
 

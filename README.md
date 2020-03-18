@@ -23,7 +23,7 @@ Basic connections, and those with options. The compiler will force these to be c
 ```rust
 let nc = nats::connect("localhost")?;
 
-let nc2 = nats::Connection::new()
+let nc2 = nats::Options::new()
     .with_name("My Rust NATS App")
     .with_user_pass("derek", "s3cr3t!")
     .connect("127.0.0.1")?;
