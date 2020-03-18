@@ -242,7 +242,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         }
     }
 
-    /// Connect to a NATS server and establish a `Connection`.
+    /// Establish a `Connection` with a NATS server.
     ///
     /// # Example
     /// ```
