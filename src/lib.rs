@@ -112,7 +112,7 @@ pub mod options_typestate {
     /// any auth-related configuration
     /// provided yet.
     #[derive(Debug, Copy, Clone, Default)]
-    pub struct Unauthenticated;
+    pub struct NoAuth;
 
     /// `ConnectionOptions` typestate indicating
     /// that auth-related configuration
@@ -130,14 +130,14 @@ pub mod options_typestate {
 
 /// A configuration object for a NATS connection.
 #[derive(Clone, Debug, Default)]
-pub struct ConnectionOptions<TypeState = options_typestate::Unauthenticated> {
+pub struct ConnectionOptions<TypeState> {
     auth: AuthStyle,
     name: Option<String>,
     no_echo: bool,
     typestate: PhantomData<TypeState>,
 }
 
-impl ConnectionOptions<options_typestate::Unauthenticated> {
+impl ConnectionOptions<options_typestate::NoAuth> {
     /// `ConnectionOptions` for establishing a new NATS `Connection`.
     ///
     /// # Example
@@ -147,7 +147,7 @@ impl ConnectionOptions<options_typestate::Unauthenticated> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new() -> ConnectionOptions<options_typestate::Unauthenticated> {
+    pub fn new() -> ConnectionOptions<options_typestate::NoAuth> {
         ConnectionOptions::default()
     }
 
