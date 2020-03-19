@@ -143,7 +143,8 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new().connect("demo.nats.io")?;
+    /// let options = nats::ConnectionOptions::new();
+    /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -247,7 +248,8 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new().connect("demo.nats.io")?;
+    /// let options = nats::ConnectionOptions::new();
+    /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
