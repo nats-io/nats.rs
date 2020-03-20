@@ -1,6 +1,12 @@
-# NATS - Rust Client (Beta)
-A [Rust](https://www.rust-lang.org/) client for the [NATS messaging system](https://nats.io).
+<p align="center">
+  <img src="https://raw.githubusercontent.com/nats-io/nats.rs/master/logo/NATS-Rust.png">
+</p>
 
+<p align="center">
+    A <a href="https://www.rust-lang.org/">Rust</a> client for the <a href="https://nats.io">NATS messaging system</a>.
+</p>
+
+## Status
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Crates.io](https://img.shields.io/crates/v/natsio.svg)](https://crates.io/crates/natsio)
 [![Documentation](https://docs.rs/natsio/badge.svg)](https://docs.rs/natsio/)
