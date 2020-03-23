@@ -313,7 +313,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         });
         conn.reader = Some(read_loop);
 
-        let usec = Duration::new(0, 1_000);
+        let usec = Duration::from_micros(1);
         let wait: [Duration; 5] = [10 * usec, 100 * usec, 500 * usec, 1000 * usec, 5000 * usec];
         let wbuf = conn.writer.clone();
 
