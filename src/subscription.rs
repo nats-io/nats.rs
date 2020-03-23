@@ -83,7 +83,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn messages(&self) -> Iter<'_> {
+    pub const fn messages(&self) -> Iter<'_> {
         Iter { subscription: self }
     }
 
@@ -98,7 +98,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn iter(&self) -> Iter<'_> {
+    pub const fn iter(&self) -> Iter<'_> {
         Iter { subscription: self }
     }
 
@@ -113,7 +113,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn try_iter(&self) -> TryIter<'_> {
+    pub const fn try_iter(&self) -> TryIter<'_> {
         TryIter { subscription: self }
     }
 
@@ -128,7 +128,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn timeout_iter(&self, timeout: Duration) -> TimeoutIter<'_> {
+    pub const fn timeout_iter(&self, timeout: Duration) -> TimeoutIter<'_> {
         TimeoutIter {
             subscription: self,
             to: timeout,
