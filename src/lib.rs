@@ -1128,29 +1128,16 @@ struct ServerInfo {
     host: String,
     port: i16,
     version: String,
-    #[serde(default = "default_false")]
+    #[serde(default)]
     auth_required: bool,
-    #[serde(default = "default_false")]
+    #[serde(default)]
     tls_required: bool,
     max_payload: i32,
     proto: i8,
     client_id: u64,
     go: String,
-    #[serde(default = "default_empty")]
+    #[serde(default)]
     nonce: String,
-    #[serde(default = "default_no_urls")]
+    #[serde(default)]
     connect_urls: Vec<String>,
-}
-
-const fn default_false() -> bool {
-    false
-}
-
-#[inline]
-fn default_empty() -> String {
-    "".to_string()
-}
-
-const fn default_no_urls() -> Vec<String> {
-    Vec::new()
 }
