@@ -789,6 +789,7 @@ impl Connection {
             parser::ControlOp::Ping
             | parser::ControlOp::Msg(_)
             | parser::ControlOp::Info(_)
+            | parser::ControlOp::EOF
             | parser::ControlOp::Unknown(_) => {
                 eprintln!(
                     "encountered unexpected control op during connection: {:?}",

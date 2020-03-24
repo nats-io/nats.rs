@@ -39,6 +39,7 @@ pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
             ControlOp::Msg(msg_args) => state.process_msg(msg_args)?,
             ControlOp::Ping => state.send_pong()?,
             ControlOp::Pong => state.process_pong(),
+            ControlOp::EOF => return Ok(()),
             ControlOp::Info(_) | ControlOp::Err(_) | ControlOp::Unknown(_) => {
                 eprintln!("Received unhandled message: {:?}", parsed_op)
             }
@@ -114,6 +115,10 @@ pub(crate) fn parse_control_op(reader: &mut BufReader<TcpStream>) -> io::Result<
             let (input, (op, args)) = if let Ok((input, (op, args))) = r {
                 (input, (op, args))
             } else {
+                // Check for EOF, this happens on close of connection.
+                if buf.len() == 0 {
+                    return Ok(ControlOp::EOF);
+                }
                 return Err(parse_error());
             };
             (input, 0, (op, args))
@@ -217,6 +222,7 @@ pub(crate) enum ControlOp {
     Info(ServerInfo),
     Ping,
     Pong,
+    EOF,
     Err(String),
     Unknown(String),
 }
