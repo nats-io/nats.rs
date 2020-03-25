@@ -1,17 +1,20 @@
-use crossbeam_channel::Sender;
-use nom::bytes::streaming::{take_until, take_while, take_while1};
-use nom::character::is_space;
-use nom::character::streaming::crlf;
-use nom::sequence::tuple;
-use nom::Err::Incomplete;
-use nom::IResult;
-use std::collections::{HashMap, VecDeque};
-use std::io::{self, BufRead, BufReader, Error, ErrorKind, Read, Write};
-use std::net::TcpStream;
-use std::str::FromStr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::{
+    io::{self, BufRead, BufReader, Error, ErrorKind, Read, Write},
+    net::TcpStream,
+    str::FromStr,
+    sync::Arc,
+};
 
-#[deny(unsafe_code)]
+use nom::{
+    bytes::streaming::{take_until, take_while, take_while1},
+    character::is_space,
+    character::streaming::crlf,
+    sequence::tuple,
+    Err::Incomplete,
+    IResult,
+};
+
+use crate::{Message, ServerInfo, SharedState};
 
 // Protocol
 const INFO: &[u8] = b"INFO";
@@ -27,9 +30,7 @@ fn is_valid_op_char(c: u8) -> bool {
 
 pub(crate) struct ReadLoopState {
     pub(crate) reader: BufReader<TcpStream>,
-    pub(crate) writer: Arc<Mutex<Outbound>>,
-    pub(crate) subs: Arc<RwLock<HashMap<usize, Sender<Message>>>>,
-    pub(crate) pongs: Arc<Mutex<VecDeque<Sender<bool>>>>,
+    pub(crate) shared_state: Arc<SharedState>,
 }
 
 pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
@@ -48,15 +49,39 @@ pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
 }
 
 impl ReadLoopState {
+    fn reconnect(&mut self) -> io::Result<()> {
+        // flush outstanding pongs
+        {
+            let mut pongs = self.shared_state.pongs.lock().unwrap();
+            while let Some(s) = pongs.pop_front() {
+                s.send(true).unwrap();
+            }
+        }
+
+        todo!("clear any captured errors");
+        /*
+        todo!("execute disconnect callback if registered");
+
+        // for each server in the server pool:
+        todo!("wait backoff");
+        todo!("record retry stats");
+        todo!("clear particular server stats");
+        todo!("resend subscriptions");
+        todo!("send the buffered items");
+        todo!("trigger reconnected callback");
+        todo!("flush buffers to server");
+        Ok(())
+        */
+    }
     fn process_pong(&mut self) {
-        let mut pongs = self.pongs.lock().unwrap();
+        let mut pongs = self.shared_state.pongs.lock().unwrap();
         if let Some(s) = pongs.pop_front() {
             s.send(true).unwrap();
         }
     }
 
     fn send_pong(&self) -> io::Result<()> {
-        let w = &mut self.writer.lock().unwrap().writer;
+        let w = &mut self.shared_state.writer.lock().unwrap().writer;
         w.write_all(b"PONG\r\n")?;
         w.flush()?;
         Ok(())
@@ -67,12 +92,12 @@ impl ReadLoopState {
             subject: msg_args.subject,
             reply: msg_args.reply,
             data: Vec::with_capacity(msg_args.mlen as usize),
-            writer: None,
+            responder: None,
         };
 
         // Setup so we can send responses.
         if msg.reply.is_some() {
-            msg.writer = Some(self.writer.clone());
+            msg.responder = Some(self.shared_state.clone());
         }
 
         let reader = &mut self.reader;
@@ -86,7 +111,7 @@ impl ReadLoopState {
         reader.read_exact(&mut crlf)?;
 
         // Now lookup the subscription's channel.
-        let subs = self.subs.read().unwrap();
+        let subs = self.shared_state.subs.read().unwrap();
         if let Some(tx) = subs.get(&msg_args.sid) {
             tx.send(msg).unwrap();
         }
@@ -198,10 +223,6 @@ fn control_args(input: &[u8]) -> IResult<&[u8], &[u8]> {
     let (remainder, (_, args, _)) = tuple((take_while(is_space), take_until(CRLF), crlf))(input)?;
     Ok((remainder, args))
 }
-
-use super::Message;
-use super::Outbound;
-use super::ServerInfo;
 
 fn parse_info(input: &[u8]) -> io::Result<ControlOp> {
     let info = serde_json::from_slice(input)?;
