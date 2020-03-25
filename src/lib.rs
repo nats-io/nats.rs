@@ -84,6 +84,13 @@
     clippy::wrong_pub_self_convention,
 )]
 
+mod parser;
+mod shared_state;
+
+/// Functionality relating to subscribing to a
+/// subject.
+pub mod subscription;
+
 use std::{
     collections::{HashMap, VecDeque},
     io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
@@ -95,16 +102,11 @@ use std::{
     {fmt, str, thread},
 };
 
-use crossbeam_channel::Sender;
 use serde::{Deserialize, Serialize};
 
-mod parser;
-
-/// Functionality relating to subscribing to a
-/// subject.
-pub mod subscription;
-
 pub use subscription::Subscription;
+
+use shared_state::SharedState;
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
@@ -280,15 +282,18 @@ impl<TypeState> ConnectionOptions<TypeState> {
             stream: stream.try_clone()?,
             info: server_info,
             sid: AtomicUsize::new(1),
-            subs: Arc::new(RwLock::new(HashMap::new())),
-            pongs: Arc::new(Mutex::new(VecDeque::new())),
-            writer: Arc::new(Mutex::new(Outbound {
-                writer: BufWriter::with_capacity(64 * 1024, stream.try_clone()?),
-                flusher: None,
-                should_flush: true,
-                in_flush: false,
-                closed: false,
-            })),
+            shared_state: Arc::new(SharedState {
+                last_error: RwLock::new(Ok(())),
+                subs: RwLock::new(HashMap::new()),
+                pongs: Mutex::new(VecDeque::new()),
+                writer: Mutex::new(Outbound {
+                    writer: BufWriter::with_capacity(64 * 1024, stream.try_clone()?),
+                    flusher: None,
+                    should_flush: true,
+                    in_flush: false,
+                    closed: false,
+                }),
+            }),
             reader: None,
             options: ConnectionOptions {
                 typestate: PhantomData,
@@ -303,9 +308,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         // Setup the state we will move to the readloop thread
         let mut state = parser::ReadLoopState {
             reader,
-            writer: conn.writer.clone(),
-            subs: conn.subs.clone(),
-            pongs: conn.pongs.clone(),
+            shared_state: conn.shared_state.clone(),
         };
 
         let read_loop = thread::spawn(move || {
@@ -319,18 +322,18 @@ impl<TypeState> ConnectionOptions<TypeState> {
 
         let usec = Duration::from_micros(1);
         let wait: [Duration; 5] = [10 * usec, 100 * usec, 500 * usec, 1000 * usec, 5000 * usec];
-        let wbuf = conn.writer.clone();
 
+        let shared_state = conn.shared_state.clone();
         let flusher_loop = thread::spawn(move || loop {
             thread::park();
-            let start_len = start_flush_cycle(&wbuf);
+            let start_len = start_flush_cycle(&shared_state.writer);
             thread::yield_now();
-            let mut cur_len = wbuf.lock().unwrap().writer.buffer().len();
+            let mut cur_len = shared_state.writer.lock().unwrap().writer.buffer().len();
             if cur_len != start_len {
                 for d in &wait {
                     thread::sleep(*d);
                     {
-                        let w = wbuf.lock().unwrap();
+                        let w = shared_state.writer.lock().unwrap();
                         cur_len = w.writer.buffer().len();
                         if cur_len == 0 || cur_len == start_len || w.closed {
                             break;
@@ -338,7 +341,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
                     }
                 }
             }
-            let mut w = wbuf.lock().unwrap();
+            let mut w = shared_state.writer.lock().unwrap();
             w.in_flush = false;
             if cur_len > 0 {
                 if let Err(error) = w.writer.flush() {
@@ -350,7 +353,8 @@ impl<TypeState> ConnectionOptions<TypeState> {
                 break;
             }
         });
-        conn.writer.lock().unwrap().flusher = Some(flusher_loop);
+
+        conn.shared_state.writer.lock().unwrap().flusher = Some(flusher_loop);
 
         Ok(conn)
     }
@@ -403,14 +407,12 @@ impl Outbound {
 /// A NATS connection.
 #[derive(Debug)]
 pub struct Connection {
+    shared_state: Arc<SharedState>,
     id: String,
     status: ConnectionStatus,
     stream: TcpStream,
     info: ServerInfo,
     sid: AtomicUsize,
-    subs: Arc<RwLock<HashMap<usize, Sender<Message>>>>,
-    pongs: Arc<Mutex<VecDeque<Sender<bool>>>>,
-    writer: Arc<Mutex<Outbound>>,
     reader: Option<thread::JoinHandle<()>>,
     options: ConnectionOptions<options_typestate::Finalized>,
 }
@@ -442,7 +444,7 @@ pub fn connect(nats_url: &str) -> io::Result<Connection> {
     ConnectionOptions::new().connect(nats_url)
 }
 
-fn start_flush_cycle(wbuf: &Arc<Mutex<Outbound>>) -> usize {
+fn start_flush_cycle(wbuf: &Mutex<Outbound>) -> usize {
     let mut w = wbuf.lock().unwrap();
     w.in_flush = true;
     w.writer.buffer().len()
@@ -458,7 +460,7 @@ pub struct Message {
     pub reply: Option<String>,
     /// The `Message` contents.
     pub data: Vec<u8>,
-    pub(crate) writer: Option<Arc<Mutex<Outbound>>>,
+    pub(crate) responder: Option<Arc<SharedState>>,
 }
 
 impl Message {
@@ -475,9 +477,13 @@ impl Message {
     /// # }
     /// ```
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        if let Some(writer) = &self.writer {
+        if let Some(shared_state) = &self.responder {
             if let Some(reply) = &self.reply {
-                writer.lock().unwrap().write_response(reply, msg.as_ref())?;
+                shared_state
+                    .writer
+                    .lock()
+                    .unwrap()
+                    .write_response(reply, msg.as_ref())?;
             }
         } else {
             return Err(Error::new(
@@ -543,7 +549,7 @@ impl Connection {
     fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
         let sid = self.sid.fetch_add(1, Ordering::Relaxed);
         {
-            let w = &mut self.writer.lock().unwrap();
+            let w = &mut self.shared_state.writer.lock().unwrap();
             match queue {
                 Some(q) => write!(w.writer, "SUB {} {} {}\r\n", subject, q, sid)?,
                 None => write!(w.writer, "SUB {} {}\r\n", subject, sid)?,
@@ -554,32 +560,32 @@ impl Connection {
         }
         let (sub, recv) = crossbeam_channel::unbounded();
         {
-            let mut subs = self.subs.write().unwrap();
+            let mut subs = self.shared_state.subs.write().unwrap();
             subs.insert(sid, sub);
         }
         // TODO(dlc) - Should we do a flush and check errors?
         Ok(Subscription {
+            subject: subject.to_string(),
             sid,
             recv,
-            writer: self.writer.clone(),
-            subs: self.subs.clone(),
+            shared_state: self.shared_state.clone(),
             do_unsub: true,
         })
     }
 
     #[doc(hidden)]
     pub fn batch(&self) {
-        self.writer.lock().unwrap().should_flush = false;
+        self.shared_state.writer.lock().unwrap().should_flush = false;
     }
 
     #[doc(hidden)]
     pub fn unbatch(&self) {
-        self.writer.lock().unwrap().should_flush = true;
+        self.shared_state.writer.lock().unwrap().should_flush = true;
     }
 
     #[inline]
     fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
-        let mut w = self.writer.lock().unwrap();
+        let mut w = self.shared_state.writer.lock().unwrap();
         if let Some(reply) = reply {
             write!(w.writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
         } else {
@@ -724,7 +730,7 @@ impl Connection {
         self.unbatch();
         let (s, r) = crossbeam_channel::unbounded();
         {
-            let mut pongs = self.pongs.lock().unwrap();
+            let mut pongs = self.shared_state.pongs.lock().unwrap();
             pongs.push_back(s);
         }
         self.send_ping()?;
@@ -733,7 +739,7 @@ impl Connection {
     }
 
     fn send_ping(&self) -> io::Result<()> {
-        let w = &mut self.writer.lock().unwrap().writer;
+        let w = &mut self.shared_state.writer.lock().unwrap().writer;
         w.write_all(b"PING\r\n")?;
         // Flush in place on pings.
         w.flush()?;
@@ -804,8 +810,8 @@ impl Connection {
 impl Drop for Connection {
     fn drop(&mut self) {
         self.status = ConnectionStatus::Closed;
-        self.writer.lock().unwrap().closed = true;
-        let flusher = self.writer.lock().unwrap().flusher.take();
+        self.shared_state.writer.lock().unwrap().closed = true;
+        let flusher = self.shared_state.writer.lock().unwrap().flusher.take();
         if let Some(ft) = flusher {
             ft.thread().unpark();
             if let Err(error) = ft.join() {

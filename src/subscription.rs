@@ -1,22 +1,21 @@
 use std::{
-    collections::HashMap,
     io::{self, Write},
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
     thread,
     time::Duration,
 };
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 
-use super::{Message, Outbound};
+use crate::{Message, SharedState};
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
 pub struct Subscription {
+    pub(crate) subject: String,
     pub(crate) sid: usize,
     pub(crate) recv: Receiver<Message>,
-    pub(crate) subs: Arc<RwLock<HashMap<usize, Sender<Message>>>>,
-    pub(crate) writer: Arc<Mutex<Outbound>>,
+    pub(crate) shared_state: Arc<SharedState>,
     pub(crate) do_unsub: bool,
 }
 
@@ -173,8 +172,8 @@ impl Subscription {
 
     fn unsub(&mut self) -> io::Result<()> {
         self.do_unsub = false;
-        self.subs.write().unwrap().remove(&self.sid);
-        let w = &mut self.writer.lock().unwrap().writer;
+        self.shared_state.subs.write().unwrap().remove(&self.sid);
+        let w = &mut self.shared_state.writer.lock().unwrap().writer;
         write!(w, "UNSUB {}\r\n", self.sid)?;
         w.flush()?;
         Ok(())
