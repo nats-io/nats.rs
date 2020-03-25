@@ -49,30 +49,6 @@ pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
 }
 
 impl ReadLoopState {
-    fn reconnect(&mut self) -> io::Result<()> {
-        // flush outstanding pongs
-        {
-            let mut pongs = self.shared_state.pongs.lock().unwrap();
-            while let Some(s) = pongs.pop_front() {
-                s.send(true).unwrap();
-            }
-        }
-
-        todo!("clear any captured errors");
-        /*
-        todo!("execute disconnect callback if registered");
-
-        // for each server in the server pool:
-        todo!("wait backoff");
-        todo!("record retry stats");
-        todo!("clear particular server stats");
-        todo!("resend subscriptions");
-        todo!("send the buffered items");
-        todo!("trigger reconnected callback");
-        todo!("flush buffers to server");
-        Ok(())
-        */
-    }
     fn process_pong(&mut self) {
         let mut pongs = self.shared_state.pongs.lock().unwrap();
         if let Some(s) = pongs.pop_front() {
