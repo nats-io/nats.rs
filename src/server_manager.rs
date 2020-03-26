@@ -253,7 +253,7 @@ impl ServerManager {
             options,
             status: ConnectionStatus::Connected,
             server_pool: servers,
-            shared_state: shared_state,
+            shared_state,
         })
     }
 

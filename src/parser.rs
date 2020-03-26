@@ -49,7 +49,7 @@ pub(crate) fn parse_control_op<R: BufRead>(mut reader: R) -> io::Result<ControlO
                 (input, (op, args))
             } else {
                 // Check for EOF, this happens on close of connection.
-                if buf.len() == 0 {
+                if buf.is_empty() {
                     return Ok(ControlOp::EOF);
                 }
                 return Err(parse_error());

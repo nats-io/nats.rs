@@ -538,7 +538,7 @@ impl Connection {
             let mut subs = self.shared_state.subs.write().unwrap();
             subs.insert(
                 sid,
-                (subject.to_string(), queue.map(|q| q.to_string()), sub),
+                (subject.to_string(), queue.map(ToString::to_string), sub),
             );
         }
         // TODO(dlc) - Should we do a flush and check errors?
