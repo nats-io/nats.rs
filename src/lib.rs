@@ -293,6 +293,9 @@ impl<TypeState> ConnectionOptions<TypeState> {
                     in_flush: false,
                     closed: false,
                 }),
+                server_pool: Mutex::new(vec![nats_url.to_string()]),
+                disconnect_callback: RwLock::new(None),
+                reconnect_callback: RwLock::new(None),
             }),
             reader: None,
             options: ConnectionOptions {
@@ -759,6 +762,32 @@ impl Connection {
     pub fn close(self) -> io::Result<()> {
         drop(self);
         Ok(())
+    }
+
+    /// Set a callback to be executed during disconnection.
+    /// Returns `true` if this is the first time a callback
+    /// has been set.
+    pub fn set_disconnect_callback<F>(&self, cb: F) -> bool
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        let mut shared_cb = self.shared_state.disconnect_callback.write().unwrap();
+        let ret = shared_cb.is_none();
+        *shared_cb = Some(Box::new(cb));
+        ret
+    }
+
+    /// Set a callback to be executed during reconnection,
+    /// Returns `true` if this is the first time a callback
+    /// has been set.
+    pub fn set_reconnect_callback<F>(&self, cb: F) -> bool
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        let mut shared_cb = self.shared_state.reconnect_callback.write().unwrap();
+        let ret = shared_cb.is_none();
+        *shared_cb = Some(Box::new(cb));
+        ret
     }
 
     fn send_connect(&mut self, reader: &mut BufReader<TcpStream>) -> io::Result<()> {
