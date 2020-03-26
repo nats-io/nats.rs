@@ -85,6 +85,7 @@
 )]
 
 mod parser;
+mod server_manager;
 mod shared_state;
 
 /// Functionality relating to subscribing to a
@@ -92,24 +93,62 @@ mod shared_state;
 pub mod subscription;
 
 use std::{
-    collections::{HashMap, VecDeque},
-    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
+    io::{self, BufWriter, Error, ErrorKind, Write},
     marker::PhantomData,
     net::{Shutdown, SocketAddr, TcpStream},
     sync::atomic::{AtomicUsize, Ordering},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     time::Duration,
     {fmt, str, thread},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub use subscription::Subscription;
 
-use shared_state::SharedState;
+use {server_manager::ServerManager, shared_state::SharedState};
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
+
+fn parse_server_addresses<S: AsRef<str>>(
+    connect_str: S,
+) -> std::io::Result<Vec<server_manager::Server>> {
+    fn check_port(nats_url: &str) -> String {
+        match nats_url.parse::<SocketAddr>() {
+            Ok(_) => nats_url.to_string(),
+            Err(_) => {
+                if nats_url.find(':').is_some() {
+                    nats_url.to_string()
+                } else {
+                    format!("{}:4222", nats_url)
+                }
+            }
+        }
+    }
+
+    let server_strings = connect_str.as_ref().split(',');
+
+    let mut ret = vec![];
+
+    for server_string in server_strings {
+        let addr = if server_string.starts_with("nats://") {
+            check_port(&server_string["nats://".len()..])
+        } else {
+            check_port(server_string)
+        };
+        ret.push(server_manager::Server {
+            addr: addr.to_string(),
+            retries: 0,
+        });
+    }
+
+    if ret.is_empty() {
+        Err(Error::new(ErrorKind::InvalidInput, "No configured servers"))
+    } else {
+        Ok(ret)
+    }
+}
 
 #[doc(hidden)]
 pub mod options_typestate {
@@ -133,6 +172,8 @@ pub mod options_typestate {
     #[derive(Debug, Copy, Clone)]
     pub struct Finalized;
 }
+
+type FinalizedOptions = ConnectionOptions<crate::options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
 #[derive(Clone, Debug, Default)]
@@ -236,19 +277,6 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    fn check_port(&self, nats_url: &str) -> String {
-        match nats_url.parse::<SocketAddr>() {
-            Ok(_) => nats_url.to_string(),
-            Err(_) => {
-                if nats_url.find(':').is_some() {
-                    nats_url.to_string()
-                } else {
-                    format!("{}:4222", nats_url)
-                }
-            }
-        }
-    }
-
     /// Establish a `Connection` with a NATS server.
     ///
     /// # Example
@@ -260,63 +288,29 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let connect_url = self.check_port(nats_url);
-        let stream = TcpStream::connect(connect_url)?;
+        let servers = parse_server_addresses(nats_url)?;
 
-        let mut reader = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
-        let server_info = parser::expect_info(&mut reader)?;
+        let options = ConnectionOptions {
+            auth: self.auth,
+            no_echo: self.no_echo,
+            name: self.name,
+            // move options into the Finalized state by setting
+            // `typestate` to `PhantomData<Finalized>`
+            typestate: PhantomData,
+        };
 
-        // TODO(dlc) - Fix, but for now at least signal properly.
-        if server_info.tls_required {
-            return Err(Error::new(
-                ErrorKind::ConnectionRefused,
-                "TLS currently not supported",
-            ));
-        }
-
-        let mut n = nuid::NUID::new();
+        // Setup the server manager we will move to the its own thread.
+        let mut server_manager = ServerManager::connect(options, servers)?;
 
         let mut conn = Connection {
-            id: n.next(),
-            status: ConnectionStatus::Connecting,
-            stream: stream.try_clone()?,
-            info: server_info,
             sid: AtomicUsize::new(1),
-            shared_state: Arc::new(SharedState {
-                last_error: RwLock::new(Ok(())),
-                subs: RwLock::new(HashMap::new()),
-                pongs: Mutex::new(VecDeque::new()),
-                writer: Mutex::new(Outbound {
-                    writer: BufWriter::with_capacity(64 * 1024, stream.try_clone()?),
-                    flusher: None,
-                    should_flush: true,
-                    in_flush: false,
-                    closed: false,
-                }),
-                server_pool: Mutex::new(vec![nats_url.to_string()]),
-                disconnect_callback: RwLock::new(None),
-                reconnect_callback: RwLock::new(None),
-            }),
+            shared_state: server_manager.shared_state.clone(),
             reader: None,
-            options: ConnectionOptions {
-                typestate: PhantomData,
-                no_echo: self.no_echo,
-                name: self.name,
-                auth: self.auth,
-            },
-        };
-        conn.send_connect(&mut reader)?;
-        conn.status = ConnectionStatus::Connected;
-
-        // Setup the state we will move to the readloop thread
-        let mut state = parser::ReadLoopState {
-            reader,
-            shared_state: conn.shared_state.clone(),
         };
 
         let read_loop = thread::spawn(move || {
             // FIXME(dlc) - Capture?
-            if let Err(error) = parser::read_loop(&mut state) {
+            if let Err(error) = server_manager.read_loop() {
                 eprintln!("error encountered in the parser read_loop: {:?}", error);
                 return;
             }
@@ -363,21 +357,6 @@ impl<TypeState> ConnectionOptions<TypeState> {
     }
 }
 
-/// A `ConnectionStatus` describes the current sub-status of a `Connection`.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum ConnectionStatus {
-    /// A connection in the process of establishing a connection.
-    Connecting,
-    /// An established connection.
-    Connected,
-    /// A permanently closed connection.
-    Closed,
-    /// A connection that has lost connectivity, but may reestablish connectivity.
-    Disconnected,
-    /// A connection in the process of reestablishing connectivity after a disconnect.
-    Reconnecting,
-}
-
 #[derive(Debug)]
 pub(crate) struct Outbound {
     writer: BufWriter<TcpStream>,
@@ -388,7 +367,6 @@ pub(crate) struct Outbound {
 }
 
 impl Outbound {
-    #[inline]
     fn write_response(&mut self, subj: &str, msgb: &[u8]) -> io::Result<()> {
         write!(self.writer, "PUB {} {}\r\n", subj, msgb.len())?;
         self.writer.write_all(msgb)?;
@@ -399,7 +377,6 @@ impl Outbound {
         Ok(())
     }
 
-    #[inline]
     fn kick_flusher(&self) {
         if let Some(flusher) = &self.flusher {
             flusher.thread().unpark();
@@ -411,13 +388,8 @@ impl Outbound {
 #[derive(Debug)]
 pub struct Connection {
     shared_state: Arc<SharedState>,
-    id: String,
-    status: ConnectionStatus,
-    stream: TcpStream,
-    info: ServerInfo,
     sid: AtomicUsize,
     reader: Option<thread::JoinHandle<()>>,
-    options: ConnectionOptions<options_typestate::Finalized>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -564,7 +536,10 @@ impl Connection {
         let (sub, recv) = crossbeam_channel::unbounded();
         {
             let mut subs = self.shared_state.subs.write().unwrap();
-            subs.insert(sid, sub);
+            subs.insert(
+                sid,
+                (subject.to_string(), queue.map(|q| q.to_string()), sub),
+            );
         }
         // TODO(dlc) - Should we do a flush and check errors?
         Ok(Subscription {
@@ -649,7 +624,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}.{}", self.id, nuid::next())
+        format!("_INBOX.{}.{}", self.shared_state.id, nuid::next())
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -789,56 +764,10 @@ impl Connection {
         *shared_cb = Some(Box::new(cb));
         ret
     }
-
-    fn send_connect(&mut self, reader: &mut BufReader<TcpStream>) -> io::Result<()> {
-        let mut connect_op = Connect {
-            name: self.options.name.as_ref(),
-            pedantic: false,
-            verbose: false,
-            lang: LANG,
-            version: VERSION,
-            user: None,
-            pass: None,
-            auth_token: None,
-            echo: !self.options.no_echo,
-        };
-        match &self.options.auth {
-            AuthStyle::UserPass(user, pass) => {
-                connect_op.user = Some(user);
-                connect_op.pass = Some(pass);
-            }
-            AuthStyle::Token(token) => connect_op.auth_token = Some(token),
-            _ => {}
-        }
-        let op = format!(
-            "CONNECT {}\r\nPING\r\n",
-            serde_json::to_string(&connect_op)?
-        );
-        self.stream.write_all(op.as_bytes())?;
-
-        let parsed_op = parser::parse_control_op(reader)?;
-
-        match parsed_op {
-            parser::ControlOp::Pong => Ok(()),
-            parser::ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            parser::ControlOp::Ping
-            | parser::ControlOp::Msg(_)
-            | parser::ControlOp::Info(_)
-            | parser::ControlOp::EOF
-            | parser::ControlOp::Unknown(_) => {
-                eprintln!(
-                    "encountered unexpected control op during connection: {:?}",
-                    parsed_op
-                );
-                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
-            }
-        }
-    }
 }
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        self.status = ConnectionStatus::Closed;
         self.shared_state.writer.lock().unwrap().closed = true;
         let flusher = self.shared_state.writer.lock().unwrap().flusher.take();
         if let Some(ft) = flusher {
@@ -847,8 +776,18 @@ impl Drop for Connection {
                 eprintln!("error encountered in flusher thread: {:?}", error);
             }
         }
+        self.shared_state
+            .shutting_down
+            .store(true, Ordering::SeqCst);
         // Shutdown socket.
-        let ret = self.stream.shutdown(Shutdown::Both);
+        let ret = self
+            .shared_state
+            .writer
+            .lock()
+            .unwrap()
+            .writer
+            .get_mut()
+            .shutdown(Shutdown::Both);
         if let Some(rt) = self.reader.take() {
             if let Err(error) = rt.join() {
                 eprintln!("error encountered in reader thread: {:?}", error);
@@ -858,59 +797,4 @@ impl Drop for Connection {
             eprintln!("error closing Connected during Drop: {:?}", error);
         }
     }
-}
-
-#[derive(Serialize, Debug)]
-struct Connect<'a> {
-    #[serde(skip_serializing_if = "empty_or_none")]
-    name: Option<&'a String>,
-    verbose: bool,
-    pedantic: bool,
-    #[serde(skip_serializing_if = "if_true")]
-    echo: bool,
-    lang: &'a str,
-    version: &'a str,
-
-    // Authentication
-    #[serde(skip_serializing_if = "empty_or_none")]
-    user: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    pass: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    auth_token: Option<&'a String>,
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-const fn if_true(field: &bool) -> bool {
-    *field
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[inline]
-fn empty_or_none(field: &Option<&String>) -> bool {
-    match field {
-        Some(_) => false,
-        None => true,
-    }
-}
-
-#[derive(Deserialize, Debug)]
-struct ServerInfo {
-    server_id: String,
-    server_name: String,
-    host: String,
-    port: i16,
-    version: String,
-    #[serde(default)]
-    auth_required: bool,
-    #[serde(default)]
-    tls_required: bool,
-    max_payload: i32,
-    proto: i8,
-    client_id: u64,
-    go: String,
-    #[serde(default)]
-    nonce: String,
-    #[serde(default)]
-    connect_urls: Vec<String>,
 }

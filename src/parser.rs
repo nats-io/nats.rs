@@ -1,8 +1,7 @@
 use std::{
-    io::{self, BufRead, BufReader, Error, ErrorKind, Read, Write},
+    io::{self, BufRead, BufReader, Error, ErrorKind},
     net::TcpStream,
     str::FromStr,
-    sync::Arc,
 };
 
 use nom::{
@@ -14,7 +13,7 @@ use nom::{
     IResult,
 };
 
-use crate::{Message, ServerInfo, SharedState};
+use crate::server_manager::ServerInfo;
 
 // Protocol
 const INFO: &[u8] = b"INFO";
@@ -28,98 +27,7 @@ fn is_valid_op_char(c: u8) -> bool {
     (c >= 0x41 && c <= 0x5A) || c == b'-' || c == b'+'
 }
 
-pub(crate) struct ReadLoopState {
-    pub(crate) reader: BufReader<TcpStream>,
-    pub(crate) shared_state: Arc<SharedState>,
-}
-
-pub(crate) fn read_loop(state: &mut ReadLoopState) -> io::Result<()> {
-    loop {
-        let parsed_op = parse_control_op(&mut state.reader)?;
-        match parsed_op {
-            ControlOp::Msg(msg_args) => state.process_msg(msg_args)?,
-            ControlOp::Ping => state.send_pong()?,
-            ControlOp::Pong => state.process_pong(),
-            ControlOp::EOF => return Ok(()),
-            ControlOp::Info(_) | ControlOp::Err(_) | ControlOp::Unknown(_) => {
-                eprintln!("Received unhandled message: {:?}", parsed_op)
-            }
-        }
-    }
-}
-
-impl ReadLoopState {
-    fn reconnect(&mut self) -> io::Result<()> {
-        // flush outstanding pongs
-        {
-            let mut pongs = self.shared_state.pongs.lock().unwrap();
-            while let Some(s) = pongs.pop_front() {
-                s.send(true).unwrap();
-            }
-        }
-
-        todo!("clear any captured errors");
-        /*
-        todo!("execute disconnect callback if registered");
-
-        // for each server in the server pool:
-        todo!("wait backoff");
-        todo!("record retry stats");
-        todo!("clear particular server stats");
-        todo!("resend subscriptions");
-        todo!("send the buffered items");
-        todo!("trigger reconnected callback");
-        todo!("flush buffers to server");
-        Ok(())
-        */
-    }
-    fn process_pong(&mut self) {
-        let mut pongs = self.shared_state.pongs.lock().unwrap();
-        if let Some(s) = pongs.pop_front() {
-            s.send(true).unwrap();
-        }
-    }
-
-    fn send_pong(&self) -> io::Result<()> {
-        let w = &mut self.shared_state.writer.lock().unwrap().writer;
-        w.write_all(b"PONG\r\n")?;
-        w.flush()?;
-        Ok(())
-    }
-
-    fn process_msg(&mut self, msg_args: MsgArgs) -> io::Result<()> {
-        let mut msg = Message {
-            subject: msg_args.subject,
-            reply: msg_args.reply,
-            data: Vec::with_capacity(msg_args.mlen as usize),
-            responder: None,
-        };
-
-        // Setup so we can send responses.
-        if msg.reply.is_some() {
-            msg.responder = Some(self.shared_state.clone());
-        }
-
-        let reader = &mut self.reader;
-        // FIXME(dlc) - avoid copy if possible.
-        // FIXME(dlc) - Just read CRLF? Buffered so should be ok.
-        reader
-            .take(u64::from(msg_args.mlen))
-            .read_to_end(&mut msg.data)?;
-
-        let mut crlf = [0; 2];
-        reader.read_exact(&mut crlf)?;
-
-        // Now lookup the subscription's channel.
-        let subs = self.shared_state.subs.read().unwrap();
-        if let Some(tx) = subs.get(&msg_args.sid) {
-            tx.send(msg).unwrap();
-        }
-        Ok(())
-    }
-}
-
-pub(crate) fn parse_control_op(reader: &mut BufReader<TcpStream>) -> io::Result<ControlOp> {
+pub(crate) fn parse_control_op<R: BufRead>(mut reader: R) -> io::Result<ControlOp> {
     // This should not do a malloc here so this should be ok.
     let mut buf = Vec::new();
     let (input, start_len, (op, args)) = {
@@ -230,11 +138,11 @@ fn parse_info(input: &[u8]) -> io::Result<ControlOp> {
 }
 
 #[derive(Debug)]
-pub struct MsgArgs {
-    subject: String,
-    reply: Option<String>,
-    mlen: u32,
-    sid: usize,
+pub(crate) struct MsgArgs {
+    pub(crate) subject: String,
+    pub(crate) reply: Option<String>,
+    pub(crate) mlen: u32,
+    pub(crate) sid: usize,
 }
 
 #[derive(Debug)]
