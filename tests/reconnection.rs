@@ -67,6 +67,7 @@ fn bad_server(
     port: u16,
     barrier: Arc<Barrier>,
     shutdown: Arc<AtomicBool>,
+    restart: Arc<AtomicBool>,
     chance: u32,
 ) {
     let mut max_client_id = 0;
@@ -107,9 +108,14 @@ fn bad_server(
             subs.clear();
         }
 
+        if restart.load(Ordering::Acquire) {
+            clients.clear();
+            subs.clear();
+            restart.store(false, Ordering::Release);
+        }
+
         // maybe accept a new client
         if let Ok((mut next, _addr)) = listener.accept() {
-            println!("got a client");
             max_client_id += 1;
             let client_id = max_client_id;
             next.write_all(server_info(client_id).as_bytes()).unwrap();
@@ -129,13 +135,8 @@ fn bad_server(
         let mut to_evict = vec![];
         let mut outbound = vec![];
 
-        // maybe read a byte from some clients
         for (client_id, client) in &mut clients {
             if client.outstanding_pings > 3 {
-                println!(
-                    "evicting client who isn't responding to pings: {}",
-                    client_id
-                );
                 to_evict.push(*client_id);
                 continue;
             }
@@ -147,12 +148,12 @@ fn bad_server(
             }
 
             let command = if let Some(command) = read_line(&mut client.socket) {
-                println!("got command {}", command);
                 command
             } else {
                 continue;
             };
 
+            println!("got command {}", command);
             let mut parts = command.split(' ');
 
             match parts.next().unwrap() {
@@ -166,33 +167,52 @@ fn bad_server(
                 }
                 "CONNECT" => (),
                 "SUB" => {
-                    println!("sub");
                     let subject = parts.next().unwrap();
                     let sid = parts.next().unwrap();
                     let entry = subs.entry(subject.to_string()).or_insert(HashSet::new());
                     entry.insert(sid.to_string());
                 }
                 "PUB" => {
-                    println!("pub");
-                    let subject = parts.next().unwrap();
-                    let len = parts.next().unwrap();
+                    let (subject, reply, len) = match (parts.next(), parts.next(), parts.next()) {
+                        (Some(subject), Some(reply), Some(len)) => (subject, Some(reply), len),
+                        (Some(subject), Some(len), None) => (subject, None, len),
+                        other => panic!("unknown args: {:?}", other),
+                    };
+
                     let next_line = read_line(&mut client.socket).unwrap();
 
                     assert_eq!(len.parse::<usize>().unwrap(), next_line.len());
 
                     for sub in subs.get(subject).unwrap_or(&HashSet::new()) {
-                        let out = format!(
-                            "MSG {} {} {}\r\n{}\r\n",
-                            subject,
-                            sub,
-                            next_line.len(),
-                            next_line
-                        );
+                        let out = if let Some(group) = reply {
+                            format!(
+                                "MSG {} {} {} {}\r\n{}\r\n",
+                                subject,
+                                sub,
+                                group,
+                                next_line.len(),
+                                next_line
+                            )
+                        } else {
+                            format!(
+                                "MSG {} {} {}\r\n{}\r\n",
+                                subject,
+                                sub,
+                                next_line.len(),
+                                next_line
+                            )
+                        };
 
                         outbound.push(out.into_bytes());
                     }
                 }
-                other => println!("unknown command {}", other),
+                "UNSUB" => {
+                    let sid = parts.next().unwrap();
+                    // FIXME(tan) uncommenting this exposes
+                    // a bug with unsubscribing.
+                    // subs.remove(sid);
+                }
+                other => eprintln!("unknown command {}", other),
             }
         }
 
@@ -210,44 +230,58 @@ fn bad_server(
 
 #[test]
 #[ignore]
-fn simple_reconnect() -> std::io::Result<()> {
-    let barrier = Arc::new(Barrier::new(2));
+fn simple_reconnect() {
     let shutdown = Arc::new(AtomicBool::new(false));
+    let restart = Arc::new(AtomicBool::new(false));
+    let success = Arc::new(AtomicBool::new(false));
 
-    std::thread::spawn({
+    let barrier = Arc::new(Barrier::new(2));
+    let server = std::thread::spawn({
         let barrier = barrier.clone();
         let shutdown = shutdown.clone();
-        move || bad_server("localhost", 22222, barrier, shutdown, 10)
+        move || bad_server("localhost", 22222, barrier, shutdown, restart, 200)
     });
 
     barrier.wait();
 
-    let nc = Arc::new(nats::connect("localhost:22222")?);
+    let nc = Arc::new(nats::connect("localhost:22222").unwrap());
 
     let tx = std::thread::spawn({
         let nc = nc.clone();
+        let success = success.clone();
         move || {
-            //let nc = nats::connect("demo.nats.io").unwrap();
-            for i in 0..10 {
-                println!("tests/reconnection.rs:175 publishing {}", i);
-                nc.publish("rust.tests.reconnect", format!("{}", i))?;
-                std::thread::sleep(Duration::from_millis(50));
+            const EXPECTED_SUCCESSES: usize = 100;
+            let mut received = 0;
+
+            while received < EXPECTED_SUCCESSES {
+                if nc
+                    .request_timeout(
+                        "rust.tests.faulty_requests",
+                        "Help me?",
+                        std::time::Duration::from_secs(2),
+                    )
+                    .is_ok()
+                {
+                    received += 1;
+                } else {
+                    println!("timed out before we received a response :(");
+                }
             }
-            Ok(())
+
+            success.store(true, Ordering::Release);
         }
     });
 
-    let subscriber = nc.subscribe("rust.tests.reconnect")?;
+    let subscriber = nc.subscribe("rust.tests.faulty_requests").unwrap();
 
-    let mut received = 0;
-    for msg in subscriber.timeout_iter(Duration::from_millis(10)) {
-        println!("subscriber got msg: {:?}", msg);
-        received += 1;
+    while !success.load(Ordering::Acquire) {
+        for msg in subscriber.timeout_iter(Duration::from_millis(10)) {
+            msg.respond("Anything for the story").unwrap();
+        }
     }
-
-    assert_eq!(received, 10, "did not receive the expected messages");
 
     shutdown.store(true, Ordering::Release);
 
-    tx.join().unwrap()
+    tx.join().unwrap();
+    server.join().unwrap();
 }

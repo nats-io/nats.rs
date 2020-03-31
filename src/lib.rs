@@ -84,8 +84,9 @@
     clippy::wrong_pub_self_convention,
 )]
 
+mod inbound;
+mod outbound;
 mod parser;
-mod server_manager;
 mod shared_state;
 
 /// Functionality relating to subscribing to a
@@ -93,61 +94,38 @@ mod shared_state;
 pub mod subscription;
 
 use std::{
-    io::{self, BufWriter, Error, ErrorKind, Write},
-    marker::PhantomData,
-    net::{Shutdown, SocketAddr, TcpStream},
-    sync::atomic::{AtomicUsize, Ordering},
-    sync::{Arc, Mutex},
+    fmt,
+    io::{self, Error, ErrorKind},
+    sync::{atomic::Ordering, Arc},
     time::Duration,
-    {fmt, str, thread},
 };
 
 use serde::Serialize;
 
+use std::{marker::PhantomData, sync::atomic::AtomicUsize};
+
 pub use subscription::Subscription;
 
-use {server_manager::ServerManager, shared_state::SharedState};
+use {
+    inbound::Inbound,
+    outbound::Outbound,
+    shared_state::{Server, ServerInfo, SharedState},
+};
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
 
-fn parse_server_addresses<S: AsRef<str>>(
-    connect_str: S,
-) -> std::io::Result<Vec<server_manager::Server>> {
-    fn check_port(nats_url: &str) -> String {
-        match nats_url.parse::<SocketAddr>() {
-            Ok(_) => nats_url.to_string(),
-            Err(_) => {
-                if nats_url.find(':').is_some() {
-                    nats_url.to_string()
-                } else {
-                    format!("{}:4222", nats_url)
-                }
-            }
-        }
-    }
-
-    let server_strings = connect_str.as_ref().split(',');
-
-    let mut ret = vec![];
-
-    for server_string in server_strings {
-        let addr = if server_string.starts_with("nats://") {
-            check_port(&server_string["nats://".len()..])
-        } else {
-            check_port(server_string)
-        };
-        ret.push(server_manager::Server {
-            addr: addr.to_string(),
-            retries: 0,
-        });
-    }
-
-    if ret.is_empty() {
-        Err(Error::new(ErrorKind::InvalidInput, "No configured servers"))
-    } else {
-        Ok(ret)
-    }
+/// A `ConnectionStatus` describes the current sub-status of a `Connection`.
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum ConnectionStatus {
+    /// An established connection.
+    Connected,
+    /// A permanently closed connection.
+    Closed,
+    /// A connection that has lost connectivity, but may reestablish connectivity.
+    Disconnected,
+    /// A connection in the process of reestablishing connectivity after a disconnect.
+    Reconnecting,
 }
 
 #[doc(hidden)]
@@ -178,10 +156,10 @@ type FinalizedOptions = ConnectionOptions<crate::options_typestate::Finalized>;
 /// A configuration object for a NATS connection.
 #[derive(Clone, Debug, Default)]
 pub struct ConnectionOptions<TypeState> {
+    typestate: PhantomData<TypeState>,
     auth: AuthStyle,
     name: Option<String>,
     no_echo: bool,
-    typestate: PhantomData<TypeState>,
 }
 
 impl ConnectionOptions<options_typestate::NoAuth> {
@@ -288,8 +266,6 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let servers = parse_server_addresses(nats_url)?;
-
         let options = ConnectionOptions {
             auth: self.auth,
             no_echo: self.no_echo,
@@ -299,88 +275,32 @@ impl<TypeState> ConnectionOptions<TypeState> {
             typestate: PhantomData,
         };
 
-        // Setup the server manager we will move to the its own thread.
-        let mut server_manager = ServerManager::connect(options, servers)?;
+        let shared_state = SharedState::connect(options, nats_url)?;
 
-        let mut conn = Connection {
+        let conn = Connection {
             sid: AtomicUsize::new(1),
-            shared_state: server_manager.shared_state.clone(),
-            reader: None,
+            shutdown_dropper: Arc::new(ShutdownDropper {
+                shared_state: shared_state.clone(),
+            }),
+            shared_state: shared_state,
         };
-
-        let read_loop = thread::spawn(move || {
-            // FIXME(dlc) - Capture?
-            if let Err(error) = server_manager.read_loop() {
-                eprintln!("error encountered in the parser read_loop: {:?}", error);
-                return;
-            }
-        });
-        conn.reader = Some(read_loop);
-
-        let usec = Duration::from_micros(1);
-        let wait: [Duration; 5] = [10 * usec, 100 * usec, 500 * usec, 1000 * usec, 5000 * usec];
-
-        let shared_state = conn.shared_state.clone();
-        let flusher_loop = thread::spawn(move || loop {
-            thread::park();
-            let start_len = start_flush_cycle(&shared_state.writer);
-            thread::yield_now();
-            let mut cur_len = shared_state.writer.lock().unwrap().writer.buffer().len();
-            if cur_len != start_len {
-                for d in &wait {
-                    thread::sleep(*d);
-                    {
-                        let w = shared_state.writer.lock().unwrap();
-                        cur_len = w.writer.buffer().len();
-                        if cur_len == 0 || cur_len == start_len || w.closed {
-                            break;
-                        }
-                    }
-                }
-            }
-            let mut w = shared_state.writer.lock().unwrap();
-            w.in_flush = false;
-            if cur_len > 0 {
-                if let Err(error) = w.writer.flush() {
-                    eprintln!("Flusher thread failed to flush: {:?}", error);
-                    break;
-                }
-            }
-            if w.closed {
-                break;
-            }
-        });
-
-        conn.shared_state.writer.lock().unwrap().flusher = Some(flusher_loop);
-
         Ok(conn)
     }
 }
 
+// This type exists to hold a reference count
+// for all high-level user-controlled structures.
+// Once all of the user structures drop,
+// the background IO system should flush
+// everything and shut down.
 #[derive(Debug)]
-pub(crate) struct Outbound {
-    writer: BufWriter<TcpStream>,
-    flusher: Option<thread::JoinHandle<()>>,
-    should_flush: bool,
-    in_flush: bool,
-    closed: bool,
+pub(crate) struct ShutdownDropper {
+    shared_state: Arc<SharedState>,
 }
 
-impl Outbound {
-    fn write_response(&mut self, subj: &str, msgb: &[u8]) -> io::Result<()> {
-        write!(self.writer, "PUB {} {}\r\n", subj, msgb.len())?;
-        self.writer.write_all(msgb)?;
-        self.writer.write_all(b"\r\n")?;
-        if self.should_flush && !self.in_flush {
-            self.kick_flusher();
-        }
-        Ok(())
-    }
-
-    fn kick_flusher(&self) {
-        if let Some(flusher) = &self.flusher {
-            flusher.thread().unpark();
-        }
+impl Drop for ShutdownDropper {
+    fn drop(&mut self) {
+        self.shared_state.shut_down();
     }
 }
 
@@ -388,8 +308,8 @@ impl Outbound {
 #[derive(Debug)]
 pub struct Connection {
     shared_state: Arc<SharedState>,
+    shutdown_dropper: Arc<ShutdownDropper>,
     sid: AtomicUsize,
-    reader: Option<thread::JoinHandle<()>>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -417,12 +337,6 @@ impl Default for AuthStyle {
 /// ```
 pub fn connect(nats_url: &str) -> io::Result<Connection> {
     ConnectionOptions::new().connect(nats_url)
-}
-
-fn start_flush_cycle(wbuf: &Mutex<Outbound>) -> usize {
-    let mut w = wbuf.lock().unwrap();
-    w.in_flush = true;
-    w.writer.buffer().len()
 }
 
 /// A `Message` that has been published to a NATS `Subject`.
@@ -454,11 +368,7 @@ impl Message {
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
         if let Some(shared_state) = &self.responder {
             if let Some(reply) = &self.reply {
-                shared_state
-                    .writer
-                    .lock()
-                    .unwrap()
-                    .write_response(reply, msg.as_ref())?;
+                shared_state.outbound.send_response(reply, msg.as_ref())?;
             }
         } else {
             return Err(Error::new(
@@ -473,7 +383,7 @@ impl Message {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut body = format!("[{} bytes]", self.data.len());
-        if let Ok(str) = str::from_utf8(&self.data) {
+        if let Ok(str) = std::str::from_utf8(&self.data) {
             body = str.to_string();
         }
         if let Some(reply) = &self.reply {
@@ -523,16 +433,9 @@ impl Connection {
 
     fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
         let sid = self.sid.fetch_add(1, Ordering::Relaxed);
-        {
-            let w = &mut self.shared_state.writer.lock().unwrap();
-            match queue {
-                Some(q) => write!(w.writer, "SUB {} {} {}\r\n", subject, q, sid)?,
-                None => write!(w.writer, "SUB {} {}\r\n", subject, sid)?,
-            }
-            if w.should_flush && !w.in_flush {
-                w.kick_flusher();
-            }
-        }
+        self.shared_state
+            .outbound
+            .send_sub_msg(subject, queue, sid)?;
         let (sub, recv) = crossbeam_channel::unbounded();
         {
             let mut subs = self.shared_state.subs.write().unwrap();
@@ -547,34 +450,9 @@ impl Connection {
             sid,
             recv,
             shared_state: self.shared_state.clone(),
+            shutdown_dropper: self.shutdown_dropper.clone(),
             do_unsub: true,
         })
-    }
-
-    #[doc(hidden)]
-    pub fn batch(&self) {
-        self.shared_state.writer.lock().unwrap().should_flush = false;
-    }
-
-    #[doc(hidden)]
-    pub fn unbatch(&self) {
-        self.shared_state.writer.lock().unwrap().should_flush = true;
-    }
-
-    #[inline]
-    fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
-        let mut w = self.shared_state.writer.lock().unwrap();
-        if let Some(reply) = reply {
-            write!(w.writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
-        } else {
-            write!(w.writer, "PUB {} {}\r\n", subj, msgb.len())?;
-        }
-        w.writer.write_all(msgb)?;
-        w.writer.write_all(b"\r\n")?;
-        if w.should_flush && !w.in_flush {
-            w.kick_flusher();
-        }
-        Ok(())
     }
 
     /// Publish a message on the given subject.
@@ -588,7 +466,9 @@ impl Connection {
     /// # }
     /// ```
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.write_pub_msg(subject, None, msg.as_ref())
+        self.shared_state
+            .outbound
+            .send_pub_msg(subject, None, msg.as_ref())
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -609,7 +489,9 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.write_pub_msg(subject, Some(reply), msg.as_ref())
+        self.shared_state
+            .outbound
+            .send_pub_msg(subject, Some(reply), msg.as_ref())
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -705,22 +587,13 @@ impl Connection {
     /// ```
     pub fn flush(&self) -> io::Result<()> {
         // TODO(dlc) - bounded or oneshot?
-        self.unbatch();
-        let (s, r) = crossbeam_channel::unbounded();
+        let (s, r) = crossbeam_channel::bounded(1);
         {
             let mut pongs = self.shared_state.pongs.lock().unwrap();
             pongs.push_back(s);
         }
-        self.send_ping()?;
+        self.shared_state.outbound.send_ping()?;
         r.recv().unwrap();
-        Ok(())
-    }
-
-    fn send_ping(&self) -> io::Result<()> {
-        let w = &mut self.shared_state.writer.lock().unwrap().writer;
-        w.write_all(b"PING\r\n")?;
-        // Flush in place on pings.
-        w.flush()?;
         Ok(())
     }
 
@@ -746,7 +619,7 @@ impl Connection {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        let mut shared_cb = self.shared_state.disconnect_callback.write().unwrap();
+        let mut shared_cb = self.shared_state.disconnect_callback.0.write().unwrap();
         let ret = shared_cb.is_none();
         *shared_cb = Some(Box::new(cb));
         ret
@@ -759,42 +632,9 @@ impl Connection {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        let mut shared_cb = self.shared_state.reconnect_callback.write().unwrap();
+        let mut shared_cb = self.shared_state.reconnect_callback.0.write().unwrap();
         let ret = shared_cb.is_none();
         *shared_cb = Some(Box::new(cb));
         ret
-    }
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        self.shared_state.writer.lock().unwrap().closed = true;
-        let flusher = self.shared_state.writer.lock().unwrap().flusher.take();
-        if let Some(ft) = flusher {
-            ft.thread().unpark();
-            if let Err(error) = ft.join() {
-                eprintln!("error encountered in flusher thread: {:?}", error);
-            }
-        }
-        self.shared_state
-            .shutting_down
-            .store(true, Ordering::SeqCst);
-        // Shutdown socket.
-        let ret = self
-            .shared_state
-            .writer
-            .lock()
-            .unwrap()
-            .writer
-            .get_mut()
-            .shutdown(Shutdown::Both);
-        if let Some(rt) = self.reader.take() {
-            if let Err(error) = rt.join() {
-                eprintln!("error encountered in reader thread: {:?}", error);
-            }
-        }
-        if let Err(error) = ret {
-            eprintln!("error closing Connected during Drop: {:?}", error);
-        }
     }
 }

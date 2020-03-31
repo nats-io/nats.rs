@@ -13,7 +13,7 @@ use nom::{
     IResult,
 };
 
-use crate::server_manager::ServerInfo;
+use crate::shared_state::ServerInfo;
 
 // Protocol
 const INFO: &[u8] = b"INFO";
