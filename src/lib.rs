@@ -438,7 +438,7 @@ impl Connection {
             .send_sub_msg(subject, queue, sid)?;
         let (sub, recv) = crossbeam_channel::unbounded();
         {
-            let mut subs = self.shared_state.subs.write().unwrap();
+            let mut subs = self.shared_state.subs.write();
             subs.insert(
                 sid,
                 SubscriptionState {
@@ -593,7 +593,7 @@ impl Connection {
         // TODO(dlc) - bounded or oneshot?
         let (s, r) = crossbeam_channel::bounded(1);
         {
-            let mut pongs = self.shared_state.pongs.lock().unwrap();
+            let mut pongs = self.shared_state.pongs.lock();
             pongs.push_back(s);
         }
         self.shared_state.outbound.send_ping()?;
@@ -623,7 +623,7 @@ impl Connection {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        let mut shared_cb = self.shared_state.disconnect_callback.0.write().unwrap();
+        let mut shared_cb = self.shared_state.disconnect_callback.0.write();
         let ret = shared_cb.is_none();
         *shared_cb = Some(Box::new(cb));
         ret
@@ -636,7 +636,7 @@ impl Connection {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        let mut shared_cb = self.shared_state.reconnect_callback.0.write().unwrap();
+        let mut shared_cb = self.shared_state.reconnect_callback.0.write();
         let ret = shared_cb.is_none();
         *shared_cb = Some(Box::new(cb));
         ret

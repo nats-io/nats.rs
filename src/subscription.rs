@@ -168,7 +168,7 @@ impl Subscription {
 
     fn unsub(&mut self) -> io::Result<()> {
         self.do_unsub = false;
-        self.shared_state.subs.write().unwrap().remove(&self.sid);
+        self.shared_state.subs.write().remove(&self.sid);
 
         self.shared_state.outbound.send_unsub(self.sid)
     }

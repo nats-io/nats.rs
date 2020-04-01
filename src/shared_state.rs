@@ -5,12 +5,13 @@ use std::{
     net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock,
+        Arc,
     },
     thread,
     time::Duration,
 };
 
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -138,7 +139,7 @@ pub(crate) struct Callback(pub(crate) RwLock<Option<Box<dyn Fn() + Send + Sync +
 
 impl fmt::Debug for Callback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let cb = self.0.read().unwrap();
+        let cb = self.0.read();
 
         f.debug_map()
             .entry(&"callback", if cb.is_some() { &"set" } else { &"unset" })
@@ -231,7 +232,7 @@ impl SharedState {
         let outbound_thread = thread::spawn(move || outbound_state.outbound.flush_loop());
 
         {
-            let mut threads = shared_state.threads.lock().unwrap();
+            let mut threads = shared_state.threads.lock();
             *threads = Some(WorkerThreads {
                 inbound: Some(inbound_thread),
                 outbound: Some(outbound_thread),
@@ -249,7 +250,7 @@ impl SharedState {
         }
 
         self.outbound.signal_shutdown();
-        let mut threads = self.threads.lock().unwrap().take().unwrap();
+        let mut threads = self.threads.lock().take().unwrap();
         let inbound = threads.inbound.take().unwrap();
         let outbound = threads.outbound.take().unwrap();
 

@@ -53,17 +53,17 @@ impl Inbound {
     fn reconnect(&mut self) -> io::Result<()> {
         // flush outstanding pongs
         {
-            let mut pongs = self.shared_state.pongs.lock().unwrap();
+            let mut pongs = self.shared_state.pongs.lock();
             while let Some(s) = pongs.pop_front() {
                 s.send(true).unwrap();
             }
         }
 
         // clear any captured errors
-        *self.shared_state.last_error.write().unwrap() = Ok(());
+        *self.shared_state.last_error.write() = Ok(());
 
         // execute disconnect callback if registered
-        if let Some(ref cb) = &*self.shared_state.disconnect_callback.0.read().unwrap() {
+        if let Some(ref cb) = &*self.shared_state.disconnect_callback.0.read() {
             (cb)();
         }
 
@@ -91,12 +91,12 @@ impl Inbound {
         // resend subscriptions
         self.shared_state
             .outbound
-            .resend_subs(&self.shared_state.subs.read().unwrap())?;
+            .resend_subs(&self.shared_state.subs.read())?;
 
         // TODO(tan) send the buffered items
 
         // trigger reconnected callback
-        if let Some(ref cb) = &*self.shared_state.reconnect_callback.0.read().unwrap() {
+        if let Some(ref cb) = &*self.shared_state.reconnect_callback.0.read() {
             (cb)();
         }
 
@@ -104,7 +104,7 @@ impl Inbound {
     }
 
     fn process_pong(&mut self) {
-        let mut pongs = self.shared_state.pongs.lock().unwrap();
+        let mut pongs = self.shared_state.pongs.lock();
         if let Some(s) = pongs.pop_front() {
             s.send(true).unwrap();
         }
@@ -135,7 +135,7 @@ impl Inbound {
         msg.data.truncate(msg_args.mlen as usize);
 
         // Now lookup the subscription's channel.
-        let subs = self.shared_state.subs.read().unwrap();
+        let subs = self.shared_state.subs.read();
         if let Some(SubscriptionState { sender, .. }) = subs.get(&msg_args.sid) {
             sender.send(msg).unwrap();
         }

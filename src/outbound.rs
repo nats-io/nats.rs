@@ -2,11 +2,10 @@ use std::{
     collections::HashMap,
     io::{self, BufWriter, Write},
     net::{Shutdown, TcpStream},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Condvar, Mutex,
-    },
+    sync::atomic::{AtomicBool, Ordering},
 };
+
+use parking_lot::{Condvar, Mutex};
 
 use crate::SubscriptionState;
 
@@ -28,54 +27,41 @@ impl Outbound {
 
     pub(crate) fn flush_loop(&self) {
         while !self.shutting_down.load(Ordering::Acquire) {
-            let mut writer = self.writer.lock().unwrap();
-            writer = self
-                .updated
-                .wait_while(writer, |w| w.buffer().is_empty())
-                .unwrap();
+            let mut writer = self.writer.lock();
+            while writer.buffer().is_empty() {
+                self.updated.wait(&mut writer);
+            }
 
             if let Err(error) = writer.flush() {
                 eprintln!("Outbound thread failed to flush: {:?}", error);
 
                 // Shutdown socket to force the reader to handle reconnection.
-                self.writer
-                    .lock()
-                    .unwrap()
-                    .get_mut()
-                    .shutdown(Shutdown::Both)
-                    .unwrap();
+                let _unchecked = writer.get_mut().shutdown(Shutdown::Both);
             }
         }
     }
 
     pub(crate) fn replace_stream(&self, new_stream: TcpStream) {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer.lock();
         *writer.get_mut() = new_stream;
     }
 
     pub(crate) fn signal_shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
-
-        // Shutdown socket.
-        self.writer
-            .lock()
-            .unwrap()
-            .get_mut()
-            .shutdown(Shutdown::Both)
-            .unwrap();
+        let _unchecked = self.writer.lock().get_mut().shutdown(Shutdown::Both);
     }
 
     fn with_writer<F>(&self, f: F) -> io::Result<()>
     where
         F: FnOnce(&mut BufWriter<TcpStream>) -> io::Result<()>,
     {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer.lock();
         match (f)(&mut *writer) {
             Ok(()) => Ok(()),
             Err(e) => {
                 // Shutdown socket to ensure we propagate the error
                 // to the Inbound reader.
-                let _ = writer.get_mut().shutdown(Shutdown::Both);
+                let _unchecked = writer.get_mut().shutdown(Shutdown::Both);
                 Err(e)
             }
         }
@@ -89,7 +75,7 @@ impl Outbound {
     }
 
     pub(crate) fn send_ping(&self) -> io::Result<()> {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer.lock();
         writer.write_all(b"PING\r\n")?;
         // Flush in place on pings.
         writer.flush()
@@ -139,7 +125,7 @@ impl Outbound {
     }
 
     pub(crate) fn resend_subs(&self, subs: &HashMap<usize, SubscriptionState>) -> io::Result<()> {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer.lock();
         for (sid, SubscriptionState { subject, queue, .. }) in subs {
             match queue {
                 Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
