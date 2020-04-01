@@ -8,9 +8,7 @@ use std::{
     },
 };
 
-use crossbeam_channel::Sender;
-
-use crate::Message;
+use crate::SubscriptionState;
 
 #[derive(Debug)]
 pub(crate) struct Outbound {
@@ -140,13 +138,10 @@ impl Outbound {
         })
     }
 
-    pub(crate) fn resend_subs(
-        &self,
-        subs: &HashMap<usize, (String, Option<String>, Sender<Message>)>,
-    ) -> io::Result<()> {
+    pub(crate) fn resend_subs(&self, subs: &HashMap<usize, SubscriptionState>) -> io::Result<()> {
         let mut writer = self.writer.lock().unwrap();
-        for (sid, (subject, queue_group, _tx)) in subs {
-            match queue_group {
+        for (sid, SubscriptionState { subject, queue, .. }) in subs {
+            match queue {
                 Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
                 None => write!(writer, "SUB {} {}\r\n", subject, sid)?,
             }

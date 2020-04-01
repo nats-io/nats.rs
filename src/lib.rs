@@ -109,7 +109,7 @@ pub use subscription::Subscription;
 use {
     inbound::Inbound,
     outbound::Outbound,
-    shared_state::{Server, ServerInfo, SharedState},
+    shared_state::{Server, ServerInfo, SharedState, SubscriptionState},
 };
 
 const VERSION: &str = "0.0.1";
@@ -282,7 +282,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
             shutdown_dropper: Arc::new(ShutdownDropper {
                 shared_state: shared_state.clone(),
             }),
-            shared_state: shared_state,
+            shared_state,
         };
         Ok(conn)
     }
@@ -441,7 +441,11 @@ impl Connection {
             let mut subs = self.shared_state.subs.write().unwrap();
             subs.insert(
                 sid,
-                (subject.to_string(), queue.map(ToString::to_string), sub),
+                SubscriptionState {
+                    subject: subject.to_string(),
+                    queue: queue.map(ToString::to_string),
+                    sender: sub,
+                },
             );
         }
         // TODO(dlc) - Should we do a flush and check errors?

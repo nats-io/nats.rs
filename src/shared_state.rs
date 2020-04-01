@@ -147,12 +147,19 @@ impl fmt::Debug for Callback {
 }
 
 #[derive(Debug)]
+pub(crate) struct SubscriptionState {
+    pub(crate) subject: String,
+    pub(crate) queue: Option<String>,
+    pub(crate) sender: Sender<Message>,
+}
+
+#[derive(Debug)]
 pub(crate) struct SharedState {
     pub(crate) threads: Mutex<Option<WorkerThreads>>,
     pub(crate) id: String,
     pub(crate) shutting_down: AtomicBool,
     pub(crate) last_error: RwLock<io::Result<()>>,
-    pub(crate) subs: RwLock<HashMap<usize, (String, Option<String>, Sender<Message>)>>,
+    pub(crate) subs: RwLock<HashMap<usize, SubscriptionState>>,
     pub(crate) pongs: Mutex<VecDeque<Sender<bool>>>,
     pub(crate) outbound: Outbound,
     pub(crate) disconnect_callback: Callback,

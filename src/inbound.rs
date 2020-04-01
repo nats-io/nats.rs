@@ -7,6 +7,7 @@ use std::{
 use crate::{
     parser::{parse_control_op, ControlOp, MsgArgs},
     ConnectionStatus, FinalizedOptions, Message, Server, ServerInfo, SharedState,
+    SubscriptionState,
 };
 
 #[derive(Debug)]
@@ -135,8 +136,8 @@ impl Inbound {
 
         // Now lookup the subscription's channel.
         let subs = self.shared_state.subs.read().unwrap();
-        if let Some((_name, _group, tx)) = subs.get(&msg_args.sid) {
-            tx.send(msg).unwrap();
+        if let Some(SubscriptionState { sender, .. }) = subs.get(&msg_args.sid) {
+            sender.send(msg).unwrap();
         }
         Ok(())
     }
