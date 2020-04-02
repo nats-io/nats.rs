@@ -12,6 +12,7 @@ use std::{
 };
 
 use parking_lot::{Mutex, RwLock};
+use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -49,6 +50,7 @@ fn parse_server_addresses<S: AsRef<str>>(connect_str: S) -> std::io::Result<Vec<
             reconnects: 0,
         });
     }
+    ret.shuffle(&mut thread_rng());
 
     if ret.is_empty() {
         Err(Error::new(ErrorKind::InvalidInput, "No configured servers"))
@@ -185,7 +187,7 @@ impl SharedState {
                 }
                 Err(e) => {
                     // record retry stats
-                    server.reconnects = server.reconnects.overflowing_add(1).0;
+                    server.reconnects += 1;
                     last_err_opt = Some(e);
                 }
             }

@@ -4,6 +4,8 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
+use rand::{seq::SliceRandom, thread_rng};
+
 use crate::{
     parser::{parse_control_op, ControlOp, MsgArgs},
     ConnectionStatus, FinalizedOptions, Message, Server, ServerInfo, SharedState,
@@ -72,6 +74,8 @@ impl Inbound {
         // loop through our known servers until we establish a connection, backing-off
         // more each time we cycle through the known set.
         'outer: loop {
+            self.server_pool.shuffle(&mut thread_rng());
+
             let filter = if let Some(max_reconnects) = self.options.max_reconnects {
                 // only filter servers out if there exists at least one server
                 // that would NOT be filtered out.

@@ -27,6 +27,7 @@ lazy_static = "1.4"
 nom = "5.1"
 crossbeam-channel = "0.4"
 parking_lot = "0.10.0"
+rand = "0.7.3"
 
 [dev-dependencies]
 criterion = "0.3"
