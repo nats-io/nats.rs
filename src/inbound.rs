@@ -72,18 +72,31 @@ impl Inbound {
         // loop through our known servers until we establish a connection, backing-off
         // more each time we cycle through the known set.
         'outer: loop {
+            let filter = if let Some(max_reconnects) = self.options.max_reconnects {
+                // only filter servers out if there exists at least one server
+                // that would NOT be filtered out.
+                self.server_pool
+                    .iter()
+                    .any(|s| s.reconnects <= max_reconnects)
+            } else {
+                false
+            };
+
             for server in &mut self.server_pool {
+                if filter && server.reconnects > self.options.max_reconnects.unwrap() {
+                    continue;
+                }
                 if let Ok((inbound, info)) = server.try_connect(&self.options) {
                     // replace our inbound and writer to correspond with the new socket
                     self.inbound = inbound;
                     self.info = info;
                     let stream: TcpStream = self.inbound.get_mut().try_clone().unwrap();
                     self.shared_state.outbound.replace_stream(stream);
-                    server.retries = 0;
+                    server.reconnects = 0;
                     break 'outer;
                 } else {
                     // record retry stats
-                    server.retries = server.retries.overflowing_add(1).0;
+                    server.reconnects = server.reconnects.overflowing_add(1).0;
                 }
             }
         }

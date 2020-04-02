@@ -46,7 +46,7 @@ fn parse_server_addresses<S: AsRef<str>>(connect_str: S) -> std::io::Result<Vec<
         };
         ret.push(Server {
             addr: addr.to_string(),
-            retries: 0,
+            reconnects: 0,
         });
     }
 
@@ -60,7 +60,7 @@ fn parse_server_addresses<S: AsRef<str>>(connect_str: S) -> std::io::Result<Vec<
 #[derive(Debug)]
 pub(crate) struct Server {
     pub(crate) addr: String,
-    pub(crate) retries: u32,
+    pub(crate) reconnects: usize,
 }
 
 impl Server {
@@ -70,9 +70,10 @@ impl Server {
     ) -> io::Result<(BufReader<TcpStream>, ServerInfo)> {
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
-        if self.retries > 0 {
+        if self.reconnects > 0 {
             let log_2_four_seconds_in_ms = 12_u32;
-            let truncated_exponent = std::cmp::min(log_2_four_seconds_in_ms, self.retries);
+            let truncated_exponent =
+                std::cmp::min(log_2_four_seconds_in_ms, self.reconnects as u32);
             let backoff_ms = 2_u64.checked_pow(truncated_exponent).unwrap();
             let backoff = Duration::from_millis(backoff_ms);
             std::thread::sleep(backoff);
@@ -184,7 +185,7 @@ impl SharedState {
                 }
                 Err(e) => {
                     // record retry stats
-                    server.retries = server.retries.overflowing_add(1).0;
+                    server.reconnects = server.reconnects.overflowing_add(1).0;
                     last_err_opt = Some(e);
                 }
             }

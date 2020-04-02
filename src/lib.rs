@@ -151,15 +151,28 @@ pub mod options_typestate {
     pub struct Finalized;
 }
 
-type FinalizedOptions = ConnectionOptions<crate::options_typestate::Finalized>;
+type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ConnectionOptions<TypeState> {
     typestate: PhantomData<TypeState>,
     auth: AuthStyle,
     name: Option<String>,
     no_echo: bool,
+    max_reconnects: Option<usize>,
+}
+
+impl Default for ConnectionOptions<options_typestate::NoAuth> {
+    fn default() -> ConnectionOptions<options_typestate::NoAuth> {
+        ConnectionOptions {
+            typestate: PhantomData,
+            auth: AuthStyle::None,
+            name: None,
+            no_echo: false,
+            max_reconnects: Some(60),
+        }
+    }
 }
 
 impl ConnectionOptions<options_typestate::NoAuth> {
@@ -194,6 +207,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            max_reconnects: self.max_reconnects,
         }
     }
 
@@ -218,6 +232,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            max_reconnects: self.max_reconnects,
         }
     }
 }
@@ -255,6 +270,27 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
+    /// Set the maximum number of reconnect attempts.
+    /// If no servers remain that are under this threshold,
+    /// all servers will still be attempted.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .max_reconnects(Some(3))
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub const fn max_reconnects(
+        mut self,
+        max_reconnects: Option<usize>,
+    ) -> ConnectionOptions<TypeState> {
+        self.max_reconnects = max_reconnects;
+        self
+    }
+
     /// Establish a `Connection` with a NATS server.
     ///
     /// # Example
@@ -270,6 +306,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
             auth: self.auth,
             no_echo: self.no_echo,
             name: self.name,
+            max_reconnects: self.max_reconnects,
             // move options into the Finalized state by setting
             // `typestate` to `PhantomData<Finalized>`
             typestate: PhantomData,
