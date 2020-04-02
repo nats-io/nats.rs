@@ -23,41 +23,13 @@ use crate::{
 
 use crossbeam_channel::Sender;
 
-fn parse_server_addresses<S: AsRef<str>>(connect_str: S) -> std::io::Result<Vec<Server>> {
-    fn check_port(nats_url: &str) -> String {
-        match nats_url.parse::<SocketAddr>() {
-            Ok(_) => nats_url.to_string(),
-            Err(_) => {
-                if nats_url.find(':').is_some() {
-                    nats_url.to_string()
-                } else {
-                    format!("{}:4222", nats_url)
-                }
-            }
-        }
-    }
-
-    let server_strings = connect_str.as_ref().split(',');
-
-    let mut ret = vec![];
-    for server_string in server_strings {
-        let addr = if server_string.starts_with("nats://") {
-            check_port(&server_string["nats://".len()..])
-        } else {
-            check_port(server_string)
-        };
-        ret.push(Server {
-            addr: addr.to_string(),
-            reconnects: 0,
-        });
-    }
+// Accepts any input that can be treated as an Iterator over string-like objects
+pub(crate) fn parse_server_addresses(
+    input: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Vec<Server> {
+    let mut ret: Vec<Server> = input.into_iter().map(|s| Server::new(s.as_ref())).collect();
     ret.shuffle(&mut thread_rng());
-
-    if ret.is_empty() {
-        Err(Error::new(ErrorKind::InvalidInput, "No configured servers"))
-    } else {
-        Ok(ret)
-    }
+    ret
 }
 
 #[derive(Debug)]
@@ -67,6 +39,32 @@ pub(crate) struct Server {
 }
 
 impl Server {
+    pub(crate) fn new(input: &str) -> Server {
+        fn check_port(nats_url: &str) -> String {
+            match nats_url.parse::<SocketAddr>() {
+                Ok(_) => nats_url.to_string(),
+                Err(_) => {
+                    if nats_url.find(':').is_some() {
+                        nats_url.to_string()
+                    } else {
+                        format!("{}:4222", nats_url)
+                    }
+                }
+            }
+        }
+
+        let addr = if input.starts_with("nats://") {
+            check_port(&input["nats://".len()..])
+        } else {
+            check_port(input)
+        };
+
+        Server {
+            addr: addr,
+            reconnects: 0,
+        }
+    }
+
     pub(crate) fn try_connect(
         &mut self,
         options: &FinalizedOptions,
@@ -95,6 +93,7 @@ impl Server {
             auth_token: None,
             echo: !options.no_echo,
         };
+
         match &options.auth {
             AuthStyle::UserPass(user, pass) => {
                 connect_op.user = Some(user);
@@ -103,6 +102,7 @@ impl Server {
             AuthStyle::Token(token) => connect_op.auth_token = Some(token),
             _ => {}
         }
+
         let op = format!(
             "CONNECT {}\r\nPING\r\n",
             serde_json::to_string(&connect_op)?
@@ -174,7 +174,7 @@ impl SharedState {
         options: FinalizedOptions,
         nats_url: &str,
     ) -> io::Result<Arc<SharedState>> {
-        let mut servers = parse_server_addresses(nats_url)?;
+        let mut servers = parse_server_addresses(nats_url.split(','));
 
         let mut last_err_opt = None;
         let mut stream_opt = None;
@@ -194,7 +194,7 @@ impl SharedState {
 
         if stream_opt.is_none() {
             // there are no reachable servers. return an error to the caller.
-            return Err(last_err_opt.unwrap());
+            return Err(last_err_opt.expect("expected at least one valid server URL"));
         }
 
         let (mut inbound, info) = stream_opt.unwrap();
@@ -220,11 +220,12 @@ impl SharedState {
         });
 
         let mut inbound = Inbound {
+            learned_servers: parse_server_addresses(&info.connect_urls),
             inbound,
             info,
             options,
             status: ConnectionStatus::Connected,
-            server_pool: servers,
+            configured_servers: servers,
             shared_state: shared_state.clone(),
         };
 
@@ -321,4 +322,10 @@ pub(crate) struct ServerInfo {
     nonce: String,
     #[serde(default)]
     connect_urls: Vec<String>,
+}
+
+impl ServerInfo {
+    pub(crate) fn learned_servers(&self) -> Vec<Server> {
+        parse_server_addresses(&self.connect_urls)
+    }
 }

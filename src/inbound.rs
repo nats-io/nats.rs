@@ -15,7 +15,8 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct Inbound {
     pub(crate) inbound: BufReader<TcpStream>,
-    pub(crate) server_pool: Vec<Server>,
+    pub(crate) configured_servers: Vec<Server>,
+    pub(crate) learned_servers: Vec<Server>,
     pub(crate) shared_state: Arc<SharedState>,
     pub(crate) status: ConnectionStatus,
     pub(crate) info: ServerInfo,
@@ -48,7 +49,8 @@ impl Inbound {
             ControlOp::Msg(msg_args) => self.process_msg(msg_args)?,
             ControlOp::Ping => self.shared_state.outbound.send_pong()?,
             ControlOp::Pong => self.process_pong(),
-            ControlOp::Info(_) | ControlOp::Err(_) | ControlOp::Unknown(_) => {
+            ControlOp::Info(new_info) => self.process_info(new_info),
+            ControlOp::Err(_) | ControlOp::Unknown(_) => {
                 eprintln!("Received unhandled message: {:?}", parsed_op)
             }
         }
@@ -78,19 +80,25 @@ impl Inbound {
         // loop through our known servers until we establish a connection, backing-off
         // more each time we cycle through the known set.
         'outer: loop {
-            self.server_pool.shuffle(&mut thread_rng());
+            self.configured_servers.shuffle(&mut thread_rng());
+            self.learned_servers.shuffle(&mut thread_rng());
 
             let filter = if let Some(max_reconnects) = self.options.max_reconnects {
                 // only filter servers out if there exists at least one server
                 // that would NOT be filtered out.
-                self.server_pool
+                self.configured_servers
                     .iter()
+                    .chain(self.learned_servers.iter())
                     .any(|s| s.reconnects <= max_reconnects)
             } else {
                 false
             };
 
-            for server in &mut self.server_pool {
+            for server in self
+                .learned_servers
+                .iter_mut()
+                .chain(self.configured_servers.iter_mut())
+            {
                 if filter && server.reconnects > self.options.max_reconnects.unwrap() {
                     continue;
                 }
@@ -101,6 +109,7 @@ impl Inbound {
                     let stream: TcpStream = self.inbound.get_mut().try_clone().unwrap();
                     self.shared_state.outbound.replace_stream(stream);
                     server.reconnects = 0;
+                    self.learned_servers = self.info.learned_servers();
                     break 'outer;
                 } else {
                     // record retry stats
@@ -131,6 +140,11 @@ impl Inbound {
         if let Some(s) = pongs.pop_front() {
             s.send(true).unwrap();
         }
+    }
+
+    fn process_info(&mut self, new_info: ServerInfo) {
+        self.info = new_info;
+        self.learned_servers = self.info.learned_servers();
     }
 
     fn process_msg(&mut self, msg_args: MsgArgs) -> io::Result<()> {
