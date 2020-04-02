@@ -9,28 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Generates a random number in `0..n`.
-fn random(n: u32) -> u32 {
-    use std::cell::Cell;
-    use std::num::Wrapping;
-
-    thread_local! {
-        static RNG: Cell<Wrapping<u32>> = Cell::new(Wrapping(1_406_868_647));
-    }
-
-    RNG.with(|rng| {
-        // This is the 32-bit variant of Xorshift.
-        //
-        // Source: https://en.wikipedia.org/wiki/Xorshift
-        let mut x = rng.get();
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        rng.set(x);
-
-        x.0 % n
-    })
-}
+use rand::{thread_rng, Rng};
 
 struct Client {
     partial_cmd: Vec<u8>,
@@ -103,7 +82,7 @@ fn bad_server(
         }
 
         // this makes it nice and bad
-        if random(chance) == 1 {
+        if thread_rng().gen_bool(1. / chance as f64) {
             clients.clear();
             subs.clear();
         }
@@ -208,9 +187,7 @@ fn bad_server(
                 }
                 "UNSUB" => {
                     let sid = parts.next().unwrap();
-                    // FIXME(tan) uncommenting this exposes
-                    // a bug with unsubscribing.
-                    // subs.remove(sid);
+                    subs.remove(sid);
                 }
                 other => eprintln!("unknown command {}", other),
             }
