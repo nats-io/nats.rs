@@ -29,30 +29,34 @@ impl Drop for Inbound {
 }
 
 impl Inbound {
-    pub(crate) fn read_loop(&mut self) -> io::Result<()> {
+    pub(crate) fn read_loop(&mut self) {
         loop {
-            let parsed_op = parse_control_op(&mut self.inbound)?;
-            match parsed_op {
-                ControlOp::Msg(msg_args) => self.process_msg(msg_args)?,
-                ControlOp::Ping => self.shared_state.outbound.send_pong()?,
-                ControlOp::Pong => self.process_pong(),
-                ControlOp::EOF => {
-                    self.status = ConnectionStatus::Disconnected;
-                    if self.shared_state.shutting_down.load(Ordering::Acquire) {
-                        return Ok(());
-                    } else {
-                        self.reconnect()?;
-                    }
-                    self.status = ConnectionStatus::Connected;
-                }
-                ControlOp::Info(_) | ControlOp::Err(_) | ControlOp::Unknown(_) => {
-                    eprintln!("Received unhandled message: {:?}", parsed_op)
-                }
+            if self.shared_state.shutting_down.load(Ordering::Acquire) {
+                return;
+            }
+
+            if let Err(e) = self.read_and_process_message() {
+                eprintln!("failed to process message: {:?}", e);
+                self.reconnect().unwrap();
             }
         }
     }
 
+    fn read_and_process_message(&mut self) -> io::Result<()> {
+        let parsed_op = parse_control_op(&mut self.inbound)?;
+        match parsed_op {
+            ControlOp::Msg(msg_args) => self.process_msg(msg_args)?,
+            ControlOp::Ping => self.shared_state.outbound.send_pong()?,
+            ControlOp::Pong => self.process_pong(),
+            ControlOp::Info(_) | ControlOp::Err(_) | ControlOp::Unknown(_) => {
+                eprintln!("Received unhandled message: {:?}", parsed_op)
+            }
+        }
+        Ok(())
+    }
+
     fn reconnect(&mut self) -> io::Result<()> {
+        self.status = ConnectionStatus::Disconnected;
         // flush outstanding pongs
         {
             let mut pongs = self.shared_state.pongs.lock();
@@ -111,6 +115,8 @@ impl Inbound {
             .resend_subs(&self.shared_state.subs.read())?;
 
         // TODO(tan) send the buffered items
+
+        self.status = ConnectionStatus::Connected;
 
         // trigger reconnected callback
         if let Some(ref cb) = &*self.shared_state.reconnect_callback.0.read() {

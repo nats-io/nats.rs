@@ -50,7 +50,7 @@ pub(crate) fn parse_control_op<R: BufRead>(mut reader: R) -> io::Result<ControlO
             } else {
                 // Check for EOF, this happens on close of connection.
                 if buf.is_empty() {
-                    return Ok(ControlOp::EOF);
+                    return Err(Error::new(ErrorKind::UnexpectedEof, "socket closed"));
                 }
                 return Err(parse_error());
             };
@@ -151,7 +151,6 @@ pub(crate) enum ControlOp {
     Info(ServerInfo),
     Ping,
     Pong,
-    EOF,
     Err(String),
     Unknown(String),
 }

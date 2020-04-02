@@ -119,11 +119,7 @@ impl Server {
         match parsed_op {
             ControlOp::Pong => Ok((inbound, info)),
             ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            ControlOp::Ping
-            | ControlOp::Msg(_)
-            | ControlOp::Info(_)
-            | ControlOp::EOF
-            | ControlOp::Unknown(_) => {
+            ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
                 eprintln!(
                     "encountered unexpected control op during connection: {:?}",
                     parsed_op
@@ -136,7 +132,7 @@ impl Server {
 
 #[derive(Debug)]
 pub(crate) struct WorkerThreads {
-    inbound: Option<thread::JoinHandle<io::Result<()>>>,
+    inbound: Option<thread::JoinHandle<()>>,
     outbound: Option<thread::JoinHandle<()>>,
 }
 
