@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    convert::TryFrom,
     fmt,
     io::{self, BufReader, Error, ErrorKind, Write},
     net::{SocketAddr, TcpStream},
@@ -74,8 +75,10 @@ impl Server {
         // doubles until it reaches 4 seconds;
         if self.reconnects > 0 {
             let log_2_four_seconds_in_ms = 12_u32;
-            let truncated_exponent =
-                std::cmp::min(log_2_four_seconds_in_ms, self.reconnects as u32);
+            let truncated_exponent = std::cmp::min(
+                log_2_four_seconds_in_ms,
+                u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
+            );
             let backoff_ms = 2_u64.checked_pow(truncated_exponent).unwrap();
             let backoff = Duration::from_millis(backoff_ms);
             std::thread::sleep(backoff);
