@@ -229,7 +229,6 @@ fn bad_server(
 }
 
 #[test]
-#[ignore]
 fn simple_reconnect() {
     let shutdown = Arc::new(AtomicBool::new(false));
     let restart = Arc::new(AtomicBool::new(false));
