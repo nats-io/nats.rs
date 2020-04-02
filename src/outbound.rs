@@ -35,8 +35,9 @@ impl Outbound {
             if let Err(error) = writer.flush() {
                 eprintln!("Outbound thread failed to flush: {:?}", error);
 
-                // Shutdown socket to force the reader to handle reconnection.
-                let _unchecked = writer.get_mut().shutdown(Shutdown::Both);
+                // wait for our stream to be replaced by the Inbound during
+                // reconnection.
+                self.updated.wait(&mut writer);
             }
         }
     }
@@ -44,6 +45,7 @@ impl Outbound {
     pub(crate) fn replace_stream(&self, new_stream: TcpStream) {
         let mut writer = self.writer.lock();
         *writer.get_mut() = new_stream;
+        self.updated.notify_all();
     }
 
     pub(crate) fn signal_shutdown(&self) {
