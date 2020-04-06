@@ -1,13 +1,8 @@
-use std::{
-    io::{self, Write},
-    sync::Arc,
-    thread,
-    time::Duration,
-};
+use std::{io, sync::Arc, thread, time::Duration};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 
-use crate::{Message, SharedState};
+use crate::{Message, SharedState, ShutdownDropper};
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
@@ -17,6 +12,7 @@ pub struct Subscription {
     pub(crate) recv: Receiver<Message>,
     pub(crate) shared_state: Arc<SharedState>,
     pub(crate) do_unsub: bool,
+    pub(crate) shutdown_dropper: Arc<ShutdownDropper>,
 }
 
 impl Subscription {
@@ -172,11 +168,9 @@ impl Subscription {
 
     fn unsub(&mut self) -> io::Result<()> {
         self.do_unsub = false;
-        self.shared_state.subs.write().unwrap().remove(&self.sid);
-        let w = &mut self.shared_state.writer.lock().unwrap().writer;
-        write!(w, "UNSUB {}\r\n", self.sid)?;
-        w.flush()?;
-        Ok(())
+        self.shared_state.subs.write().remove(&self.sid);
+
+        self.shared_state.outbound.send_unsub(self.sid)
     }
 
     /// Unsubscribe a subscription.

@@ -84,6 +84,8 @@
     clippy::wrong_pub_self_convention,
 )]
 
+mod inbound;
+mod outbound;
 mod parser;
 mod shared_state;
 
@@ -92,24 +94,95 @@ mod shared_state;
 pub mod subscription;
 
 use std::{
-    collections::{HashMap, VecDeque},
-    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
-    marker::PhantomData,
-    net::{Shutdown, SocketAddr, TcpStream},
-    sync::atomic::{AtomicUsize, Ordering},
-    sync::{Arc, Mutex, RwLock},
+    fmt,
+    io::{self, Error, ErrorKind},
+    sync::{atomic::Ordering, Arc},
     time::Duration,
-    {fmt, str, thread},
 };
 
 use serde::{Deserialize, Serialize};
 
+use std::{marker::PhantomData, sync::atomic::AtomicUsize};
+
 pub use subscription::Subscription;
 
-use shared_state::SharedState;
+use {
+    inbound::Inbound,
+    outbound::Outbound,
+    shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
+};
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
+
+/// Information sent by the server back to this client
+/// during initial connection, and possibly again later.
+#[derive(Deserialize, Debug)]
+pub struct ServerInfo {
+    /// The unique identifier of the NATS server.
+    pub server_id: String,
+    /// Generated Server Name.
+    pub server_name: String,
+    /// The host specified in the cluster parameter/options.
+    pub host: String,
+    /// The port number specified in the cluster parameter/options.
+    pub port: i16,
+    /// The version of the NATS server.
+    pub version: String,
+    /// If this is set, then the server should try to authenticate upon connect.
+    #[serde(default)]
+    pub auth_required: bool,
+    /// If this is set, then the server must authenticate using TLS.
+    #[serde(default)]
+    pub tls_required: bool,
+    /// Maximum payload size that the server will accept.
+    pub max_payload: i32,
+    /// The protocol version in use.
+    pub proto: i8,
+    /// The server-assigned client ID. This may change during reconnection.
+    pub client_id: u64,
+    /// The version of golang the NATS server was built with.
+    pub go: String,
+    #[serde(default)]
+    /// The nonce used for nkeys.
+    pub nonce: String,
+    /// A list of server urls that a client can connect to.
+    #[serde(default)]
+    pub connect_urls: Vec<String>,
+}
+
+impl ServerInfo {
+    pub(crate) fn learned_servers(&self) -> Vec<Server> {
+        parse_server_addresses(&self.connect_urls)
+    }
+}
+
+/// A `ConnectionStatus` describes the current sub-status of a `Connection`.
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum ConnectionStatus {
+    /// An established connection.
+    Connected,
+    /// A permanently closed connection.
+    Closed,
+    /// A connection that has lost connectivity, but may reestablish connectivity.
+    Disconnected,
+    /// A connection in the process of reestablishing connectivity after a disconnect.
+    Reconnecting,
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct Callback(Option<Arc<dyn Fn(&ServerInfo) + Send + Sync + 'static>>);
+
+impl fmt::Debug for Callback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(
+                &"callback",
+                if self.0.is_some() { &"set" } else { &"unset" },
+            )
+            .finish()
+    }
+}
 
 #[doc(hidden)]
 pub mod options_typestate {
@@ -134,13 +207,34 @@ pub mod options_typestate {
     pub struct Finalized;
 }
 
+type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
+
 /// A configuration object for a NATS connection.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ConnectionOptions<TypeState> {
+    typestate: PhantomData<TypeState>,
     auth: AuthStyle,
     name: Option<String>,
     no_echo: bool,
-    typestate: PhantomData<TypeState>,
+    max_reconnects: Option<usize>,
+    reconnect_buffer_size: usize,
+    disconnect_callback: Callback,
+    reconnect_callback: Callback,
+}
+
+impl Default for ConnectionOptions<options_typestate::NoAuth> {
+    fn default() -> ConnectionOptions<options_typestate::NoAuth> {
+        ConnectionOptions {
+            typestate: PhantomData,
+            auth: AuthStyle::None,
+            name: None,
+            no_echo: false,
+            reconnect_buffer_size: 8 * 1024 * 1024,
+            max_reconnects: Some(60),
+            disconnect_callback: Callback(None),
+            reconnect_callback: Callback(None),
+        }
+    }
 }
 
 impl ConnectionOptions<options_typestate::NoAuth> {
@@ -175,6 +269,10 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
+            reconnect_buffer_size: self.reconnect_buffer_size,
+            max_reconnects: self.max_reconnects,
         }
     }
 
@@ -199,6 +297,10 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
+            max_reconnects: self.max_reconnects,
         }
     }
 }
@@ -236,17 +338,46 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    fn check_port(&self, nats_url: &str) -> String {
-        match nats_url.parse::<SocketAddr>() {
-            Ok(_) => nats_url.to_string(),
-            Err(_) => {
-                if nats_url.find(':').is_some() {
-                    nats_url.to_string()
-                } else {
-                    format!("{}:4222", nats_url)
-                }
-            }
-        }
+    /// Set the maximum number of reconnect attempts.
+    /// If no servers remain that are under this threshold,
+    /// all servers will still be attempted.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .max_reconnects(Some(3))
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub const fn max_reconnects(
+        mut self,
+        max_reconnects: Option<usize>,
+    ) -> ConnectionOptions<TypeState> {
+        self.max_reconnects = max_reconnects;
+        self
+    }
+
+    /// Set the maximum amount of bytes to buffer
+    /// when accepting outgoing traffic in disconnected
+    /// mode.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .reconnect_buffer_size(64 * 1024)
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub const fn reconnect_buffer_size(
+        mut self,
+        reconnect_buffer_size: usize,
+    ) -> ConnectionOptions<TypeState> {
+        self.reconnect_buffer_size = reconnect_buffer_size;
+        self
     }
 
     /// Establish a `Connection` with a NATS server.
@@ -260,147 +391,65 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let connect_url = self.check_port(nats_url);
-        let stream = TcpStream::connect(connect_url)?;
+        let options = ConnectionOptions {
+            auth: self.auth,
+            no_echo: self.no_echo,
+            name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
+            max_reconnects: self.max_reconnects,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
+            // move options into the Finalized state by setting
+            // `typestate` to `PhantomData<Finalized>`
+            typestate: PhantomData,
+        };
 
-        let mut reader = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
-        let server_info = parser::expect_info(&mut reader)?;
+        let shared_state = SharedState::connect(options, nats_url)?;
 
-        // TODO(dlc) - Fix, but for now at least signal properly.
-        if server_info.tls_required {
-            return Err(Error::new(
-                ErrorKind::ConnectionRefused,
-                "TLS currently not supported",
-            ));
-        }
-
-        let mut n = nuid::NUID::new();
-
-        let mut conn = Connection {
-            id: n.next(),
-            status: ConnectionStatus::Connecting,
-            stream: stream.try_clone()?,
-            info: server_info,
+        let conn = Connection {
             sid: AtomicUsize::new(1),
-            shared_state: Arc::new(SharedState {
-                last_error: RwLock::new(Ok(())),
-                subs: RwLock::new(HashMap::new()),
-                pongs: Mutex::new(VecDeque::new()),
-                writer: Mutex::new(Outbound {
-                    writer: BufWriter::with_capacity(64 * 1024, stream.try_clone()?),
-                    flusher: None,
-                    should_flush: true,
-                    in_flush: false,
-                    closed: false,
-                }),
+            shutdown_dropper: Arc::new(ShutdownDropper {
+                shared_state: shared_state.clone(),
             }),
-            reader: None,
-            options: ConnectionOptions {
-                typestate: PhantomData,
-                no_echo: self.no_echo,
-                name: self.name,
-                auth: self.auth,
-            },
+            shared_state,
         };
-        conn.send_connect(&mut reader)?;
-        conn.status = ConnectionStatus::Connected;
-
-        // Setup the state we will move to the readloop thread
-        let mut state = parser::ReadLoopState {
-            reader,
-            shared_state: conn.shared_state.clone(),
-        };
-
-        let read_loop = thread::spawn(move || {
-            // FIXME(dlc) - Capture?
-            if let Err(error) = parser::read_loop(&mut state) {
-                eprintln!("error encountered in the parser read_loop: {:?}", error);
-                return;
-            }
-        });
-        conn.reader = Some(read_loop);
-
-        let usec = Duration::from_micros(1);
-        let wait: [Duration; 5] = [10 * usec, 100 * usec, 500 * usec, 1000 * usec, 5000 * usec];
-
-        let shared_state = conn.shared_state.clone();
-        let flusher_loop = thread::spawn(move || loop {
-            thread::park();
-            let start_len = start_flush_cycle(&shared_state.writer);
-            thread::yield_now();
-            let mut cur_len = shared_state.writer.lock().unwrap().writer.buffer().len();
-            if cur_len != start_len {
-                for d in &wait {
-                    thread::sleep(*d);
-                    {
-                        let w = shared_state.writer.lock().unwrap();
-                        cur_len = w.writer.buffer().len();
-                        if cur_len == 0 || cur_len == start_len || w.closed {
-                            break;
-                        }
-                    }
-                }
-            }
-            let mut w = shared_state.writer.lock().unwrap();
-            w.in_flush = false;
-            if cur_len > 0 {
-                if let Err(error) = w.writer.flush() {
-                    eprintln!("Flusher thread failed to flush: {:?}", error);
-                    break;
-                }
-            }
-            if w.closed {
-                break;
-            }
-        });
-
-        conn.shared_state.writer.lock().unwrap().flusher = Some(flusher_loop);
-
         Ok(conn)
     }
-}
 
-/// A `ConnectionStatus` describes the current sub-status of a `Connection`.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum ConnectionStatus {
-    /// A connection in the process of establishing a connection.
-    Connecting,
-    /// An established connection.
-    Connected,
-    /// A permanently closed connection.
-    Closed,
-    /// A connection that has lost connectivity, but may reestablish connectivity.
-    Disconnected,
-    /// A connection in the process of reestablishing connectivity after a disconnect.
-    Reconnecting,
-}
-
-#[derive(Debug)]
-pub(crate) struct Outbound {
-    writer: BufWriter<TcpStream>,
-    flusher: Option<thread::JoinHandle<()>>,
-    should_flush: bool,
-    in_flush: bool,
-    closed: bool,
-}
-
-impl Outbound {
-    #[inline]
-    fn write_response(&mut self, subj: &str, msgb: &[u8]) -> io::Result<()> {
-        write!(self.writer, "PUB {} {}\r\n", subj, msgb.len())?;
-        self.writer.write_all(msgb)?;
-        self.writer.write_all(b"\r\n")?;
-        if self.should_flush && !self.in_flush {
-            self.kick_flusher();
-        }
-        Ok(())
+    /// Set a callback to be executed when connectivity to
+    /// a server has been lost.
+    pub fn set_disconnect_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(&ServerInfo) + Send + Sync + 'static,
+    {
+        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self
     }
 
-    #[inline]
-    fn kick_flusher(&self) {
-        if let Some(flusher) = &self.flusher {
-            flusher.thread().unpark();
-        }
+    /// Set a callback to be executed when connectivity to a
+    /// server has been established.
+    pub fn set_reconnect_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(&ServerInfo) + Send + Sync + 'static,
+    {
+        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self
+    }
+}
+
+// This type exists to hold a reference count
+// for all high-level user-controlled structures.
+// Once all of the user structures drop,
+// the background IO system should flush
+// everything and shut down.
+#[derive(Debug)]
+pub(crate) struct ShutdownDropper {
+    shared_state: Arc<SharedState>,
+}
+
+impl Drop for ShutdownDropper {
+    fn drop(&mut self) {
+        self.shared_state.shut_down();
     }
 }
 
@@ -408,13 +457,8 @@ impl Outbound {
 #[derive(Debug)]
 pub struct Connection {
     shared_state: Arc<SharedState>,
-    id: String,
-    status: ConnectionStatus,
-    stream: TcpStream,
-    info: ServerInfo,
+    shutdown_dropper: Arc<ShutdownDropper>,
     sid: AtomicUsize,
-    reader: Option<thread::JoinHandle<()>>,
-    options: ConnectionOptions<options_typestate::Finalized>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -442,12 +486,6 @@ impl Default for AuthStyle {
 /// ```
 pub fn connect(nats_url: &str) -> io::Result<Connection> {
     ConnectionOptions::new().connect(nats_url)
-}
-
-fn start_flush_cycle(wbuf: &Mutex<Outbound>) -> usize {
-    let mut w = wbuf.lock().unwrap();
-    w.in_flush = true;
-    w.writer.buffer().len()
 }
 
 /// A `Message` that has been published to a NATS `Subject`.
@@ -479,11 +517,7 @@ impl Message {
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
         if let Some(shared_state) = &self.responder {
             if let Some(reply) = &self.reply {
-                shared_state
-                    .writer
-                    .lock()
-                    .unwrap()
-                    .write_response(reply, msg.as_ref())?;
+                shared_state.outbound.send_response(reply, msg.as_ref())?;
             }
         } else {
             return Err(Error::new(
@@ -498,7 +532,7 @@ impl Message {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut body = format!("[{} bytes]", self.data.len());
-        if let Ok(str) = str::from_utf8(&self.data) {
+        if let Ok(str) = std::str::from_utf8(&self.data) {
             body = str.to_string();
         }
         if let Some(reply) = &self.reply {
@@ -548,20 +582,20 @@ impl Connection {
 
     fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
         let sid = self.sid.fetch_add(1, Ordering::Relaxed);
-        {
-            let w = &mut self.shared_state.writer.lock().unwrap();
-            match queue {
-                Some(q) => write!(w.writer, "SUB {} {} {}\r\n", subject, q, sid)?,
-                None => write!(w.writer, "SUB {} {}\r\n", subject, sid)?,
-            }
-            if w.should_flush && !w.in_flush {
-                w.kick_flusher();
-            }
-        }
+        self.shared_state
+            .outbound
+            .send_sub_msg(subject, queue, sid)?;
         let (sub, recv) = crossbeam_channel::unbounded();
         {
-            let mut subs = self.shared_state.subs.write().unwrap();
-            subs.insert(sid, sub);
+            let mut subs = self.shared_state.subs.write();
+            subs.insert(
+                sid,
+                SubscriptionState {
+                    subject: subject.to_string(),
+                    queue: queue.map(ToString::to_string),
+                    sender: sub,
+                },
+            );
         }
         // TODO(dlc) - Should we do a flush and check errors?
         Ok(Subscription {
@@ -569,34 +603,9 @@ impl Connection {
             sid,
             recv,
             shared_state: self.shared_state.clone(),
+            shutdown_dropper: self.shutdown_dropper.clone(),
             do_unsub: true,
         })
-    }
-
-    #[doc(hidden)]
-    pub fn batch(&self) {
-        self.shared_state.writer.lock().unwrap().should_flush = false;
-    }
-
-    #[doc(hidden)]
-    pub fn unbatch(&self) {
-        self.shared_state.writer.lock().unwrap().should_flush = true;
-    }
-
-    #[inline]
-    fn write_pub_msg(&self, subj: &str, reply: Option<&str>, msgb: &[u8]) -> io::Result<()> {
-        let mut w = self.shared_state.writer.lock().unwrap();
-        if let Some(reply) = reply {
-            write!(w.writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
-        } else {
-            write!(w.writer, "PUB {} {}\r\n", subj, msgb.len())?;
-        }
-        w.writer.write_all(msgb)?;
-        w.writer.write_all(b"\r\n")?;
-        if w.should_flush && !w.in_flush {
-            w.kick_flusher();
-        }
-        Ok(())
     }
 
     /// Publish a message on the given subject.
@@ -610,7 +619,9 @@ impl Connection {
     /// # }
     /// ```
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.write_pub_msg(subject, None, msg.as_ref())
+        self.shared_state
+            .outbound
+            .send_pub_msg(subject, None, msg.as_ref())
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -631,7 +642,9 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.write_pub_msg(subject, Some(reply), msg.as_ref())
+        self.shared_state
+            .outbound
+            .send_pub_msg(subject, Some(reply), msg.as_ref())
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -646,7 +659,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}.{}", self.id, nuid::next())
+        format!("_INBOX.{}.{}", self.shared_state.id, nuid::next())
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -727,22 +740,13 @@ impl Connection {
     /// ```
     pub fn flush(&self) -> io::Result<()> {
         // TODO(dlc) - bounded or oneshot?
-        self.unbatch();
-        let (s, r) = crossbeam_channel::unbounded();
+        let (s, r) = crossbeam_channel::bounded(1);
         {
-            let mut pongs = self.shared_state.pongs.lock().unwrap();
+            let mut pongs = self.shared_state.pongs.lock();
             pongs.push_back(s);
         }
-        self.send_ping()?;
+        self.shared_state.outbound.send_ping()?;
         r.recv().unwrap();
-        Ok(())
-    }
-
-    fn send_ping(&self) -> io::Result<()> {
-        let w = &mut self.shared_state.writer.lock().unwrap().writer;
-        w.write_all(b"PING\r\n")?;
-        // Flush in place on pings.
-        w.flush()?;
         Ok(())
     }
 
@@ -760,128 +764,4 @@ impl Connection {
         drop(self);
         Ok(())
     }
-
-    fn send_connect(&mut self, reader: &mut BufReader<TcpStream>) -> io::Result<()> {
-        let mut connect_op = Connect {
-            name: self.options.name.as_ref(),
-            pedantic: false,
-            verbose: false,
-            lang: LANG,
-            version: VERSION,
-            user: None,
-            pass: None,
-            auth_token: None,
-            echo: !self.options.no_echo,
-        };
-        match &self.options.auth {
-            AuthStyle::UserPass(user, pass) => {
-                connect_op.user = Some(user);
-                connect_op.pass = Some(pass);
-            }
-            AuthStyle::Token(token) => connect_op.auth_token = Some(token),
-            _ => {}
-        }
-        let op = format!(
-            "CONNECT {}\r\nPING\r\n",
-            serde_json::to_string(&connect_op)?
-        );
-        self.stream.write_all(op.as_bytes())?;
-
-        let parsed_op = parser::parse_control_op(reader)?;
-
-        match parsed_op {
-            parser::ControlOp::Pong => Ok(()),
-            parser::ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            parser::ControlOp::Ping
-            | parser::ControlOp::Msg(_)
-            | parser::ControlOp::Info(_)
-            | parser::ControlOp::EOF
-            | parser::ControlOp::Unknown(_) => {
-                eprintln!(
-                    "encountered unexpected control op during connection: {:?}",
-                    parsed_op
-                );
-                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
-            }
-        }
-    }
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        self.status = ConnectionStatus::Closed;
-        self.shared_state.writer.lock().unwrap().closed = true;
-        let flusher = self.shared_state.writer.lock().unwrap().flusher.take();
-        if let Some(ft) = flusher {
-            ft.thread().unpark();
-            if let Err(error) = ft.join() {
-                eprintln!("error encountered in flusher thread: {:?}", error);
-            }
-        }
-        // Shutdown socket.
-        let ret = self.stream.shutdown(Shutdown::Both);
-        if let Some(rt) = self.reader.take() {
-            if let Err(error) = rt.join() {
-                eprintln!("error encountered in reader thread: {:?}", error);
-            }
-        }
-        if let Err(error) = ret {
-            eprintln!("error closing Connected during Drop: {:?}", error);
-        }
-    }
-}
-
-#[derive(Serialize, Debug)]
-struct Connect<'a> {
-    #[serde(skip_serializing_if = "empty_or_none")]
-    name: Option<&'a String>,
-    verbose: bool,
-    pedantic: bool,
-    #[serde(skip_serializing_if = "if_true")]
-    echo: bool,
-    lang: &'a str,
-    version: &'a str,
-
-    // Authentication
-    #[serde(skip_serializing_if = "empty_or_none")]
-    user: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    pass: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    auth_token: Option<&'a String>,
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-const fn if_true(field: &bool) -> bool {
-    *field
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[inline]
-fn empty_or_none(field: &Option<&String>) -> bool {
-    match field {
-        Some(_) => false,
-        None => true,
-    }
-}
-
-#[derive(Deserialize, Debug)]
-struct ServerInfo {
-    server_id: String,
-    server_name: String,
-    host: String,
-    port: i16,
-    version: String,
-    #[serde(default)]
-    auth_required: bool,
-    #[serde(default)]
-    tls_required: bool,
-    max_payload: i32,
-    proto: i8,
-    client_id: u64,
-    go: String,
-    #[serde(default)]
-    nonce: String,
-    #[serde(default)]
-    connect_urls: Vec<String>,
 }
