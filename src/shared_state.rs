@@ -119,38 +119,47 @@ impl Server {
         for addr in addrs {
             std::thread::sleep(backoff);
 
-            let mut stream = TcpStream::connect(&addr)?;
-            stream.write_all(op.as_bytes())?;
-
-            let mut inbound = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
-            let info = crate::parser::expect_info(&mut inbound)?;
-
-            let parsed_op = parse_control_op(&mut inbound)?;
-
-            match parsed_op {
-                ControlOp::Pong => {
-                    self.reconnects = 0;
-                    return Ok((inbound, info));
-                }
-                ControlOp::Err(e) => {
-                    last_err = Error::new(ErrorKind::ConnectionRefused, e);
-                }
-                ControlOp::Ping
-                | ControlOp::Msg(_)
-                | ControlOp::Info(_)
-                | ControlOp::Unknown(_) => {
-                    eprintln!(
-                        "encountered unexpected control op during connection: {:?}",
-                        parsed_op
-                    );
-                    last_err = Error::new(ErrorKind::ConnectionRefused, "Protocol Error");
-                }
-            }
+            match self.try_connect_addr(addr, &op) {
+                Ok(result) => return Ok(result),
+                Err(e) => last_err = e,
+            };
         }
 
         self.reconnects += 1;
 
         Err(last_err)
+    }
+
+    // we split the specific connection function into its own
+    // function so we can use the try operator and have it more
+    // gracefully feed into `last_err` at the call site.
+    fn try_connect_addr(
+        &mut self,
+        addr: SocketAddr,
+        op: &str,
+    ) -> io::Result<(BufReader<TcpStream>, ServerInfo)> {
+        let mut stream = TcpStream::connect(&addr)?;
+        stream.write_all(op.as_bytes())?;
+
+        let mut inbound = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
+        let info = crate::parser::expect_info(&mut inbound)?;
+
+        let parsed_op = parse_control_op(&mut inbound)?;
+
+        match parsed_op {
+            ControlOp::Pong => {
+                self.reconnects = 0;
+                Ok((inbound, info))
+            }
+            ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
+            ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
+                eprintln!(
+                    "encountered unexpected control op during connection: {:?}",
+                    parsed_op
+                );
+                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
+            }
+        }
     }
 }
 
