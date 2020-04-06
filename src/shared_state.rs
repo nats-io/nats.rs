@@ -3,7 +3,7 @@ use std::{
     convert::TryFrom,
     fmt,
     io::{self, BufReader, Error, ErrorKind, Write},
-    net::{SocketAddr, TcpStream},
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -34,7 +34,7 @@ pub(crate) fn parse_server_addresses(
 
 #[derive(Debug)]
 pub(crate) struct Server {
-    pub(crate) addr: String,
+    pub(crate) url: String,
     pub(crate) reconnects: usize,
 }
 
@@ -53,14 +53,14 @@ impl Server {
             }
         }
 
-        let addr = if input.starts_with("nats://") {
+        let url = if input.starts_with("nats://") {
             check_port(&input["nats://".len()..])
         } else {
             check_port(input)
         };
 
         Server {
-            addr: addr,
+            url: url,
             reconnects: 0,
         }
     }
@@ -69,19 +69,6 @@ impl Server {
         &mut self,
         options: &FinalizedOptions,
     ) -> io::Result<(BufReader<TcpStream>, ServerInfo)> {
-        // wait for a truncated exponential backoff where it starts at 1ms and
-        // doubles until it reaches 4 seconds;
-        if self.reconnects > 0 {
-            let log_2_four_seconds_in_ms = 12_u32;
-            let truncated_exponent = std::cmp::min(
-                log_2_four_seconds_in_ms,
-                u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
-            );
-            let backoff_ms = 2_u64.checked_pow(truncated_exponent).unwrap();
-            let backoff = Duration::from_millis(backoff_ms);
-            std::thread::sleep(backoff);
-        }
-
         let mut connect_op = Connect {
             name: options.name.as_ref(),
             pedantic: false,
@@ -108,25 +95,62 @@ impl Server {
             serde_json::to_string(&connect_op)?
         );
 
-        let mut stream = TcpStream::connect(&self.addr)?;
-        stream.write_all(op.as_bytes())?;
+        // wait for a truncated exponential backoff where it starts at 1ms and
+        // doubles until it reaches 4 seconds;
+        let backoff_ms = if self.reconnects > 0 {
+            let log_2_four_seconds_in_ms = 12_u32;
+            let truncated_exponent = std::cmp::min(
+                log_2_four_seconds_in_ms,
+                u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
+            );
+            2_u64.checked_pow(truncated_exponent).unwrap()
+        } else {
+            0
+        };
 
-        let mut inbound = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
-        let info = crate::parser::expect_info(&mut inbound)?;
+        let backoff = Duration::from_millis(backoff_ms);
 
-        let parsed_op = parse_control_op(&mut inbound)?;
+        // look up network addresses and shuffle them
+        let mut addrs: Vec<SocketAddr> = self.url.to_socket_addrs()?.collect();
+        addrs.shuffle(&mut thread_rng());
 
-        match parsed_op {
-            ControlOp::Pong => Ok((inbound, info)),
-            ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
-                eprintln!(
-                    "encountered unexpected control op during connection: {:?}",
-                    parsed_op
-                );
-                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
+        let mut last_err = Error::new(ErrorKind::AddrNotAvailable, "no results");
+
+        for addr in addrs {
+            std::thread::sleep(backoff);
+
+            let mut stream = TcpStream::connect(&addr)?;
+            stream.write_all(op.as_bytes())?;
+
+            let mut inbound = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
+            let info = crate::parser::expect_info(&mut inbound)?;
+
+            let parsed_op = parse_control_op(&mut inbound)?;
+
+            match parsed_op {
+                ControlOp::Pong => {
+                    self.reconnects = 0;
+                    return Ok((inbound, info));
+                }
+                ControlOp::Err(e) => {
+                    last_err = Error::new(ErrorKind::ConnectionRefused, e);
+                }
+                ControlOp::Ping
+                | ControlOp::Msg(_)
+                | ControlOp::Info(_)
+                | ControlOp::Unknown(_) => {
+                    eprintln!(
+                        "encountered unexpected control op during connection: {:?}",
+                        parsed_op
+                    );
+                    last_err = Error::new(ErrorKind::ConnectionRefused, "Protocol Error");
+                }
             }
         }
+
+        self.reconnects += 1;
+
+        Err(last_err)
     }
 }
 
@@ -186,7 +210,6 @@ impl SharedState {
                 }
                 Err(e) => {
                     // record retry stats
-                    server.reconnects += 1;
                     last_err_opt = Some(e);
                 }
             }
