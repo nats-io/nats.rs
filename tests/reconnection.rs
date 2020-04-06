@@ -50,7 +50,7 @@ fn bad_server(
     hop_ports: bool,
 ) {
     let mut max_client_id = 0;
-    let mut server_info = |client_id, port| {
+    let server_info = |client_id, port| {
         format!(
             "INFO {{  \
                 \"server_id\": \"test\", \
@@ -68,7 +68,7 @@ fn bad_server(
             port,
             client_id,
             host,
-            port + 1
+            if hop_ports { port + 1 } else { port }
         )
     };
 
@@ -113,9 +113,11 @@ fn bad_server(
                 },
             );
 
-            // we hop to a new port because we have sent the client the new
-            // server information.
-            port += 1;
+            if hop_ports {
+                // we hop to a new port because we have sent the client the new
+                // server information.
+                port += 1;
+            }
         }
 
         let mut to_evict = vec![];
@@ -222,7 +224,19 @@ fn simple_reconnect() {
     let server = std::thread::spawn({
         let barrier = barrier.clone();
         let shutdown = shutdown.clone();
-        move || bad_server("localhost", 22222, barrier, shutdown, restart, 200, true)
+        let hop_ports = true;
+        let bugginess = 200;
+        move || {
+            bad_server(
+                "localhost",
+                22222,
+                barrier,
+                shutdown,
+                restart,
+                bugginess,
+                hop_ports,
+            )
+        }
     });
 
     barrier.wait();
