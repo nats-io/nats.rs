@@ -42,14 +42,15 @@ fn read_line(stream: &mut TcpStream) -> Option<String> {
 
 fn bad_server(
     host: &str,
-    port: u16,
+    mut port: u16,
     barrier: Arc<Barrier>,
     shutdown: Arc<AtomicBool>,
     restart: Arc<AtomicBool>,
     chance: u32,
+    hop_ports: bool,
 ) {
     let mut max_client_id = 0;
-    let server_info = |client_id| {
+    let mut server_info = |client_id, port| {
         format!(
             "INFO {{  \
                 \"server_id\": \"test\", \
@@ -60,14 +61,19 @@ fn bad_server(
                 \"go\": \"bad\", \
                 \"max_payload\": 4096, \
                 \"proto\": 0, \
-                \"client_id\": {} \
+                \"client_id\": {}, \
+                \"connect_urls\": [\"{}:{}\"] \
             }}\r\n",
-            host, port, client_id,
+            host,
+            port,
+            client_id,
+            host,
+            port + 1
         )
     };
 
     let baddr = format!("{}:{}", host, port);
-    let listener = TcpListener::bind(baddr).unwrap();
+    let mut listener = TcpListener::bind(baddr).unwrap();
     listener.set_nonblocking(true).unwrap();
 
     barrier.wait();
@@ -81,22 +87,21 @@ fn bad_server(
         }
 
         // this makes it nice and bad
-        if thread_rng().gen_bool(1. / chance as f64) {
+        if thread_rng().gen_bool(1. / chance as f64) || restart.load(Ordering::Acquire) {
             clients.clear();
             subs.clear();
-        }
-
-        if restart.load(Ordering::Acquire) {
-            clients.clear();
-            subs.clear();
-            restart.store(false, Ordering::Release);
+            drop(listener);
+            let baddr = format!("{}:{}", host, port);
+            listener = TcpListener::bind(baddr).unwrap();
+            listener.set_nonblocking(true).unwrap();
         }
 
         // maybe accept a new client
         if let Ok((mut next, _addr)) = listener.accept() {
             max_client_id += 1;
             let client_id = max_client_id;
-            next.write_all(server_info(client_id).as_bytes()).unwrap();
+            next.write_all(server_info(client_id, port).as_bytes())
+                .unwrap();
             let _unchecked = next.set_read_timeout(Some(Duration::from_millis(1)));
             clients.insert(
                 client_id,
@@ -107,6 +112,10 @@ fn bad_server(
                     outstanding_pings: 0,
                 },
             );
+
+            // we hop to a new port because we have sent the client the new
+            // server information.
+            port += 1;
         }
 
         let mut to_evict = vec![];
@@ -213,7 +222,7 @@ fn simple_reconnect() {
     let server = std::thread::spawn({
         let barrier = barrier.clone();
         let shutdown = shutdown.clone();
-        move || bad_server("localhost", 22222, barrier, shutdown, restart, 200)
+        move || bad_server("localhost", 22222, barrier, shutdown, restart, 200, true)
     });
 
     barrier.wait();
