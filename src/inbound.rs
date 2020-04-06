@@ -8,8 +8,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     parser::{parse_control_op, ControlOp, MsgArgs},
-    ConnectionStatus, FinalizedOptions, Message, Server, ServerInfo, SharedState,
-    SubscriptionState,
+    ConnectionStatus, Message, Server, ServerInfo, SharedState, SubscriptionState,
 };
 
 #[derive(Debug)]
@@ -20,7 +19,6 @@ pub(crate) struct Inbound {
     pub(crate) shared_state: Arc<SharedState>,
     pub(crate) status: ConnectionStatus,
     pub(crate) info: ServerInfo,
-    pub(crate) options: FinalizedOptions,
 }
 
 impl Drop for Inbound {
@@ -61,7 +59,7 @@ impl Inbound {
         self.status = ConnectionStatus::Disconnected;
         self.shared_state
             .outbound
-            .transition_to_disconnect_buffer(self.options.reconnect_buffer_size);
+            .transition_to_disconnect_buffer(self.shared_state.options.reconnect_buffer_size);
         // flush outstanding pongs
         {
             let mut pongs = self.shared_state.pongs.lock();
@@ -74,8 +72,8 @@ impl Inbound {
         *self.shared_state.last_error.write() = Ok(());
 
         // execute disconnect callback if registered
-        if let Some(ref cb) = &*self.shared_state.disconnect_callback.0.read() {
-            (cb)();
+        if let Some(ref cb) = self.shared_state.options.disconnect_callback.0 {
+            (cb)(&self.info);
         }
 
         self.status = ConnectionStatus::Reconnecting;
@@ -86,7 +84,7 @@ impl Inbound {
             self.configured_servers.shuffle(&mut thread_rng());
             self.learned_servers.shuffle(&mut thread_rng());
 
-            let filter = if let Some(max_reconnects) = self.options.max_reconnects {
+            let filter = if let Some(max_reconnects) = self.shared_state.options.max_reconnects {
                 // only filter servers out if there exists at least one server
                 // that would NOT be filtered out.
                 self.configured_servers
@@ -102,10 +100,10 @@ impl Inbound {
                 .iter_mut()
                 .chain(self.configured_servers.iter_mut())
             {
-                if filter && server.reconnects > self.options.max_reconnects.unwrap() {
+                if filter && server.reconnects > self.shared_state.options.max_reconnects.unwrap() {
                     continue;
                 }
-                if let Ok((inbound, info)) = server.try_connect(&self.options) {
+                if let Ok((inbound, info)) = server.try_connect(&self.shared_state.options) {
                     // replace our inbound and writer to correspond with the new socket
                     self.inbound = inbound;
                     self.info = info;
@@ -135,8 +133,8 @@ impl Inbound {
         self.status = ConnectionStatus::Connected;
 
         // trigger reconnected callback
-        if let Some(ref cb) = &*self.shared_state.reconnect_callback.0.read() {
-            (cb)();
+        if let Some(ref cb) = self.shared_state.options.reconnect_callback.0 {
+            (cb)(&self.info);
         }
 
         Ok(())

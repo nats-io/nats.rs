@@ -100,7 +100,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use std::{marker::PhantomData, sync::atomic::AtomicUsize};
 
@@ -109,11 +109,53 @@ pub use subscription::Subscription;
 use {
     inbound::Inbound,
     outbound::Outbound,
-    shared_state::{Server, ServerInfo, SharedState, SubscriptionState},
+    shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
 };
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
+
+/// Information sent by the server back to this client
+/// during initial connection, and possibly again later.
+#[derive(Deserialize, Debug)]
+pub struct ServerInfo {
+    /// The unique identifier of the NATS server.
+    pub server_id: String,
+    /// Generated Server Name.
+    pub server_name: String,
+    /// The host specified in the cluster parameter/options.
+    pub host: String,
+    /// The port number specified in the cluster parameter/options.
+    pub port: i16,
+    /// The version of the NATS server.
+    pub version: String,
+    /// If this is set, then the server should try to authenticate upon connect.
+    #[serde(default)]
+    pub auth_required: bool,
+    /// If this is set, then the server must authenticate using TLS.
+    #[serde(default)]
+    pub tls_required: bool,
+    /// Maximum payload size that the server will accept.
+    pub max_payload: i32,
+    /// The protocol version in use.
+    pub proto: i8,
+    /// The server-assigned client ID. This may change during reconnection.
+    pub client_id: u64,
+    /// The version of golang the NATS server was built with.
+    pub go: String,
+    #[serde(default)]
+    /// The nonce used for nkeys.
+    pub nonce: String,
+    /// A list of server urls that a client can connect to.
+    #[serde(default)]
+    pub connect_urls: Vec<String>,
+}
+
+impl ServerInfo {
+    pub(crate) fn learned_servers(&self) -> Vec<Server> {
+        parse_server_addresses(&self.connect_urls)
+    }
+}
 
 /// A `ConnectionStatus` describes the current sub-status of a `Connection`.
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -126,6 +168,20 @@ enum ConnectionStatus {
     Disconnected,
     /// A connection in the process of reestablishing connectivity after a disconnect.
     Reconnecting,
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct Callback(Option<Arc<dyn Fn(&ServerInfo) + Send + Sync + 'static>>);
+
+impl fmt::Debug for Callback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(
+                &"callback",
+                if self.0.is_some() { &"set" } else { &"unset" },
+            )
+            .finish()
+    }
 }
 
 #[doc(hidden)]
@@ -162,6 +218,8 @@ pub struct ConnectionOptions<TypeState> {
     no_echo: bool,
     max_reconnects: Option<usize>,
     reconnect_buffer_size: usize,
+    disconnect_callback: Callback,
+    reconnect_callback: Callback,
 }
 
 impl Default for ConnectionOptions<options_typestate::NoAuth> {
@@ -173,6 +231,8 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             no_echo: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
+            disconnect_callback: Callback(None),
+            reconnect_callback: Callback(None),
         }
     }
 }
@@ -209,6 +269,8 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
             reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
         }
@@ -236,6 +298,8 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             no_echo: self.no_echo,
             name: self.name,
             reconnect_buffer_size: self.reconnect_buffer_size,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
             max_reconnects: self.max_reconnects,
         }
     }
@@ -333,6 +397,8 @@ impl<TypeState> ConnectionOptions<TypeState> {
             name: self.name,
             reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
             // move options into the Finalized state by setting
             // `typestate` to `PhantomData<Finalized>`
             typestate: PhantomData,
@@ -348,6 +414,26 @@ impl<TypeState> ConnectionOptions<TypeState> {
             shared_state,
         };
         Ok(conn)
+    }
+
+    /// Set a callback to be executed when connectivity to
+    /// a server has been lost.
+    pub fn set_disconnect_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(&ServerInfo) + Send + Sync + 'static,
+    {
+        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed when connectivity to a
+    /// server has been established.
+    pub fn set_reconnect_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(&ServerInfo) + Send + Sync + 'static,
+    {
+        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self
     }
 }
 
@@ -677,31 +763,5 @@ impl Connection {
     pub fn close(self) -> io::Result<()> {
         drop(self);
         Ok(())
-    }
-
-    /// Set a callback to be executed during disconnection.
-    /// Returns `true` if this is the first time a callback
-    /// has been set.
-    pub fn set_disconnect_callback<F>(&self, cb: F) -> bool
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        let mut shared_cb = self.shared_state.disconnect_callback.0.write();
-        let ret = shared_cb.is_none();
-        *shared_cb = Some(Box::new(cb));
-        ret
-    }
-
-    /// Set a callback to be executed during reconnection,
-    /// Returns `true` if this is the first time a callback
-    /// has been set.
-    pub fn set_reconnect_callback<F>(&self, cb: F) -> bool
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        let mut shared_cb = self.shared_state.reconnect_callback.0.write();
-        let ret = shared_cb.is_none();
-        *shared_cb = Some(Box::new(cb));
-        ret
     }
 }

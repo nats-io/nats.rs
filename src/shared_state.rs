@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::TryFrom,
-    fmt,
     io::{self, BufReader, Error, ErrorKind, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
@@ -14,11 +13,12 @@ use std::{
 
 use parking_lot::{Mutex, RwLock};
 use rand::{seq::SliceRandom, thread_rng};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::{
     parser::{parse_control_op, ControlOp},
-    AuthStyle, ConnectionStatus, FinalizedOptions, Inbound, Message, Outbound, LANG, VERSION,
+    AuthStyle, ConnectionStatus, FinalizedOptions, Inbound, Message, Outbound, ServerInfo, LANG,
+    VERSION,
 };
 
 use crossbeam_channel::Sender;
@@ -169,19 +169,6 @@ pub(crate) struct WorkerThreads {
     outbound: Option<thread::JoinHandle<()>>,
 }
 
-#[derive(Default)]
-pub(crate) struct Callback(pub(crate) RwLock<Option<Box<dyn Fn() + Send + Sync + 'static>>>);
-
-impl fmt::Debug for Callback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let cb = self.0.read();
-
-        f.debug_map()
-            .entry(&"callback", if cb.is_some() { &"set" } else { &"unset" })
-            .finish()
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct SubscriptionState {
     pub(crate) subject: String,
@@ -191,6 +178,7 @@ pub(crate) struct SubscriptionState {
 
 #[derive(Debug)]
 pub(crate) struct SharedState {
+    pub(crate) options: FinalizedOptions,
     pub(crate) threads: Mutex<Option<WorkerThreads>>,
     pub(crate) id: String,
     pub(crate) shutting_down: AtomicBool,
@@ -198,8 +186,6 @@ pub(crate) struct SharedState {
     pub(crate) subs: RwLock<HashMap<usize, SubscriptionState>>,
     pub(crate) pongs: Mutex<VecDeque<Sender<bool>>>,
     pub(crate) outbound: Outbound,
-    pub(crate) disconnect_callback: Callback,
-    pub(crate) reconnect_callback: Callback,
 }
 
 impl SharedState {
@@ -246,16 +232,14 @@ impl SharedState {
             subs: RwLock::new(HashMap::new()),
             pongs: Mutex::new(VecDeque::new()),
             outbound: Outbound::new(inbound.get_mut().try_clone()?),
-            disconnect_callback: Callback::default(),
-            reconnect_callback: Callback::default(),
             threads: Mutex::new(None),
+            options,
         });
 
         let mut inbound = Inbound {
             learned_servers: parse_server_addresses(&info.connect_urls),
             inbound,
             info,
-            options,
             status: ConnectionStatus::Connected,
             configured_servers: servers,
             shared_state: shared_state.clone(),
@@ -332,32 +316,5 @@ fn empty_or_none(field: &Option<&String>) -> bool {
     match field {
         Some(_) => false,
         None => true,
-    }
-}
-
-#[derive(Deserialize, Debug)]
-pub(crate) struct ServerInfo {
-    server_id: String,
-    server_name: String,
-    host: String,
-    port: i16,
-    version: String,
-    #[serde(default)]
-    auth_required: bool,
-    #[serde(default)]
-    tls_required: bool,
-    max_payload: i32,
-    proto: i8,
-    client_id: u64,
-    go: String,
-    #[serde(default)]
-    nonce: String,
-    #[serde(default)]
-    connect_urls: Vec<String>,
-}
-
-impl ServerInfo {
-    pub(crate) fn learned_servers(&self) -> Vec<Server> {
-        parse_server_addresses(&self.connect_urls)
     }
 }
