@@ -161,6 +161,7 @@ pub struct ConnectionOptions<TypeState> {
     name: Option<String>,
     no_echo: bool,
     max_reconnects: Option<usize>,
+    reconnect_buffer_size: usize,
 }
 
 impl Default for ConnectionOptions<options_typestate::NoAuth> {
@@ -170,6 +171,7 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             auth: AuthStyle::None,
             name: None,
             no_echo: false,
+            reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
         }
     }
@@ -207,6 +209,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
         }
     }
@@ -232,6 +235,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
         }
     }
@@ -291,6 +295,27 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
+    /// Set the maximum amount of bytes to buffer
+    /// when accepting outgoing traffic in disconnected
+    /// mode.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .reconnect_buffer_size(64 * 1024)
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub const fn reconnect_buffer_size(
+        mut self,
+        reconnect_buffer_size: usize,
+    ) -> ConnectionOptions<TypeState> {
+        self.reconnect_buffer_size = reconnect_buffer_size;
+        self
+    }
+
     /// Establish a `Connection` with a NATS server.
     ///
     /// # Example
@@ -306,6 +331,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
             auth: self.auth,
             no_echo: self.no_echo,
             name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
             // move options into the Finalized state by setting
             // `typestate` to `PhantomData<Finalized>`

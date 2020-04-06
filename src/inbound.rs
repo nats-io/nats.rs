@@ -59,6 +59,9 @@ impl Inbound {
 
     fn reconnect(&mut self) -> io::Result<()> {
         self.status = ConnectionStatus::Disconnected;
+        self.shared_state
+            .outbound
+            .transition_to_disconnect_buffer(self.options.reconnect_buffer_size);
         // flush outstanding pongs
         {
             let mut pongs = self.shared_state.pongs.lock();
@@ -107,10 +110,14 @@ impl Inbound {
                     self.inbound = inbound;
                     self.info = info;
                     let stream: TcpStream = self.inbound.get_mut().try_clone().unwrap();
-                    self.shared_state.outbound.replace_stream(stream);
-                    server.reconnects = 0;
-                    self.learned_servers = self.info.learned_servers();
-                    break 'outer;
+                    if self.shared_state.outbound.replace_stream(stream).is_err() {
+                        // record retry stats
+                        server.reconnects = server.reconnects.overflowing_add(1).0;
+                    } else {
+                        server.reconnects = 0;
+                        self.learned_servers = self.info.learned_servers();
+                        break 'outer;
+                    }
                 } else {
                     // record retry stats
                     server.reconnects = server.reconnects.overflowing_add(1).0;

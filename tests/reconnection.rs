@@ -12,7 +12,6 @@ use std::{
 use rand::{thread_rng, Rng};
 
 struct Client {
-    partial_cmd: Vec<u8>,
     socket: TcpStream,
     has_sent_ping: bool,
     last_ping: Instant,
@@ -98,11 +97,10 @@ fn bad_server(
             max_client_id += 1;
             let client_id = max_client_id;
             next.write_all(server_info(client_id).as_bytes()).unwrap();
-            next.set_read_timeout(Some(Duration::from_millis(1)));
+            let _unchecked = next.set_read_timeout(Some(Duration::from_millis(1)));
             clients.insert(
                 client_id,
                 Client {
-                    partial_cmd: vec![],
                     socket: next,
                     has_sent_ping: false,
                     last_ping: Instant::now(),
