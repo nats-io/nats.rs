@@ -122,6 +122,7 @@ pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
     /// Generated Server Name.
+    #[serde(default)]
     pub server_name: String,
     /// The host specified in the cluster parameter/options.
     pub host: String,
