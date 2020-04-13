@@ -408,7 +408,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         let shared_state = SharedState::connect(options, nats_url)?;
 
         let conn = Connection {
-            sid: AtomicUsize::new(1),
+            sid: Arc::new(AtomicUsize::new(1)),
             shutdown_dropper: Arc::new(ShutdownDropper {
                 shared_state: shared_state.clone(),
             }),
@@ -455,11 +455,11 @@ impl Drop for ShutdownDropper {
 }
 
 /// A NATS connection.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Connection {
     shared_state: Arc<SharedState>,
     shutdown_dropper: Arc<ShutdownDropper>,
-    sid: AtomicUsize,
+    sid: Arc<AtomicUsize>,
 }
 
 #[derive(Serialize, Clone, Debug)]
