@@ -110,7 +110,7 @@ The following is a list of features currently supported and planned for the near
   * [X] User/Password
   * [ ] Nkeys
   * [ ] User JWTs (NATS 2.0)
-* [ ] Reconnect logic
+* [X] Reconnect logic
 * [ ] TLS support
 * [ ] Direct async support
 * [X] Crates.io listing
