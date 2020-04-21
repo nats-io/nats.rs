@@ -96,13 +96,15 @@ pub mod subscription;
 use std::{
     fmt,
     io::{self, Error, ErrorKind},
-    sync::{atomic::Ordering, Arc},
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
-
-use std::{marker::PhantomData, sync::atomic::AtomicUsize};
 
 pub use subscription::Subscription;
 
