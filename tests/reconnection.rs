@@ -18,11 +18,11 @@ struct Client {
     outstanding_pings: usize,
 }
 
-fn ends_with_crlf(buf: &[u8]) -> bool {
-    buf.len() >= 2 && buf[buf.len() - 2] == b'\r' && buf[buf.len() - 1] == b'\n'
-}
-
 fn read_line(stream: &mut TcpStream) -> Option<String> {
+    fn ends_with_crlf(buf: &[u8]) -> bool {
+        buf.len() >= 2 && buf[buf.len() - 2] == b'\r' && buf[buf.len() - 1] == b'\n'
+    }
+
     let mut buf = vec![];
     while !ends_with_crlf(&buf) {
         let mut read_buf = [0];
