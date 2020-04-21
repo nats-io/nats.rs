@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::TryFrom,
-    io::{self, BufReader, Error, ErrorKind, Write},
+    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -17,8 +17,8 @@ use serde::Serialize;
 
 use crate::{
     parser::{parse_control_op, ControlOp},
-    AuthStyle, ConnectionStatus, FinalizedOptions, Inbound, Message, Outbound, ServerInfo, LANG,
-    VERSION,
+    split_tls, AuthStyle, ConnectionStatus, FinalizedOptions, Inbound, Message, Outbound, Reader,
+    ServerInfo, Writer, LANG, VERSION,
 };
 
 use crossbeam_channel::Sender;
@@ -37,7 +37,8 @@ pub(crate) fn parse_server_addresses(
 
 #[derive(Debug)]
 pub(crate) struct Server {
-    pub(crate) url: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
     pub(crate) tls_required: bool,
     pub(crate) reconnects: usize,
 }
@@ -66,25 +67,22 @@ impl Server {
 
         let mut host_port_splits = host_port.split(':');
         let host_opt = host_port_splits.next();
+        if host_opt.map(|h| h.is_empty()).unwrap_or(true) {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid URL provided: {}", input),
+            ));
+        };
+        let host = host_opt.unwrap().to_string();
+
         let port_opt = host_port_splits
             .next()
             .and_then(|port_str| port_str.parse().ok());
-
-        let (host, port) = match (host_opt, port_opt) {
-            (Some(host), Some(port)) if !host.is_empty() => (host, port),
-            (Some(host), None) if !host.is_empty() => (host, 4222),
-            _ => {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("invalid URL provided: {}", input),
-                ));
-            }
-        };
-
-        let url = format!("{}:{}", host, port);
+        let port = port_opt.unwrap_or(4222);
 
         Ok(Server {
-            url,
+            host,
+            port,
             tls_required,
             reconnects: 0,
         })
@@ -93,7 +91,7 @@ impl Server {
     pub(crate) fn try_connect(
         &mut self,
         options: &FinalizedOptions,
-    ) -> io::Result<(BufReader<TcpStream>, ServerInfo)> {
+    ) -> io::Result<(Reader, Writer, ServerInfo)> {
         let mut connect_op = Connect {
             tls_required: self.tls_required,
             name: options.name.as_ref(),
@@ -137,7 +135,7 @@ impl Server {
         let backoff = Duration::from_millis(backoff_ms);
 
         // look up network addresses and shuffle them
-        let mut addrs: Vec<SocketAddr> = self.url.to_socket_addrs()?.collect();
+        let mut addrs: Vec<SocketAddr> = (&*self.host, self.port).to_socket_addrs()?.collect();
         addrs.shuffle(&mut thread_rng());
 
         let mut last_err = Error::new(ErrorKind::AddrNotAvailable, "no results");
@@ -163,19 +161,42 @@ impl Server {
         &mut self,
         addr: SocketAddr,
         op: &str,
-    ) -> io::Result<(BufReader<TcpStream>, ServerInfo)> {
+    ) -> io::Result<(Reader, Writer, ServerInfo)> {
         let mut stream = TcpStream::connect(&addr)?;
         stream.write_all(op.as_bytes())?;
 
         let mut inbound = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
         let info = crate::parser::expect_info(&mut inbound)?;
 
+        if self.tls_required || info.tls_required {}
+
         let parsed_op = parse_control_op(&mut inbound)?;
 
         match parsed_op {
             ControlOp::Pong => {
                 self.reconnects = 0;
-                Ok((inbound, info))
+                if info.tls_required || self.tls_required {
+                    let connector = native_tls::TlsConnector::new().unwrap();
+                    match connector.connect(&self.host, stream) {
+                        Ok(tls) => {
+                            let (tls_reader, tls_writer) = split_tls(tls);
+                            let reader =
+                                Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
+                            let writer =
+                                Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
+                            Ok((reader, writer, info))
+                        }
+                        Err(e) => {
+                            eprintln!("failed to upgrade TLS: {:?}", e);
+                            Err(Error::new(ErrorKind::PermissionDenied, e))
+                        }
+                    }
+                } else {
+                    let reader =
+                        Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
+                    let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
+                    Ok((reader, writer, info))
+                }
             }
             ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
             ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
@@ -222,12 +243,12 @@ impl SharedState {
         let mut servers = parse_server_addresses(nats_url.split(','));
 
         let mut last_err_opt = None;
-        let mut stream_opt = None;
+        let mut connected_opt = None;
         'outer: for _ in 0..options.max_reconnects.unwrap_or(5) {
             for server in &mut servers {
                 match server.try_connect(&options) {
-                    Ok(stream) => {
-                        stream_opt = Some(stream);
+                    Ok(connected) => {
+                        connected_opt = Some(connected);
                         break 'outer;
                     }
                     Err(e) => {
@@ -238,20 +259,14 @@ impl SharedState {
             }
         }
 
-        if stream_opt.is_none() {
+        if connected_opt.is_none() {
             // there are no reachable servers. return an error to the caller.
             return Err(last_err_opt.expect("expected at least one valid server URL"));
         }
 
-        let (mut inbound, info) = stream_opt.unwrap();
+        let (reader, writer, info) = connected_opt.unwrap();
 
-        // TODO(dlc) - Fix, but for now at least signal properly.
-        if info.tls_required {
-            return Err(Error::new(
-                ErrorKind::ConnectionRefused,
-                "TLS currently not supported",
-            ));
-        }
+        let outbound = Outbound::new(writer);
 
         let shared_state = Arc::new(SharedState {
             id: nuid::next(),
@@ -259,14 +274,14 @@ impl SharedState {
             last_error: RwLock::new(Ok(())),
             subs: RwLock::new(HashMap::new()),
             pongs: Mutex::new(VecDeque::new()),
-            outbound: Outbound::new(inbound.get_mut().try_clone()?),
+            outbound,
             threads: Mutex::new(None),
             options,
         });
 
         let mut inbound = Inbound {
             learned_servers: parse_server_addresses(&info.connect_urls),
-            inbound,
+            reader,
             info,
             status: ConnectionStatus::Connected,
             configured_servers: servers,
@@ -344,7 +359,7 @@ const fn if_true(field: &bool) -> bool {
 #[inline]
 fn empty_or_none(field: &Option<&String>) -> bool {
     match field {
-        Some(_) => false,
+        Some(inner) => inner.is_empty(),
         None => true,
     }
 }

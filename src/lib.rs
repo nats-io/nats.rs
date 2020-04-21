@@ -88,6 +88,7 @@ mod inbound;
 mod outbound;
 mod parser;
 mod shared_state;
+mod tls;
 
 /// Functionality relating to subscribing to a
 /// subject.
@@ -109,13 +110,89 @@ use serde::{Deserialize, Serialize};
 pub use subscription::Subscription;
 
 use {
-    inbound::Inbound,
-    outbound::Outbound,
+    inbound::{Inbound, Reader},
+    outbound::{Outbound, Writer},
     shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
+    tls::{split_tls, TlsReader, TlsWriter},
 };
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
+
+/*
+#[derive(Debug)]
+enum Stream {
+    Tcp(TcpStream),
+    Tls(TlsStream<TcpStream>),
+}
+
+impl Stream {
+    fn upgrade(&mut self) -> io::Result<()> {
+        let stream = if let Stream::Tcp(tcp) = self {
+            tcp.try_clone().unwrap()
+        } else {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "cannot upgrade a TLS connection, as it is already upgraded",
+            ));
+        };
+
+        let connector = match TlsConnector::new() {
+            Ok(connector) => connector,
+            Err(e) => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("failed to create TLS connector: {}", e),
+                ));
+            }
+        };
+
+        match connector.connect("", stream) {
+            Ok(tls) => *self = Stream::Tls(tls),
+            Err(e) => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("failed to upgrade connection to TLS: {}", e),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> io::Result<()> {
+        match self {
+            Stream::Tcp(tcp) => tcp.shutdown(Shutdown::Both),
+            Stream::Tls(tls) => tls.shutdown(),
+        }
+    }
+}
+
+impl Read for Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Stream::Tcp(tcp) => tcp.read(buf),
+            Stream::Tls(tls) => tls.read(buf),
+        }
+    }
+}
+
+impl Write for Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Stream::Tcp(tcp) => tcp.write(buf),
+            Stream::Tls(tls) => tls.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Stream::Tcp(tcp) => tcp.flush(),
+            Stream::Tls(tls) => tls.flush(),
+        }
+    }
+}
+*/
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
