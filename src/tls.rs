@@ -6,6 +6,30 @@ use std::{
 
 use native_tls::TlsStream;
 
+pub use native_tls::{Certificate, Identity, TlsConnector, TlsConnectorBuilder};
+
+/// Returns a new TLS configuration object for use
+/// with `ConnectionOptions::set_tls_connector`.
+///
+/// # Examples
+/// ```no_run
+/// # fn main() -> std::io::Result<()> {
+/// let mut tls_connector = nats::tls::tls_builder()
+///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password").unwrap())
+///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes").unwrap())
+///     .build()
+///     .unwrap();
+///
+/// let nc = nats::ConnectionOptions::new()
+///     .tls_connector(tls_connector)
+///     .connect("demo.nats.io")?;
+/// # Ok(())
+/// # }
+/// ```
+pub fn tls_builder() -> TlsConnectorBuilder {
+    TlsConnector::builder()
+}
+
 pub(crate) fn split_tls(tls: TlsStream<TcpStream>) -> (TlsReader, TlsWriter) {
     let tls_reader = TlsReader {
         raw_socket: tls.get_ref().try_clone().unwrap(),

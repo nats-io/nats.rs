@@ -93,7 +93,7 @@ impl Server {
         options: &FinalizedOptions,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         let mut connect_op = Connect {
-            tls_required: self.tls_required,
+            tls_required: options.tls_required || self.tls_required,
             name: options.name.as_ref(),
             pedantic: false,
             verbose: false,
@@ -143,7 +143,7 @@ impl Server {
         for addr in addrs {
             std::thread::sleep(backoff);
 
-            match self.try_connect_inner(addr, &op) {
+            match self.try_connect_inner(options, addr, &op) {
                 Ok(result) => return Ok(result),
                 Err(e) => last_err = e,
             };
@@ -159,44 +159,51 @@ impl Server {
     // gracefully feed into `last_err` at the call site.
     fn try_connect_inner(
         &mut self,
+        options: &FinalizedOptions,
         addr: SocketAddr,
         op: &str,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         let mut stream = TcpStream::connect(&addr)?;
-        stream.write_all(op.as_bytes())?;
+        let info = crate::parser::expect_info(&mut stream)?;
 
-        let mut inbound = BufReader::with_capacity(64 * 1024, stream.try_clone()?);
-        let info = crate::parser::expect_info(&mut inbound)?;
+        // potentially upgrade to TLS
+        let (mut reader, mut writer) =
+            if options.tls_required || info.tls_required || self.tls_required {
+                let attempt = if let Some(ref tls_connector) = options.tls_connector {
+                    tls_connector.connect(&self.host, stream)
+                } else {
+                    let connector = native_tls::TlsConnector::builder()
+                        .danger_accept_invalid_certs(true)
+                        .build()
+                        .unwrap();
+                    connector.connect(&self.host, stream)
+                };
+                match attempt {
+                    Ok(tls) => {
+                        let (tls_reader, tls_writer) = split_tls(tls);
+                        let reader = Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
+                        let writer = Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
+                        (reader, writer)
+                    }
+                    Err(e) => {
+                        eprintln!("failed to upgrade TLS: {:?}", e);
+                        return Err(Error::new(ErrorKind::PermissionDenied, e));
+                    }
+                }
+            } else {
+                let reader = Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
+                let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
+                (reader, writer)
+            };
 
-        if self.tls_required || info.tls_required {}
-
-        let parsed_op = parse_control_op(&mut inbound)?;
+        writer.write_all(op.as_bytes())?;
+        writer.flush()?;
+        let parsed_op = parse_control_op(&mut reader)?;
 
         match parsed_op {
             ControlOp::Pong => {
                 self.reconnects = 0;
-                if info.tls_required || self.tls_required {
-                    let connector = native_tls::TlsConnector::new().unwrap();
-                    match connector.connect(&self.host, stream) {
-                        Ok(tls) => {
-                            let (tls_reader, tls_writer) = split_tls(tls);
-                            let reader =
-                                Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
-                            let writer =
-                                Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
-                            Ok((reader, writer, info))
-                        }
-                        Err(e) => {
-                            eprintln!("failed to upgrade TLS: {:?}", e);
-                            Err(Error::new(ErrorKind::PermissionDenied, e))
-                        }
-                    }
-                } else {
-                    let reader =
-                        Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
-                    let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
-                    Ok((reader, writer, info))
-                }
+                Ok((reader, writer, info))
             }
             ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
             ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {

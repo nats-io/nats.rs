@@ -88,7 +88,9 @@ mod inbound;
 mod outbound;
 mod parser;
 mod shared_state;
-mod tls;
+
+/// Functionality relating to TLS configuration
+pub mod tls;
 
 /// Functionality relating to subscribing to a
 /// subject.
@@ -118,81 +120,6 @@ use {
 
 const VERSION: &str = "0.0.1";
 const LANG: &str = "rust";
-
-/*
-#[derive(Debug)]
-enum Stream {
-    Tcp(TcpStream),
-    Tls(TlsStream<TcpStream>),
-}
-
-impl Stream {
-    fn upgrade(&mut self) -> io::Result<()> {
-        let stream = if let Stream::Tcp(tcp) = self {
-            tcp.try_clone().unwrap()
-        } else {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "cannot upgrade a TLS connection, as it is already upgraded",
-            ));
-        };
-
-        let connector = match TlsConnector::new() {
-            Ok(connector) => connector,
-            Err(e) => {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("failed to create TLS connector: {}", e),
-                ));
-            }
-        };
-
-        match connector.connect("", stream) {
-            Ok(tls) => *self = Stream::Tls(tls),
-            Err(e) => {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("failed to upgrade connection to TLS: {}", e),
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn shutdown(&mut self) -> io::Result<()> {
-        match self {
-            Stream::Tcp(tcp) => tcp.shutdown(Shutdown::Both),
-            Stream::Tls(tls) => tls.shutdown(),
-        }
-    }
-}
-
-impl Read for Stream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            Stream::Tcp(tcp) => tcp.read(buf),
-            Stream::Tls(tls) => tls.read(buf),
-        }
-    }
-}
-
-impl Write for Stream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            Stream::Tcp(tcp) => tcp.write(buf),
-            Stream::Tls(tls) => tls.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            Stream::Tcp(tcp) => tcp.flush(),
-            Stream::Tls(tls) => tls.flush(),
-        }
-    }
-}
-*/
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -290,7 +217,6 @@ pub mod options_typestate {
 type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
-#[derive(Clone, Debug)]
 pub struct ConnectionOptions<TypeState> {
     typestate: PhantomData<TypeState>,
     auth: AuthStyle,
@@ -300,6 +226,8 @@ pub struct ConnectionOptions<TypeState> {
     reconnect_buffer_size: usize,
     disconnect_callback: Callback,
     reconnect_callback: Callback,
+    tls_connector: Option<tls::TlsConnector>,
+    tls_required: bool,
 }
 
 impl Default for ConnectionOptions<options_typestate::NoAuth> {
@@ -313,7 +241,32 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             max_reconnects: Some(60),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
+            tls_connector: None,
+            tls_required: false,
         }
+    }
+}
+
+impl<T> fmt::Debug for ConnectionOptions<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(&"auth", &self.auth)
+            .entry(&"name", &self.name)
+            .entry(&"no_echo", &self.no_echo)
+            .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
+            .entry(&"max_reconnects", &self.max_reconnects)
+            .entry(&"disconnect_callback", &self.disconnect_callback)
+            .entry(&"reconnect_callback", &self.reconnect_callback)
+            .entry(
+                &"tls_connector",
+                if self.tls_connector.is_some() {
+                    &"set"
+                } else {
+                    &"unset"
+                },
+            )
+            .entry(&"tls_required", &self.tls_required)
+            .finish()
     }
 }
 
@@ -353,6 +306,8 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             reconnect_callback: self.reconnect_callback,
             reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
+            tls_connector: self.tls_connector,
+            tls_required: self.tls_required,
         }
     }
 
@@ -381,6 +336,8 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
             max_reconnects: self.max_reconnects,
+            tls_connector: self.tls_connector,
+            tls_required: self.tls_required,
         }
     }
 }
@@ -479,6 +436,8 @@ impl<TypeState> ConnectionOptions<TypeState> {
             max_reconnects: self.max_reconnects,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            tls_connector: self.tls_connector,
+            tls_required: self.tls_required,
             // move options into the Finalized state by setting
             // `typestate` to `PhantomData<Finalized>`
             typestate: PhantomData,
@@ -513,6 +472,59 @@ impl<TypeState> ConnectionOptions<TypeState> {
         F: Fn(&ServerInfo) + Send + Sync + 'static,
     {
         self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self
+    }
+
+    /// Setting this requires that TLS be set for all server connections.
+    ///
+    /// If you only want to use TLS for some server connections, you may
+    /// declare them separately in the connect string by prefixing them
+    /// with `tls://host:port` instead of `nats://host:port`.
+    ///
+    /// If you want to use a particular TLS configuration, see
+    /// the `nats::tls::tls_connector` method and the
+    /// `nats::ConnectionOptions::tls_connector` method below
+    /// to apply the desired configuration to all server connections.
+    ///
+    /// # Examples
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    ///
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .tls_required(true)
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_required(mut self, tls_required: bool) -> Self {
+        self.tls_required = tls_required;
+        self
+    }
+
+    /// Allows a particular TLS configuration to be set
+    /// for upgrading TCP connections to TLS connections.
+    ///
+    /// Note that this also enforces that TLS will be
+    /// enabled for all connections to all servers.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let mut tls_connector = nats::tls::tls_builder()
+    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password").unwrap())
+    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes").unwrap())
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .tls_connector(tls_connector)
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_connector(mut self, connector: tls::TlsConnector) -> Self {
+        self.tls_connector = Some(connector);
+        self.tls_required = true;
         self
     }
 }
