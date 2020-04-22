@@ -115,6 +115,8 @@ fn parse_err(args: &[u8]) -> ControlOp {
 }
 
 pub(crate) fn expect_info(reader: &mut TcpStream) -> io::Result<ServerInfo> {
+    // TODO(spacejam) revisit this with a profiler and make it
+    // more optimized to minimize time-to-first-byte.
     let mut buf = Vec::with_capacity(512);
 
     while !buf.ends_with(b"\r\n") {
