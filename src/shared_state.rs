@@ -172,11 +172,10 @@ impl Server {
                 let attempt = if let Some(ref tls_connector) = options.tls_connector {
                     tls_connector.connect(&self.host, stream)
                 } else {
-                    let connector = native_tls::TlsConnector::builder()
-                        .danger_accept_invalid_certs(true)
-                        .build()
-                        .unwrap();
-                    connector.connect(&self.host, stream)
+                    match native_tls::TlsConnector::new() {
+                        Ok(connector) => connector.connect(&self.host, stream),
+                        Err(e) => return Err(Error::new(ErrorKind::Other, e)),
+                    }
                 };
                 match attempt {
                     Ok(tls) => {
