@@ -7,17 +7,17 @@ use std::{
 
 use parking_lot::{Condvar, Mutex};
 
-use crate::SubscriptionState;
+use crate::{SubscriptionState, TlsWriter};
 
 #[derive(Debug)]
-struct DisconnectBuffer {
+pub(crate) struct DisconnectWriter {
     buf: Box<[u8]>,
     len: usize,
 }
 
-impl DisconnectBuffer {
-    fn new(buf_sz: usize) -> DisconnectBuffer {
-        DisconnectBuffer {
+impl DisconnectWriter {
+    fn new(buf_sz: usize) -> DisconnectWriter {
+        DisconnectWriter {
             buf: vec![0; buf_sz].into_boxed_slice(),
             len: 0,
         }
@@ -25,16 +25,18 @@ impl DisconnectBuffer {
 }
 
 #[derive(Debug)]
-enum Buffer {
-    Connected(BufWriter<TcpStream>),
-    Disconnected(DisconnectBuffer),
+pub(crate) enum Writer {
+    Tcp(BufWriter<TcpStream>),
+    Tls(BufWriter<TlsWriter>),
+    Disconnected(DisconnectWriter),
 }
 
-impl Write for Buffer {
+impl Write for Writer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
-            Buffer::Connected(bw) => bw.write(buf),
-            Buffer::Disconnected(db) => {
+            Writer::Tcp(bw) => bw.write(buf),
+            Writer::Tls(bw) => bw.write(buf),
+            Writer::Disconnected(db) => {
                 if db.len + buf.len() > db.buf.len() {
                     Err(Error::new(
                         ErrorKind::Other,
@@ -51,62 +53,42 @@ impl Write for Buffer {
 
     fn flush(&mut self) -> io::Result<()> {
         match self {
-            Buffer::Connected(bw) => bw.flush(),
-            Buffer::Disconnected(_) => Ok(()),
+            Writer::Tcp(bw) => bw.flush(),
+            Writer::Tls(bw) => bw.flush(),
+            Writer::Disconnected(_) => Ok(()),
         }
     }
 }
 
-impl Buffer {
+impl Writer {
     fn is_empty(&self) -> bool {
         match self {
-            Buffer::Connected(bw) => bw.buffer().is_empty(),
-            Buffer::Disconnected(db) => db.len == 0,
-        }
-    }
-
-    // Replaces the underlying stream with a new socket.
-    // If the state was `Disconnected`, we will also try
-    // to write and flush the entire disconnect buffer into
-    // the new socket.
-    fn replace_stream(&mut self, stream: TcpStream) -> io::Result<()> {
-        match self {
-            Buffer::Connected(ref mut bw) => {
-                *(bw.get_mut()) = stream;
-                Ok(())
-            }
-            Buffer::Disconnected(db) => {
-                let mut new_bw = BufWriter::with_capacity(64 * 1024, stream);
-                new_bw.write_all(&db.buf[..db.len])?;
-                new_bw.flush()?;
-                *self = Buffer::Connected(new_bw);
-                Ok(())
-            }
+            Writer::Tcp(bw) => bw.buffer().is_empty(),
+            Writer::Tls(bw) => bw.buffer().is_empty(),
+            Writer::Disconnected(db) => db.len == 0,
         }
     }
 
     fn shutdown(&mut self) -> io::Result<()> {
-        if let Buffer::Connected(bw) = self {
-            bw.get_mut().shutdown(Shutdown::Both)?;
+        match self {
+            Writer::Tcp(bw) => bw.get_mut().shutdown(Shutdown::Both),
+            Writer::Tls(bw) => bw.get_mut().shutdown(),
+            Writer::Disconnected(_) => Ok(()),
         }
-        Ok(())
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct Outbound {
-    writer: Mutex<Buffer>,
+    writer: Mutex<Writer>,
     updated: Condvar,
     shutting_down: AtomicBool,
 }
 
 impl Outbound {
-    pub(crate) fn new(stream: TcpStream) -> Outbound {
+    pub(crate) fn new(writer: Writer) -> Outbound {
         Outbound {
-            writer: Mutex::new(Buffer::Connected(BufWriter::with_capacity(
-                64 * 1024,
-                stream,
-            ))),
+            writer: Mutex::new(writer),
             updated: Condvar::new(),
             shutting_down: AtomicBool::new(false),
         }
@@ -129,16 +111,28 @@ impl Outbound {
         }
     }
 
+    pub(crate) fn is_disconnected(&self) -> bool {
+        matches!(*self.writer.lock(), Writer::Disconnected(_))
+    }
+
     pub(crate) fn transition_to_disconnect_buffer(&self, buf_sz: usize) {
-        let mut writer = self.writer.lock();
-        if let Buffer::Connected(_) = *writer {
-            *writer = Buffer::Disconnected(DisconnectBuffer::new(buf_sz));
+        if !self.is_disconnected() {
+            let mut writer = self.writer.lock();
+            *writer = Writer::Disconnected(DisconnectWriter::new(buf_sz));
         }
     }
 
-    pub(crate) fn replace_stream(&self, new_stream: TcpStream) -> io::Result<()> {
+    // Replaces the underlying stream with a new socket.
+    // If the state was `Disconnected`, we will also try
+    // to write and flush the entire disconnect buffer into
+    // the new socket.
+    pub(crate) fn replace_writer(&self, mut new_writer: Writer) -> io::Result<()> {
         let mut writer = self.writer.lock();
-        writer.replace_stream(new_stream)?;
+        if let Writer::Disconnected(ref db) = *writer {
+            new_writer.write_all(&db.buf[..db.len])?;
+            new_writer.flush()?;
+        }
+        *writer = new_writer;
         drop(writer);
         self.updated.notify_all();
         Ok(())
@@ -151,7 +145,7 @@ impl Outbound {
 
     fn with_writer<F>(&self, f: F) -> io::Result<()>
     where
-        F: FnOnce(&mut Buffer) -> io::Result<()>,
+        F: FnOnce(&mut Writer) -> io::Result<()>,
     {
         let mut writer = self.writer.lock();
         match (f)(&mut *writer) {

@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufRead, BufReader, Error, ErrorKind},
+    io::{self, BufRead, Error, ErrorKind, Read},
     net::TcpStream,
     str::FromStr,
 };
@@ -114,14 +114,23 @@ fn parse_err(args: &[u8]) -> ControlOp {
     ControlOp::Err(err_description.to_string())
 }
 
-pub(crate) fn expect_info(reader: &mut BufReader<TcpStream>) -> io::Result<ServerInfo> {
-    let op = parse_control_op(reader)?;
+pub(crate) fn expect_info(reader: &mut TcpStream) -> io::Result<ServerInfo> {
+    // TODO(spacejam) revisit this with a profiler and make it
+    // more optimized to minimize time-to-first-byte.
+    let mut buf = Vec::with_capacity(512);
 
-    if let ControlOp::Info(info) = op {
-        Ok(info)
-    } else {
-        Err(Error::new(ErrorKind::Other, "INFO proto not found"))
+    while !buf.ends_with(b"\r\n") {
+        let byte = &mut [0];
+        reader.read_exact(byte)?;
+        buf.push(byte[0]);
     }
+
+    if buf.starts_with(b"INFO ") {
+        if let Ok(info) = serde_json::from_slice(&buf[b"INFO ".len()..]) {
+            return Ok(info);
+        }
+    }
+    Err(Error::new(ErrorKind::Other, "INFO proto not found"))
 }
 
 const CRLF: &str = "\r\n";

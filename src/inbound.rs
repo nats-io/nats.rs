@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufReader, Read},
+    io::{self, BufRead, BufReader, Read},
     net::TcpStream,
     sync::{atomic::Ordering, Arc},
 };
@@ -8,12 +8,43 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     parser::{parse_control_op, ControlOp, MsgArgs},
-    ConnectionStatus, Message, Server, ServerInfo, SharedState, SubscriptionState,
+    ConnectionStatus, Message, Server, ServerInfo, SharedState, SubscriptionState, TlsReader,
 };
 
 #[derive(Debug)]
+pub(crate) enum Reader {
+    Tcp(BufReader<TcpStream>),
+    Tls(BufReader<TlsReader>),
+}
+
+impl BufRead for Reader {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match self {
+            Reader::Tcp(br) => br.fill_buf(),
+            Reader::Tls(br) => br.fill_buf(),
+        }
+    }
+
+    fn consume(&mut self, amt: usize) {
+        match self {
+            Reader::Tcp(br) => br.consume(amt),
+            Reader::Tls(br) => br.consume(amt),
+        }
+    }
+}
+
+impl Read for Reader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Reader::Tcp(br) => br.read(buf),
+            Reader::Tls(br) => br.read(buf),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct Inbound {
-    pub(crate) inbound: BufReader<TcpStream>,
+    pub(crate) reader: Reader,
     pub(crate) configured_servers: Vec<Server>,
     pub(crate) learned_servers: Vec<Server>,
     pub(crate) shared_state: Arc<SharedState>,
@@ -42,7 +73,7 @@ impl Inbound {
     }
 
     fn read_and_process_message(&mut self) -> io::Result<()> {
-        let parsed_op = parse_control_op(&mut self.inbound)?;
+        let parsed_op = parse_control_op(&mut self.reader)?;
         match parsed_op {
             ControlOp::Msg(msg_args) => self.process_msg(msg_args)?,
             ControlOp::Ping => self.shared_state.outbound.send_pong()?,
@@ -103,12 +134,11 @@ impl Inbound {
                 if filter && server.reconnects > self.shared_state.options.max_reconnects.unwrap() {
                     continue;
                 }
-                if let Ok((inbound, info)) = server.try_connect(&self.shared_state.options) {
-                    // replace our inbound and writer to correspond with the new socket
-                    self.inbound = inbound;
+                if let Ok((reader, writer, info)) = server.try_connect(&self.shared_state.options) {
+                    // replace our reader and writer to correspond with the new socket
+                    self.reader = reader;
                     self.info = info;
-                    let stream: TcpStream = self.inbound.get_mut().try_clone().unwrap();
-                    if self.shared_state.outbound.replace_stream(stream).is_err() {
+                    if self.shared_state.outbound.replace_writer(writer).is_err() {
                         // record retry stats
                         server.reconnects = server.reconnects.overflowing_add(1).0;
                     } else {
@@ -167,9 +197,9 @@ impl Inbound {
             msg.responder = Some(self.shared_state.clone());
         }
 
-        let inbound = &mut self.inbound;
+        let reader = &mut self.reader;
         // FIXME(dlc) - avoid copy if possible.
-        inbound
+        reader
             .take(u64::from(msg_args.mlen + CRLF_LEN))
             .read_to_end(&mut msg.data)?;
 
