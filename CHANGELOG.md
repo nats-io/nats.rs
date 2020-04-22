@@ -1,3 +1,9 @@
+# 0.3.1
+
+## New Features
+
+* #19 TLS support has been added.
+
 # 0.3
 
 ## New Features
