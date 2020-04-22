@@ -510,7 +510,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Examples
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let mut tls_connector = nats::tls::tls_builder()
+    /// let mut tls_connector = nats::tls::builder()
     ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password").unwrap())
     ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes").unwrap())
     ///     .build()
