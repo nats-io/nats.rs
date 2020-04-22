@@ -250,17 +250,15 @@ impl SharedState {
 
         let mut last_err_opt = None;
         let mut connected_opt = None;
-        'outer: for _ in 0..options.max_reconnects.unwrap_or(5) {
-            for server in &mut servers {
-                match server.try_connect(&options) {
-                    Ok(connected) => {
-                        connected_opt = Some(connected);
-                        break 'outer;
-                    }
-                    Err(e) => {
-                        // record retry stats
-                        last_err_opt = Some(e);
-                    }
+        for server in &mut servers {
+            match server.try_connect(&options) {
+                Ok(connected) => {
+                    connected_opt = Some(connected);
+                    break;
+                }
+                Err(e) => {
+                    // record retry stats
+                    last_err_opt = Some(e);
                 }
             }
         }
