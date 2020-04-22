@@ -67,7 +67,7 @@ impl Server {
 
         let mut host_port_splits = host_port.split(':');
         let host_opt = host_port_splits.next();
-        if host_opt.map(|h| h.is_empty()).unwrap_or(true) {
+        if host_opt.map_or(true, str::is_empty) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 format!("invalid URL provided: {}", input),
