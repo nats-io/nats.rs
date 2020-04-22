@@ -241,7 +241,11 @@ fn simple_reconnect() {
 
     barrier.wait();
 
-    let nc = Arc::new(nats::connect("localhost:22222").unwrap());
+    let nc = loop {
+        if let Ok(nc) = nats::connect("localhost:22222") {
+            break Arc::new(nc);
+        }
+    };
 
     let tx = std::thread::spawn({
         let nc = nc.clone();
