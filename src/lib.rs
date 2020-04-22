@@ -496,7 +496,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tls_required(mut self, tls_required: bool) -> Self {
+    pub const fn tls_required(mut self, tls_required: bool) -> Self {
         self.tls_required = tls_required;
         self
     }
