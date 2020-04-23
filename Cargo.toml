@@ -1,6 +1,6 @@
 [package]
 name = "natsio"
-version = "0.3.1"
+version = "0.3.2"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>"]
 edition = "2018"
