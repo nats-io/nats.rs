@@ -2,7 +2,7 @@
 name = "natsio"
 version = "0.3.2"
 description = "A Rust NATS client"
-authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@synadia.com>"]
+authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>"]
 edition = "2018"
 license = "Apache-2.0"
 homepage = "https://github.com/nats-io/nats.rs"
