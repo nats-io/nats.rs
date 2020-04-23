@@ -10,6 +10,6 @@ jobs:
 cache:
   cargo: true
   directories:
-    ~/.rustup
-    ~/.cargo
-    $TRAVIS_BUILD_DIR/target
+    - ~/.rustup
+    - ~/.cargo
+    - $TRAVIS_BUILD_DIR/target
