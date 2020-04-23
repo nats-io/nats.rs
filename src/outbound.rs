@@ -102,7 +102,7 @@ impl Outbound {
             }
 
             if let Err(error) = writer.flush() {
-                eprintln!("Outbound thread failed to flush: {:?}", error);
+                log::error!("Outbound thread failed to flush: {:?}", error);
 
                 // wait for our stream to be replaced by the Inbound during
                 // reconnection.
