@@ -96,6 +96,10 @@ nc.publish_request("foo", reply, "Help me!")?;
 let response = rsub.iter().take(1);
 ```
 
+## Minimum Supported Rust Version (MSRV)
+
+The minimum supported Rust version is 1.37.0.
+
 ## Sync vs Async
 
 The Rust ecosystem has a diverse set of options for async behaviors. This client library can be used somewhat effectively already with async runtimes such as async-std and tokio. Going forward we look to provide an async client. Publish today is mostly non-blocking, so largest API change would be around subscriptions being streams vs iterators by default. Also been researching sinks and whether or not they make sense. Would probably be a config feature for async wnd options for most runtimes like async-std and tokio.
