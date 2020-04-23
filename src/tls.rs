@@ -22,7 +22,7 @@ pub use native_tls::{Certificate, Identity, Protocol, TlsConnector, TlsConnector
 ///
 /// let nc = nats::ConnectionOptions::new()
 ///     .tls_connector(tls_connector)
-///     .connect("demo.nats.io")?;
+///     .connect("tls://demo.nats.io:4443")?;
 /// # Ok(())
 /// # }
 /// ```
