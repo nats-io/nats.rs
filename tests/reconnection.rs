@@ -141,7 +141,7 @@ fn bad_server(
                 continue;
             };
 
-            println!("got command {}", command);
+            log::debug!("got command {}", command);
             let mut parts = command.split(' ');
 
             match parts.next().unwrap() {
@@ -198,7 +198,7 @@ fn bad_server(
                     let sid = parts.next().unwrap();
                     subs.remove(sid);
                 }
-                other => eprintln!("unknown command {}", other),
+                other => log::error!("unknown command {}", other),
             }
         }
 
@@ -265,7 +265,7 @@ fn simple_reconnect() {
                 {
                     received += 1;
                 } else {
-                    println!("timed out before we received a response :(");
+                    log::debug!("timed out before we received a response :(");
                 }
             }
 

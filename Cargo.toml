@@ -32,6 +32,7 @@ crossbeam-channel = "0.4.2"
 parking_lot = "0.10.2"
 rand = "0.7.3"
 native-tls = "0.2.4"
+log = "0.4.8"
 
 [dev-dependencies]
 criterion = "0.3.1"

@@ -185,7 +185,7 @@ impl Server {
                         (reader, writer)
                     }
                     Err(e) => {
-                        eprintln!("failed to upgrade TLS: {:?}", e);
+                        log::error!("failed to upgrade TLS: {:?}", e);
                         return Err(Error::new(ErrorKind::PermissionDenied, e));
                     }
                 }
@@ -206,7 +206,7 @@ impl Server {
             }
             ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
             ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
-                eprintln!(
+                log::error!(
                     "encountered unexpected control op during connection: {:?}",
                     parsed_op
                 );
@@ -324,10 +324,10 @@ impl SharedState {
         outbound.thread().unpark();
 
         if let Err(error) = inbound.join() {
-            eprintln!("error encountered in inbound thread: {:?}", error);
+            log::error!("error encountered in inbound thread: {:?}", error);
         }
         if let Err(error) = outbound.join() {
-            eprintln!("error encountered in outbound thread: {:?}", error);
+            log::error!("error encountered in outbound thread: {:?}", error);
         }
     }
 }

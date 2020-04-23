@@ -66,7 +66,7 @@ impl Inbound {
             }
 
             if let Err(e) = self.read_and_process_message() {
-                eprintln!("failed to process message: {:?}", e);
+                log::error!("failed to process message: {:?}", e);
                 self.reconnect().unwrap();
             }
         }
@@ -80,7 +80,7 @@ impl Inbound {
             ControlOp::Pong => self.process_pong(),
             ControlOp::Info(new_info) => self.process_info(new_info),
             ControlOp::Err(_) | ControlOp::Unknown(_) => {
-                eprintln!("Received unhandled message: {:?}", parsed_op)
+                log::error!("Received unhandled message: {:?}", parsed_op)
             }
         }
         Ok(())

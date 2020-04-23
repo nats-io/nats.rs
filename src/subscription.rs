@@ -159,7 +159,7 @@ impl Subscription {
             for m in r.iter() {
                 if let Err(e) = handler(m) {
                     // TODO(dlc) - Capture for last error?
-                    eprintln!("Error in callback! {:?}", e);
+                    log::error!("Error in callback! {:?}", e);
                 }
             }
         });
@@ -208,7 +208,7 @@ impl Drop for Subscription {
     fn drop(&mut self) {
         if self.do_unsub {
             if let Err(error) = self.unsub() {
-                eprintln!("error unsubscribing during Subscription Drop: {:?}", error);
+                log::error!("error unsubscribing during Subscription Drop: {:?}", error);
             }
         }
     }
