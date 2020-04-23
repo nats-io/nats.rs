@@ -6,7 +6,7 @@ use std::{
 
 use native_tls::TlsStream;
 
-pub use native_tls::{Certificate, Identity, TlsConnector, TlsConnectorBuilder};
+pub use native_tls::{Certificate, Identity, Protocol, TlsConnector, TlsConnectorBuilder};
 
 /// Returns a new TLS configuration object for use
 /// with `ConnectionOptions::set_tls_connector`.
