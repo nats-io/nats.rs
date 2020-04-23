@@ -112,7 +112,11 @@ impl Outbound {
     }
 
     pub(crate) fn is_disconnected(&self) -> bool {
-        matches!(*self.writer.lock(), Writer::Disconnected(_))
+        if let Writer::Disconnected(_) = *self.writer.lock() {
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn transition_to_disconnect_buffer(&self, buf_sz: usize) {

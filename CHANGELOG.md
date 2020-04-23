@@ -1,3 +1,13 @@
+# 0.3.2
+
+## Misc
+
+* The minimum supported Rust version (MSRV) is now
+  made explicit, and lowered to version 1.37.0 from
+  1.42.0. Crate version 0.3.1 has been yanked due to
+  it having silently broken older Rust versions than
+  1.42.0.
+
 # 0.3.1
 
 ## New Features

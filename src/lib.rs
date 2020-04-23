@@ -487,12 +487,12 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// to apply the desired configuration to all server connections.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     ///
     /// let nc = nats::ConnectionOptions::new()
     ///     .tls_required(true)
-    ///     .connect("demo.nats.io")?;
+    ///     .connect("my.nats.server")?;
     /// # Ok(())
     /// # }
     /// ```
