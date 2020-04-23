@@ -1,12 +1,15 @@
 language: rust
+
 rust:
   - 1.37.0
   - stable
-  - beta
-  - nightly
+
 jobs:
-  allow_failures:
-    - rust: nightly
   fast_finish: true
 
-cache: cargo
+cache:
+  cargo: true
+  directories:
+    ~/.rustup
+    ~/.cargo
+    $TRAVIS_BUILD_DIR/target
