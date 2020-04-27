@@ -156,6 +156,9 @@ pub struct ServerInfo {
     /// A list of server urls that a client can connect to.
     #[serde(default)]
     pub connect_urls: Vec<String>,
+    /// The client IP as known by the server.
+    #[serde(default)]
+    pub client_ip: String,
 }
 
 impl ServerInfo {
@@ -487,7 +490,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// to apply the desired configuration to all server connections.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     ///
     /// let nc = nats::ConnectionOptions::new()
@@ -509,12 +512,11 @@ impl<TypeState> ConnectionOptions<TypeState> {
     ///
     /// # Examples
     /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut tls_connector = nats::tls::builder()
-    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password").unwrap())
-    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes").unwrap())
-    ///     .build()
-    ///     .unwrap();
+    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
+    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
+    ///     .build()?;
     ///
     /// let nc = nats::ConnectionOptions::new()
     ///     .tls_connector(tls_connector)
@@ -905,5 +907,42 @@ impl Connection {
         let start = Instant::now();
         self.flush_timeout(Duration::from_secs(10))?;
         Ok(start.elapsed())
+    }
+  
+    /// Returns the client IP as known by the server.
+    /// Supported as of server version 2.1.6.
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// println!("ip: {:?}", nc.client_ip());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn client_ip(&self) -> io::Result<std::net::IpAddr> {
+        let info = self.shared_state.info.read();
+        if info.client_ip.is_empty() {
+            return Err(Error::new(
+                ErrorKind::Other,
+                &*format!(
+                    "client_ip was not provided by the server. \
+                    It is supported on servers above version 2.1.6. \
+                    The server version is {}",
+                    info.version
+                ),
+            ));
+        }
+
+        match info.client_ip.parse() {
+            Ok(addr) => Ok(addr),
+            Err(_) => Err(Error::new(
+                ErrorKind::InvalidData,
+                &*format!(
+                    "client_ip provided by the server cannot be parsed.
+                    The server provided IP: {}",
+                    info.client_ip
+                ),
+            )),
+        }
     }
 }
