@@ -834,7 +834,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        self.flush_timeout(Duration::from_secs(60))
+        self.flush_timeout(Duration::from_secs(3))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
