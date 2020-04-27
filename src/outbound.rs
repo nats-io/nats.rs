@@ -76,6 +76,14 @@ impl Writer {
             Writer::Disconnected(_) => Ok(()),
         }
     }
+
+    pub(crate) fn is_disconnected(&self) -> bool {
+        if let Writer::Disconnected(_) = self {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -172,6 +180,14 @@ impl Outbound {
 
     pub(crate) fn send_ping(&self) -> io::Result<()> {
         let mut writer = self.writer.lock();
+
+        if writer.is_disconnected() {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "The client is not currently connected to a server",
+            ));
+        }
+
         writer.write_all(b"PING\r\n")?;
         // Flush in place on pings.
         writer.flush()
