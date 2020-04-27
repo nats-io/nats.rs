@@ -49,7 +49,6 @@ pub(crate) struct Inbound {
     pub(crate) learned_servers: Vec<Server>,
     pub(crate) shared_state: Arc<SharedState>,
     pub(crate) status: ConnectionStatus,
-    pub(crate) info: ServerInfo,
 }
 
 impl Drop for Inbound {
@@ -104,7 +103,7 @@ impl Inbound {
 
         // execute disconnect callback if registered
         if let Some(ref cb) = self.shared_state.options.disconnect_callback.0 {
-            (cb)(&self.info);
+            (cb)(&self.shared_state.info.read());
         }
 
         self.status = ConnectionStatus::Reconnecting;
@@ -137,16 +136,15 @@ impl Inbound {
                 if let Ok((reader, writer, info)) = server.try_connect(&self.shared_state.options) {
                     // replace our reader and writer to correspond with the new socket
                     self.reader = reader;
-                    self.info = info.clone();
-                    *self.shared_state.info.write() = info;
                     if self.shared_state.outbound.replace_writer(writer).is_err() {
                         // record retry stats
                         server.reconnects = server.reconnects.overflowing_add(1).0;
                     } else {
                         server.reconnects = 0;
-                        self.learned_servers = self.info.learned_servers();
+                        self.learned_servers = info.learned_servers();
                         break 'outer;
                     }
+                    *self.shared_state.info.write() = info;
                 } else {
                     // record retry stats
                     server.reconnects = server.reconnects.overflowing_add(1).0;
@@ -165,7 +163,7 @@ impl Inbound {
 
         // trigger reconnected callback
         if let Some(ref cb) = self.shared_state.options.reconnect_callback.0 {
-            (cb)(&self.info);
+            (cb)(&self.shared_state.info.read());
         }
 
         Ok(())
@@ -179,8 +177,8 @@ impl Inbound {
     }
 
     fn process_info(&mut self, new_info: ServerInfo) {
-        self.info = new_info;
-        self.learned_servers = self.info.learned_servers();
+        self.learned_servers = new_info.learned_servers();
+        *self.shared_state.info.write() = new_info;
     }
 
     fn process_msg(&mut self, msg_args: MsgArgs) -> io::Result<()> {

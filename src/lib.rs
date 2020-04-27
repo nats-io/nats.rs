@@ -123,7 +123,7 @@ const LANG: &str = "rust";
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
