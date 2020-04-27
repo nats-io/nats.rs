@@ -104,7 +104,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -842,6 +842,30 @@ impl Connection {
         Ok(())
     }
 
+    /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
+    /// Will fail with `TimedOut` if the server takes longer than this duration to respond.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// nc.flush()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
+        // TODO(dlc) - bounded or oneshot?
+        let (s, r) = crossbeam_channel::bounded(1);
+        {
+            let mut pongs = self.shared_state.pongs.lock();
+            pongs.push_back(s);
+        }
+        self.shared_state.outbound.send_ping()?;
+        r.recv_timeout(duration)
+            .map(|_| ())
+            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))
+    }
+
     /// Close a NATS connection.
     ///
     /// # Example
@@ -855,5 +879,23 @@ impl Connection {
     pub fn close(self) -> io::Result<()> {
         drop(self);
         Ok(())
+    }
+
+    /// Calculates the round trip time between this client and the server,
+    /// if the server is currently connected. Fails with `TimedOut` if
+    /// the server takes more than 10 seconds to respond.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// println!("server rtt: {:?}", nc.rtt());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn rtt(&self) -> io::Result<Duration> {
+        let start = Instant::now();
+        self.flush_timeout(Duration::from_secs(10))?;
+        Ok(start.elapsed())
     }
 }
