@@ -95,7 +95,7 @@ impl Inbound {
         {
             let mut pongs = self.shared_state.pongs.lock();
             while let Some(s) = pongs.pop_front() {
-                s.send(true).unwrap();
+                s.send(false).unwrap();
             }
         }
 

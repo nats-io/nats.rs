@@ -821,6 +821,9 @@ impl Connection {
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
+    /// Will fail with `TimedOut` if the server does not respond with in 60 seconds.
+    /// Will fail with `NotConnected` if the server is not currently connected.
+    /// Will fail with `BrokenPipe` if the connection to the server is lost.
     ///
     /// # Example
     /// ```
@@ -831,19 +834,13 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        // TODO(dlc) - bounded or oneshot?
-        let (s, r) = crossbeam_channel::bounded(1);
-        {
-            let mut pongs = self.shared_state.pongs.lock();
-            pongs.push_back(s);
-        }
-        self.shared_state.outbound.send_ping()?;
-        r.recv().unwrap();
-        Ok(())
+        self.flush_timeout(Duration::from_secs(60))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
     /// Will fail with `TimedOut` if the server takes longer than this duration to respond.
+    /// Will fail with `NotConnected` if the server is not currently connected.
+    /// Will fail with `BrokenPipe` if the connection to the server is lost.
     ///
     /// # Example
     /// ```
@@ -860,10 +857,21 @@ impl Connection {
             let mut pongs = self.shared_state.pongs.lock();
             pongs.push_back(s);
         }
+
         self.shared_state.outbound.send_ping()?;
-        r.recv_timeout(duration)
-            .map(|_| ())
-            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))
+
+        let success = r
+            .recv_timeout(duration)
+            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))?;
+
+        if !success {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "The connection to the remote server was lost",
+            ));
+        }
+
+        Ok(())
     }
 
     /// Close a NATS connection.
