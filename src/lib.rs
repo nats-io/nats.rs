@@ -156,6 +156,9 @@ pub struct ServerInfo {
     /// A list of server urls that a client can connect to.
     #[serde(default)]
     pub connect_urls: Vec<String>,
+    /// The client IP as known by the server.
+    #[serde(default)]
+    pub client_ip: String,
 }
 
 impl ServerInfo {
