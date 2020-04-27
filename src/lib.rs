@@ -821,7 +821,7 @@ impl Connection {
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
-    /// Will fail with `TimedOut` if the server does not respond with in 60 seconds.
+    /// Will fail with `TimedOut` if the server does not respond with in 10 seconds.
     /// Will fail with `NotConnected` if the server is not currently connected.
     /// Will fail with `BrokenPipe` if the connection to the server is lost.
     ///
@@ -834,7 +834,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        self.flush_timeout(Duration::from_secs(3))
+        self.flush_timeout(Duration::from_secs(10))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
