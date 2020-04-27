@@ -239,6 +239,7 @@ pub(crate) struct SharedState {
     pub(crate) subs: RwLock<HashMap<usize, SubscriptionState>>,
     pub(crate) pongs: Mutex<VecDeque<Sender<bool>>>,
     pub(crate) outbound: Outbound,
+    pub(crate) info: RwLock<ServerInfo>,
 }
 
 impl SharedState {
@@ -272,6 +273,8 @@ impl SharedState {
 
         let outbound = Outbound::new(writer);
 
+        let learned_servers = parse_server_addresses(&info.connect_urls);
+
         let shared_state = Arc::new(SharedState {
             id: nuid::next(),
             shutting_down: AtomicBool::new(false),
@@ -281,12 +284,12 @@ impl SharedState {
             outbound,
             threads: Mutex::new(None),
             options,
+            info: RwLock::new(info),
         });
 
         let mut inbound = Inbound {
-            learned_servers: parse_server_addresses(&info.connect_urls),
+            learned_servers,
             reader,
-            info,
             status: ConnectionStatus::Connected,
             configured_servers: servers,
             shared_state: shared_state.clone(),

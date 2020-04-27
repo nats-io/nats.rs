@@ -156,6 +156,9 @@ pub struct ServerInfo {
     /// A list of server urls that a client can connect to.
     #[serde(default)]
     pub connect_urls: Vec<String>,
+    /// The client IP as known by the server.
+    #[serde(default)]
+    pub client_ip: String,
 }
 
 impl ServerInfo {
@@ -855,5 +858,42 @@ impl Connection {
     pub fn close(self) -> io::Result<()> {
         drop(self);
         Ok(())
+    }
+
+    /// Returns the client IP as known by the server.
+    /// Supported as of server version 2.1.6.
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// println!("ip: {:?}", nc.client_ip());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn client_ip(&self) -> io::Result<std::net::IpAddr> {
+        let info = self.shared_state.info.read();
+        if info.client_ip.is_empty() {
+            return Err(Error::new(
+                ErrorKind::Other,
+                &*format!(
+                    "client_ip was not provided by the server. \
+                    It is supported on servers above version 2.1.6. \
+                    The server version is {}",
+                    info.version
+                ),
+            ));
+        }
+
+        match info.client_ip.parse() {
+            Ok(addr) => Ok(addr),
+            Err(_) => Err(Error::new(
+                ErrorKind::InvalidData,
+                &*format!(
+                    "client_ip provided by the server cannot be parsed.
+                    The server provided IP: {}",
+                    info.client_ip
+                ),
+            )),
+        }
     }
 }
