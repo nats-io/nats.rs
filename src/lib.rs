@@ -825,7 +825,7 @@ impl Connection {
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
     /// Will fail with `TimedOut` if the server does not respond with in 10 seconds.
     /// Will fail with `NotConnected` if the server is not currently connected.
-    /// Will fail with `ConnectionReset` if the connection to the server is lost.
+    /// Will fail with `BrokenPipe` if the connection to the server is lost.
     ///
     /// # Example
     /// ```
@@ -842,7 +842,7 @@ impl Connection {
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
     /// Will fail with `TimedOut` if the server takes longer than this duration to respond.
     /// Will fail with `NotConnected` if the server is not currently connected.
-    /// Will fail with `ConnectionReset` if the connection to the server is lost.
+    /// Will fail with `BrokenPipe` if the connection to the server is lost.
     ///
     /// # Example
     /// ```
@@ -868,7 +868,7 @@ impl Connection {
 
         if !success {
             return Err(Error::new(
-                ErrorKind::ConnectionReset,
+                ErrorKind::BrokenPipe,
                 "The connection to the remote server was lost",
             ));
         }
@@ -908,7 +908,7 @@ impl Connection {
         self.flush_timeout(Duration::from_secs(10))?;
         Ok(start.elapsed())
     }
-  
+
     /// Returns the client IP as known by the server.
     /// Supported as of server version 2.1.6.
     /// # Example
