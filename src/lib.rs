@@ -490,7 +490,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// to apply the desired configuration to all server connections.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     ///
     /// let nc = nats::ConnectionOptions::new()
@@ -512,12 +512,11 @@ impl<TypeState> ConnectionOptions<TypeState> {
     ///
     /// # Examples
     /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut tls_connector = nats::tls::builder()
-    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password").unwrap())
-    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes").unwrap())
-    ///     .build()
-    ///     .unwrap();
+    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
+    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
+    ///     .build()?;
     ///
     /// let nc = nats::ConnectionOptions::new()
     ///     .tls_connector(tls_connector)
