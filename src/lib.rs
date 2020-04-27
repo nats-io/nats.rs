@@ -895,4 +895,19 @@ impl Connection {
             )),
         }
     }
+
+    /// Returns the client ID as known by the most recently connected server.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// println!("ip: {:?}", nc.client_id());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn client_id(&self) -> u64 {
+        let info = self.shared_state.info.read();
+        info.client_id
+    }
 }
