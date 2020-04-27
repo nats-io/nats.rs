@@ -53,17 +53,17 @@ fn bad_server(
     let server_info = |client_id, port| {
         format!(
             "INFO {{  \
-                \"server_id\": \"test\", \
-                \"server_name\": \"test\", \
-                \"host\": \"{}\", \
-                \"port\": {}, \
-                \"version\": \"bad\", \
-                \"go\": \"bad\", \
-                \"max_payload\": 4096, \
-                \"proto\": 0, \
-                \"client_id\": {}, \
-                \"connect_urls\": [\"{}:{}\"] \
-            }}\r\n",
+             \"server_id\": \"test\", \
+             \"server_name\": \"test\", \
+             \"host\": \"{}\", \
+             \"port\": {}, \
+             \"version\": \"bad\", \
+             \"go\": \"bad\", \
+             \"max_payload\": 4096, \
+             \"proto\": 0, \
+             \"client_id\": {}, \
+             \"connect_urls\": [\"{}:{}\"] \
+             }}\r\n",
             host,
             port,
             client_id,
