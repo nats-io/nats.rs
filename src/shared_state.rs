@@ -239,6 +239,7 @@ pub(crate) struct SharedState {
     pub(crate) subs: RwLock<HashMap<usize, SubscriptionState>>,
     pub(crate) pongs: Mutex<VecDeque<Sender<bool>>>,
     pub(crate) outbound: Outbound,
+    pub(crate) info: RwLock<ServerInfo>,
 }
 
 impl SharedState {
@@ -281,6 +282,7 @@ impl SharedState {
             outbound,
             threads: Mutex::new(None),
             options,
+            info: RwLock::new(info.clone()),
         });
 
         let mut inbound = Inbound {

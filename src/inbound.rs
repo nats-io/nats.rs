@@ -137,7 +137,8 @@ impl Inbound {
                 if let Ok((reader, writer, info)) = server.try_connect(&self.shared_state.options) {
                     // replace our reader and writer to correspond with the new socket
                     self.reader = reader;
-                    self.info = info;
+                    self.info = info.clone();
+                    *self.shared_state.info.write() = info;
                     if self.shared_state.outbound.replace_writer(writer).is_err() {
                         // record retry stats
                         server.reconnects = server.reconnects.overflowing_add(1).0;
