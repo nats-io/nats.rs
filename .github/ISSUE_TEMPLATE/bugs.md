@@ -4,15 +4,20 @@ about: Report a bug found in the NATS Rust client
 labels: bug
 ---
 
-Bug reports must include the following information:
+Make sure that these boxes are checked before submitting your issue -- thank you!
 
-1. natsio version (is this a recent version?)
-2. output of `rustc --version` (we support Rust 1.37 and up)
-3. your operating system
-4. code that behaved in an unexpected way
-  ```rust
-  // code goes here
-  ```
-5. what did you expect? what happened instead?
+ - [ ] Included below version and environment information
+ - [ ] Included a [Minimal, Complete, and Verifiable example] (https://stackoverflow.com/help/mcve)
 
-Thank you for helping us to understand your issue.
+#### natsio version (`grep 'name = "natsio"' Cargo.lock -A 1`)
+
+#### rustc version (`rustc --version` - we support Rust 1.37 and up)
+
+#### OS/Container environment:
+
+#### Steps or code to reproduce the issue:
+
+#### Expected result:
+
+#### Actual result:
+
