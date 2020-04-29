@@ -2,4 +2,4 @@ blank_issues_enabled: true
 contact_links:
   - name: NATS Slack
     url: https://slack.nats.io
-    about: Please ask and answer questions in the #rust channel here.
+    about: Please ask and answer questions in the rust channel here.
