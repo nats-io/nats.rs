@@ -864,7 +864,7 @@ impl Connection {
 
         // We only push to the mutex if the ping was successfully queued.
         // By holding the mutex across calls, we guarantee ordering in the
-        // queue.
+        // queue will match the order of calls to `send_ping`.
         pongs.push_back(s);
         drop(pongs);
 

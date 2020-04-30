@@ -86,17 +86,28 @@ impl Inbound {
     }
 
     fn reconnect(&mut self) -> io::Result<()> {
+        // we must hold this mutex while changing state to disconnected,
+        // setting the outbound buffer to disconnected, and then clearing
+        // all in-flight pongs.
+        let mut pongs = self.shared_state.pongs.lock();
+
         self.status = ConnectionStatus::Disconnected;
+
+        // we must call this while holding the pongs lock to ensure that
+        // any calls to `Connection::flush` / `Connection::flush_timeout`
+        // witness a disconnected outbound buffer state
         self.shared_state
             .outbound
             .transition_to_disconnect_buffer(self.shared_state.options.reconnect_buffer_size);
+
         // flush outstanding pongs
-        {
-            let mut pongs = self.shared_state.pongs.lock();
-            while let Some(s) = pongs.pop_front() {
-                s.send(false).unwrap();
-            }
+        while let Some(s) = pongs.pop_front() {
+            s.send(false).unwrap();
         }
+
+        // we only need to hold this mutex while setting the outbound buffer
+        // to disconnected, and clearing pending pongs.
+        drop(pongs);
 
         // clear any captured errors
         *self.shared_state.last_error.write() = Ok(());
