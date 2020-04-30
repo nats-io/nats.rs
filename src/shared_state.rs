@@ -201,10 +201,12 @@ impl Server {
         let info = crate::parser::expect_info(&mut stream)?;
 
         if !info.nonce.is_empty() {
-            let nkey = nkey.unwrap();
-            let sig = nkey.sign(info.nonce.as_bytes()).unwrap();
-            let sig = base64_url::encode(&sig);
-            connect_op.sig = Some(sig);
+            if let Some(nkey) = nkey {
+                let sig = nkey.sign(info.nonce.as_bytes())
+                    .map_err(|err| Error::new(ErrorKind::Other, err))?;
+                let sig = base64_url::encode(&sig);
+                connect_op.sig = Some(sig);
+            }
         }
 
         let op = format!(
