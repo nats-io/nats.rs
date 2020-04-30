@@ -609,17 +609,18 @@ impl Message {
     /// # }
     /// ```
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        if let Some(shared_state) = &self.responder {
-            if let Some(reply) = &self.reply {
-                shared_state.outbound.send_response(reply, msg.as_ref())?;
+        match (&self.responder, &self.reply) {
+            (Some(shared_state), Some(reply)) => {
+                shared_state.outbound.send_response(reply, msg.as_ref())
             }
-        } else {
-            return Err(Error::new(
+            (None, None) => Err(Error::new(
                 ErrorKind::InvalidInput,
                 "No reply subject available",
-            ));
+            )),
+            (Some(_), None) | (None, Some(_)) => unreachable!(
+                "`reply` and `shared_state` should either both be `Some` or both be `None`"
+            ),
         }
-        Ok(())
     }
 }
 
