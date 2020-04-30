@@ -2,13 +2,13 @@
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
 //!
-//! NATS.io is a simple, secure and high performance open source messaging system for cloud native applications,
-//! `IoT` messaging, and microservices architectures.
+//! NATS.io is a simple, secure and high performance open source messaging system for cloud native
+//! applications, `IoT` messaging, and microservices architectures.
 //!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
-//!
+
 #![cfg_attr(test, deny(warnings))]
 #![deny(
     missing_docs,
@@ -114,6 +114,7 @@ use std::{
     fmt,
     io::{self, Error, ErrorKind},
     marker::PhantomData,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -195,8 +196,7 @@ impl fmt::Debug for Callback {
     }
 }
 
-#[doc(hidden)]
-pub mod options_typestate {
+mod options_typestate {
     /// `ConnectionOptions` typestate indicating
     /// that there has not yet been
     /// any auth-related configuration
@@ -342,6 +342,35 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             name: self.name,
             reconnect_buffer_size: self.reconnect_buffer_size,
             close_callback: self.close_callback,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
+            max_reconnects: self.max_reconnects,
+            tls_connector: self.tls_connector,
+            tls_required: self.tls_required,
+        }
+    }
+
+    /// Authenticate with NATS using a credentials file
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .with_credentials("path/to/my.creds")
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_credentials(
+        self,
+        path: impl AsRef<Path>,
+    ) -> ConnectionOptions<options_typestate::Authenticated> {
+        ConnectionOptions {
+            auth: AuthStyle::Credentials(path.as_ref().into()),
+            typestate: PhantomData,
+            no_echo: self.no_echo,
+            name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
             max_reconnects: self.max_reconnects,
@@ -597,9 +626,16 @@ pub struct Connection {
 
 #[derive(Serialize, Clone, Debug)]
 enum AuthStyle {
-    //    Credentials(String, String),
+    /// Authenticate using a token.
     Token(String),
+
+    /// Authenticate using a username and password.
     UserPass(String, String),
+
+    /// Authenticate using a `.creds` file.
+    Credentials(PathBuf),
+
+    /// No authentication.
     None,
 }
 

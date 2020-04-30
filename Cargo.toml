@@ -36,6 +36,8 @@ parking_lot = "0.10.2"
 rand = "0.7.3"
 native-tls = "0.2.4"
 log = "0.4.8"
+nkeys = "0.0.9"
+base64-url = "1.1.13"
 
 [dev-dependencies]
 criterion = "0.3.2"

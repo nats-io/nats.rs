@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::TryFrom,
+    fs,
     io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
@@ -11,8 +12,10 @@ use std::{
     time::Duration,
 };
 
+use nkeys::KeyPair;
 use parking_lot::{Mutex, RwLock};
 use rand::{seq::SliceRandom, thread_rng};
+use regex::Regex;
 use serde::Serialize;
 
 use crate::{
@@ -23,6 +26,10 @@ use crate::{
 };
 
 use crossbeam_channel::Sender;
+
+// Parses a credentials `.creds` file.
+const CREDS_FILE_REGEX: &str =
+    r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))";
 
 // Accepts any input that can be treated as an Iterator over string-like objects
 pub(crate) fn parse_server_addresses(
@@ -94,6 +101,10 @@ impl Server {
         options: &FinalizedOptions,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         inject_io_failure()?;
+
+        let jwt;
+        let mut nkey = None;
+
         let mut connect_op = Connect {
             tls_required: options.tls_required || self.tls_required,
             name: options.name.as_ref(),
@@ -104,6 +115,8 @@ impl Server {
             user: None,
             pass: None,
             auth_token: None,
+            jwt: None,
+            sig: None,
             echo: !options.no_echo,
         };
 
@@ -113,13 +126,30 @@ impl Server {
                 connect_op.pass = Some(pass);
             }
             AuthStyle::Token(token) => connect_op.auth_token = Some(token),
-            _ => {}
-        }
+            AuthStyle::Credentials(path) => {
+                let contents = fs::read_to_string(&path)?;
+                let re = Regex::new(CREDS_FILE_REGEX).unwrap();
+                let captures = re.captures_iter(&contents).collect::<Vec<_>>();
 
-        let op = format!(
-            "CONNECT {}\r\nPING\r\n",
-            serde_json::to_string(&connect_op)?
-        );
+                let (user_jwt, seed) = match &captures[..] {
+                    [jwt, seed, ..] => (jwt[1].to_string(), seed[1].to_string()),
+                    _ => {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("cannot parse credentials in {}", path.display()),
+                        ))
+                    }
+                };
+
+                let key_pair = KeyPair::from_seed(&seed)
+                    .map_err(|err| Error::new(ErrorKind::InvalidData, err))?;
+                nkey = Some(key_pair);
+
+                jwt = Some(user_jwt);
+                connect_op.jwt = jwt.as_ref();
+            }
+            AuthStyle::None => {}
+        }
 
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
@@ -145,7 +175,7 @@ impl Server {
         for addr in addrs {
             std::thread::sleep(backoff);
 
-            match self.try_connect_inner(options, addr, &op) {
+            match self.try_connect_inner(options, addr, connect_op.clone(), nkey.as_ref()) {
                 Ok(result) => return Ok(result),
                 Err(e) => last_err = e,
             };
@@ -163,11 +193,24 @@ impl Server {
         &mut self,
         options: &FinalizedOptions,
         addr: SocketAddr,
-        op: &str,
+        mut connect_op: Connect<'_>,
+        nkey: Option<&KeyPair>,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         inject_io_failure()?;
         let mut stream = TcpStream::connect(&addr)?;
         let info = crate::parser::expect_info(&mut stream)?;
+
+        if !info.nonce.is_empty() {
+            let nkey = nkey.unwrap();
+            let sig = nkey.sign(info.nonce.as_bytes()).unwrap();
+            let sig = base64_url::encode(&sig);
+            connect_op.sig = Some(sig);
+        }
+
+        let op = format!(
+            "CONNECT {}\r\nPING\r\n",
+            serde_json::to_string(&connect_op)?
+        );
 
         // potentially upgrade to TLS
         let (mut reader, mut writer) =
@@ -318,7 +361,7 @@ impl SharedState {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Clone, Serialize, Debug)]
 struct Connect<'a> {
     #[serde(skip_serializing_if = "empty_or_none")]
     name: Option<&'a String>,
@@ -338,6 +381,10 @@ struct Connect<'a> {
     pass: Option<&'a String>,
     #[serde(skip_serializing_if = "empty_or_none")]
     auth_token: Option<&'a String>,
+    #[serde(skip_serializing_if = "empty_or_none")]
+    jwt: Option<&'a String>,
+    #[serde(skip_serializing_if = "empty_or_none_owned")]
+    sig: Option<String>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -348,6 +395,14 @@ const fn if_true(field: &bool) -> bool {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 #[inline]
 fn empty_or_none(field: &Option<&String>) -> bool {
+    match field {
+        Some(inner) => inner.is_empty(),
+        None => true,
+    }
+}
+
+#[inline]
+fn empty_or_none_owned(field: &Option<String>) -> bool {
     match field {
         Some(inner) => inner.is_empty(),
         None => true,
