@@ -854,14 +854,19 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
-        // TODO(dlc) - bounded or oneshot?
         let (s, r) = crossbeam_channel::bounded(1);
-        {
-            let mut pongs = self.shared_state.pongs.lock();
-            pongs.push_back(s);
-        }
 
+        // We take out the mutex before sending a ping (which may fail)
+        let mut pongs = self.shared_state.pongs.lock();
+
+        // This will throw an error if the system is disconnected.
         self.shared_state.outbound.send_ping()?;
+
+        // We only push to the mutex if the ping was successfully queued.
+        // By holding the mutex across calls, we guarantee ordering in the
+        // queue will match the order of calls to `send_ping`.
+        pongs.push_back(s);
+        drop(pongs);
 
         let success = r
             .recv_timeout(duration)
