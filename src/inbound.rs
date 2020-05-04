@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufRead, BufReader, Error, ErrorKind, Read},
+    io::{self, BufRead, BufReader, Read},
     net::TcpStream,
     sync::{atomic::Ordering, Arc},
 };
@@ -64,7 +64,8 @@ impl Inbound {
                 log::error!("failed to process message: {:?}", e);
                 log::info!("attempting reconnect after losing server connection");
 
-                if self.reconnect().is_err() {
+                if !self.reconnect() {
+                    log::error!("shutting down the system after failing to reconnect",);
                     self.shared_state.shutdown();
                     return;
                 }
@@ -87,8 +88,7 @@ impl Inbound {
         Ok(())
     }
 
-    fn reconnect(&mut self) -> io::Result<()> {
-        inject_io_failure()?;
+    fn reconnect(&mut self) -> bool {
         // we must hold this mutex while changing state to disconnected,
         // setting the outbound buffer to disconnected, and then clearing
         // all in-flight pongs.
@@ -130,10 +130,8 @@ impl Inbound {
         // more each time we cycle through the known set.
         'outer: loop {
             if self.shared_state.shutting_down.load(Ordering::Acquire) {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    "system is shutting down, no further reconnections will be attempted",
-                ));
+                log::warn!("ending reconnection attempt after detecting that the system shutdown flag is set");
+                return false;
             }
 
             self.configured_servers.shuffle(&mut thread_rng());
@@ -160,14 +158,29 @@ impl Inbound {
                 if let Ok((reader, writer, info)) = server.try_connect(&self.shared_state.options) {
                     // replace our reader and writer to correspond with the new socket
                     self.reader = reader;
+
                     if self.shared_state.outbound.replace_writer(writer).is_err() {
                         // record retry stats
                         server.reconnects = server.reconnects.overflowing_add(1).0;
-                    } else {
-                        self.learned_servers = info.learned_servers();
-                        break 'outer;
+                        continue;
                     }
+
+                    // resend subscriptions
+                    if let Err(e) = self
+                        .shared_state
+                        .outbound
+                        .resend_subs(&self.shared_state.subs.read())
+                    {
+                        log::warn!(
+                            "failed to send subscriptions to newly connected server: {:?}",
+                            e
+                        );
+                        continue;
+                    }
+
+                    self.learned_servers = info.learned_servers();
                     *self.shared_state.info.write() = info;
+                    break 'outer;
                 } else {
                     // record retry stats
                     server.reconnects = server.reconnects.overflowing_add(1).0;
@@ -178,18 +191,16 @@ impl Inbound {
             // threshold, we will transition into the `Closed` state and shut
             // down this connection.
             if !attempted && self.shared_state.options.max_reconnects.is_some() {
-                return Err(Error::new(
-                    ErrorKind::TimedOut,
-                    &*format!(
-                        "failed to reconnect to any known \
+                log::warn!(
+                    "failed to reconnect to any known \
                         servers ({:?}) within {} retries",
-                        self.configured_servers
-                            .iter()
-                            .chain(self.learned_servers.iter())
-                            .collect::<Vec<_>>(),
-                        self.shared_state.options.max_reconnects.unwrap(),
-                    ),
-                ));
+                    self.configured_servers
+                        .iter()
+                        .chain(self.learned_servers.iter())
+                        .collect::<Vec<_>>(),
+                    self.shared_state.options.max_reconnects.unwrap(),
+                );
+                return false;
             }
         }
 
@@ -201,17 +212,12 @@ impl Inbound {
             server.reconnects = 0;
         }
 
-        // resend subscriptions
-        self.shared_state
-            .outbound
-            .resend_subs(&self.shared_state.subs.read())?;
-
         // trigger reconnected callback
         if let Some(ref cb) = self.shared_state.options.reconnect_callback.0 {
             (cb)();
         }
 
-        Ok(())
+        true
     }
 
     fn process_pong(&mut self) {

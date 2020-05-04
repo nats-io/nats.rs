@@ -203,10 +203,7 @@ impl Server {
         let parsed_op = parse_control_op(&mut reader)?;
 
         match parsed_op {
-            ControlOp::Pong => {
-                self.reconnects = 0;
-                Ok((reader, writer, info))
-            }
+            ControlOp::Pong => Ok((reader, writer, info)),
             ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
             ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
                 log::error!(
