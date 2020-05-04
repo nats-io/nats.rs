@@ -182,9 +182,17 @@ fn bad_server(
                         other => panic!("unknown args: {:?}", other),
                     };
 
-                    let next_line = read_line(&mut client.socket).unwrap();
+                    let next_line = if let Some(next_line) = read_line(&mut client.socket) {
+                        next_line
+                    } else {
+                        to_evict.push(*client_id);
+                        continue;
+                    };
 
-                    assert_eq!(len.parse::<usize>().unwrap(), next_line.len());
+                    if len.parse::<usize>().unwrap() != next_line.len() {
+                        to_evict.push(*client_id);
+                        continue;
+                    }
 
                     for sub in subs.get(subject).unwrap_or(&HashSet::new()) {
                         let out = if let Some(group) = reply {
