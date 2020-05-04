@@ -16,6 +16,7 @@ use rand::{seq::SliceRandom, thread_rng};
 use serde::Serialize;
 
 use crate::{
+    inject_delay, inject_io_failure,
     parser::{parse_control_op, ControlOp},
     split_tls, AuthStyle, FinalizedOptions, Inbound, Message, Outbound, Reader, ServerInfo, Writer,
     LANG, VERSION,
@@ -92,6 +93,7 @@ impl Server {
         &mut self,
         options: &FinalizedOptions,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
+        inject_io_failure()?;
         let mut connect_op = Connect {
             tls_required: options.tls_required || self.tls_required,
             name: options.name.as_ref(),
@@ -163,6 +165,7 @@ impl Server {
         addr: SocketAddr,
         op: &str,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
+        inject_io_failure()?;
         let mut stream = TcpStream::connect(&addr)?;
         let info = crate::parser::expect_info(&mut stream)?;
 
@@ -218,8 +221,8 @@ impl Server {
 
 #[derive(Debug)]
 pub(crate) struct WorkerThreads {
-    inbound: Option<thread::JoinHandle<()>>,
-    outbound: Option<thread::JoinHandle<()>>,
+    pub(crate) inbound: Option<thread::JoinHandle<()>>,
+    pub(crate) outbound: Option<thread::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -247,6 +250,7 @@ impl SharedState {
         options: FinalizedOptions,
         nats_url: &str,
     ) -> io::Result<Arc<SharedState>> {
+        inject_io_failure()?;
         let mut servers = parse_server_addresses(nats_url.split(','));
 
         let mut last_err_opt = None;
@@ -300,6 +304,7 @@ impl SharedState {
         let outbound_thread = thread::spawn(move || outbound_state.outbound.flush_loop());
 
         {
+            inject_delay();
             let mut threads = shared_state.threads.lock();
             *threads = Some(WorkerThreads {
                 inbound: Some(inbound_thread),
@@ -313,17 +318,6 @@ impl SharedState {
     pub(crate) fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
         self.outbound.shutdown();
-
-        let mut threads = self.threads.lock().take().unwrap();
-        let inbound = threads.inbound.take().unwrap();
-        let outbound = threads.outbound.take().unwrap();
-
-        if let Err(error) = inbound.join() {
-            log::error!("error encountered in inbound thread: {:?}", error);
-        }
-        if let Err(error) = outbound.join() {
-            log::error!("error encountered in outbound thread: {:?}", error);
-        }
     }
 }
 

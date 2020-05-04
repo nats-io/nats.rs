@@ -89,6 +89,20 @@ mod outbound;
 mod parser;
 mod shared_state;
 
+#[cfg(feature = "faults")]
+mod fault_injection;
+
+#[cfg(feature = "faults")]
+use fault_injection::{inject_delay, inject_io_failure};
+
+#[cfg(not(feature = "faults"))]
+fn inject_delay() {}
+
+#[cfg(not(feature = "faults"))]
+fn inject_io_failure() -> io::Result<()> {
+    Ok(())
+}
+
 /// Functionality relating to TLS configuration
 pub mod tls;
 
@@ -550,6 +564,19 @@ pub(crate) struct ShutdownDropper {
 impl Drop for ShutdownDropper {
     fn drop(&mut self) {
         self.shared_state.shutdown();
+
+        inject_delay();
+        if let Some(mut threads) = self.shared_state.threads.lock().take() {
+            let inbound = threads.inbound.take().unwrap();
+            let outbound = threads.outbound.take().unwrap();
+
+            if let Err(error) = inbound.join() {
+                log::error!("error encountered in inbound thread: {:?}", error);
+            }
+            if let Err(error) = outbound.join() {
+                log::error!("error encountered in outbound thread: {:?}", error);
+            }
+        }
     }
 }
 
@@ -870,6 +897,7 @@ impl Connection {
         let (s, r) = crossbeam_channel::bounded(1);
 
         // We take out the mutex before sending a ping (which may fail)
+        inject_delay();
         let mut pongs = self.shared_state.pongs.lock();
 
         // This will throw an error if the system is disconnected.

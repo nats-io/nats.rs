@@ -7,6 +7,7 @@ use std::{
 use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
+    inject_delay, inject_io_failure,
     parser::{parse_control_op, ControlOp, MsgArgs},
     Message, Server, ServerInfo, SharedState, SubscriptionState, TlsReader,
 };
@@ -19,6 +20,7 @@ pub(crate) enum Reader {
 
 impl BufRead for Reader {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        inject_io_failure()?;
         match self {
             Reader::Tcp(br) => br.fill_buf(),
             Reader::Tls(br) => br.fill_buf(),
@@ -35,6 +37,7 @@ impl BufRead for Reader {
 
 impl Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        inject_io_failure()?;
         match self {
             Reader::Tcp(br) => br.read(buf),
             Reader::Tls(br) => br.read(buf),
@@ -70,6 +73,7 @@ impl Inbound {
     }
 
     fn read_and_process_message(&mut self) -> io::Result<()> {
+        inject_io_failure()?;
         let parsed_op = parse_control_op(&mut self.reader)?;
         match parsed_op {
             ControlOp::Msg(msg_args) => self.process_msg(msg_args)?,
@@ -84,9 +88,11 @@ impl Inbound {
     }
 
     fn reconnect(&mut self) -> io::Result<()> {
+        inject_io_failure()?;
         // we must hold this mutex while changing state to disconnected,
         // setting the outbound buffer to disconnected, and then clearing
         // all in-flight pongs.
+        inject_delay();
         let mut pongs = self.shared_state.pongs.lock();
 
         // we must call this while holding the pongs lock to ensure that
@@ -113,9 +119,23 @@ impl Inbound {
             (cb)();
         }
 
+        log::info!(
+            "attempting reconnection to configured servers {:?} \
+            and learned servers {:?}",
+            self.configured_servers,
+            self.learned_servers
+        );
+
         // loop through our known servers until we establish a connection, backing-off
         // more each time we cycle through the known set.
         'outer: loop {
+            if self.shared_state.shutting_down.load(Ordering::Acquire) {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "system is shutting down, no further reconnections will be attempted",
+                ));
+            }
+
             self.configured_servers.shuffle(&mut thread_rng());
             self.learned_servers.shuffle(&mut thread_rng());
 
@@ -144,7 +164,6 @@ impl Inbound {
                         // record retry stats
                         server.reconnects = server.reconnects.overflowing_add(1).0;
                     } else {
-                        server.reconnects = 0;
                         self.learned_servers = info.learned_servers();
                         break 'outer;
                     }
@@ -174,6 +193,14 @@ impl Inbound {
             }
         }
 
+        // reset all server connection attempts to 0
+        for server in self.configured_servers.iter_mut() {
+            server.reconnects = 0;
+        }
+        for server in self.learned_servers.iter_mut() {
+            server.reconnects = 0;
+        }
+
         // resend subscriptions
         self.shared_state
             .outbound
@@ -188,6 +215,7 @@ impl Inbound {
     }
 
     fn process_pong(&mut self) {
+        inject_delay();
         let mut pongs = self.shared_state.pongs.lock();
         if let Some(s) = pongs.pop_front() {
             s.send(true).unwrap();
@@ -200,6 +228,7 @@ impl Inbound {
     }
 
     fn process_msg(&mut self, msg_args: MsgArgs) -> io::Result<()> {
+        inject_io_failure()?;
         const CRLF_LEN: u32 = 2;
 
         let mut msg = Message {

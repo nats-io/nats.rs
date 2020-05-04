@@ -13,7 +13,7 @@ use nom::{
     IResult,
 };
 
-use crate::ServerInfo;
+use crate::{inject_io_failure, ServerInfo};
 
 // Protocol
 const INFO: &[u8] = b"INFO";
@@ -28,6 +28,7 @@ fn is_valid_op_char(c: u8) -> bool {
 }
 
 pub(crate) fn parse_control_op<R: BufRead>(mut reader: R) -> io::Result<ControlOp> {
+    inject_io_failure()?;
     // This should not do a malloc here so this should be ok.
     let mut buf = Vec::new();
     let (input, start_len, (op, args)) = {
@@ -75,6 +76,7 @@ pub(crate) fn parse_control_op<R: BufRead>(mut reader: R) -> io::Result<ControlO
 }
 
 fn parse_msg_args(args: &[u8]) -> io::Result<ControlOp> {
+    inject_io_failure()?;
     let a = String::from_utf8_lossy(args);
     // subject sid <reply> msg_len
     // TODO(dlc) - convert to nom.
@@ -115,6 +117,7 @@ fn parse_err(args: &[u8]) -> ControlOp {
 }
 
 pub(crate) fn expect_info(reader: &mut TcpStream) -> io::Result<ServerInfo> {
+    inject_io_failure()?;
     // TODO(spacejam) revisit this with a profiler and make it
     // more optimized to minimize time-to-first-byte.
     let mut buf = Vec::with_capacity(512);
@@ -142,6 +145,7 @@ fn control_args(input: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 fn parse_info(input: &[u8]) -> io::Result<ControlOp> {
+    inject_io_failure()?;
     let info = serde_json::from_slice(input)?;
     Ok(ControlOp::Info(info))
 }

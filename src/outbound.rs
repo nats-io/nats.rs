@@ -2,12 +2,11 @@ use std::{
     collections::HashMap,
     io::{self, BufWriter, Error, ErrorKind, Write},
     net::{Shutdown, TcpStream},
-    sync::atomic::{AtomicBool, Ordering},
 };
 
 use parking_lot::{Condvar, Mutex};
 
-use crate::{SubscriptionState, TlsWriter};
+use crate::{inject_delay, inject_io_failure, SubscriptionState, TlsWriter};
 
 #[derive(Debug)]
 pub(crate) struct DisconnectWriter {
@@ -34,6 +33,7 @@ pub(crate) enum Writer {
 
 impl Write for Writer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        inject_io_failure()?;
         match self {
             Writer::Tcp(bw) => bw.write(buf),
             Writer::Tls(bw) => bw.write(buf),
@@ -57,6 +57,7 @@ impl Write for Writer {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        inject_io_failure()?;
         match self {
             Writer::Tcp(bw) => bw.flush(),
             Writer::Tls(bw) => bw.flush(),
@@ -70,29 +71,43 @@ impl Write for Writer {
 }
 
 impl Writer {
-    fn is_empty(&self) -> bool {
+    fn flusher_should_wait(&self) -> bool {
         match self {
             Writer::Tcp(bw) => bw.buffer().is_empty(),
             Writer::Tls(bw) => bw.buffer().is_empty(),
-            Writer::Disconnected(db) => db.len == 0,
+            Writer::Disconnected(_) => true,
             Writer::Closed => false,
         }
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self) -> io::Result<()> {
+        inject_io_failure()?;
         match self {
             Writer::Tcp(bw) => {
-                let _unchecked = bw.get_mut().shutdown(Shutdown::Both);
+                inject_io_failure()?;
+                bw.flush()?;
+                inject_io_failure()?;
+                bw.get_mut().shutdown(Shutdown::Both)?;
             }
             Writer::Tls(bw) => {
-                let _unchecked = bw.get_mut().shutdown();
+                bw.flush()?;
+                bw.get_mut().shutdown()?;
             }
             Writer::Disconnected(_) | Writer::Closed => (),
         }
+        Ok(())
     }
 
     pub(crate) fn is_disconnected(&self) -> bool {
         if let Writer::Disconnected(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        if let Writer::Closed = self {
             true
         } else {
             false
@@ -104,7 +119,6 @@ impl Writer {
 pub(crate) struct Outbound {
     writer: Mutex<Writer>,
     updated: Condvar,
-    shutting_down: AtomicBool,
 }
 
 impl Outbound {
@@ -112,32 +126,34 @@ impl Outbound {
         Outbound {
             writer: Mutex::new(writer),
             updated: Condvar::new(),
-            shutting_down: AtomicBool::new(false),
         }
     }
 
     pub(crate) fn flush_loop(&self) {
-        while !self.shutting_down.load(Ordering::Acquire) {
-            let mut writer = self.writer.lock();
-            while writer.is_empty() {
+        inject_delay();
+        let mut writer = self.writer.lock();
+        loop {
+            while writer.flusher_should_wait() {
                 self.updated.wait(&mut writer);
+            }
+
+            if writer.is_closed() {
+                log::info!("flusher thread shutting down");
+                return;
             }
 
             if let Err(error) = writer.flush() {
                 log::error!("Outbound thread failed to flush: {:?}", error);
 
-                // wait for our stream to be replaced by the Inbound during
-                // reconnection.
+                // wait on the Condvar here until the inbound thread
+                // replaces our buffer
                 self.updated.wait(&mut writer);
             }
-        }
-        let mut writer = self.writer.lock();
-        if let Err(error) = writer.flush() {
-            log::error!("Outbound thread failed to flush: {:?}", error);
         }
     }
 
     pub(crate) fn transition_to_disconnected(&self, buf_sz: usize) {
+        inject_delay();
         let mut writer = self.writer.lock();
         match &mut *writer {
             &mut Writer::Disconnected(_) | &mut Writer::Closed => {
@@ -148,15 +164,19 @@ impl Outbound {
     }
 
     pub(crate) fn shutdown(&self) {
+        inject_delay();
         let mut writer = self.writer.lock();
-        if let Err(error) = writer.flush() {
+        if writer.is_closed() {
+            return;
+        }
+
+        if let Err(error) = writer.shutdown() {
             log::error!(
-                "failed to flush outbound buffer during \
+                "encountered error during outbound \
                 transition to Closed state: {:?}",
                 error
             );
         }
-        let _unchecked = writer.shutdown();
         *writer = Writer::Closed;
         drop(writer);
         self.updated.notify_all();
@@ -167,9 +187,13 @@ impl Outbound {
     // to write and flush the entire disconnect buffer into
     // the new socket.
     pub(crate) fn replace_writer(&self, mut new_writer: Writer) -> io::Result<()> {
+        inject_io_failure()?;
+        inject_delay();
         let mut writer = self.writer.lock();
         if let Writer::Disconnected(ref db) = *writer {
+            inject_io_failure()?;
             new_writer.write_all(&db.buf[..db.len])?;
+            inject_io_failure()?;
             new_writer.flush()?;
         }
         *writer = new_writer;
@@ -182,6 +206,8 @@ impl Outbound {
     where
         F: FnOnce(&mut Writer) -> io::Result<()>,
     {
+        inject_delay();
+        inject_io_failure()?;
         let mut writer = self.writer.lock();
         match (f)(&mut *writer) {
             Ok(()) => Ok(()),
@@ -202,6 +228,8 @@ impl Outbound {
     }
 
     pub(crate) fn send_ping(&self) -> io::Result<()> {
+        inject_io_failure()?;
+        inject_delay();
         let mut writer = self.writer.lock();
 
         if writer.is_disconnected() {
@@ -260,6 +288,8 @@ impl Outbound {
     }
 
     pub(crate) fn resend_subs(&self, subs: &HashMap<usize, SubscriptionState>) -> io::Result<()> {
+        inject_io_failure()?;
+        inject_delay();
         let mut writer = self.writer.lock();
         for (sid, SubscriptionState { subject, queue, .. }) in subs {
             match queue {

@@ -11,6 +11,9 @@ readme = "README.md"
 keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
+[features]
+faults = []
+
 [lib]
 name = "nats"
 
