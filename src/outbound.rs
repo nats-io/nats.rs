@@ -29,6 +29,7 @@ pub(crate) enum Writer {
     Tcp(BufWriter<TcpStream>),
     Tls(BufWriter<TlsWriter>),
     Disconnected(DisconnectWriter),
+    Closed,
 }
 
 impl Write for Writer {
@@ -48,6 +49,10 @@ impl Write for Writer {
                     Ok(buf.len())
                 }
             }
+            Writer::Closed => Err(Error::new(
+                ErrorKind::Other,
+                "the connection is permanently closed",
+            )),
         }
     }
 
@@ -56,6 +61,10 @@ impl Write for Writer {
             Writer::Tcp(bw) => bw.flush(),
             Writer::Tls(bw) => bw.flush(),
             Writer::Disconnected(_) => Ok(()),
+            Writer::Closed => Err(Error::new(
+                ErrorKind::Other,
+                "the connection is permanently closed",
+            )),
         }
     }
 }
@@ -66,14 +75,19 @@ impl Writer {
             Writer::Tcp(bw) => bw.buffer().is_empty(),
             Writer::Tls(bw) => bw.buffer().is_empty(),
             Writer::Disconnected(db) => db.len == 0,
+            Writer::Closed => false,
         }
     }
 
-    fn shutdown(&mut self) -> io::Result<()> {
+    fn shutdown(&mut self) {
         match self {
-            Writer::Tcp(bw) => bw.get_mut().shutdown(Shutdown::Both),
-            Writer::Tls(bw) => bw.get_mut().shutdown(),
-            Writer::Disconnected(_) => Ok(()),
+            Writer::Tcp(bw) => {
+                let _unchecked = bw.get_mut().shutdown(Shutdown::Both);
+            }
+            Writer::Tls(bw) => {
+                let _unchecked = bw.get_mut().shutdown();
+            }
+            Writer::Disconnected(_) | Writer::Closed => (),
         }
     }
 
@@ -117,21 +131,35 @@ impl Outbound {
                 self.updated.wait(&mut writer);
             }
         }
-    }
-
-    pub(crate) fn is_disconnected(&self) -> bool {
-        if let Writer::Disconnected(_) = *self.writer.lock() {
-            true
-        } else {
-            false
+        let mut writer = self.writer.lock();
+        if let Err(error) = writer.flush() {
+            log::error!("Outbound thread failed to flush: {:?}", error);
         }
     }
 
-    pub(crate) fn transition_to_disconnect_buffer(&self, buf_sz: usize) {
-        if !self.is_disconnected() {
-            let mut writer = self.writer.lock();
-            *writer = Writer::Disconnected(DisconnectWriter::new(buf_sz));
+    pub(crate) fn transition_to_disconnected(&self, buf_sz: usize) {
+        let mut writer = self.writer.lock();
+        match &mut *writer {
+            &mut Writer::Disconnected(_) | &mut Writer::Closed => {
+                // nothing to do
+            }
+            other => *other = Writer::Disconnected(DisconnectWriter::new(buf_sz)),
         }
+    }
+
+    pub(crate) fn shutdown(&self) {
+        let mut writer = self.writer.lock();
+        if let Err(error) = writer.flush() {
+            log::error!(
+                "failed to flush outbound buffer during \
+                transition to Closed state: {:?}",
+                error
+            );
+        }
+        let _unchecked = writer.shutdown();
+        *writer = Writer::Closed;
+        drop(writer);
+        self.updated.notify_all();
     }
 
     // Replaces the underlying stream with a new socket.
@@ -148,11 +176,6 @@ impl Outbound {
         drop(writer);
         self.updated.notify_all();
         Ok(())
-    }
-
-    pub(crate) fn signal_shutdown(&self) {
-        self.shutting_down.store(true, Ordering::Release);
-        let _unchecked = self.writer.lock().shutdown();
     }
 
     fn with_writer<F>(&self, f: F) -> io::Result<()>

@@ -17,8 +17,8 @@ use serde::Serialize;
 
 use crate::{
     parser::{parse_control_op, ControlOp},
-    split_tls, AuthStyle, ConnectionStatus, FinalizedOptions, Inbound, Message, Outbound, Reader,
-    ServerInfo, Writer, LANG, VERSION,
+    split_tls, AuthStyle, FinalizedOptions, Inbound, Message, Outbound, Reader, ServerInfo, Writer,
+    LANG, VERSION,
 };
 
 use crossbeam_channel::Sender;
@@ -290,7 +290,6 @@ impl SharedState {
         let mut inbound = Inbound {
             learned_servers,
             reader,
-            status: ConnectionStatus::Connected,
             configured_servers: servers,
             shared_state: shared_state.clone(),
         };
@@ -311,20 +310,13 @@ impl SharedState {
         Ok(shared_state)
     }
 
-    pub(crate) fn shut_down(&self) {
-        let last = self.shutting_down.swap(true, Ordering::SeqCst);
-        if !last {
-            // already shutting down.
-            return;
-        }
+    pub(crate) fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::Release);
+        self.outbound.shutdown();
 
-        self.outbound.signal_shutdown();
         let mut threads = self.threads.lock().take().unwrap();
         let inbound = threads.inbound.take().unwrap();
         let outbound = threads.outbound.take().unwrap();
-
-        inbound.thread().unpark();
-        outbound.thread().unpark();
 
         if let Err(error) = inbound.join() {
             log::error!("error encountered in inbound thread: {:?}", error);

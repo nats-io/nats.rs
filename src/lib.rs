@@ -167,21 +167,8 @@ impl ServerInfo {
     }
 }
 
-/// A `ConnectionStatus` describes the current sub-status of a `Connection`.
-#[derive(Debug, PartialEq, Clone, Copy)]
-enum ConnectionStatus {
-    /// An established connection.
-    Connected,
-    /// A permanently closed connection.
-    Closed,
-    /// A connection that has lost connectivity, but may reestablish connectivity.
-    Disconnected,
-    /// A connection in the process of reestablishing connectivity after a disconnect.
-    Reconnecting,
-}
-
 #[derive(Default, Clone)]
-pub(crate) struct Callback(Option<Arc<dyn Fn(&ServerInfo) + Send + Sync + 'static>>);
+pub(crate) struct Callback(Option<Arc<dyn Fn() + Send + Sync + 'static>>);
 
 impl fmt::Debug for Callback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -229,6 +216,7 @@ pub struct ConnectionOptions<TypeState> {
     reconnect_buffer_size: usize,
     disconnect_callback: Callback,
     reconnect_callback: Callback,
+    close_callback: Callback,
     tls_connector: Option<tls::TlsConnector>,
     tls_required: bool,
 }
@@ -244,6 +232,7 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             max_reconnects: Some(60),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
+            close_callback: Callback(None),
             tls_connector: None,
             tls_required: false,
         }
@@ -260,6 +249,7 @@ impl<T> fmt::Debug for ConnectionOptions<T> {
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
+            .entry(&"close_callback", &self.close_callback)
             .entry(
                 &"tls_connector",
                 if self.tls_connector.is_some() {
@@ -305,6 +295,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
+            close_callback: self.close_callback,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
             reconnect_buffer_size: self.reconnect_buffer_size,
@@ -336,6 +327,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             no_echo: self.no_echo,
             name: self.name,
             reconnect_buffer_size: self.reconnect_buffer_size,
+            close_callback: self.close_callback,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
             max_reconnects: self.max_reconnects,
@@ -403,6 +395,8 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// when accepting outgoing traffic in disconnected
     /// mode.
     ///
+    /// The default value is 8mb.
+    ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
@@ -439,6 +433,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
             max_reconnects: self.max_reconnects,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            close_callback: self.close_callback,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
             // move options into the Finalized state by setting
@@ -462,7 +457,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// a server has been lost.
     pub fn set_disconnect_callback<F>(mut self, cb: F) -> Self
     where
-        F: Fn(&ServerInfo) + Send + Sync + 'static,
+        F: Fn() + Send + Sync + 'static,
     {
         self.disconnect_callback = Callback(Some(Arc::new(cb)));
         self
@@ -472,9 +467,20 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// server has been established.
     pub fn set_reconnect_callback<F>(mut self, cb: F) -> Self
     where
-        F: Fn(&ServerInfo) + Send + Sync + 'static,
+        F: Fn() + Send + Sync + 'static,
     {
         self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed when the client has been
+    /// closed due to exhausting reconnect retries to known servers
+    /// or by completing a drain request.
+    pub fn set_close_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.close_callback = Callback(Some(Arc::new(cb)));
         self
     }
 
@@ -543,16 +549,23 @@ pub(crate) struct ShutdownDropper {
 
 impl Drop for ShutdownDropper {
     fn drop(&mut self) {
-        self.shared_state.shut_down();
+        self.shared_state.shutdown();
     }
 }
 
 /// A NATS connection.
 #[derive(Debug, Clone)]
 pub struct Connection {
-    shared_state: Arc<SharedState>,
-    shutdown_dropper: Arc<ShutdownDropper>,
     sid: Arc<AtomicUsize>,
+    shared_state: Arc<SharedState>,
+    // we split the `ShutdownDropper` into
+    // a separate Arc from the `SharedState`
+    // because the `ShutdownDropper` will only
+    // be held by "user-facing" structures, and
+    // the `SharedState` may be held by background
+    // threads that we wish to terminate once
+    // all of the user-held structures are destroyed.
+    shutdown_dropper: Arc<ShutdownDropper>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -882,7 +895,14 @@ impl Connection {
         Ok(())
     }
 
-    /// Close a NATS connection.
+    /// Close a NATS connection. All clones of
+    /// this `Connection` will also be closed,
+    /// as the backing IO threads are shared.
+    ///
+    /// If the client is currently connected
+    /// to a server, the outbound write buffer
+    /// will be flushed in the process of
+    /// shutting down.
     ///
     /// # Example
     /// ```
@@ -892,9 +912,8 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn close(self) -> io::Result<()> {
-        drop(self);
-        Ok(())
+    pub fn close(self) {
+        self.shared_state.shutdown()
     }
 
     /// Calculates the round trip time between this client and the server,
