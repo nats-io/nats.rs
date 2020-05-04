@@ -45,7 +45,7 @@ pub fn inject_delay() {
 }
 
 pub fn inject_io_failure() -> io::Result<()> {
-    if random(50) == 0 {
+    if random(100) == 0 {
         Err(Error::new(ErrorKind::Other, "injected fault"))
     } else {
         Ok(())

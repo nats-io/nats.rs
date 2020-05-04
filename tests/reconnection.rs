@@ -189,7 +189,14 @@ fn bad_server(
                         continue;
                     };
 
-                    if len.parse::<usize>().unwrap() != next_line.len() {
+                    let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
+                        parsed_len
+                    } else {
+                        to_evict.push(*client_id);
+                        continue;
+                    }
+
+                    if parsed_len != next_line.len() {
                         to_evict.push(*client_id);
                         continue;
                     }
