@@ -1,9 +1,5 @@
 language: rust
 
-rust:
-  - 1.37.0
-  - stable
-
 jobs:
   fast_finish: true
 
@@ -13,3 +9,13 @@ cache:
     - ~/.rustup
     - ~/.cargo
     - $TRAVIS_BUILD_DIR/target
+
+matrix:
+  include:
+    - rust: stable
+      env: TEST="cargo test --features=fault"
+    - rust: 1.37.0
+      env: TEST="cargo check"
+  fast_finish: true
+
+script: $TEST
