@@ -936,7 +936,7 @@ impl Connection {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// nc.close()?;
+    /// nc.close();
     /// # Ok(())
     /// # }
     /// ```
