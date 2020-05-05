@@ -13,7 +13,7 @@ use nom::{
     IResult,
 };
 
-use crate::{inject_io_failure, ServerInfo};
+use crate::{inject_io_failure, SecureVec, ServerInfo};
 
 // Protocol
 const INFO: &[u8] = b"INFO";
@@ -120,11 +120,12 @@ pub(crate) fn expect_info(reader: &mut TcpStream) -> io::Result<ServerInfo> {
     inject_io_failure()?;
     // TODO(spacejam) revisit this with a profiler and make it
     // more optimized to minimize time-to-first-byte.
-    let mut buf = Vec::with_capacity(512);
+    let mut buf = SecureVec::with_capacity(512);
 
     while !buf.ends_with(b"\r\n") {
         let byte = &mut [0];
         reader.read_exact(byte)?;
+
         buf.push(byte[0]);
     }
 
@@ -133,6 +134,7 @@ pub(crate) fn expect_info(reader: &mut TcpStream) -> io::Result<ServerInfo> {
             return Ok(info);
         }
     }
+
     Err(Error::new(ErrorKind::Other, "INFO proto not found"))
 }
 

@@ -88,6 +88,7 @@ mod connect;
 mod inbound;
 mod outbound;
 mod parser;
+mod secure_wipe;
 mod shared_state;
 
 #[cfg(feature = "fault_injection")]
@@ -130,6 +131,7 @@ pub use subscription::Subscription;
 use {
     inbound::{Inbound, Reader},
     outbound::{Outbound, Writer},
+    secure_wipe::{SecureString, SecureVec},
     shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
     tls::{split_tls, TlsReader, TlsWriter},
 };
@@ -222,11 +224,10 @@ mod options_typestate {
 type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
-#[derive(Clone)]
 pub struct ConnectionOptions<TypeState> {
     typestate: PhantomData<TypeState>,
     auth: AuthStyle,
-    name: Option<String>,
+    name: Option<SecureString>,
     no_echo: bool,
     max_reconnects: Option<usize>,
     reconnect_buffer_size: usize,
@@ -307,7 +308,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// ```
     pub fn with_token(self, token: &str) -> ConnectionOptions<options_typestate::Authenticated> {
         ConnectionOptions {
-            auth: AuthStyle::Token(token.to_string()),
+            auth: AuthStyle::Token(token.to_string().into()),
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
@@ -338,7 +339,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
         password: &str,
     ) -> ConnectionOptions<options_typestate::Authenticated> {
         ConnectionOptions {
-            auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
+            auth: AuthStyle::UserPass(user.to_string().into(), password.to_string().into()),
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
@@ -396,7 +397,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn with_name(mut self, name: &str) -> ConnectionOptions<TypeState> {
-        self.name = Some(name.to_string());
+        self.name = Some(name.to_string().into());
         self
     }
 
@@ -627,13 +628,13 @@ pub struct Connection {
     shutdown_dropper: Arc<ShutdownDropper>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Debug)]
 enum AuthStyle {
     /// Authenticate using a token.
-    Token(String),
+    Token(SecureString),
 
     /// Authenticate using a username and password.
-    UserPass(String, String),
+    UserPass(SecureString, SecureString),
 
     /// Authenticate using a `.creds` file.
     Credentials(PathBuf),
