@@ -248,7 +248,8 @@ fn bad_server(
 }
 
 #[test]
-fn simple_reconnect() {
+#[ignore]
+fn reconnect_test() {
     env_logger::init();
 
     let shutdown = Arc::new(AtomicBool::new(false));

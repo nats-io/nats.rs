@@ -45,6 +45,8 @@ pub fn inject_delay() {
     }
 }
 
+/// This allows our IO error handling code to be tested by
+/// injecting failures sometimes.
 pub fn inject_io_failure() -> io::Result<()> {
     if thread_rng().gen_ratio(1, 100) {
         Err(Error::new(ErrorKind::Other, "injected fault"))
