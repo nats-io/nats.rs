@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use rand::{thread_rng, Rng};
 
-/// This function is useful for inducing random jitter into our atomic
-/// operations, shaking out more possible interleavings quickly. It gets
-/// fully eliminated by the compiler in non-test code.
+/// This function is useful for inducing random jitter into our operations that trigger
+/// cross-thread communication, shaking out more possible interleavings quickly. It gets fully
+/// eliminated by the compiler in non-test code.
 pub fn inject_delay() {
     use std::thread;
     use std::time::Duration;
@@ -27,18 +27,17 @@ pub fn inject_delay() {
     });
 
     if global_delays == local_delays {
-        // no other threads seem to be
-        // calling this, so we may as
-        // well skip it
+        // no other threads seem to be calling this, so we don't
+        // gain anything by injecting delays.
         return;
     }
 
     if thread_rng().gen_ratio(1, 10) {
-        let duration = thread_rng().gen_range(0, 100);
+        let duration = thread_rng().gen_range(0, 50);
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
-        thread::sleep(Duration::from_micros(duration));
+        thread::sleep(Duration::from_millis(duration));
     }
 
     if thread_rng().gen_ratio(1, 2) {
