@@ -85,9 +85,11 @@
 )]
 
 mod connect;
+mod creds_utils;
 mod inbound;
 mod outbound;
 mod parser;
+mod secure_wipe;
 mod shared_state;
 
 #[cfg(feature = "fault_injection")]
@@ -115,7 +117,7 @@ use std::{
     fmt,
     io::{self, Error, ErrorKind},
     marker::PhantomData,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -123,13 +125,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub use subscription::Subscription;
 
 use {
     inbound::{Inbound, Reader},
     outbound::{Outbound, Writer},
+    secure_wipe::SecureString,
     shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
     tls::{split_tls, TlsReader, TlsWriter},
 };
@@ -368,7 +371,16 @@ impl ConnectionOptions<options_typestate::NoAuth> {
         path: impl AsRef<Path>,
     ) -> ConnectionOptions<options_typestate::Authenticated> {
         ConnectionOptions {
-            auth: AuthStyle::Credentials(path.as_ref().into()),
+            auth: AuthStyle::Credentials {
+                jwt_cb: {
+                    let path = path.as_ref().to_owned();
+                    Arc::new(move || creds_utils::user_jwt_from_file(&path))
+                },
+                sig_cb: {
+                    let path = path.as_ref().to_owned();
+                    Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
+                },
+            },
             typestate: PhantomData,
             no_echo: self.no_echo,
             name: self.name,
@@ -627,7 +639,7 @@ pub struct Connection {
     shutdown_dropper: Arc<ShutdownDropper>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone)]
 enum AuthStyle {
     /// Authenticate using a token.
     Token(String),
@@ -636,10 +648,28 @@ enum AuthStyle {
     UserPass(String, String),
 
     /// Authenticate using a `.creds` file.
-    Credentials(PathBuf),
+    Credentials {
+        /// Securely loads the user JWT.
+        jwt_cb: Arc<dyn Fn() -> io::Result<String> + Send + Sync>,
+        /// Securely loads the nkey and signs the nonce passed as an argument.
+        sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
+    },
 
     /// No authentication.
     None,
+}
+
+impl fmt::Debug for AuthStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            AuthStyle::Token(s) => f.debug_tuple("Token").field(s).finish(),
+            AuthStyle::UserPass(user, pass) => {
+                f.debug_tuple("Token").field(user).field(pass).finish()
+            }
+            AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
+            AuthStyle::None => f.debug_struct("None").finish(),
+        }
+    }
 }
 
 impl Default for AuthStyle {

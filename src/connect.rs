@@ -1,17 +1,15 @@
 use std::{
-    fs,
     io::{self, BufReader, BufWriter, Write},
     net::{SocketAddr, TcpStream},
-    path::Path,
 };
 
-use nkeys::KeyPair;
-use regex::Regex;
 use serde::Serialize;
 
 use crate::{
-    inject_io_failure, parser::parse_control_op, parser::ControlOp, split_tls, AuthStyle,
-    FinalizedOptions, Reader, ServerInfo, Writer,
+    inject_io_failure,
+    parser::ControlOp,
+    parser::{expect_info, parse_control_op},
+    split_tls, AuthStyle, FinalizedOptions, Reader, SecureString, ServerInfo, Writer,
 };
 
 /// Info to construct a CONNECT message.
@@ -27,13 +25,9 @@ pub(crate) struct ConnectInfo {
     #[serde(rename = "jwt", skip_serializing_if = "is_empty_or_none")]
     pub user_jwt: Option<String>,
 
-    /// User's Nkey.
-    #[serde(skip_serializing_if = "is_empty_or_none")]
-    pub nkey: Option<String>,
-
     /// Signed nonce, encoded to Base64URL.
-    #[serde(rename = "sig", skip_serializing_if = "is_empty_or_none")]
-    pub signature: Option<String>,
+    #[serde(rename = "sig", skip_serializing_if = "secure_is_empty_or_none")]
+    pub signature: Option<SecureString>,
 
     /// Optional client name.
     #[serde(skip_serializing_if = "is_empty_or_none")]
@@ -60,12 +54,12 @@ pub(crate) struct ConnectInfo {
     pub user: Option<String>,
 
     /// Connection password (if auth_required is set)
-    #[serde(skip_serializing_if = "is_empty_or_none")]
-    pub pass: Option<String>,
+    #[serde(skip_serializing_if = "secure_is_empty_or_none")]
+    pub pass: Option<SecureString>,
 
     /// Client authorization token (if auth_required is set)
-    #[serde(skip_serializing_if = "is_empty_or_none")]
-    pub auth_token: Option<String>,
+    #[serde(skip_serializing_if = "secure_is_empty_or_none")]
+    pub auth_token: Option<SecureString>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -76,6 +70,15 @@ const fn is_true(field: &bool) -> bool {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 #[inline]
 fn is_empty_or_none(field: &Option<String>) -> bool {
+    match field {
+        Some(inner) => inner.is_empty(),
+        None => true,
+    }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+#[inline]
+fn secure_is_empty_or_none(field: &Option<SecureString>) -> bool {
     match field {
         Some(inner) => inner.is_empty(),
         None => true,
@@ -93,7 +96,7 @@ pub(crate) fn connect_to_socket_addr(
 
     // Connect to the socket and read the initial INFO message.
     let mut stream = TcpStream::connect(&addr)?;
-    let server_info = crate::parser::expect_info(&mut stream)?;
+    let server_info = expect_info(&mut stream)?;
 
     // Send back a CONNECT message to authenticate the client.
     let (mut reader, writer) = authenticate(
@@ -133,11 +136,10 @@ fn authenticate(
     let mut connect_info = ConnectInfo {
         tls_required: tls_required,
         name: options.name.to_owned(),
-        nkey: None,
         pedantic: false,
         verbose: false,
-        lang: crate::LANG.into(),
-        version: crate::VERSION.into(),
+        lang: crate::LANG.to_string(),
+        version: crate::VERSION.to_string(),
         user: None,
         pass: None,
         auth_token: None,
@@ -149,16 +151,17 @@ fn authenticate(
     // Fill in the info that authenticates the client.
     match &options.auth {
         AuthStyle::UserPass(user, pass) => {
-            connect_info.user = Some(user.into());
-            connect_info.pass = Some(pass.into());
+            connect_info.user = Some(user.to_string());
+            connect_info.pass = Some(pass.to_string().into());
         }
         AuthStyle::Token(token) => {
-            connect_info.auth_token = Some(token.into());
+            connect_info.auth_token = Some(token.to_string().into());
         }
-        AuthStyle::Credentials(path) => {
-            let (jwt, signature) = read_jwt_and_sign(&path, server_info.nonce.into())?;
+        AuthStyle::Credentials { jwt_cb, sig_cb } => {
+            let jwt = jwt_cb()?;
+            let sig = sig_cb(server_info.nonce.as_bytes())?;
             connect_info.user_jwt = Some(jwt);
-            connect_info.signature = Some(signature);
+            connect_info.signature = Some(sig);
         }
         AuthStyle::None => {}
     }
@@ -201,65 +204,4 @@ fn authenticate(
     writer.flush()?;
 
     Ok((reader, writer))
-}
-
-/// Given a credentials file and nonce, returns JWT and signature.
-///
-/// The credentials file contains two pieces of data:
-/// - user's JWT (public data)
-/// - user's nkey (private data)
-///
-/// When connecting to a server, we are given a nonce that is used to prove client's identity.
-/// The nonce is signed using the private nkey, and such signature is then sent back to the server.
-fn read_jwt_and_sign(creds: &Path, nonce: String) -> io::Result<(String, String)> {
-    // This regex parses a credentials file.
-    //
-    // The credentials file is typically `~/.nkeys/creds/synadia/<account/<account>.creds` and
-    // looks as follows:
-    //
-    // ```
-    // -----BEGIN NATS USER JWT-----
-    // <public jwt>
-    // ------END NATS USER JWT------
-    //
-    // ************************* IMPORTANT *************************
-    // NKEY Seed printed below can be used to sign and prove identity.
-    // NKEYs are sensitive and should be treated as secrets.
-    //
-    // -----BEGIN USER NKEY SEED-----
-    // <private nkey>
-    // ------END USER NKEY SEED------
-    //
-    // *************************************************************
-    // ```
-    let re =
-        Regex::new(r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))")
-            .unwrap();
-
-    // Read the file and extract the JWT and nkey.
-    let contents = fs::read_to_string(&creds)?;
-    let captures = re.captures_iter(&contents).collect::<Vec<_>>();
-
-    // Extract captured JWT and nkey.
-    let (jwt, nkey) = match &captures[..] {
-        [jwt, nkey, ..] => (jwt[1].to_string(), nkey[1].to_string()),
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("cannot parse credentials in {}", creds.display()),
-            ))
-        }
-    };
-
-    // Sign the nonce.
-    let key_pair =
-        KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let sig = key_pair
-        .sign(nonce.as_bytes())
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-
-    // Encode signature to Base64URL.
-    let sig = base64_url::encode(&sig);
-
-    Ok((jwt, sig))
 }
