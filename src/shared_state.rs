@@ -118,9 +118,9 @@ impl Server {
 
             match crate::connect::connect_to_socket_addr(
                 addr,
-                self.host.clone(),
+                &self.host,
                 self.tls_required,
-                options.clone(),
+                options,
             ) {
                 Ok(result) => return Ok(result),
                 Err(e) => last_err = e,

@@ -64,12 +64,12 @@ static USER_CONFIG_RE: Lazy<Regex> = Lazy::new(|| {
 
 /// Parses a credentials file and returns its user JWT.
 fn parse_decorated_jwt(contents: &SecureString) -> Option<String> {
-    let capture = USER_CONFIG_RE.captures_iter(&contents).nth(0)?;
+    let capture = USER_CONFIG_RE.captures_iter(contents).next()?;
     Some(capture[1].to_string())
 }
 
 /// Parses a credentials file and returns its nkey.
 fn parse_decorated_nkey(contents: &SecureString) -> Option<SecureString> {
-    let capture = USER_CONFIG_RE.captures_iter(&contents).nth(1)?;
+    let capture = USER_CONFIG_RE.captures_iter(contents).nth(1)?;
     Some(SecureString::from(capture[1].to_string()))
 }

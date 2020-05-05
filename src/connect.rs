@@ -88,9 +88,9 @@ fn secure_is_empty_or_none(field: &Option<SecureString>) -> bool {
 /// Attempts to connect to a server on a single `SocketAddr`.
 pub(crate) fn connect_to_socket_addr(
     addr: SocketAddr,
-    host: String,
+    host: &str,
     tls_required: bool,
-    options: FinalizedOptions,
+    options: &FinalizedOptions,
 ) -> io::Result<(Reader, Writer, ServerInfo)> {
     inject_io_failure()?;
 
@@ -101,10 +101,10 @@ pub(crate) fn connect_to_socket_addr(
     // Send back a CONNECT message to authenticate the client.
     let (mut reader, writer) = authenticate(
         stream,
-        server_info.clone(),
-        options.clone(),
+        &server_info,
+        options,
         tls_required,
-        host.clone(),
+        host,
     )?;
 
     let parsed_op = parse_control_op(&mut reader)?;
@@ -127,14 +127,14 @@ pub(crate) fn connect_to_socket_addr(
 
 fn authenticate(
     stream: TcpStream,
-    server_info: ServerInfo,
-    options: FinalizedOptions,
+    server_info: &ServerInfo,
+    options: &FinalizedOptions,
     tls_required: bool,
-    host: String,
+    host: &str,
 ) -> io::Result<(Reader, Writer)> {
     // Data that will be formatted as a CONNECT message.
     let mut connect_info = ConnectInfo {
-        tls_required: tls_required,
+        tls_required,
         name: options.name.to_owned(),
         pedantic: false,
         verbose: false,
@@ -175,10 +175,10 @@ fn authenticate(
     // potentially upgrade to TLS
     let (reader, mut writer) = if options.tls_required || server_info.tls_required || tls_required {
         let attempt = if let Some(ref tls_connector) = options.tls_connector {
-            tls_connector.connect(&host, stream)
+            tls_connector.connect(host, stream)
         } else {
             match native_tls::TlsConnector::new() {
-                Ok(connector) => connector.connect(&host, stream),
+                Ok(connector) => connector.connect(host, stream),
                 Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
             }
         };

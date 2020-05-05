@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Also scrambles data on Drop.
 ///
-/// Uses the basic idea (write_volatile + compiler_fence)
+/// Uses the basic idea (`write_volatile` + `compiler_fence`)
 /// from @bascule's zeroize crate but overwrites data with
 /// random bytes instead of zeros.
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -57,7 +57,7 @@ impl Deref for SecureVec {
 
 /// A `String` that gets scrambled on drop.
 ///
-/// Uses the basic idea (write_volatile + compiler_fence)
+/// Uses the basic idea (`write_volatile` + `compiler_fence`)
 /// from @bascule's zeroize crate but overwrites data with
 /// random bytes instead of zeros.
 #[derive(Clone, Default, Deserialize, Serialize)]
