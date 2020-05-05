@@ -1,9 +1,8 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::TryFrom,
-    fs,
-    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    io::{self, Error, ErrorKind},
+    net::{SocketAddr, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -12,24 +11,15 @@ use std::{
     time::Duration,
 };
 
-use nkeys::KeyPair;
 use parking_lot::{Mutex, RwLock};
 use rand::{seq::SliceRandom, thread_rng};
-use regex::Regex;
 
 use crate::{
-    connect::ConnectInfo,
-    inject_delay, inject_io_failure,
-    parser::{parse_control_op, ControlOp},
-    split_tls, AuthStyle, FinalizedOptions, Inbound, Message, Outbound, Reader, ServerInfo, Writer,
-    LANG, VERSION,
+    inject_delay, inject_io_failure, FinalizedOptions, Inbound, Message, Outbound, Reader,
+    ServerInfo, Writer,
 };
 
 use crossbeam_channel::Sender;
-
-// Parses a credentials `.creds` file.
-const CREDS_FILE_REGEX: &str =
-    r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))";
 
 // Accepts any input that can be treated as an Iterator over string-like objects
 pub(crate) fn parse_server_addresses(
@@ -102,56 +92,6 @@ impl Server {
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         inject_io_failure()?;
 
-        let jwt;
-        let mut nkey = None;
-
-        let mut connect_op = ConnectInfo {
-            tls_required: options.tls_required || self.tls_required,
-            name: options.name.to_owned(),
-            nkey: None,
-            pedantic: false,
-            verbose: false,
-            lang: LANG.into(),
-            version: VERSION.into(),
-            user: None,
-            pass: None,
-            auth_token: None,
-            user_jwt: None,
-            sig: None,
-            echo: !options.no_echo,
-        };
-
-        match &options.auth {
-            AuthStyle::UserPass(user, pass) => {
-                connect_op.user = Some(user.into());
-                connect_op.pass = Some(pass.into());
-            }
-            AuthStyle::Token(token) => connect_op.auth_token = Some(token.into()),
-            AuthStyle::Credentials(path) => {
-                let contents = fs::read_to_string(&path)?;
-                let re = Regex::new(CREDS_FILE_REGEX).unwrap();
-                let captures = re.captures_iter(&contents).collect::<Vec<_>>();
-
-                let (user_jwt, seed) = match &captures[..] {
-                    [jwt, seed, ..] => (jwt[1].to_string(), seed[1].to_string()),
-                    _ => {
-                        return Err(Error::new(
-                            ErrorKind::InvalidInput,
-                            format!("cannot parse credentials in {}", path.display()),
-                        ))
-                    }
-                };
-
-                let key_pair = KeyPair::from_seed(&seed)
-                    .map_err(|err| Error::new(ErrorKind::InvalidData, err))?;
-                nkey = Some(key_pair);
-
-                jwt = Some(user_jwt);
-                connect_op.user_jwt = jwt.into();
-            }
-            AuthStyle::None => {}
-        }
-
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
         let backoff_ms = if self.reconnects > 0 {
@@ -176,13 +116,11 @@ impl Server {
         for addr in addrs {
             std::thread::sleep(backoff);
 
-            match crate::connect::connect_to_addr(
+            match crate::connect::connect_to_socket_addr(
+                addr,
                 self.host.clone(),
                 self.tls_required,
-                options,
-                addr,
-                connect_op.clone(),
-                nkey.as_ref(),
+                options.clone(),
             ) {
                 Ok(result) => return Ok(result),
                 Err(e) => last_err = e,

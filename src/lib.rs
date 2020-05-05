@@ -139,7 +139,7 @@ const LANG: &str = "rust";
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
@@ -222,6 +222,7 @@ mod options_typestate {
 type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
+#[derive(Clone)]
 pub struct ConnectionOptions<TypeState> {
     typestate: PhantomData<TypeState>,
     auth: AuthStyle,
