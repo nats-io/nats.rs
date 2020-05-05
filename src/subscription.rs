@@ -255,24 +255,6 @@ impl Handler {
     pub fn unsubscribe(mut self) -> io::Result<()> {
         self.sub.unsub()
     }
-
-    /// Close a subscription. Same as `unsubscribe`
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.subscribe("foo")?.with_handler(move |msg| {
-    ///     println!("Received {}", &msg);
-    ///     Ok(())
-    /// });
-    /// sub.close()?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn close(mut self) -> io::Result<()> {
-        self.sub.unsub()
-    }
 }
 
 /// A non-blocking iterator over messages from a `Subscription`

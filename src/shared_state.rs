@@ -16,9 +16,10 @@ use rand::{seq::SliceRandom, thread_rng};
 use serde::Serialize;
 
 use crate::{
+    inject_delay, inject_io_failure,
     parser::{parse_control_op, ControlOp},
-    split_tls, AuthStyle, ConnectionStatus, FinalizedOptions, Inbound, Message, Outbound, Reader,
-    ServerInfo, Writer, LANG, VERSION,
+    split_tls, AuthStyle, FinalizedOptions, Inbound, Message, Outbound, Reader, ServerInfo, Writer,
+    LANG, VERSION,
 };
 
 use crossbeam_channel::Sender;
@@ -92,6 +93,7 @@ impl Server {
         &mut self,
         options: &FinalizedOptions,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
+        inject_io_failure()?;
         let mut connect_op = Connect {
             tls_required: options.tls_required || self.tls_required,
             name: options.name.as_ref(),
@@ -163,6 +165,7 @@ impl Server {
         addr: SocketAddr,
         op: &str,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
+        inject_io_failure()?;
         let mut stream = TcpStream::connect(&addr)?;
         let info = crate::parser::expect_info(&mut stream)?;
 
@@ -200,10 +203,7 @@ impl Server {
         let parsed_op = parse_control_op(&mut reader)?;
 
         match parsed_op {
-            ControlOp::Pong => {
-                self.reconnects = 0;
-                Ok((reader, writer, info))
-            }
+            ControlOp::Pong => Ok((reader, writer, info)),
             ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
             ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
                 log::error!(
@@ -218,8 +218,8 @@ impl Server {
 
 #[derive(Debug)]
 pub(crate) struct WorkerThreads {
-    inbound: Option<thread::JoinHandle<()>>,
-    outbound: Option<thread::JoinHandle<()>>,
+    pub(crate) inbound: Option<thread::JoinHandle<()>>,
+    pub(crate) outbound: Option<thread::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -247,6 +247,7 @@ impl SharedState {
         options: FinalizedOptions,
         nats_url: &str,
     ) -> io::Result<Arc<SharedState>> {
+        inject_io_failure()?;
         let mut servers = parse_server_addresses(nats_url.split(','));
 
         let mut last_err_opt = None;
@@ -290,7 +291,6 @@ impl SharedState {
         let mut inbound = Inbound {
             learned_servers,
             reader,
-            status: ConnectionStatus::Connected,
             configured_servers: servers,
             shared_state: shared_state.clone(),
         };
@@ -301,6 +301,7 @@ impl SharedState {
         let outbound_thread = thread::spawn(move || outbound_state.outbound.flush_loop());
 
         {
+            inject_delay();
             let mut threads = shared_state.threads.lock();
             *threads = Some(WorkerThreads {
                 inbound: Some(inbound_thread),
@@ -311,27 +312,9 @@ impl SharedState {
         Ok(shared_state)
     }
 
-    pub(crate) fn shut_down(&self) {
-        let last = self.shutting_down.swap(true, Ordering::SeqCst);
-        if !last {
-            // already shutting down.
-            return;
-        }
-
-        self.outbound.signal_shutdown();
-        let mut threads = self.threads.lock().take().unwrap();
-        let inbound = threads.inbound.take().unwrap();
-        let outbound = threads.outbound.take().unwrap();
-
-        inbound.thread().unpark();
-        outbound.thread().unpark();
-
-        if let Err(error) = inbound.join() {
-            log::error!("error encountered in inbound thread: {:?}", error);
-        }
-        if let Err(error) = outbound.join() {
-            log::error!("error encountered in outbound thread: {:?}", error);
-        }
+    pub(crate) fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::Release);
+        self.outbound.shutdown();
     }
 }
 

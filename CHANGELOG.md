@@ -1,3 +1,13 @@
+# Unreleased
+
+## Breaking Changes
+
+* #36 `Connection::close` is now infallible and has no
+  return value
+* #36 The redundant `Subscription::close` has been
+  removed. The same functionality exists in
+  `Subscription::unsubscribe`.
+
 # 0.3.2
 
 ## Misc

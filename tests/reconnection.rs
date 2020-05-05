@@ -35,9 +35,11 @@ fn read_line(stream: &mut TcpStream) -> Option<String> {
     if buf.len() <= 2 {
         return None;
     }
-    assert_eq!(buf.pop().unwrap(), b'\n');
-    assert_eq!(buf.pop().unwrap(), b'\r');
-    String::from_utf8(buf).ok()
+    if buf.pop() != Some(b'\n') || buf.pop() != Some(b'\r') {
+        None
+    } else {
+        String::from_utf8(buf).ok()
+    }
 }
 
 fn bad_server(
@@ -46,7 +48,7 @@ fn bad_server(
     barrier: Arc<Barrier>,
     shutdown: Arc<AtomicBool>,
     restart: Arc<AtomicBool>,
-    chance: u32,
+    bugginess: u32,
     hop_ports: bool,
 ) {
     let mut max_client_id = 0;
@@ -74,11 +76,10 @@ fn bad_server(
 
     let baddr = format!("{}:{}", host, port);
     let mut listener = TcpListener::bind(baddr).unwrap();
-    listener.set_nonblocking(true).unwrap();
 
     barrier.wait();
 
-    let mut clients = HashMap::new();
+    let mut clients: HashMap<usize, Client> = HashMap::new();
     let mut subs = HashMap::new();
 
     loop {
@@ -87,16 +88,25 @@ fn bad_server(
         }
 
         // this makes it nice and bad
-        if thread_rng().gen_bool(1. / chance as f64) || restart.load(Ordering::Acquire) {
+        if !clients.is_empty() && thread_rng().gen_bool(1. / bugginess as f64)
+            || restart.load(Ordering::Acquire)
+        {
+            drop(listener);
             clients.clear();
             subs.clear();
-            drop(listener);
             let baddr = format!("{}:{}", host, port);
+            log::info!("bad server listening on {}:{}", host, port);
             listener = TcpListener::bind(baddr).unwrap();
             listener.set_nonblocking(true).unwrap();
         }
 
         // maybe accept a new client
+        if clients.is_empty() {
+            listener.set_nonblocking(false).unwrap();
+        } else {
+            listener.set_nonblocking(true).unwrap();
+        }
+
         if let Ok((mut next, _addr)) = listener.accept() {
             max_client_id += 1;
             let client_id = max_client_id;
@@ -112,12 +122,6 @@ fn bad_server(
                     outstanding_pings: 0,
                 },
             );
-
-            if hop_ports {
-                // we hop to a new port because we have sent the client the new
-                // server information.
-                port += 1;
-            }
         }
 
         let mut to_evict = vec![];
@@ -130,7 +134,10 @@ fn bad_server(
             }
 
             if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_millis(50) {
-                client.socket.write_all(b"PING\r\n").unwrap();
+                if client.socket.write_all(b"PING\r\n").is_err() {
+                    to_evict.push(*client_id);
+                    continue;
+                }
                 client.last_ping = Instant::now();
                 client.outstanding_pings += 1;
             }
@@ -150,8 +157,16 @@ fn bad_server(
                     client.outstanding_pings -= 1;
                 }
                 "PING" => {
-                    client.socket.write_all(b"PONG\r\n").unwrap();
+                    if client.socket.write_all(b"PONG\r\n").is_err() {
+                        to_evict.push(*client_id);
+                        continue;
+                    }
                     client.has_sent_ping = true;
+                    if hop_ports {
+                        // we hop to a new port because we have sent the client the new
+                        // server information.
+                        port += 1;
+                    }
                 }
                 "CONNECT" => (),
                 "SUB" => {
@@ -167,9 +182,24 @@ fn bad_server(
                         other => panic!("unknown args: {:?}", other),
                     };
 
-                    let next_line = read_line(&mut client.socket).unwrap();
+                    let next_line = if let Some(next_line) = read_line(&mut client.socket) {
+                        next_line
+                    } else {
+                        to_evict.push(*client_id);
+                        continue;
+                    };
 
-                    assert_eq!(len.parse::<usize>().unwrap(), next_line.len());
+                    let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
+                        parsed_len
+                    } else {
+                        to_evict.push(*client_id);
+                        continue;
+                    };
+
+                    if parsed_len != next_line.len() {
+                        to_evict.push(*client_id);
+                        continue;
+                    }
 
                     for sub in subs.get(subject).unwrap_or(&HashSet::new()) {
                         let out = if let Some(group) = reply {
@@ -202,20 +232,26 @@ fn bad_server(
             }
         }
 
-        while let Some(client_id) = to_evict.pop() {
-            clients.remove(&client_id);
+        for out in outbound {
+            for (client_id, client) in clients.iter_mut() {
+                if client.socket.write_all(&out).is_err() {
+                    to_evict.push(*client_id);
+                    continue;
+                }
+            }
         }
 
-        for out in outbound {
-            for (_id, client) in clients.iter_mut() {
-                client.socket.write_all(&out).unwrap();
-            }
+        while let Some(client_id) = to_evict.pop() {
+            clients.remove(&client_id);
         }
     }
 }
 
 #[test]
-fn simple_reconnect() {
+#[ignore]
+fn reconnect_test() {
+    env_logger::init();
+
     let shutdown = Arc::new(AtomicBool::new(false));
     let restart = Arc::new(AtomicBool::new(false));
     let success = Arc::new(AtomicBool::new(false));
@@ -224,7 +260,7 @@ fn simple_reconnect() {
     let server = std::thread::spawn({
         let barrier = barrier.clone();
         let shutdown = shutdown.clone();
-        let hop_ports = true;
+        let hop_ports = false;
         let bugginess = 200;
         move || {
             bad_server(
@@ -242,7 +278,10 @@ fn simple_reconnect() {
     barrier.wait();
 
     let nc = loop {
-        if let Ok(nc) = nats::connect("localhost:22222") {
+        if let Ok(nc) = nats::ConnectionOptions::new()
+            .max_reconnects(None)
+            .connect("localhost:22222")
+        {
             break Arc::new(nc);
         }
     };
@@ -250,11 +289,12 @@ fn simple_reconnect() {
     let tx = std::thread::spawn({
         let nc = nc.clone();
         let success = success.clone();
+        let shutdown = shutdown.clone();
         move || {
             const EXPECTED_SUCCESSES: usize = 100;
             let mut received = 0;
 
-            while received < EXPECTED_SUCCESSES {
+            while received < EXPECTED_SUCCESSES && !shutdown.load(Ordering::Acquire) {
                 if nc
                     .request_timeout(
                         "rust.tests.faulty_requests",
@@ -269,15 +309,21 @@ fn simple_reconnect() {
                 }
             }
 
-            success.store(true, Ordering::Release);
+            if received == EXPECTED_SUCCESSES {
+                success.store(true, Ordering::Release);
+            }
         }
     });
 
-    let subscriber = nc.subscribe("rust.tests.faulty_requests").unwrap();
+    let subscriber = loop {
+        if let Ok(subscriber) = nc.subscribe("rust.tests.faulty_requests") {
+            break subscriber;
+        }
+    };
 
     while !success.load(Ordering::Acquire) {
         for msg in subscriber.timeout_iter(Duration::from_millis(10)) {
-            msg.respond("Anything for the story").unwrap();
+            let _unchecked = msg.respond("Anything for the story");
         }
     }
 
