@@ -13,11 +13,9 @@ cache:
 matrix:
   include:
     - rust: stable
-      env: TEST="cargo test"
+      script: cargo test
     - rust: stable
-      env: TEST="cargo test reconnect_test --features=fault_injection -- --ignored"
+      script: cargo test reconnect_test --features=fault_injection -- --ignored
     - rust: 1.37.0
-      env: TEST="cargo check"
+      script: cargo check
   fast_finish: true
-
-script: $TEST
