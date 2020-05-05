@@ -362,7 +362,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::ConnectionOptions::new()
     ///     .with_credentials("path/to/my.creds")
-    ///     .connect("demo.nats.io")?;
+    ///     .connect("connect.ngs.global")?;
     /// # Ok(())
     /// # }
     /// ```
