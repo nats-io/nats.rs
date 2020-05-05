@@ -132,7 +132,7 @@ use {
     tls::{split_tls, TlsReader, TlsWriter},
 };
 
-const VERSION: &str = "0.0.1";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 
 /// Information sent by the server back to this client
