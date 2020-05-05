@@ -81,7 +81,7 @@ fn is_empty_or_none(field: &Option<String>) -> bool {
     }
 }
 
-/// Attempts to connect to a server using a single socket addrs.
+/// Attempts to connect to a server on a single `SocketAddr`.
 pub(crate) fn connect_to_socket_addr(
     addr: SocketAddr,
     host: String,
@@ -93,44 +93,14 @@ pub(crate) fn connect_to_socket_addr(
     let mut stream = TcpStream::connect(&addr)?;
     let server_info = crate::parser::expect_info(&mut stream)?;
 
-    let connect_info = authenticate(server_info.clone(), options.clone(), tls_required)?;
+    let (mut reader, writer) = authenticate(
+        stream,
+        server_info.clone(),
+        options.clone(),
+        tls_required,
+        host.clone(),
+    )?;
 
-    let op = format!(
-        "CONNECT {}\r\nPING\r\n",
-        serde_json::to_string(&connect_info)?
-    );
-
-    // potentially upgrade to TLS
-    let (mut reader, mut writer) =
-        if options.tls_required || server_info.tls_required || tls_required {
-            let attempt = if let Some(ref tls_connector) = options.tls_connector {
-                tls_connector.connect(&host, stream)
-            } else {
-                match native_tls::TlsConnector::new() {
-                    Ok(connector) => connector.connect(&host, stream),
-                    Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-                }
-            };
-            match attempt {
-                Ok(tls) => {
-                    let (tls_reader, tls_writer) = split_tls(tls);
-                    let reader = Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
-                    let writer = Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
-                    (reader, writer)
-                }
-                Err(e) => {
-                    log::error!("failed to upgrade TLS: {:?}", e);
-                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, e));
-                }
-            }
-        } else {
-            let reader = Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
-            let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
-            (reader, writer)
-        };
-
-    writer.write_all(op.as_bytes())?;
-    writer.flush()?;
     let parsed_op = parse_control_op(&mut reader)?;
 
     match parsed_op {
@@ -150,10 +120,12 @@ pub(crate) fn connect_to_socket_addr(
 }
 
 fn authenticate(
+    stream: TcpStream,
     server_info: ServerInfo,
     options: FinalizedOptions,
     tls_required: bool,
-) -> io::Result<ConnectInfo> {
+    host: String,
+) -> io::Result<(Reader, Writer)> {
     // This regex parses a credentials file.
     //
     // The credentials file is typically `~/.nkeys/creds/synadia/<account/<account>.creds` and
@@ -236,5 +208,41 @@ fn authenticate(
         }
     }
 
-    Ok(connect_info)
+    let op = format!(
+        "CONNECT {}\r\nPING\r\n",
+        serde_json::to_string(&connect_info)?
+    );
+
+    // potentially upgrade to TLS
+    let (reader, mut writer) = if options.tls_required || server_info.tls_required || tls_required {
+        let attempt = if let Some(ref tls_connector) = options.tls_connector {
+            tls_connector.connect(&host, stream)
+        } else {
+            match native_tls::TlsConnector::new() {
+                Ok(connector) => connector.connect(&host, stream),
+                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+            }
+        };
+        match attempt {
+            Ok(tls) => {
+                let (tls_reader, tls_writer) = split_tls(tls);
+                let reader = Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
+                let writer = Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
+                (reader, writer)
+            }
+            Err(e) => {
+                log::error!("failed to upgrade TLS: {:?}", e);
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, e));
+            }
+        }
+    } else {
+        let reader = Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
+        let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
+        (reader, writer)
+    };
+
+    writer.write_all(op.as_bytes())?;
+    writer.flush()?;
+
+    Ok((reader, writer))
 }
