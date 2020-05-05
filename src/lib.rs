@@ -84,8 +84,8 @@
     clippy::wrong_pub_self_convention,
 )]
 
-mod inbound;
 mod connect;
+mod inbound;
 mod outbound;
 mod parser;
 mod shared_state;
@@ -375,6 +375,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
             max_reconnects: self.max_reconnects,
+            close_callback: self.close_callback,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
         }

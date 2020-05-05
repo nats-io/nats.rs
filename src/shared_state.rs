@@ -176,7 +176,14 @@ impl Server {
         for addr in addrs {
             std::thread::sleep(backoff);
 
-            match self.try_connect_inner(options, addr, connect_op.clone(), nkey.as_ref()) {
+            match crate::connect::connect_to_addr(
+                self.host.clone(),
+                self.tls_required,
+                options,
+                addr,
+                connect_op.clone(),
+                nkey.as_ref(),
+            ) {
                 Ok(result) => return Ok(result),
                 Err(e) => last_err = e,
             };
@@ -185,81 +192,6 @@ impl Server {
         self.reconnects += 1;
 
         Err(last_err)
-    }
-
-    // we split the specific connection function into its own
-    // function so we can use the try operator and have it more
-    // gracefully feed into `last_err` at the call site.
-    fn try_connect_inner(
-        &mut self,
-        options: &FinalizedOptions,
-        addr: SocketAddr,
-        mut connect_op: ConnectInfo,
-        nkey: Option<&KeyPair>,
-    ) -> io::Result<(Reader, Writer, ServerInfo)> {
-        inject_io_failure()?;
-        let mut stream = TcpStream::connect(&addr)?;
-        let info = crate::parser::expect_info(&mut stream)?;
-
-        if !info.nonce.is_empty() {
-            if let Some(nkey) = nkey {
-                let sig = nkey
-                    .sign(info.nonce.as_bytes())
-                    .map_err(|err| Error::new(ErrorKind::Other, err))?;
-                let sig = base64_url::encode(&sig);
-                connect_op.sig = Some(sig);
-            }
-        }
-
-        let op = format!(
-            "CONNECT {}\r\nPING\r\n",
-            serde_json::to_string(&connect_op)?
-        );
-
-        // potentially upgrade to TLS
-        let (mut reader, mut writer) =
-            if options.tls_required || info.tls_required || self.tls_required {
-                let attempt = if let Some(ref tls_connector) = options.tls_connector {
-                    tls_connector.connect(&self.host, stream)
-                } else {
-                    match native_tls::TlsConnector::new() {
-                        Ok(connector) => connector.connect(&self.host, stream),
-                        Err(e) => return Err(Error::new(ErrorKind::Other, e)),
-                    }
-                };
-                match attempt {
-                    Ok(tls) => {
-                        let (tls_reader, tls_writer) = split_tls(tls);
-                        let reader = Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
-                        let writer = Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
-                        (reader, writer)
-                    }
-                    Err(e) => {
-                        log::error!("failed to upgrade TLS: {:?}", e);
-                        return Err(Error::new(ErrorKind::PermissionDenied, e));
-                    }
-                }
-            } else {
-                let reader = Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
-                let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
-                (reader, writer)
-            };
-
-        writer.write_all(op.as_bytes())?;
-        writer.flush()?;
-        let parsed_op = parse_control_op(&mut reader)?;
-
-        match parsed_op {
-            ControlOp::Pong => Ok((reader, writer, info)),
-            ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
-                log::error!(
-                    "encountered unexpected control op during connection: {:?}",
-                    parsed_op
-                );
-                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
-            }
-        }
     }
 }
 
