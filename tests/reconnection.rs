@@ -194,7 +194,7 @@ fn bad_server(
                     } else {
                         to_evict.push(*client_id);
                         continue;
-                    }
+                    };
 
                     if parsed_len != next_line.len() {
                         to_evict.push(*client_id);
