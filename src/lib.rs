@@ -85,6 +85,7 @@
 )]
 
 mod inbound;
+mod connect;
 mod outbound;
 mod parser;
 mod shared_state;

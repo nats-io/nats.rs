@@ -16,9 +16,9 @@ use nkeys::KeyPair;
 use parking_lot::{Mutex, RwLock};
 use rand::{seq::SliceRandom, thread_rng};
 use regex::Regex;
-use serde::Serialize;
 
 use crate::{
+    connect::ConnectInfo,
     inject_delay, inject_io_failure,
     parser::{parse_control_op, ControlOp},
     split_tls, AuthStyle, FinalizedOptions, Inbound, Message, Outbound, Reader, ServerInfo, Writer,
@@ -105,27 +105,28 @@ impl Server {
         let jwt;
         let mut nkey = None;
 
-        let mut connect_op = Connect {
+        let mut connect_op = ConnectInfo {
             tls_required: options.tls_required || self.tls_required,
-            name: options.name.as_ref(),
+            name: options.name.to_owned(),
+            nkey: None,
             pedantic: false,
             verbose: false,
-            lang: LANG,
-            version: VERSION,
+            lang: LANG.into(),
+            version: VERSION.into(),
             user: None,
             pass: None,
             auth_token: None,
-            jwt: None,
+            user_jwt: None,
             sig: None,
             echo: !options.no_echo,
         };
 
         match &options.auth {
             AuthStyle::UserPass(user, pass) => {
-                connect_op.user = Some(user);
-                connect_op.pass = Some(pass);
+                connect_op.user = Some(user.into());
+                connect_op.pass = Some(pass.into());
             }
-            AuthStyle::Token(token) => connect_op.auth_token = Some(token),
+            AuthStyle::Token(token) => connect_op.auth_token = Some(token.into()),
             AuthStyle::Credentials(path) => {
                 let contents = fs::read_to_string(&path)?;
                 let re = Regex::new(CREDS_FILE_REGEX).unwrap();
@@ -146,7 +147,7 @@ impl Server {
                 nkey = Some(key_pair);
 
                 jwt = Some(user_jwt);
-                connect_op.jwt = jwt.as_ref();
+                connect_op.user_jwt = jwt.into();
             }
             AuthStyle::None => {}
         }
@@ -193,7 +194,7 @@ impl Server {
         &mut self,
         options: &FinalizedOptions,
         addr: SocketAddr,
-        mut connect_op: Connect<'_>,
+        mut connect_op: ConnectInfo,
         nkey: Option<&KeyPair>,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         inject_io_failure()?;
@@ -202,7 +203,8 @@ impl Server {
 
         if !info.nonce.is_empty() {
             if let Some(nkey) = nkey {
-                let sig = nkey.sign(info.nonce.as_bytes())
+                let sig = nkey
+                    .sign(info.nonce.as_bytes())
                     .map_err(|err| Error::new(ErrorKind::Other, err))?;
                 let sig = base64_url::encode(&sig);
                 connect_op.sig = Some(sig);
@@ -360,53 +362,5 @@ impl SharedState {
     pub(crate) fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
         self.outbound.shutdown();
-    }
-}
-
-#[derive(Clone, Serialize, Debug)]
-struct Connect<'a> {
-    #[serde(skip_serializing_if = "empty_or_none")]
-    name: Option<&'a String>,
-    verbose: bool,
-    pedantic: bool,
-    #[serde(skip_serializing_if = "if_true")]
-    echo: bool,
-    lang: &'a str,
-    version: &'a str,
-    #[serde(default)]
-    tls_required: bool,
-
-    // Authentication
-    #[serde(skip_serializing_if = "empty_or_none")]
-    user: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    pass: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    auth_token: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    jwt: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none_owned")]
-    sig: Option<String>,
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-const fn if_true(field: &bool) -> bool {
-    *field
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[inline]
-fn empty_or_none(field: &Option<&String>) -> bool {
-    match field {
-        Some(inner) => inner.is_empty(),
-        None => true,
-    }
-}
-
-#[inline]
-fn empty_or_none_owned(field: &Option<String>) -> bool {
-    match field {
-        Some(inner) => inner.is_empty(),
-        None => true,
     }
 }
