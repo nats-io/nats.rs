@@ -89,16 +89,16 @@ mod outbound;
 mod parser;
 mod shared_state;
 
-#[cfg(feature = "faults")]
+#[cfg(feature = "fault_injection")]
 mod fault_injection;
 
-#[cfg(feature = "faults")]
+#[cfg(feature = "fault_injection")]
 use fault_injection::{inject_delay, inject_io_failure};
 
-#[cfg(not(feature = "faults"))]
+#[cfg(not(feature = "fault_injection"))]
 fn inject_delay() {}
 
-#[cfg(not(feature = "faults"))]
+#[cfg(not(feature = "fault_injection"))]
 fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }

@@ -13,7 +13,7 @@ cache:
 matrix:
   include:
     - rust: stable
-      env: TEST="cargo test --features=fault"
+      env: TEST="cargo test --features=fault_injection"
     - rust: 1.37.0
       env: TEST="cargo check"
   fast_finish: true
