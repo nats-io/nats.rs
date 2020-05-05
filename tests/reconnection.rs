@@ -314,7 +314,11 @@ fn simple_reconnect() {
         }
     });
 
-    let subscriber = nc.subscribe("rust.tests.faulty_requests").unwrap();
+    let subscriber = loop {
+        if let Ok(subscriber) = nc.subscribe("rust.tests.faulty_requests") {
+            break subscriber;
+        }
+    };
 
     while !success.load(Ordering::Acquire) {
         for msg in subscriber.timeout_iter(Duration::from_millis(10)) {
