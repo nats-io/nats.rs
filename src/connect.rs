@@ -2,6 +2,7 @@ use std::{
     fs,
     io::{self, BufReader, BufWriter, Write},
     net::{SocketAddr, TcpStream},
+    path::Path,
 };
 
 use nkeys::KeyPair;
@@ -30,7 +31,7 @@ pub(crate) struct ConnectInfo {
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub nkey: Option<String>,
 
-    /// Signed nonce, formatted using base64 URL encoding.
+    /// Signed nonce, encoded to Base64URL.
     #[serde(rename = "sig", skip_serializing_if = "is_empty_or_none")]
     pub signature: Option<String>,
 
@@ -90,9 +91,11 @@ pub(crate) fn connect_to_socket_addr(
 ) -> io::Result<(Reader, Writer, ServerInfo)> {
     inject_io_failure()?;
 
+    // Connect to the socket and read the initial INFO message.
     let mut stream = TcpStream::connect(&addr)?;
     let server_info = crate::parser::expect_info(&mut stream)?;
 
+    // Send back a CONNECT message to authenticate the client.
     let (mut reader, writer) = authenticate(
         stream,
         server_info.clone(),
@@ -126,29 +129,7 @@ fn authenticate(
     tls_required: bool,
     host: String,
 ) -> io::Result<(Reader, Writer)> {
-    // This regex parses a credentials file.
-    //
-    // The credentials file is typically `~/.nkeys/creds/synadia/<account/<account>.creds` and
-    // looks as follows:
-    //
-    // ```
-    // -----BEGIN NATS USER JWT-----
-    // <public jwt>
-    // ------END NATS USER JWT------
-    //
-    // ************************* IMPORTANT *************************
-    // NKEY Seed printed below can be used to sign and prove identity.
-    // NKEYs are sensitive and should be treated as secrets.
-    //
-    // -----BEGIN USER NKEY SEED-----
-    // <private nkey>
-    // ------END USER NKEY SEED------
-    //
-    // *************************************************************
-    // ```
-    const CREDS_FILE_REGEX: &str =
-        r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))";
-
+    // Data that will be formatted as a CONNECT message.
     let mut connect_info = ConnectInfo {
         tls_required: tls_required,
         name: options.name.to_owned(),
@@ -165,49 +146,24 @@ fn authenticate(
         echo: !options.no_echo,
     };
 
-    let mut nkey = None;
-
+    // Fill in the info that authenticates the client.
     match &options.auth {
         AuthStyle::UserPass(user, pass) => {
             connect_info.user = Some(user.into());
             connect_info.pass = Some(pass.into());
         }
-        AuthStyle::Token(token) => connect_info.auth_token = Some(token.into()),
+        AuthStyle::Token(token) => {
+            connect_info.auth_token = Some(token.into());
+        }
         AuthStyle::Credentials(path) => {
-            let contents = fs::read_to_string(&path)?;
-            let re = Regex::new(CREDS_FILE_REGEX).unwrap();
-            let captures = re.captures_iter(&contents).collect::<Vec<_>>();
-
-            let (user_jwt, seed) = match &captures[..] {
-                [jwt, seed, ..] => (jwt[1].to_string(), seed[1].to_string()),
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("cannot parse credentials in {}", path.display()),
-                    ))
-                }
-            };
-
-            let key_pair = KeyPair::from_seed(&seed)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-            nkey = Some(key_pair);
-
-            let jwt = Some(user_jwt);
-            connect_info.user_jwt = jwt.into();
+            let (jwt, signature) = read_jwt_and_sign(&path, server_info.nonce.into())?;
+            connect_info.user_jwt = Some(jwt);
+            connect_info.signature = Some(signature);
         }
         AuthStyle::None => {}
     }
 
-    if !server_info.nonce.is_empty() {
-        if let Some(nkey) = nkey {
-            let sig = nkey
-                .sign(server_info.nonce.as_bytes())
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-            let sig = base64_url::encode(&sig);
-            connect_info.signature = Some(sig);
-        }
-    }
-
+    // Format the data as a CONNECT message followed by a PING.
     let op = format!(
         "CONNECT {}\r\nPING\r\n",
         serde_json::to_string(&connect_info)?
@@ -245,4 +201,65 @@ fn authenticate(
     writer.flush()?;
 
     Ok((reader, writer))
+}
+
+/// Given a credentials file and nonce, returns JWT and signature.
+///
+/// The credentials file contains two pieces of data:
+/// - user's JWT (public data)
+/// - user's nkey (private data)
+///
+/// When connecting to a server, we are given a nonce that is used to prove client's identity.
+/// The nonce is signed using the private nkey, and such signature is then sent back to the server.
+fn read_jwt_and_sign(creds: &Path, nonce: String) -> io::Result<(String, String)> {
+    // This regex parses a credentials file.
+    //
+    // The credentials file is typically `~/.nkeys/creds/synadia/<account/<account>.creds` and
+    // looks as follows:
+    //
+    // ```
+    // -----BEGIN NATS USER JWT-----
+    // <public jwt>
+    // ------END NATS USER JWT------
+    //
+    // ************************* IMPORTANT *************************
+    // NKEY Seed printed below can be used to sign and prove identity.
+    // NKEYs are sensitive and should be treated as secrets.
+    //
+    // -----BEGIN USER NKEY SEED-----
+    // <private nkey>
+    // ------END USER NKEY SEED------
+    //
+    // *************************************************************
+    // ```
+    let re =
+        Regex::new(r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))")
+            .unwrap();
+
+    // Read the file and extract the JWT and nkey.
+    let contents = fs::read_to_string(&creds)?;
+    let captures = re.captures_iter(&contents).collect::<Vec<_>>();
+
+    // Extract captured JWT and nkey.
+    let (jwt, nkey) = match &captures[..] {
+        [jwt, nkey, ..] => (jwt[1].to_string(), nkey[1].to_string()),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("cannot parse credentials in {}", creds.display()),
+            ))
+        }
+    };
+
+    // Sign the nonce.
+    let key_pair =
+        KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let sig = key_pair
+        .sign(nonce.as_bytes())
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+
+    // Encode signature to Base64URL.
+    let sig = base64_url::encode(&sig);
+
+    Ok((jwt, sig))
 }
