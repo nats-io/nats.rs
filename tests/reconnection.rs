@@ -318,7 +318,7 @@ fn simple_reconnect() {
 
     while !success.load(Ordering::Acquire) {
         for msg in subscriber.timeout_iter(Duration::from_millis(10)) {
-            msg.respond("Anything for the story");
+            let _unchecked = msg.respond("Anything for the story");
         }
     }
 

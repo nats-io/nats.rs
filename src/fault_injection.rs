@@ -3,6 +3,8 @@
 use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
+use rand::{thread_rng, Rng};
+
 /// This function is useful for inducing random jitter into our atomic
 /// operations, shaking out more possible interleavings quickly. It gets
 /// fully eliminated by the compiler in non-test code.
@@ -31,52 +33,23 @@ pub fn inject_delay() {
         return;
     }
 
-    if random(10) == 1 {
-        let duration = random(100);
+    if thread_rng().gen_ratio(1, 10) {
+        let duration = thread_rng().gen_range(0, 100);
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
-        thread::sleep(Duration::from_micros(u64::from(duration)));
+        thread::sleep(Duration::from_micros(duration));
     }
 
-    if random(2) == 0 {
+    if thread_rng().gen_ratio(1, 2) {
         thread::yield_now();
     }
 }
 
 pub fn inject_io_failure() -> io::Result<()> {
-    if random(100) == 0 {
+    if thread_rng().gen_ratio(1, 100) {
         Err(Error::new(ErrorKind::Other, "injected fault"))
     } else {
         Ok(())
     }
-}
-
-/// Generates a random number in `0..n`.
-fn random(n: u32) -> u32 {
-    use std::cell::Cell;
-    use std::num::Wrapping;
-
-    thread_local! {
-        static RNG: Cell<Wrapping<u32>> = Cell::new(Wrapping(1_406_868_647));
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    RNG.try_with(|rng| {
-        // This is the 32-bit variant of Xorshift.
-        //
-        // Source: https://en.wikipedia.org/wiki/Xorshift
-        let mut x = rng.get();
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        rng.set(x);
-
-        // This is a fast alternative to `x % n`.
-        //
-        // Author: Daniel Lemire
-        // Source: https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-        (u64::from(x.0).wrapping_mul(u64::from(n)) >> 32) as u32
-    })
-    .unwrap_or(0)
 }
