@@ -205,10 +205,10 @@ impl Inbound {
         }
 
         // reset all server connection attempts to 0
-        for server in self.configured_servers.iter_mut() {
+        for server in &mut self.configured_servers {
             server.reconnects = 0;
         }
-        for server in self.learned_servers.iter_mut() {
+        for server in &mut self.learned_servers {
             server.reconnects = 0;
         }
 
@@ -234,8 +234,9 @@ impl Inbound {
     }
 
     fn process_msg(&mut self, msg_args: MsgArgs) -> io::Result<()> {
-        inject_io_failure()?;
         const CRLF_LEN: u32 = 2;
+
+        inject_io_failure()?;
 
         let mut msg = Message {
             subject: msg_args.subject,
