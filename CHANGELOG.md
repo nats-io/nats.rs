@@ -1,3 +1,10 @@
+# Unreleased
+
+## Breaking Changes
+
+* #36 `Connection::close` is now infallible and has no
+  return value
+
 # 0.3.2
 
 ## Misc
