@@ -516,9 +516,15 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    /// Set a callback to be executed when the client has been
-    /// closed due to exhausting reconnect retries to known servers
-    /// or by completing a drain request.
+    /// Set a callback to be executed for calculating the backoff duration
+    /// to wait before a server reconnection attempt.
+    ///
+    /// The function takes the number of reconnects as an argument
+    /// and returns the `Duration` that should be waited before
+    /// making the next connection attempt.
+    ///
+    /// It is recommended that some random jitter is added to
+    /// your returned `Duration`.
     pub fn set_reconnect_delay_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
