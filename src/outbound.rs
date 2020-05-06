@@ -246,12 +246,12 @@ impl Outbound {
 
     pub(crate) fn send_pong(&self) -> io::Result<()> {
         self.with_writer(|writer| {
-            if !writer.is_disconnected() {
+            if writer.is_disconnected() {
+                Ok(())
+            } else {
                 writer.write_all(b"PONG\r\n")?;
                 // Flush in place on pings.
                 writer.flush()
-            } else {
-                Ok(())
             }
         })
     }
