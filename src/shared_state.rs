@@ -12,7 +12,7 @@ use std::{
 };
 
 use parking_lot::{Mutex, RwLock};
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 use serde::Serialize;
 
 use crate::{
@@ -123,18 +123,20 @@ impl Server {
 
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
-        let backoff_ms = if self.reconnects > 0 {
+        let backoff = if let Some(ref cb) = options.reconnect_delay_callback.0 {
+            (cb)(self.reconnects)
+        } else if self.reconnects > 0 {
             let log_2_four_seconds_in_ms = 12_u32;
             let truncated_exponent = std::cmp::min(
                 log_2_four_seconds_in_ms,
                 u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
             );
-            2_u64.checked_pow(truncated_exponent).unwrap()
-        } else {
-            0
-        };
 
-        let backoff = Duration::from_millis(backoff_ms);
+            let jitter = thread_rng().gen_range(0, 1000);
+            Duration::from_millis(jitter + 2_u64.checked_pow(truncated_exponent).unwrap())
+        } else {
+            Duration::from_millis(0)
+        };
 
         // look up network addresses and shuffle them
         let mut addrs: Vec<SocketAddr> = (&*self.host, self.port).to_socket_addrs()?.collect();

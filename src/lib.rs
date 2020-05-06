@@ -182,6 +182,11 @@ impl ServerInfo {
 }
 
 #[derive(Default, Clone)]
+pub(crate) struct ReconnectDelayCallback(
+    Option<Arc<dyn Fn(usize) -> Duration + Send + Sync + 'static>>,
+);
+
+#[derive(Default, Clone)]
 pub(crate) struct Callback(Option<Arc<dyn Fn() + Send + Sync + 'static>>);
 
 impl fmt::Debug for Callback {
@@ -230,6 +235,7 @@ pub struct ConnectionOptions<TypeState> {
     reconnect_buffer_size: usize,
     disconnect_callback: Callback,
     reconnect_callback: Callback,
+    reconnect_delay_callback: ReconnectDelayCallback,
     close_callback: Callback,
     tls_connector: Option<tls::TlsConnector>,
     tls_required: bool,
@@ -246,6 +252,7 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             max_reconnects: Some(60),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
+            reconnect_delay_callback: ReconnectDelayCallback(None),
             close_callback: Callback(None),
             tls_connector: None,
             tls_required: false,
@@ -263,6 +270,14 @@ impl<T> fmt::Debug for ConnectionOptions<T> {
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
+            .entry(
+                &"reconnect_delay_callback",
+                if self.reconnect_delay_callback.0.is_some() {
+                    &"set"
+                } else {
+                    &"unset"
+                },
+            )
             .entry(&"close_callback", &self.close_callback)
             .entry(
                 &"tls_connector",
@@ -312,6 +327,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             close_callback: self.close_callback,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
             tls_connector: self.tls_connector,
@@ -344,6 +360,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             close_callback: self.close_callback,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             max_reconnects: self.max_reconnects,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
@@ -447,6 +464,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
             max_reconnects: self.max_reconnects,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             close_callback: self.close_callback,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
@@ -483,7 +501,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self.reconnect_callback = Callback(Some(Arc::new(cb)));
         self
     }
 
@@ -495,6 +513,17 @@ impl<TypeState> ConnectionOptions<TypeState> {
         F: Fn() + Send + Sync + 'static,
     {
         self.close_callback = Callback(Some(Arc::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed when the client has been
+    /// closed due to exhausting reconnect retries to known servers
+    /// or by completing a drain request.
+    pub fn set_reconnect_delay_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(usize) -> Duration + Send + Sync + 'static,
+    {
+        self.reconnect_delay_callback = ReconnectDelayCallback(Some(Arc::new(cb)));
         self
     }
 
