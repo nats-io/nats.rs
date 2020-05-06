@@ -7,7 +7,7 @@ use regex::Regex;
 use crate::SecureString;
 
 /// Loads user JWT from a credentials file.
-pub(crate) fn user_jwt_from_file(path: &Path) -> io::Result<String> {
+pub(crate) fn user_jwt_from_file(path: &Path) -> io::Result<SecureString> {
     let contents = SecureString::from(fs::read_to_string(path)?);
     parse_decorated_jwt(&contents).ok_or_else(|| {
         io::Error::new(
@@ -63,9 +63,9 @@ static USER_CONFIG_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// Parses a credentials file and returns its user JWT.
-fn parse_decorated_jwt(contents: &SecureString) -> Option<String> {
+fn parse_decorated_jwt(contents: &SecureString) -> Option<SecureString> {
     let capture = USER_CONFIG_RE.captures_iter(contents).next()?;
-    Some(capture[1].to_string())
+    Some(SecureString::from(capture[1].to_string()))
 }
 
 /// Parses a credentials file and returns its nkey.

@@ -23,6 +23,26 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct SecureVec(Vec<u8>);
 
 impl SecureVec {
+    pub(crate) fn with_capacity(sz: usize) -> SecureVec {
+        SecureVec(Vec::with_capacity(sz))
+    }
+
+    pub(crate) fn push(&mut self, item: u8) {
+        if self.0.len() == self.0.capacity() {
+            let cap = std::cmp::max(16, self.0.capacity());
+            let mut next = Vec::with_capacity(cap * 2);
+
+            // copy toxic waste to next destination
+            next.extend_from_slice(&self.0);
+
+            // replace old home of toxic waste with random data
+            self.scramble();
+
+            self.0 = next;
+        }
+        self.0.push(item);
+    }
+
     pub(crate) fn scramble(&mut self) {
         let mut rng = thread_rng();
         for byte in &mut self.0 {

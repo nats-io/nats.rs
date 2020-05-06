@@ -132,7 +132,7 @@ pub use subscription::Subscription;
 use {
     inbound::{Inbound, Reader},
     outbound::{Outbound, Writer},
-    secure_wipe::SecureString,
+    secure_wipe::{SecureString, SecureVec},
     shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
     tls::{split_tls, TlsReader, TlsWriter},
 };
@@ -650,7 +650,7 @@ enum AuthStyle {
     /// Authenticate using a `.creds` file.
     Credentials {
         /// Securely loads the user JWT.
-        jwt_cb: Arc<dyn Fn() -> io::Result<String> + Send + Sync>,
+        jwt_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
         /// Securely loads the nkey and signs the nonce passed as an argument.
         sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
     },

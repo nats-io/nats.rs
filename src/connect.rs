@@ -23,15 +23,15 @@ pub(crate) struct ConnectInfo {
 
     /// User's JWT.
     #[serde(rename = "jwt", skip_serializing_if = "is_empty_or_none")]
-    pub user_jwt: Option<String>,
+    pub user_jwt: Option<SecureString>,
 
     /// Signed nonce, encoded to Base64URL.
-    #[serde(rename = "sig", skip_serializing_if = "secure_is_empty_or_none")]
+    #[serde(rename = "sig", skip_serializing_if = "is_empty_or_none")]
     pub signature: Option<SecureString>,
 
     /// Optional client name.
     #[serde(skip_serializing_if = "is_empty_or_none")]
-    pub name: Option<String>,
+    pub name: Option<SecureString>,
 
     /// If set to `true`, the server (version 1.2.0+) will not send originating messages from this
     /// connection to its own subscriptions. Clients should set this to `true` only for server
@@ -51,14 +51,14 @@ pub(crate) struct ConnectInfo {
 
     /// Connection username (if `auth_required` is set)
     #[serde(skip_serializing_if = "is_empty_or_none")]
-    pub user: Option<String>,
+    pub user: Option<SecureString>,
 
     /// Connection password (if auth_required is set)
-    #[serde(skip_serializing_if = "secure_is_empty_or_none")]
+    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub pass: Option<SecureString>,
 
     /// Client authorization token (if auth_required is set)
-    #[serde(skip_serializing_if = "secure_is_empty_or_none")]
+    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub auth_token: Option<SecureString>,
 }
 
@@ -69,16 +69,7 @@ const fn is_true(field: &bool) -> bool {
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
 #[inline]
-fn is_empty_or_none(field: &Option<String>) -> bool {
-    match field {
-        Some(inner) => inner.is_empty(),
-        None => true,
-    }
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[inline]
-fn secure_is_empty_or_none(field: &Option<SecureString>) -> bool {
+fn is_empty_or_none(field: &Option<SecureString>) -> bool {
     match field {
         Some(inner) => inner.is_empty(),
         None => true,
@@ -99,13 +90,7 @@ pub(crate) fn connect_to_socket_addr(
     let server_info = expect_info(&mut stream)?;
 
     // Send back a CONNECT message to authenticate the client.
-    let (mut reader, writer) = authenticate(
-        stream,
-        &server_info,
-        options,
-        tls_required,
-        host,
-    )?;
+    let (mut reader, writer) = authenticate(stream, &server_info, options, tls_required, host)?;
 
     let parsed_op = parse_control_op(&mut reader)?;
 
@@ -135,7 +120,7 @@ fn authenticate(
     // Data that will be formatted as a CONNECT message.
     let mut connect_info = ConnectInfo {
         tls_required,
-        name: options.name.to_owned(),
+        name: options.name.clone().map(SecureString::from),
         pedantic: false,
         verbose: false,
         lang: crate::LANG.to_string(),
@@ -151,8 +136,8 @@ fn authenticate(
     // Fill in the info that authenticates the client.
     match &options.auth {
         AuthStyle::UserPass(user, pass) => {
-            connect_info.user = Some(user.to_string());
-            connect_info.pass = Some(pass.to_string().into());
+            connect_info.user = Some(SecureString::from(user.to_string()));
+            connect_info.pass = Some(SecureString::from(pass.to_string()));
         }
         AuthStyle::Token(token) => {
             connect_info.auth_token = Some(token.to_string().into());
