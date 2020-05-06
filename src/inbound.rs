@@ -134,12 +134,9 @@ impl Inbound {
                 return false;
             }
 
-            self.configured_servers.shuffle(&mut thread_rng());
-            self.learned_servers.shuffle(&mut thread_rng());
-
             let max_reconnects = self.shared_state.options.max_reconnects;
 
-            let servers = self
+            let mut servers: Vec<&mut Server> = self
                 .configured_servers
                 .iter_mut()
                 .chain(self.learned_servers.iter_mut())
@@ -149,7 +146,10 @@ impl Inbound {
                     } else {
                         true
                     }
-                });
+                })
+                .collect();
+
+            servers.shuffle(&mut thread_rng());
 
             let mut attempted = false;
 
