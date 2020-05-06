@@ -186,8 +186,8 @@ impl ServerInfo {
     }
 }
 
-#[derive(Default, Clone)]
-pub(crate) struct Callback(Option<Arc<dyn Fn() + Send + Sync + 'static>>);
+#[derive(Default)]
+pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
 
 impl fmt::Debug for Callback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -225,7 +225,6 @@ mod options_typestate {
 type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
-#[derive(Clone)]
 pub struct ConnectionOptions<TypeState> {
     typestate: PhantomData<TypeState>,
     auth: AuthStyle,
@@ -517,7 +516,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self.disconnect_callback = Callback(Some(Box::new(cb)));
         self
     }
 
@@ -527,7 +526,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Arc::new(cb)));
+        self.disconnect_callback = Callback(Some(Box::new(cb)));
         self
     }
 
@@ -538,7 +537,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.close_callback = Callback(Some(Arc::new(cb)));
+        self.close_callback = Callback(Some(Box::new(cb)));
         self
     }
 
