@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
-    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    io::{self, Error, ErrorKind},
+    net::{SocketAddr, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,

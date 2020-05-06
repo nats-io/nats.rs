@@ -127,8 +127,7 @@ use std::{
 };
 
 use rand::{thread_rng, Rng};
-use serde::{Deserialize, Serialize};
-
+use serde::Deserialize;
 
 pub use subscription::Subscription;
 
@@ -415,6 +414,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             reconnect_buffer_size: self.reconnect_buffer_size,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             max_reconnects: self.max_reconnects,
             close_callback: self.close_callback,
             tls_connector: self.tls_connector,
