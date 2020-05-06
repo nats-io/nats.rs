@@ -111,6 +111,7 @@ pub mod tls;
 pub mod subscription;
 
 use std::{
+    convert::TryFrom,
     fmt,
     io::{self, Error, ErrorKind},
     marker::PhantomData,
@@ -121,6 +122,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
 pub use subscription::Subscription;
@@ -181,10 +183,8 @@ impl ServerInfo {
     }
 }
 
-#[derive(Default, Clone)]
-pub(crate) struct ReconnectDelayCallback(
-    Option<Arc<dyn Fn(usize) -> Duration + Send + Sync + 'static>>,
-);
+#[derive(Clone)]
+pub(crate) struct ReconnectDelayCallback(Arc<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
 
 #[derive(Default, Clone)]
 pub(crate) struct Callback(Option<Arc<dyn Fn() + Send + Sync + 'static>>);
@@ -241,6 +241,21 @@ pub struct ConnectionOptions<TypeState> {
     tls_required: bool,
 }
 
+fn default_reconnect_delay_callback(reconnects: usize) -> Duration {
+    if reconnects > 0 {
+        let log_2_four_seconds_in_ms = 12_u32;
+        let truncated_exponent = std::cmp::min(
+            log_2_four_seconds_in_ms,
+            u32::try_from(std::cmp::min(u32::max_value() as usize, reconnects)).unwrap(),
+        );
+
+        let jitter = thread_rng().gen_range(0, 1000);
+        Duration::from_millis(jitter + 2_u64.checked_pow(truncated_exponent).unwrap())
+    } else {
+        Duration::from_millis(0)
+    }
+}
+
 impl Default for ConnectionOptions<options_typestate::NoAuth> {
     fn default() -> ConnectionOptions<options_typestate::NoAuth> {
         ConnectionOptions {
@@ -252,7 +267,9 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             max_reconnects: Some(60),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
-            reconnect_delay_callback: ReconnectDelayCallback(None),
+            reconnect_delay_callback: ReconnectDelayCallback(Arc::new(
+                default_reconnect_delay_callback,
+            )),
             close_callback: Callback(None),
             tls_connector: None,
             tls_required: false,
@@ -270,14 +287,7 @@ impl<T> fmt::Debug for ConnectionOptions<T> {
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
-            .entry(
-                &"reconnect_delay_callback",
-                if self.reconnect_delay_callback.0.is_some() {
-                    &"set"
-                } else {
-                    &"unset"
-                },
-            )
+            .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
             .entry(
                 &"tls_connector",
@@ -529,7 +539,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
     {
-        self.reconnect_delay_callback = ReconnectDelayCallback(Some(Arc::new(cb)));
+        self.reconnect_delay_callback = ReconnectDelayCallback(Arc::new(cb));
         self
     }
 

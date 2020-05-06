@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
@@ -8,11 +7,10 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
 };
 
 use parking_lot::{Mutex, RwLock};
-use rand::{seq::SliceRandom, thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng};
 use serde::Serialize;
 
 use crate::{
@@ -123,20 +121,7 @@ impl Server {
 
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
-        let backoff = if let Some(ref cb) = options.reconnect_delay_callback.0 {
-            (cb)(self.reconnects)
-        } else if self.reconnects > 0 {
-            let log_2_four_seconds_in_ms = 12_u32;
-            let truncated_exponent = std::cmp::min(
-                log_2_four_seconds_in_ms,
-                u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
-            );
-
-            let jitter = thread_rng().gen_range(0, 1000);
-            Duration::from_millis(jitter + 2_u64.checked_pow(truncated_exponent).unwrap())
-        } else {
-            Duration::from_millis(0)
-        };
+        let backoff = (options.reconnect_delay_callback.0)(self.reconnects);
 
         // look up network addresses and shuffle them
         let mut addrs: Vec<SocketAddr> = (&*self.host, self.port).to_socket_addrs()?.collect();
