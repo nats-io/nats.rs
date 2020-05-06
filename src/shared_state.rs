@@ -1,8 +1,8 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::TryFrom,
-    io::{self, BufReader, BufWriter, Error, ErrorKind, Write},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    io::{self, Error, ErrorKind},
+    net::{SocketAddr, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -13,13 +13,10 @@ use std::{
 
 use parking_lot::{Mutex, RwLock};
 use rand::{seq::SliceRandom, thread_rng};
-use serde::Serialize;
 
 use crate::{
-    inject_delay, inject_io_failure,
-    parser::{parse_control_op, ControlOp},
-    split_tls, AuthStyle, FinalizedOptions, Inbound, Message, Outbound, Reader, ServerInfo, Writer,
-    LANG, VERSION,
+    inject_delay, inject_io_failure, FinalizedOptions, Inbound, Message, Outbound, Reader,
+    ServerInfo, Writer,
 };
 
 use crossbeam_channel::Sender;
@@ -94,32 +91,6 @@ impl Server {
         options: &FinalizedOptions,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         inject_io_failure()?;
-        let mut connect_op = Connect {
-            tls_required: options.tls_required || self.tls_required,
-            name: options.name.as_ref(),
-            pedantic: false,
-            verbose: false,
-            lang: LANG,
-            version: VERSION,
-            user: None,
-            pass: None,
-            auth_token: None,
-            echo: !options.no_echo,
-        };
-
-        match &options.auth {
-            AuthStyle::UserPass(user, pass) => {
-                connect_op.user = Some(user);
-                connect_op.pass = Some(pass);
-            }
-            AuthStyle::Token(token) => connect_op.auth_token = Some(token),
-            _ => {}
-        }
-
-        let op = format!(
-            "CONNECT {}\r\nPING\r\n",
-            serde_json::to_string(&connect_op)?
-        );
 
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
@@ -145,7 +116,12 @@ impl Server {
         for addr in addrs {
             std::thread::sleep(backoff);
 
-            match self.try_connect_inner(options, addr, &op) {
+            match crate::connect::connect_to_socket_addr(
+                addr,
+                &self.host,
+                self.tls_required,
+                options,
+            ) {
                 Ok(result) => return Ok(result),
                 Err(e) => last_err = e,
             };
@@ -154,65 +130,6 @@ impl Server {
         self.reconnects += 1;
 
         Err(last_err)
-    }
-
-    // we split the specific connection function into its own
-    // function so we can use the try operator and have it more
-    // gracefully feed into `last_err` at the call site.
-    fn try_connect_inner(
-        &mut self,
-        options: &FinalizedOptions,
-        addr: SocketAddr,
-        op: &str,
-    ) -> io::Result<(Reader, Writer, ServerInfo)> {
-        inject_io_failure()?;
-        let mut stream = TcpStream::connect(&addr)?;
-        let info = crate::parser::expect_info(&mut stream)?;
-
-        // potentially upgrade to TLS
-        let (mut reader, mut writer) =
-            if options.tls_required || info.tls_required || self.tls_required {
-                let attempt = if let Some(ref tls_connector) = options.tls_connector {
-                    tls_connector.connect(&self.host, stream)
-                } else {
-                    match native_tls::TlsConnector::new() {
-                        Ok(connector) => connector.connect(&self.host, stream),
-                        Err(e) => return Err(Error::new(ErrorKind::Other, e)),
-                    }
-                };
-                match attempt {
-                    Ok(tls) => {
-                        let (tls_reader, tls_writer) = split_tls(tls);
-                        let reader = Reader::Tls(BufReader::with_capacity(64 * 1024, tls_reader));
-                        let writer = Writer::Tls(BufWriter::with_capacity(64 * 1024, tls_writer));
-                        (reader, writer)
-                    }
-                    Err(e) => {
-                        log::error!("failed to upgrade TLS: {:?}", e);
-                        return Err(Error::new(ErrorKind::PermissionDenied, e));
-                    }
-                }
-            } else {
-                let reader = Reader::Tcp(BufReader::with_capacity(64 * 1024, stream.try_clone()?));
-                let writer = Writer::Tcp(BufWriter::with_capacity(64 * 1024, stream));
-                (reader, writer)
-            };
-
-        writer.write_all(op.as_bytes())?;
-        writer.flush()?;
-        let parsed_op = parse_control_op(&mut reader)?;
-
-        match parsed_op {
-            ControlOp::Pong => Ok((reader, writer, info)),
-            ControlOp::Err(e) => Err(Error::new(ErrorKind::ConnectionRefused, e)),
-            ControlOp::Ping | ControlOp::Msg(_) | ControlOp::Info(_) | ControlOp::Unknown(_) => {
-                log::error!(
-                    "encountered unexpected control op during connection: {:?}",
-                    parsed_op
-                );
-                Err(Error::new(ErrorKind::ConnectionRefused, "Protocol Error"))
-            }
-        }
     }
 }
 
@@ -315,41 +232,5 @@ impl SharedState {
     pub(crate) fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
         self.outbound.shutdown();
-    }
-}
-
-#[derive(Serialize, Debug)]
-struct Connect<'a> {
-    #[serde(skip_serializing_if = "empty_or_none")]
-    name: Option<&'a String>,
-    verbose: bool,
-    pedantic: bool,
-    #[serde(skip_serializing_if = "if_true")]
-    echo: bool,
-    lang: &'a str,
-    version: &'a str,
-    #[serde(default)]
-    tls_required: bool,
-
-    // Authentication
-    #[serde(skip_serializing_if = "empty_or_none")]
-    user: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    pass: Option<&'a String>,
-    #[serde(skip_serializing_if = "empty_or_none")]
-    auth_token: Option<&'a String>,
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-const fn if_true(field: &bool) -> bool {
-    *field
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[inline]
-fn empty_or_none(field: &Option<&String>) -> bool {
-    match field {
-        Some(inner) => inner.is_empty(),
-        None => true,
     }
 }

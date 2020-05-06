@@ -2,13 +2,13 @@
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
 //!
-//! NATS.io is a simple, secure and high performance open source messaging system for cloud native applications,
-//! `IoT` messaging, and microservices architectures.
+//! NATS.io is a simple, secure and high performance open source messaging system for cloud native
+//! applications, `IoT` messaging, and microservices architectures.
 //!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
-//!
+
 #![cfg_attr(test, deny(warnings))]
 #![deny(
     missing_docs,
@@ -84,9 +84,12 @@
     clippy::wrong_pub_self_convention,
 )]
 
+mod connect;
+mod creds_utils;
 mod inbound;
 mod outbound;
 mod parser;
+mod secure_wipe;
 mod shared_state;
 
 #[cfg(feature = "fault_injection")]
@@ -114,6 +117,7 @@ use std::{
     fmt,
     io::{self, Error, ErrorKind},
     marker::PhantomData,
+    path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -121,13 +125,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub use subscription::Subscription;
 
 use {
     inbound::{Inbound, Reader},
     outbound::{Outbound, Writer},
+    secure_wipe::{SecureString, SecureVec},
     shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
     tls::{split_tls, TlsReader, TlsWriter},
 };
@@ -137,7 +142,7 @@ const LANG: &str = "rust";
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
@@ -195,8 +200,7 @@ impl fmt::Debug for Callback {
     }
 }
 
-#[doc(hidden)]
-pub mod options_typestate {
+mod options_typestate {
     /// `ConnectionOptions` typestate indicating
     /// that there has not yet been
     /// any auth-related configuration
@@ -221,6 +225,7 @@ pub mod options_typestate {
 type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
 
 /// A configuration object for a NATS connection.
+#[derive(Clone)]
 pub struct ConnectionOptions<TypeState> {
     typestate: PhantomData<TypeState>,
     auth: AuthStyle,
@@ -345,6 +350,45 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
             max_reconnects: self.max_reconnects,
+            tls_connector: self.tls_connector,
+            tls_required: self.tls_required,
+        }
+    }
+
+    /// Authenticate with NATS using a credentials file
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::ConnectionOptions::new()
+    ///     .with_credentials("path/to/my.creds")
+    ///     .connect("connect.ngs.global")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_credentials(
+        self,
+        path: impl AsRef<Path>,
+    ) -> ConnectionOptions<options_typestate::Authenticated> {
+        ConnectionOptions {
+            auth: AuthStyle::Credentials {
+                jwt_cb: {
+                    let path = path.as_ref().to_owned();
+                    Arc::new(move || creds_utils::user_jwt_from_file(&path))
+                },
+                sig_cb: {
+                    let path = path.as_ref().to_owned();
+                    Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
+                },
+            },
+            typestate: PhantomData,
+            no_echo: self.no_echo,
+            name: self.name,
+            reconnect_buffer_size: self.reconnect_buffer_size,
+            disconnect_callback: self.disconnect_callback,
+            reconnect_callback: self.reconnect_callback,
+            max_reconnects: self.max_reconnects,
+            close_callback: self.close_callback,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
         }
@@ -595,12 +639,37 @@ pub struct Connection {
     shutdown_dropper: Arc<ShutdownDropper>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone)]
 enum AuthStyle {
-    //    Credentials(String, String),
+    /// Authenticate using a token.
     Token(String),
+
+    /// Authenticate using a username and password.
     UserPass(String, String),
+
+    /// Authenticate using a `.creds` file.
+    Credentials {
+        /// Securely loads the user JWT.
+        jwt_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
+        /// Securely loads the nkey and signs the nonce passed as an argument.
+        sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
+    },
+
+    /// No authentication.
     None,
+}
+
+impl fmt::Debug for AuthStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            AuthStyle::Token(s) => f.debug_tuple("Token").field(s).finish(),
+            AuthStyle::UserPass(user, pass) => {
+                f.debug_tuple("Token").field(user).field(pass).finish()
+            }
+            AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
+            AuthStyle::None => f.debug_struct("None").finish(),
+        }
+    }
 }
 
 impl Default for AuthStyle {
