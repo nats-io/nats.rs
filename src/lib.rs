@@ -188,7 +188,6 @@ impl ServerInfo {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
 
 #[derive(Default)]
@@ -583,7 +582,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
     {
-        self.reconnect_delay_callback = ReconnectDelayCallback(Arc::new(cb));
+        self.reconnect_delay_callback = ReconnectDelayCallback(Box::new(cb));
         self
     }
 
