@@ -114,6 +114,7 @@ pub mod tls;
 pub mod subscription;
 
 use std::{
+    convert::TryFrom,
     fmt,
     io::{self, Error, ErrorKind},
     marker::PhantomData,
@@ -125,6 +126,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use rand::{thread_rng, Rng};
 use serde::Deserialize;
 
 pub use subscription::Subscription;
@@ -186,6 +188,8 @@ impl ServerInfo {
     }
 }
 
+pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
+
 #[derive(Default)]
 pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
 
@@ -234,9 +238,25 @@ pub struct ConnectionOptions<TypeState> {
     reconnect_buffer_size: usize,
     disconnect_callback: Callback,
     reconnect_callback: Callback,
+    reconnect_delay_callback: ReconnectDelayCallback,
     close_callback: Callback,
     tls_connector: Option<tls::TlsConnector>,
     tls_required: bool,
+}
+
+fn default_reconnect_delay_callback(reconnects: usize) -> Duration {
+    if reconnects > 0 {
+        let log_2_four_seconds_in_ms = 12_u32;
+        let truncated_exponent = std::cmp::min(
+            log_2_four_seconds_in_ms,
+            u32::try_from(std::cmp::min(u32::max_value() as usize, reconnects)).unwrap(),
+        );
+
+        let jitter = thread_rng().gen_range(0, 1000);
+        Duration::from_millis(jitter + 2_u64.checked_pow(truncated_exponent).unwrap())
+    } else {
+        Duration::from_millis(0)
+    }
 }
 
 impl Default for ConnectionOptions<options_typestate::NoAuth> {
@@ -250,6 +270,9 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
             max_reconnects: Some(60),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
+            reconnect_delay_callback: ReconnectDelayCallback(Box::new(
+                default_reconnect_delay_callback,
+            )),
             close_callback: Callback(None),
             tls_connector: None,
             tls_required: false,
@@ -267,6 +290,7 @@ impl<T> fmt::Debug for ConnectionOptions<T> {
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
+            .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
             .entry(
                 &"tls_connector",
@@ -316,6 +340,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             close_callback: self.close_callback,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             reconnect_buffer_size: self.reconnect_buffer_size,
             max_reconnects: self.max_reconnects,
             tls_connector: self.tls_connector,
@@ -348,6 +373,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             close_callback: self.close_callback,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             max_reconnects: self.max_reconnects,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
@@ -386,6 +412,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
             reconnect_buffer_size: self.reconnect_buffer_size,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             max_reconnects: self.max_reconnects,
             close_callback: self.close_callback,
             tls_connector: self.tls_connector,
@@ -490,6 +517,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
             max_reconnects: self.max_reconnects,
             disconnect_callback: self.disconnect_callback,
             reconnect_callback: self.reconnect_callback,
+            reconnect_delay_callback: self.reconnect_delay_callback,
             close_callback: self.close_callback,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
@@ -538,6 +566,23 @@ impl<TypeState> ConnectionOptions<TypeState> {
         F: Fn() + Send + Sync + 'static,
     {
         self.close_callback = Callback(Some(Box::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed for calculating the backoff duration
+    /// to wait before a server reconnection attempt.
+    ///
+    /// The function takes the number of reconnects as an argument
+    /// and returns the `Duration` that should be waited before
+    /// making the next connection attempt.
+    ///
+    /// It is recommended that some random jitter is added to
+    /// your returned `Duration`.
+    pub fn set_reconnect_delay_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(usize) -> Duration + Send + Sync + 'static,
+    {
+        self.reconnect_delay_callback = ReconnectDelayCallback(Box::new(cb));
         self
     }
 

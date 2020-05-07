@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     io::{self, Error, ErrorKind},
     net::{SocketAddr, ToSocketAddrs},
     sync::{
@@ -8,7 +7,6 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
 };
 
 use parking_lot::{Mutex, RwLock};
@@ -94,18 +92,7 @@ impl Server {
 
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
-        let backoff_ms = if self.reconnects > 0 {
-            let log_2_four_seconds_in_ms = 12_u32;
-            let truncated_exponent = std::cmp::min(
-                log_2_four_seconds_in_ms,
-                u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
-            );
-            2_u64.checked_pow(truncated_exponent).unwrap()
-        } else {
-            0
-        };
-
-        let backoff = Duration::from_millis(backoff_ms);
+        let backoff = (options.reconnect_delay_callback.0)(self.reconnects);
 
         // look up network addresses and shuffle them
         let mut addrs: Vec<SocketAddr> = (&*self.host, self.port).to_socket_addrs()?.collect();
