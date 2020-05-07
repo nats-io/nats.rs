@@ -9,8 +9,9 @@
 //!
 //! [https://nats.io/]: https://nats.io/
 
-#![cfg_attr(test, deny(warnings))]
-#![deny(
+#![recursion_limit = "1024"]
+// #![cfg_attr(test, deny(warnings))]
+#![warn(
     missing_docs,
     future_incompatible,
     nonstandard_style,
@@ -91,6 +92,8 @@ mod outbound;
 mod parser;
 mod secure_wipe;
 mod shared_state;
+
+pub mod new_client;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
