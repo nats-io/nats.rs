@@ -131,6 +131,9 @@ use serde::Deserialize;
 
 pub use subscription::Subscription;
 
+#[doc(hidden)]
+pub use connect::ConnectInfo;
+
 use {
     inbound::{Inbound, Reader},
     outbound::{Outbound, Writer},
