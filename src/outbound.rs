@@ -33,10 +33,15 @@ pub(crate) enum Writer {
 
 impl Write for Writer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        inject_io_failure()?;
         match self {
-            Writer::Tcp(bw) => bw.write(buf),
-            Writer::Tls(bw) => bw.write(buf),
+            Writer::Tcp(bw) => {
+                inject_io_failure()?;
+                bw.write(buf)
+            }
+            Writer::Tls(bw) => {
+                inject_io_failure()?;
+                bw.write(buf)
+            }
             Writer::Disconnected(db) => {
                 if db.len + buf.len() > db.buf.len() {
                     Err(Error::new(
@@ -57,10 +62,15 @@ impl Write for Writer {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        inject_io_failure()?;
         match self {
-            Writer::Tcp(bw) => bw.flush(),
-            Writer::Tls(bw) => bw.flush(),
+            Writer::Tcp(bw) => {
+                inject_io_failure()?;
+                bw.flush()
+            }
+            Writer::Tls(bw) => {
+                inject_io_failure()?;
+                bw.flush()
+            }
             Writer::Disconnected(_) => Ok(()),
             Writer::Closed => Err(Error::new(
                 ErrorKind::Other,
@@ -71,6 +81,15 @@ impl Write for Writer {
 }
 
 impl Writer {
+    fn transition_to_disconnected(&mut self, reconnect_buffer_size: usize) {
+        match self {
+            &mut Writer::Disconnected(_) | &mut Writer::Closed => {
+                // nothing to do
+            }
+            other => *other = Writer::Disconnected(DisconnectWriter::new(reconnect_buffer_size)),
+        }
+    }
+
     fn flusher_should_wait(&self) -> bool {
         match self {
             Writer::Tcp(bw) => bw.buffer().is_empty(),
@@ -81,7 +100,6 @@ impl Writer {
     }
 
     fn shutdown(&mut self) -> io::Result<()> {
-        inject_io_failure()?;
         match self {
             Writer::Tcp(bw) => {
                 inject_io_failure()?;
@@ -90,7 +108,9 @@ impl Writer {
                 bw.get_mut().shutdown(Shutdown::Both)?;
             }
             Writer::Tls(bw) => {
+                inject_io_failure()?;
                 bw.flush()?;
+                inject_io_failure()?;
                 bw.get_mut().shutdown()?;
             }
             Writer::Disconnected(_) | Writer::Closed => (),
@@ -119,13 +139,15 @@ impl Writer {
 pub(crate) struct Outbound {
     writer: Mutex<Writer>,
     updated: Condvar,
+    reconnect_buffer_size: usize,
 }
 
 impl Outbound {
-    pub(crate) fn new(writer: Writer) -> Outbound {
+    pub(crate) fn new(writer: Writer, reconnect_buffer_size: usize) -> Outbound {
         Outbound {
             writer: Mutex::new(writer),
             updated: Condvar::new(),
+            reconnect_buffer_size,
         }
     }
 
@@ -145,6 +167,8 @@ impl Outbound {
             if let Err(error) = writer.flush() {
                 log::error!("Outbound thread failed to flush: {:?}", error);
 
+                let _unchecked = writer.shutdown();
+
                 // wait on the Condvar here until the inbound thread
                 // replaces our buffer
                 self.updated.wait(&mut writer);
@@ -152,18 +176,13 @@ impl Outbound {
         }
     }
 
-    pub(crate) fn transition_to_disconnected(&self, buf_sz: usize) {
+    pub(crate) fn transition_to_disconnected(&self) {
         inject_delay();
         let mut writer = self.writer.lock();
-        match &mut *writer {
-            &mut Writer::Disconnected(_) | &mut Writer::Closed => {
-                // nothing to do
-            }
-            other => *other = Writer::Disconnected(DisconnectWriter::new(buf_sz)),
-        }
+        writer.transition_to_disconnected(self.reconnect_buffer_size);
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn close(&self) {
         inject_delay();
         let mut writer = self.writer.lock();
         if writer.is_closed() {
@@ -177,6 +196,7 @@ impl Outbound {
                 error
             );
         }
+
         *writer = Writer::Closed;
         drop(writer);
         self.updated.notify_all();
@@ -187,14 +207,24 @@ impl Outbound {
     // to write and flush the entire disconnect buffer into
     // the new socket.
     pub(crate) fn replace_writer(&self, mut new_writer: Writer) -> io::Result<()> {
-        inject_io_failure()?;
         inject_delay();
         let mut writer = self.writer.lock();
         if let Writer::Disconnected(ref db) = *writer {
-            inject_io_failure()?;
-            new_writer.write_all(&db.buf[..db.len])?;
-            inject_io_failure()?;
-            new_writer.flush()?;
+            let res = new_writer
+                .write_all(&db.buf[..db.len])
+                .and_then(|()| new_writer.flush());
+
+            if let Err(error) = res {
+                log::error!(
+                    "encountered error while sending data \
+                    buffered during disconnection to the new \
+                    server:: {:?}",
+                    error
+                );
+
+                let _unchecked = new_writer.shutdown();
+                return Err(error);
+            }
         }
         *writer = new_writer;
         drop(writer);
@@ -207,7 +237,6 @@ impl Outbound {
         F: FnOnce(&mut Writer) -> io::Result<()>,
     {
         inject_delay();
-        inject_io_failure()?;
         let mut writer = self.writer.lock();
         match (f)(&mut *writer) {
             Ok(()) => Ok(()),
@@ -215,6 +244,7 @@ impl Outbound {
                 // Shutdown socket to ensure we propagate the error
                 // to the Inbound reader.
                 let _unchecked = writer.shutdown();
+                writer.transition_to_disconnected(self.reconnect_buffer_size);
                 Err(e)
             }
         }
@@ -228,20 +258,20 @@ impl Outbound {
     }
 
     pub(crate) fn send_ping(&self) -> io::Result<()> {
-        inject_io_failure()?;
         inject_delay();
-        let mut writer = self.writer.lock();
 
-        if writer.is_disconnected() {
-            return Err(Error::new(
-                ErrorKind::NotConnected,
-                "The client is not currently connected to a server",
-            ));
-        }
+        self.with_writer(|writer| {
+            if writer.is_disconnected() {
+                return Err(Error::new(
+                    ErrorKind::NotConnected,
+                    "The client is not currently connected to a server",
+                ));
+            }
 
-        writer.write_all(b"PING\r\n")?;
-        // Flush in place on pings.
-        writer.flush()
+            writer.write_all(b"PING\r\n")?;
+            // Flush in place on pings.
+            writer.flush()
+        })
     }
 
     pub(crate) fn send_pong(&self) -> io::Result<()> {
@@ -281,29 +311,30 @@ impl Outbound {
         queue: Option<&str>,
         sid: usize,
     ) -> std::io::Result<()> {
-        self.with_writer(|writer| {
+        let res = self.with_writer(|writer| {
             match queue {
                 Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
                 None => write!(writer, "SUB {} {}\r\n", subject, sid)?,
             }
-            self.updated.notify_all();
             Ok(())
-        })
+        });
+        self.updated.notify_all();
+        res
     }
 
     pub(crate) fn resend_subs(&self, subs: &HashMap<usize, SubscriptionState>) -> io::Result<()> {
-        inject_io_failure()?;
         inject_delay();
-        let mut writer = self.writer.lock();
-        for (sid, SubscriptionState { subject, queue, .. }) in subs {
-            match queue {
-                Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
-                None => write!(writer, "SUB {} {}\r\n", subject, sid)?,
+        let res = self.with_writer(|writer| {
+            for (sid, SubscriptionState { subject, queue, .. }) in subs {
+                match queue {
+                    Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
+                    None => write!(writer, "SUB {} {}\r\n", subject, sid)?,
+                }
             }
-        }
-        drop(writer);
+            Ok(())
+        });
         self.updated.notify_all();
-        Ok(())
+        res
     }
 
     pub(crate) fn send_response(&self, subj: &str, msgb: &[u8]) -> io::Result<()> {
