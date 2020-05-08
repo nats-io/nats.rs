@@ -176,7 +176,7 @@ impl SharedState {
 
         let (reader, writer, info) = connected_opt.unwrap();
 
-        let outbound = Outbound::new(writer);
+        let outbound = Outbound::new(writer, options.reconnect_buffer_size);
 
         let learned_servers = parse_server_addresses(&info.connect_urls);
 
@@ -216,8 +216,8 @@ impl SharedState {
         Ok(shared_state)
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn close(&self) {
         self.shutting_down.store(true, Ordering::Release);
-        self.outbound.shutdown();
+        self.outbound.close();
     }
 }

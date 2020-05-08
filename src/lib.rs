@@ -131,6 +131,9 @@ use serde::Deserialize;
 
 pub use subscription::Subscription;
 
+#[doc(hidden)]
+pub use connect::ConnectInfo;
+
 use {
     inbound::{Inbound, Reader},
     outbound::{Outbound, Writer},
@@ -651,7 +654,7 @@ pub(crate) struct ShutdownDropper {
 
 impl Drop for ShutdownDropper {
     fn drop(&mut self) {
-        self.shared_state.shutdown();
+        self.shared_state.close();
 
         inject_delay();
         if let Some(mut threads) = self.shared_state.threads.lock().take() {
@@ -1054,7 +1057,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn close(self) {
-        self.shared_state.shutdown()
+        self.shared_state.close()
     }
 
     /// Calculates the round trip time between this client and the server,

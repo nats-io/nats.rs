@@ -3,7 +3,7 @@ use std::{
     net::{SocketAddr, TcpStream},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     inject_io_failure,
@@ -12,9 +12,15 @@ use crate::{
     split_tls, AuthStyle, FinalizedOptions, Reader, SecureString, ServerInfo, Writer,
 };
 
+fn default_echo() -> bool {
+    true
+}
+
 /// Info to construct a CONNECT message.
-#[derive(Clone, Serialize, Debug)]
-pub(crate) struct ConnectInfo {
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[doc(hidden)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgements.
     pub verbose: bool,
 
@@ -36,7 +42,7 @@ pub(crate) struct ConnectInfo {
     /// If set to `true`, the server (version 1.2.0+) will not send originating messages from this
     /// connection to its own subscriptions. Clients should set this to `true` only for server
     /// supporting this feature, which is when proto in the INFO protocol is set to at least 1.
-    #[serde(skip_serializing_if = "is_true")]
+    #[serde(skip_serializing_if = "is_true", default = "default_echo")]
     pub echo: bool,
 
     /// The implementation language of the client.
