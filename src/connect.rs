@@ -19,6 +19,7 @@ fn default_echo() -> bool {
 /// Info to construct a CONNECT message.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[doc(hidden)]
+#[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgements.
     pub verbose: bool,
