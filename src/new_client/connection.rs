@@ -2,10 +2,15 @@ use std::io::{self, Error, ErrorKind};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
+use std::time::{Duration, Instant};
 
-use futures::{channel::mpsc, io::BufReader, prelude::*};
+use futures::{
+    channel::mpsc,
+    io::{BufReader, BufWriter},
+    prelude::*,
+};
 use piper::Arc;
-use smol::Async;
+use smol::{Async, Timer};
 
 use crate::connect::ConnectInfo;
 use crate::new_client::decoder::{decode, ServerOp};
@@ -83,7 +88,11 @@ async fn client(
     mut sub_ops: mpsc::UnboundedReceiver<SubscriptionOp>,
 ) -> io::Result<()> {
     let stream = Arc::new(Async::<TcpStream>::connect(url).await?);
-    let mut writer = stream.clone();
+
+    // Bytes written to the server are buffered and periodically flushed.
+    let flush_timeout = Duration::from_millis(100); // TODO(stjepang): Make this configurable.
+    let mut next_flush = Instant::now() + flush_timeout;
+    let mut writer = BufWriter::new(stream.clone());
 
     // Create an endless stream parsing operations from the server.
     let mut reader = stream::try_unfold(BufReader::new(stream), |mut stream| async {
@@ -212,6 +221,12 @@ async fn client(
                         .await?;
                     }
                 }
+            }
+
+            // Periodically flush writes to the server.
+            _ = Timer::at(next_flush).fuse() => {
+                writer.flush().await?;
+                next_flush = Instant::now() + flush_timeout;
             }
         }
     }
