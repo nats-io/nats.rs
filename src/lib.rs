@@ -503,11 +503,30 @@ impl<TypeState> ConnectionOptions<TypeState> {
 
     /// Establish a `Connection` with a NATS server.
     ///
+    /// Multiple servers may be specified by separating
+    /// them with commas.
+    ///
     /// # Example
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let options = nats::ConnectionOptions::new();
     /// let nc = options.connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// In the below case, the second server is configured
+    /// to use TLS but the first one is not. Using the
+    /// `tls_required` method can ensure that all
+    /// servers are connected to with TLS, if that is
+    /// your intention.
+    ///
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let options = nats::ConnectionOptions::new();
+    /// let nc = options.connect("nats://demo.nats.io:4222,tls://demo.nats.io:4443")?;
     /// # Ok(())
     /// # }
     /// ```
