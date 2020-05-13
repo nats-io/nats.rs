@@ -1,3 +1,5 @@
+//! Decode bytes received from the server to protocol operations.
+
 use std::io::{self, Error, ErrorKind};
 use std::str::FromStr;
 
@@ -8,10 +10,10 @@ use crate::{inject_io_failure, ServerInfo};
 /// A protocol operation sent by the server.
 #[derive(Debug)]
 pub(crate) enum ServerOp {
-    /// INFO {["option_name":option_value],...}
+    /// `INFO {["option_name":option_value],...}`
     Info(ServerInfo),
 
-    /// MSG <subject> <sid> [reply-to] <#bytes>\r\n[payload]\r\n
+    /// `MSG <subject> <sid> [reply-to] <#bytes>\r\n[payload]\r\n`
     Msg {
         subject: String,
         sid: usize,
@@ -19,13 +21,13 @@ pub(crate) enum ServerOp {
         payload: Vec<u8>,
     },
 
-    /// PING
+    /// `PING`
     Ping,
 
-    /// PONG
+    /// `PONG`
     Pong,
 
-    /// -ERR <error message>
+    /// `-ERR <error message>`
     Err(String),
 
     /// Unknown protocol message.

@@ -1,3 +1,5 @@
+//! Encode protocol operations to bytes to send to the server.
+
 use std::io;
 
 use futures::prelude::*;
@@ -7,30 +9,30 @@ use crate::{connect::ConnectInfo, inject_io_failure};
 /// A protocol operation sent by the client.
 #[derive(Debug)]
 pub(crate) enum ClientOp {
-    /// CONNECT {["option_name":option_value],...}
+    /// `CONNECT {["option_name":option_value],...}`
     Connect(ConnectInfo),
 
-    /// PUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n
+    /// `PUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n`
     Pub {
         subject: String,
         reply_to: Option<String>,
         payload: Vec<u8>,
     },
 
-    /// SUB <subject> [queue group] <sid>\r\n
+    /// `SUB <subject> [queue group] <sid>\r\n`
     Sub {
         subject: String,
         queue_group: Option<String>,
         sid: usize,
     },
 
-    /// UNSUB <sid> [max_msgs]
+    /// `UNSUB <sid> [max_msgs]`
     Unsub { sid: usize, max_msgs: Option<u64> },
 
-    /// PING
+    /// `PING`
     Ping,
 
-    /// PONG
+    /// `PONG`
     Pong,
 }
 
