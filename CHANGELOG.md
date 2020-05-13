@@ -7,6 +7,8 @@
 * #36 The redundant `Subscription::close` has been
   removed. The same functionality exists in
   `Subscription::unsubscribe`.
+* bumped the MSRV to 1.39.0 in anticipation of possible
+  async support.
 
 # 0.3.2
 

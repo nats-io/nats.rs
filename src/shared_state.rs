@@ -25,7 +25,7 @@ pub(crate) fn parse_server_addresses(
 ) -> Vec<Server> {
     let mut ret: Vec<Server> = input
         .into_iter()
-        .filter_map(|s| Server::new(s.as_ref()).ok())
+        .filter_map(|s| Server::new(s.as_ref().trim()).ok())
         .collect();
     ret.shuffle(&mut thread_rng());
     ret
