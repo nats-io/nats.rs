@@ -15,18 +15,13 @@ use smol::{Async, Timer};
 use crate::connect::ConnectInfo;
 use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
-use crate::new_client::subscription::{Subscription, SubscriptionOp};
+use crate::new_client::subscription::Subscription;
 use crate::Message;
 
 /// A NATS client connection.
 pub struct Connection {
-    /// Enqueues PUB operations.
-    ///
-    /// Items are of the form `(subject, message)`.
-    pub_ops: mpsc::UnboundedSender<(String, Vec<u8>)>,
-
-    /// Enqueues SUB and UNSUB operations.
-    sub_ops: mpsc::UnboundedSender<SubscriptionOp>,
+    /// Enqueues user operations.
+    user_ops: mpsc::UnboundedSender<UserOp>,
 
     /// Subscription ID generator.
     sid_gen: AtomicUsize,
@@ -39,16 +34,14 @@ impl Connection {
     /// Connects a NATS client.
     pub fn connect(url: &str) -> io::Result<Connection> {
         let url = url.to_string();
-        let (pub_sender, pub_receiver) = mpsc::unbounded();
-        let (sub_sender, sub_receiver) = mpsc::unbounded();
+        let (sender, receiver) = mpsc::unbounded();
 
         Ok(Connection {
             thread: thread::spawn(move || {
                 // TODO(stjepang): Report errors from `run()` in a better place.
-                dbg!(smol::run(client(&url, pub_receiver, sub_receiver)))
+                dbg!(smol::run(client(&url, receiver)))
             }),
-            sub_ops: sub_sender,
-            pub_ops: pub_sender,
+            user_ops: sender,
             sid_gen: AtomicUsize::new(1),
         })
     }
@@ -56,11 +49,16 @@ impl Connection {
     /// Publishes a message.
     pub fn publish(&mut self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         let subject = subject.to_string();
-        let msg = msg.as_ref().to_vec();
+        let payload = msg.as_ref().to_vec();
+        let reply_to = None;
 
         // Enqueue a PUB operation.
-        self.pub_ops
-            .send((subject, msg))
+        self.user_ops
+            .send(UserOp::Pub {
+                subject,
+                reply_to,
+                payload,
+            })
             .now_or_never()
             .expect("future can't be pending because the publish channel is unbounded")
             .expect("the publish channel shouldn't be disconnected");
@@ -71,7 +69,7 @@ impl Connection {
     /// Creates a new subscriber.
     pub fn subscribe(&mut self, subject: &str) -> Subscription {
         let sid = self.sid_gen.fetch_add(1, Ordering::SeqCst);
-        Subscription::new(subject, sid, self.sub_ops.clone())
+        Subscription::new(subject, sid, self.user_ops.clone())
     }
 }
 
@@ -82,11 +80,7 @@ impl Drop for Connection {
 }
 
 /// The main loop for a NATS client.
-async fn client(
-    url: &str,
-    mut pub_ops: mpsc::UnboundedReceiver<(String, Vec<u8>)>,
-    mut sub_ops: mpsc::UnboundedReceiver<SubscriptionOp>,
-) -> io::Result<()> {
+async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io::Result<()> {
     let stream = Arc::new(Async::<TcpStream>::connect(url).await?);
 
     // Bytes written to the server are buffered and periodically flushed.
@@ -103,7 +97,7 @@ async fn client(
     .boxed();
 
     // Expect an INFO message.
-    let server_info = match reader
+    let mut server_info = match reader
         .try_next()
         .await?
         .expect("end of what should be an infinite stream")
@@ -143,8 +137,8 @@ async fn client(
                 let op = res?.expect("end of what should be an infinite stream");
 
                 match op {
-                    ServerOp::Info(server_info) => {
-                        // TODO(stjepang): Do something with this info.
+                    ServerOp::Info(new_server_info) => {
+                        server_info = new_server_info;
                     }
 
                     ServerOp::Ping => {
@@ -180,23 +174,20 @@ async fn client(
                 }
             }
 
-            // A PUB operation was enqueued.
-            msg = pub_ops.next().fuse() => {
-                let (subject, payload) = msg.expect("disconnected");
+            // The user has enqueued an operation.
+            msg = user_ops.next().fuse() => {
+                match msg.expect("user_ops disconnected") {
+                    UserOp::Pub { subject, reply_to, payload } => {
+                        // Send a PUB operation to the server.
+                        encode(&mut writer, ClientOp::Pub {
+                            subject,
+                            reply_to: None,
+                            payload
+                        })
+                        .await?;
+                    }
 
-                // Send a PUB operation to the server.
-                encode(&mut writer, ClientOp::Pub {
-                    subject,
-                    reply_to: None,
-                    payload
-                })
-                .await?;
-            }
-
-            // A SUB or UNSUB operation was enqueued.
-            msg = sub_ops.next().fuse() => {
-                match msg.expect("disconnected") {
-                    SubscriptionOp::Sub { subject, queue_group, sid, messages } => {
+                    UserOp::Sub { subject, queue_group, sid, messages } => {
                         // Add the subscription to the list.
                         subscriptions.push((subject.clone(), sid, messages));
 
@@ -209,7 +200,7 @@ async fn client(
                         .await?;
                     }
 
-                    SubscriptionOp::Unsub { sid, max_msgs } => {
+                    UserOp::Unsub { sid, max_msgs } => {
                         // Remove the subscription from the list.
                         subscriptions.retain(|(_, s, _)| *s != sid);
 
@@ -230,4 +221,23 @@ async fn client(
             }
         }
     }
+}
+
+/// An operation requested by the user of this crate.
+pub(crate) enum UserOp {
+    Pub {
+        subject: String,
+        reply_to: Option<String>,
+        payload: Vec<u8>,
+    },
+    Sub {
+        subject: String,
+        queue_group: Option<String>,
+        sid: usize,
+        messages: mpsc::UnboundedSender<Message>,
+    },
+    Unsub {
+        sid: usize,
+        max_msgs: Option<u64>,
+    },
 }
