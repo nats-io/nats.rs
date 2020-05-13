@@ -1,6 +1,6 @@
+use std::collections::VecDeque;
 use std::io::{self, Error, ErrorKind};
 use std::net::TcpStream;
-use std::collections::VecDeque;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -53,19 +53,17 @@ pub(crate) fn spawn(
     user_ops: mpsc::UnboundedReceiver<UserOp>,
 ) -> thread::JoinHandle<io::Result<()>> {
     let url = url.to_string();
-
-    thread::spawn(move || {
-        // TODO(stjepang): Report errors from `run()` in a better place.
-        dbg!(smol::run(client(&url, user_ops)))
-    })
+    thread::spawn(move || smol::run(client(&url, user_ops)))
 }
 
 /// Runs the main loop for a client.
 async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io::Result<()> {
     let stream = Arc::new(Async::<TcpStream>::connect(url).await?);
 
+    // TODO(stjepang): Make this option configurable.
+    let flush_timeout = Duration::from_millis(100);
+
     // Bytes written to the server are buffered and periodically flushed.
-    let flush_timeout = Duration::from_millis(100); // TODO(stjepang): Make this configurable.
     let mut next_flush = Instant::now() + flush_timeout;
     let mut writer = BufWriter::new(stream.clone());
 
@@ -153,11 +151,11 @@ async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io:
                     }
 
                     ServerOp::Err(msg) => {
-                        // TODO(stjepang): Display the error?
+                        log::error!("received -ERR '{}'", msg);
                     }
 
                     ServerOp::Unknown(line) => {
-                        // TODO(stjepang): Log the unknown operation?
+                        log::warn!("unknown op: {}", line);
                     }
                 }
             }

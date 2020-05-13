@@ -15,6 +15,7 @@ fn main() -> io::Result<()> {
     thread::sleep(Duration::from_secs(1));
 
     nc.publish("hello", "hi from new-client")?;
+    nc.flush()?;
 
     loop {
         let msg = sub.next_msg()?;

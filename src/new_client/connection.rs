@@ -2,10 +2,7 @@ use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use futures::{
-    channel::{mpsc, oneshot},
-    prelude::*,
-};
+use futures::channel::{mpsc, oneshot};
 use smol::block_on;
 
 use crate::new_client::client::{self, UserOp};
@@ -26,14 +23,22 @@ pub struct Connection {
 impl Connection {
     /// Connects a NATS client.
     pub fn connect(url: &str) -> io::Result<Connection> {
+        // Spawn a client thread.
         let (sender, receiver) = mpsc::unbounded();
         let thread = client::spawn(url, receiver);
 
-        Ok(Connection {
+        // Connection handle controlling the client thread.
+        let mut conn = Connection {
             user_ops: sender,
             sid_gen: AtomicUsize::new(1),
             thread: Some(thread),
-        })
+        };
+
+        // Flush to send a ping and wait for the connection to establish.
+        conn.flush()?;
+
+        // All good! The connection is now ready.
+        Ok(conn)
     }
 
     /// Publishes a message.
@@ -77,11 +82,11 @@ impl Connection {
 
     /// Close the connection.
     pub fn close(&mut self) -> io::Result<()> {
-        // Enqueue a close operation.
-        let _ = self.user_ops.unbounded_send(UserOp::Close);
-
-        // Wait for the client thread to stop.
         if let Some(thread) = self.thread.take() {
+            // Enqueue a close operation.
+            let _ = self.user_ops.unbounded_send(UserOp::Close);
+
+            // Wait for the client thread to stop.
             thread
                 .join()
                 .expect("client thread has panicked")
@@ -94,7 +99,7 @@ impl Connection {
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        // Enqueue a close operation in case it hasn't been already.
+        // Close the connection in case it hasn't been already.
         let _ = self.close();
     }
 }
