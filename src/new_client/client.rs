@@ -1,10 +1,11 @@
 use std::io::{self, Error, ErrorKind};
 use std::net::TcpStream;
+use std::collections::VecDeque;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use futures::{
-    channel::mpsc,
+    channel::{mpsc, oneshot},
     io::{BufReader, BufWriter},
     prelude::*,
 };
@@ -16,7 +17,10 @@ use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
 use crate::Message;
 
-/// An operation requested by the user of this crate.
+/// An operation enqueued by the user of this crate.
+///
+/// These operations are enqueued by `Connection` or `Subscription` and are then handled by the
+/// client thread.
 pub(crate) enum UserOp {
     /// Publish a message.
     Pub {
@@ -36,6 +40,9 @@ pub(crate) enum UserOp {
     /// Unsubscribe from a subject.
     Unsub { sid: usize, max_msgs: Option<u64> },
 
+    /// Send a ping and wait for a pong.
+    Ping { pong: oneshot::Sender<()> },
+
     /// Close the connection.
     Close,
 }
@@ -53,7 +60,7 @@ pub(crate) fn spawn(
     })
 }
 
-/// The main loop for a NATS client.
+/// Runs the main loop for a client.
 async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io::Result<()> {
     let stream = Arc::new(Async::<TcpStream>::connect(url).await?);
 
@@ -80,6 +87,12 @@ async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io:
         _ => return Err(Error::new(ErrorKind::Other, "expected an INFO message")),
     };
 
+    // Current subscriptions in the form `(subject, sid, messages)`.
+    let mut subscriptions: Vec<(String, usize, mpsc::UnboundedSender<Message>)> = Vec::new();
+
+    // Expected pongs and their notification channels.
+    let mut pongs: VecDeque<oneshot::Sender<()>> = VecDeque::new();
+
     // Send a CONNECT operation to the server.
     encode(
         &mut writer,
@@ -100,9 +113,6 @@ async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io:
     )
     .await?;
 
-    // Current subscriptions in the form `(subject, sid, messages)`.
-    let mut subscriptions: Vec<(String, usize, mpsc::UnboundedSender<Message>)> = Vec::new();
-
     // Handle events in a loop.
     loop {
         futures::select! {
@@ -121,7 +131,11 @@ async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io:
                     }
 
                     ServerOp::Pong => {
-                        // TODO(stjepang): Do something with these pongs.
+                        // Take the next expected pong from the queue.
+                        let pong = pongs.pop_front().expect("unexpected pong");
+
+                        // Complete the pong by sending a message into the channel.
+                        let _ = pong.send(());
                     }
 
                     ServerOp::Msg { subject, sid, reply_to, payload } => {
@@ -184,6 +198,14 @@ async fn client(url: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io:
                             max_msgs,
                         })
                         .await?;
+                    }
+
+                    UserOp::Ping { pong } => {
+                        // Send a PING operation to the server.
+                        encode(&mut writer, ClientOp::Ping).await?;
+
+                        // Record that we're expecting a pong.
+                        pongs.push_back(pong);
                     }
 
                     UserOp::Close => {

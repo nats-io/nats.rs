@@ -2,7 +2,11 @@ use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use futures::{channel::mpsc, prelude::*};
+use futures::{
+    channel::{mpsc, oneshot},
+    prelude::*,
+};
+use smol::block_on;
 
 use crate::new_client::client::{self, UserOp};
 use crate::new_client::subscription::Subscription;
@@ -40,14 +44,12 @@ impl Connection {
 
         // Enqueue a PUB operation.
         self.user_ops
-            .send(UserOp::Pub {
+            .unbounded_send(UserOp::Pub {
                 subject,
                 reply_to,
                 payload,
             })
-            .now_or_never()
-            .expect("future can't be pending because the publish channel is unbounded")
-            .expect("the publish channel shouldn't be disconnected");
+            .map_err(|err| Error::new(ErrorKind::ConnectionReset, err))?;
 
         Ok(())
     }
@@ -58,16 +60,35 @@ impl Connection {
         Subscription::new(subject, sid, self.user_ops.clone())
     }
 
+    /// Flushes by performing a round trip to the server.
+    pub fn flush(&mut self) -> io::Result<()> {
+        let (sender, receiver) = oneshot::channel();
+
+        // Enqueue a PING operation.
+        self.user_ops
+            .unbounded_send(UserOp::Ping { pong: sender })
+            .map_err(|err| Error::new(ErrorKind::ConnectionReset, err))?;
+
+        // Wait until the PONG operation is received.
+        let _ = block_on(receiver);
+
+        Ok(())
+    }
+
     /// Close the connection.
     pub fn close(&mut self) -> io::Result<()> {
         // Enqueue a close operation.
         let _ = self.user_ops.unbounded_send(UserOp::Close);
 
+        // Wait for the client thread to stop.
         if let Some(thread) = self.thread.take() {
-            thread.join().expect("the client thread has panicked")
-        } else {
-            Ok(())
+            thread
+                .join()
+                .expect("client thread has panicked")
+                .map_err(|err| Error::new(ErrorKind::ConnectionReset, err))?;
         }
+
+        Ok(())
     }
 }
 

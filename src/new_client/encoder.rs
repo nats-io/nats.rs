@@ -43,10 +43,7 @@ pub(crate) async fn encode(mut stream: impl AsyncWrite + Unpin, op: ClientOp) ->
 
     match &op {
         ClientOp::Connect(connect_info) => {
-            let op = format!(
-                "CONNECT {}\r\nPING\r\n",
-                serde_json::to_string(&connect_info)?
-            );
+            let op = format!("CONNECT {}\r\n", serde_json::to_string(&connect_info)?);
             stream.write_all(op.as_bytes()).await?;
         }
 
