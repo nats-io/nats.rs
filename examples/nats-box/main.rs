@@ -8,6 +8,9 @@ struct Cli {
     /// NATS server
     #[structopt(long, short, default_value = "demo.nats.io")]
     server: String,
+    // Optional credentials for NATS 2.x
+    #[structopt(long, default_value = "")]
+    creds: String,
     /// Command: pub, sub, request, reply
     #[structopt(subcommand)]
     cmd: Command,
@@ -28,12 +31,24 @@ enum Command {
 
 fn main() -> CliResult {
     let args = Cli::from_args();
-    let nc = nats::ConnectionOptions::new()
-        .with_name("nats-box rust example")
-        .connect(&args.server)?;
+    let nc: nats::Connection;
+
+    if args.creds.len() > 0 {
+        nc = nats::ConnectionOptions::new()
+            .with_name("nats-box rust example")
+            .with_credentials(&args.creds)
+            .connect(&args.server)?;
+    } else {
+        nc = nats::ConnectionOptions::new()
+            .with_name("nats-box rust example")
+            .connect(&args.server)?;
+    }
 
     match args.cmd {
-        Command::Pub { subject, msg } => nc.publish(&subject, msg)?,
+        Command::Pub { subject, msg } => {
+            nc.publish(&subject, &msg)?;
+            println!("Published to '{}': '{}'", subject, msg);
+        }
         Command::Sub { subject } => {
             let sub = nc.subscribe(&subject)?;
             println!("Listening on '{}'", subject);
@@ -43,7 +58,7 @@ fn main() -> CliResult {
         }
         Command::Request { subject, msg } => {
             println!("Waiting on response for '{}'", subject);
-            let resp = nc.request(&subject, msg)?;
+            let resp = nc.request(&subject, &msg)?;
             println!("Response is {}", resp);
         }
         Command::Reply { subject, resp } => {
