@@ -35,24 +35,29 @@ pub(crate) enum ServerOp {
 }
 
 /// Decodes a single operation from the server.
-pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<ServerOp> {
+///
+/// If the connection is closed, `None` will be returned.
+pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<Option<ServerOp>> {
     // Inject random I/O failures when testing.
     inject_io_failure()?;
 
     // Read a line, which should be human readable.
     let mut line = Vec::new();
-    stream.read_until(b'\n', &mut line).await?;
+    if stream.read_until(b'\n', &mut line).await? == 0 {
+        // If zero bytes were read, the connection is closed.
+        return Ok(None);
+    }
 
     // Convert into a UTF8 string for simpler parsing.
     let line = String::from_utf8(line).map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
     let line_uppercase = line.trim().to_uppercase();
 
     if line_uppercase.starts_with("PING") {
-        return Ok(ServerOp::Ping);
+        return Ok(Some(ServerOp::Ping));
     }
 
     if line_uppercase.starts_with("PONG") {
-        return Ok(ServerOp::Pong);
+        return Ok(Some(ServerOp::Pong));
     }
 
     if line_uppercase.starts_with("INFO") {
@@ -60,7 +65,7 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
         let server_info = serde_json::from_slice(&line["INFO".len()..].as_bytes())
             .map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
 
-        return Ok(ServerOp::Info(server_info));
+        return Ok(Some(ServerOp::Info(server_info)));
     }
 
     if line_uppercase.starts_with("MSG") {
@@ -109,20 +114,20 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
         payload.resize(num_bytes as usize, 0u8);
         stream.read_exact(&mut payload[..]).await?;
 
-        return Ok(ServerOp::Msg {
+        return Ok(Some(ServerOp::Msg {
             subject,
             sid,
             reply_to,
             payload,
-        });
+        }));
     }
 
     if line_uppercase.starts_with("-ERR") {
         // Extract the message argument.
         let msg = line["-ERR".len()..].trim().trim_matches('\'').to_string();
 
-        return Ok(ServerOp::Err(msg));
+        return Ok(Some(ServerOp::Err(msg)));
     }
 
-    Ok(ServerOp::Unknown(line))
+    Ok(Some(ServerOp::Unknown(line)))
 }

@@ -93,6 +93,5 @@ pub(crate) async fn encode(mut stream: impl AsyncWrite + Unpin, op: ClientOp) ->
         }
     }
 
-    stream.flush().await?;
     Ok(())
 }
