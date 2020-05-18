@@ -1,6 +1,5 @@
 use std::cmp;
 use std::collections::{HashMap, VecDeque};
-use std::convert::TryFrom;
 use std::io::{self, Error, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
@@ -86,7 +85,10 @@ async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>)
 
         // Iterate over the server table in random order.
         for server in &servers {
+            // Calculate the backoff sleep duration and bump the reconnect counter.
             let reconnects = server_reconnects.get_mut(server).unwrap();
+            let sleep_duration = backoff(*reconnects);
+            *reconnects += 1;
 
             // Resolve the server URL into socket addresses.
             let mut addrs = match (server.host.as_str(), server.port).to_socket_addrs() {
@@ -102,7 +104,7 @@ async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>)
 
             for addr in addrs {
                 // Sleep for some time if this is not the first connection attempt for this server.
-                Timer::after(backoff(*reconnects)).await;
+                Timer::after(sleep_duration).await;
 
                 // Try connecting to this address.
                 let (mut server_info, server_ops, stream) = match try_connect(addr).await {
@@ -143,9 +145,6 @@ async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>)
                 // Go to the beginning of the connect loop.
                 continue 'start;
             }
-
-            // Couldn't connect to this server - bump its reconnect counter.
-            *reconnects += 1;
         }
 
         // All connect attempts have failed.
