@@ -9,47 +9,7 @@ use crate::new_client::Connection;
 use crate::secure_wipe::SecureString;
 use crate::tls;
 
-#[derive(Default)]
-pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
-
-impl fmt::Debug for Callback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(
-                &"callback",
-                if self.0.is_some() { &"set" } else { &"unset" },
-            )
-            .finish()
-    }
-}
-
-mod options_typestate {
-    /// `ConnectionOptions` typestate indicating
-    /// that there has not yet been
-    /// any auth-related configuration
-    /// provided yet.
-    #[derive(Debug, Copy, Clone, Default)]
-    pub struct NoAuth;
-
-    /// `ConnectionOptions` typestate indicating
-    /// that auth-related configuration
-    /// has been provided, and may not
-    /// be provided again.
-    #[derive(Debug, Copy, Clone)]
-    pub struct Authenticated;
-
-    /// `ConnectionOptions` typestate indicating that
-    /// this `ConnectionOptions` has been used to create
-    /// a `Connection` and may not be changed.
-    #[derive(Debug, Copy, Clone)]
-    pub struct Finalized;
-}
-
-pub(crate) type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
-
-/// A configuration object for a NATS connection.
-pub struct ConnectionOptions<TypeState> {
-    pub(crate) typestate: PhantomData<TypeState>,
+pub(crate) struct Options {
     pub(crate) auth: AuthStyle,
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
@@ -62,25 +22,7 @@ pub struct ConnectionOptions<TypeState> {
     pub(crate) tls_required: bool,
 }
 
-impl Default for ConnectionOptions<options_typestate::NoAuth> {
-    fn default() -> ConnectionOptions<options_typestate::NoAuth> {
-        ConnectionOptions {
-            typestate: PhantomData,
-            auth: AuthStyle::None,
-            name: None,
-            no_echo: false,
-            reconnect_buffer_size: 8 * 1024 * 1024,
-            max_reconnects: Some(60),
-            disconnect_callback: Callback(None),
-            reconnect_callback: Callback(None),
-            close_callback: Callback(None),
-            tls_connector: None,
-            tls_required: false,
-        }
-    }
-}
-
-impl<T> fmt::Debug for ConnectionOptions<T> {
+impl fmt::Debug for Options {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_map()
             .entry(&"auth", &self.auth)
@@ -101,6 +43,49 @@ impl<T> fmt::Debug for ConnectionOptions<T> {
             )
             .entry(&"tls_required", &self.tls_required)
             .finish()
+    }
+}
+
+mod options_typestate {
+    /// `ConnectionOptions` typestate indicating
+    /// that there has not yet been
+    /// any auth-related configuration
+    /// provided yet.
+    #[derive(Debug, Copy, Clone, Default)]
+    pub struct NoAuth;
+
+    /// `ConnectionOptions` typestate indicating
+    /// that auth-related configuration
+    /// has been provided, and may not
+    /// be provided again.
+    #[derive(Debug, Copy, Clone)]
+    pub struct Authenticated;
+}
+
+/// A configuration object for a NATS connection.
+#[derive(Debug)]
+pub struct ConnectionOptions<TypeState> {
+    options: Options,
+    typestate: PhantomData<TypeState>,
+}
+
+impl Default for ConnectionOptions<options_typestate::NoAuth> {
+    fn default() -> ConnectionOptions<options_typestate::NoAuth> {
+        ConnectionOptions {
+            options: Options {
+                auth: AuthStyle::NoAuth,
+                name: None,
+                no_echo: false,
+                reconnect_buffer_size: 8 * 1024 * 1024,
+                max_reconnects: Some(60),
+                disconnect_callback: Callback(None),
+                reconnect_callback: Callback(None),
+                close_callback: Callback(None),
+                tls_connector: None,
+                tls_required: false,
+            },
+            typestate: PhantomData,
+        }
     }
 }
 
@@ -132,17 +117,11 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// ```
     pub fn with_token(self, token: &str) -> ConnectionOptions<options_typestate::Authenticated> {
         ConnectionOptions {
-            auth: AuthStyle::Token(token.to_string()),
+            options: Options {
+                auth: AuthStyle::Token(token.to_string()),
+                ..self.options
+            },
             typestate: PhantomData,
-            no_echo: self.no_echo,
-            name: self.name,
-            close_callback: self.close_callback,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            max_reconnects: self.max_reconnects,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
         }
     }
 
@@ -163,17 +142,11 @@ impl ConnectionOptions<options_typestate::NoAuth> {
         password: &str,
     ) -> ConnectionOptions<options_typestate::Authenticated> {
         ConnectionOptions {
-            auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
+            options: Options {
+                auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
+                ..self.options
+            },
             typestate: PhantomData,
-            no_echo: self.no_echo,
-            name: self.name,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            close_callback: self.close_callback,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            max_reconnects: self.max_reconnects,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
         }
     }
 
@@ -193,26 +166,20 @@ impl ConnectionOptions<options_typestate::NoAuth> {
         path: impl AsRef<Path>,
     ) -> ConnectionOptions<options_typestate::Authenticated> {
         ConnectionOptions {
-            auth: AuthStyle::Credentials {
-                jwt_cb: {
-                    let path = path.as_ref().to_owned();
-                    Arc::new(move || creds_utils::user_jwt_from_file(&path))
+            options: Options {
+                auth: AuthStyle::Credentials {
+                    jwt_cb: {
+                        let path = path.as_ref().to_owned();
+                        Arc::new(move || creds_utils::user_jwt_from_file(&path))
+                    },
+                    sig_cb: {
+                        let path = path.as_ref().to_owned();
+                        Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
+                    },
                 },
-                sig_cb: {
-                    let path = path.as_ref().to_owned();
-                    Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
-                },
+                ..self.options
             },
             typestate: PhantomData,
-            no_echo: self.no_echo,
-            name: self.name,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            max_reconnects: self.max_reconnects,
-            close_callback: self.close_callback,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
         }
     }
 }
@@ -230,7 +197,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn with_name(mut self, name: &str) -> ConnectionOptions<TypeState> {
-        self.name = Some(name.to_string());
+        self.options.name = Some(name.to_string());
         self
     }
 
@@ -246,7 +213,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn no_echo(mut self) -> ConnectionOptions<TypeState> {
-        self.no_echo = true;
+        self.options.no_echo = true;
         self
     }
 
@@ -264,7 +231,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn max_reconnects(mut self, max_reconnects: Option<usize>) -> ConnectionOptions<TypeState> {
-        self.max_reconnects = max_reconnects;
+        self.options.max_reconnects = max_reconnects;
         self
     }
 
@@ -287,7 +254,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         mut self,
         reconnect_buffer_size: usize,
     ) -> ConnectionOptions<TypeState> {
-        self.reconnect_buffer_size = reconnect_buffer_size;
+        self.options.reconnect_buffer_size = reconnect_buffer_size;
         self
     }
 
@@ -302,22 +269,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let options = ConnectionOptions {
-            auth: self.auth,
-            no_echo: self.no_echo,
-            name: self.name,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            max_reconnects: self.max_reconnects,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            close_callback: self.close_callback,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
-            // move options into the Finalized state by setting
-            // `typestate` to `PhantomData<Finalized>`
-            typestate: PhantomData,
-        };
-        Connection::connect_with_options(nats_url, options)
+        Connection::connect_with_options(nats_url, self.options)
     }
 
     /// Set a callback to be executed when connectivity to
@@ -326,7 +278,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Box::new(cb)));
+        self.options.disconnect_callback = Callback(Some(Box::new(cb)));
         self
     }
 
@@ -336,7 +288,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Box::new(cb)));
+        self.options.disconnect_callback = Callback(Some(Box::new(cb)));
         self
     }
 
@@ -347,7 +299,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.close_callback = Callback(Some(Box::new(cb)));
+        self.options.close_callback = Callback(Some(Box::new(cb)));
         self
     }
 
@@ -373,7 +325,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn tls_required(mut self, tls_required: bool) -> Self {
-        self.tls_required = tls_required;
+        self.options.tls_required = tls_required;
         self
     }
 
@@ -398,8 +350,8 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # }
     /// ```
     pub fn tls_connector(mut self, connector: tls::TlsConnector) -> Self {
-        self.tls_connector = Some(connector);
-        self.tls_required = true;
+        self.options.tls_connector = Some(connector);
+        self.options.tls_required = true;
         self
     }
 }
@@ -421,24 +373,38 @@ pub(crate) enum AuthStyle {
     },
 
     /// No authentication.
-    None,
+    NoAuth,
 }
 
 impl fmt::Debug for AuthStyle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
+            AuthStyle::NoAuth => f.debug_struct("None").finish(),
             AuthStyle::Token(s) => f.debug_tuple("Token").field(s).finish(),
             AuthStyle::UserPass(user, pass) => {
                 f.debug_tuple("Token").field(user).field(pass).finish()
             }
             AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
-            AuthStyle::None => f.debug_struct("None").finish(),
         }
     }
 }
 
 impl Default for AuthStyle {
     fn default() -> AuthStyle {
-        AuthStyle::None
+        AuthStyle::NoAuth
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
+
+impl fmt::Debug for Callback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(
+                &"callback",
+                if self.0.is_some() { &"set" } else { &"unset" },
+            )
+            .finish()
     }
 }

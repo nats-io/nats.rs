@@ -6,7 +6,7 @@ use futures::channel::{mpsc, oneshot};
 use smol::block_on;
 
 use crate::new_client::client::{self, UserOp};
-use crate::new_client::options::{ConnectionOptions, FinalizedOptions};
+use crate::new_client::options::{ConnectionOptions, Options};
 use crate::new_client::subscription::Subscription;
 
 /// A NATS client connection.
@@ -22,10 +22,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub(crate) fn connect_with_options(
-        url: &str,
-        options: FinalizedOptions,
-    ) -> io::Result<Connection> {
+    pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
         // Spawn a client thread.
         let (sender, receiver) = mpsc::unbounded();
         let thread = client::spawn(url, options, receiver);

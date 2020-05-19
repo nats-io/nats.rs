@@ -17,7 +17,7 @@ use smol::{Async, Timer};
 
 use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
-use crate::new_client::options::{AuthStyle, FinalizedOptions};
+use crate::new_client::options::{AuthStyle, Options};
 use crate::new_client::server::Server;
 use crate::secure_wipe::SecureString;
 use crate::{connect::ConnectInfo, inject_io_failure, Message, ServerInfo};
@@ -55,7 +55,7 @@ pub(crate) enum UserOp {
 /// Spawns a client thread.
 pub(crate) fn spawn(
     url: &str,
-    options: FinalizedOptions,
+    options: Options,
     user_ops: mpsc::UnboundedReceiver<UserOp>,
 ) -> thread::JoinHandle<io::Result<()>> {
     let url = url.to_string();
@@ -65,7 +65,7 @@ pub(crate) fn spawn(
 /// Runs the loop that connects and reconnects the client.
 async fn connect_loop(
     urls: &str,
-    options: &FinalizedOptions,
+    options: &Options,
     mut user_ops: mpsc::UnboundedReceiver<UserOp>,
 ) -> io::Result<()> {
     // Current subscriptions in the form `(subject, sid, messages)`.
@@ -179,7 +179,7 @@ fn backoff(reconnects: usize) -> Duration {
 async fn try_connect(
     addr: SocketAddr,
     server: &Server,
-    options: &FinalizedOptions,
+    options: &Options,
 ) -> io::Result<(
     ServerInfo,
     Pin<Box<dyn Stream<Item = io::Result<ServerOp>> + Send>>,
@@ -249,6 +249,7 @@ async fn try_connect(
 
     // Fill in the info that authenticates the client.
     match &options.auth {
+        AuthStyle::NoAuth => {}
         AuthStyle::UserPass(user, pass) => {
             connect_info.user = Some(SecureString::from(user.to_string()));
             connect_info.pass = Some(SecureString::from(pass.to_string()));
@@ -262,7 +263,6 @@ async fn try_connect(
             connect_info.user_jwt = Some(jwt);
             connect_info.signature = Some(sig);
         }
-        AuthStyle::None => {}
     }
 
     // Send CONNECT and INFO messages.
