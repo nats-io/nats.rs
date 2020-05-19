@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Barrier,
     },
+    thread,
     time::{Duration, Instant},
 };
 
@@ -133,7 +134,7 @@ fn bad_server(
                 continue;
             }
 
-            if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_millis(50) {
+            if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_micros(50) {
                 if client.socket.write_all(b"PING\r\n").is_err() {
                     to_evict.push(*client_id);
                     continue;
@@ -155,8 +156,10 @@ fn bad_server(
                 "PONG" => {
                     assert!(client.outstanding_pings > 0);
                     client.outstanding_pings -= 1;
+                    assert_eq!(parts.next(), None);
                 }
                 "PING" => {
+                    assert_eq!(parts.next(), None);
                     if client.socket.write_all(b"PONG\r\n").is_err() {
                         to_evict.push(*client_id);
                         continue;
@@ -168,10 +171,14 @@ fn bad_server(
                         port += 1;
                     }
                 }
-                "CONNECT" => (),
+                "CONNECT" => {
+                    let _: nats::ConnectInfo = serde_json::from_str(parts.next().unwrap()).unwrap();
+                    assert_eq!(parts.next(), None);
+                }
                 "SUB" => {
                     let subject = parts.next().unwrap();
                     let sid = parts.next().unwrap();
+                    assert_eq!(parts.next(), None);
                     let entry = subs.entry(subject.to_string()).or_insert(HashSet::new());
                     entry.insert(sid.to_string());
                 }
@@ -181,6 +188,8 @@ fn bad_server(
                         (Some(subject), Some(len), None) => (subject, None, len),
                         other => panic!("unknown args: {:?}", other),
                     };
+
+                    assert_eq!(parts.next(), None);
 
                     let next_line = if let Some(next_line) = read_line(&mut client.socket) {
                         next_line
@@ -226,9 +235,10 @@ fn bad_server(
                 }
                 "UNSUB" => {
                     let sid = parts.next().unwrap();
+                    assert_eq!(parts.next(), None);
                     subs.remove(sid);
                 }
-                other => log::error!("unknown command {}", other),
+                other => panic!("unknown command {}", other),
             }
         }
 
@@ -256,8 +266,20 @@ fn reconnect_test() {
     let restart = Arc::new(AtomicBool::new(false));
     let success = Arc::new(AtomicBool::new(false));
 
+    // kill process if we take longer than 10 minutes to run the test
+    thread::spawn({
+        let success = success.clone();
+        move || {
+            thread::sleep(Duration::from_secs(10 * 60));
+            if !success.load(Ordering::Acquire) {
+                log::error!("killing process after 5 minutes");
+                std::process::exit(1);
+            }
+        }
+    });
+
     let barrier = Arc::new(Barrier::new(2));
-    let server = std::thread::spawn({
+    let server = thread::spawn({
         let barrier = barrier.clone();
         let shutdown = shutdown.clone();
         let hop_ports = false;
@@ -286,7 +308,7 @@ fn reconnect_test() {
         }
     };
 
-    let tx = std::thread::spawn({
+    let tx = thread::spawn({
         let nc = nc.clone();
         let success = success.clone();
         let shutdown = shutdown.clone();

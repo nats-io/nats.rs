@@ -80,8 +80,11 @@ impl Deref for SecureVec {
 /// Uses the basic idea (`write_volatile` + `compiler_fence`)
 /// from @bascule's zeroize crate but overwrites data with
 /// random bytes instead of zeros.
+///
+/// Public + hidden for testing purposes.
 #[derive(Clone, Default, Deserialize, Serialize)]
-pub(crate) struct SecureString(String);
+#[doc(hidden)]
+pub struct SecureString(String);
 
 impl SecureString {
     pub(crate) fn scramble(&mut self) {

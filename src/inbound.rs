@@ -66,7 +66,7 @@ impl Inbound {
 
                 if !self.reconnect() {
                     log::error!("shutting down the system after failing to reconnect",);
-                    self.shared_state.shutdown();
+                    self.shared_state.close();
                     return;
                 }
             }
@@ -98,9 +98,7 @@ impl Inbound {
         // we must call this while holding the pongs lock to ensure that
         // any calls to `Connection::flush` / `Connection::flush_timeout`
         // witness a disconnected outbound buffer state
-        self.shared_state
-            .outbound
-            .transition_to_disconnected(self.shared_state.options.reconnect_buffer_size);
+        self.shared_state.outbound.transition_to_disconnected();
 
         // flush outstanding pongs
         while let Some(s) = pongs.pop_front() {

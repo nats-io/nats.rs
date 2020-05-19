@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     io::{self, Error, ErrorKind},
     net::{SocketAddr, ToSocketAddrs},
     sync::{
@@ -8,7 +7,6 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
 };
 
 use parking_lot::{Mutex, RwLock};
@@ -27,7 +25,7 @@ pub(crate) fn parse_server_addresses(
 ) -> Vec<Server> {
     let mut ret: Vec<Server> = input
         .into_iter()
-        .filter_map(|s| Server::new(s.as_ref()).ok())
+        .filter_map(|s| Server::new(s.as_ref().trim()).ok())
         .collect();
     ret.shuffle(&mut thread_rng());
     ret
@@ -94,18 +92,7 @@ impl Server {
 
         // wait for a truncated exponential backoff where it starts at 1ms and
         // doubles until it reaches 4 seconds;
-        let backoff_ms = if self.reconnects > 0 {
-            let log_2_four_seconds_in_ms = 12_u32;
-            let truncated_exponent = std::cmp::min(
-                log_2_four_seconds_in_ms,
-                u32::try_from(std::cmp::min(u32::max_value() as usize, self.reconnects)).unwrap(),
-            );
-            2_u64.checked_pow(truncated_exponent).unwrap()
-        } else {
-            0
-        };
-
-        let backoff = Duration::from_millis(backoff_ms);
+        let backoff = (options.reconnect_delay_callback.0)(self.reconnects);
 
         // look up network addresses and shuffle them
         let mut addrs: Vec<SocketAddr> = (&*self.host, self.port).to_socket_addrs()?.collect();
@@ -189,7 +176,7 @@ impl SharedState {
 
         let (reader, writer, info) = connected_opt.unwrap();
 
-        let outbound = Outbound::new(writer);
+        let outbound = Outbound::new(writer, options.reconnect_buffer_size);
 
         let learned_servers = parse_server_addresses(&info.connect_urls);
 
@@ -229,8 +216,8 @@ impl SharedState {
         Ok(shared_state)
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn close(&self) {
         self.shutting_down.store(true, Ordering::Release);
-        self.outbound.shutdown();
+        self.outbound.close();
     }
 }
