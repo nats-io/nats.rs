@@ -46,9 +46,15 @@ struct Args {
 
 fn main() -> std::io::Result<()> {
     let args = Args::from_args();
-    let nc = nats::ConnectionOptions::new()
+    let opts = nats::ConnectionOptions::new()
         .with_name("nats_bench rust client")
-        .connect(&args.url)?;
+        .tls_required(args.tls);
+
+    let nc = if let Some(creds_path) = args.creds {
+        opts.with_credentials(creds_path).connect(&args.url)?
+    } else {
+        opts.connect(&args.url)?
+    };
 
     let messages = if args.messages.get() % args.publishers.get() != 0 {
         let bumped_idx = (args.messages.get() / args.publishers.get()) + 1;
