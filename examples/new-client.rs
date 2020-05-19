@@ -2,23 +2,25 @@ use std::io;
 use std::thread;
 use std::time::Duration;
 
-use nats::new_client::Connection;
+use nats::new_client::{Connection, ConnectionOptions};
 
 fn main() -> io::Result<()> {
     // Useful commands for testing:
     // nats-sub -s nats://demo.nats.io hello
     // nats-pub -s nats://demo.nats.io hello 'hi from nats-pub'
 
-    let mut nc = Connection::connect("demo.nats.io:4222")?;
-    let mut sub = nc.subscribe("hello");
+    let mut nc = ConnectionOptions::new()
+        // .with_credentials("/home/stjepan/.nkeys/creds/synadia/First/First.creds")
+        // .connect("connect.ngs.global")?;
+        .connect("localhost:4222")?;
 
-    thread::sleep(Duration::from_secs(1));
+    let mut sub = nc.subscribe("hello")?;
 
     nc.publish("hello", "hi from new-client")?;
     nc.flush()?;
 
     loop {
-        let msg = sub.next_msg()?;
-        println!("{}", msg);
+        let msg = sub.next()?;
+        println!("{:?}", msg);
     }
 }

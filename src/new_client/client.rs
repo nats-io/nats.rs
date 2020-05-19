@@ -59,13 +59,13 @@ pub(crate) fn spawn(
     user_ops: mpsc::UnboundedReceiver<UserOp>,
 ) -> thread::JoinHandle<io::Result<()>> {
     let url = url.to_string();
-    thread::spawn(move || smol::run(connect_loop(&url, &options, user_ops)))
+    thread::spawn(move || smol::run(connect_loop(&url, options, user_ops)))
 }
 
 /// Runs the loop that connects and reconnects the client.
 async fn connect_loop(
     urls: &str,
-    options: &Options,
+    options: Options,
     mut user_ops: mpsc::UnboundedReceiver<UserOp>,
 ) -> io::Result<()> {
     // Current subscriptions in the form `(subject, sid, messages)`.
@@ -274,7 +274,7 @@ async fn try_connect(
     // Create an endless stream parsing operations from the server.
     let mut server_ops = stream::try_unfold(BufReader::new(reader), |mut stream| async {
         // Decode a single operation.
-        match dbg!(decode(&mut stream).await)? {
+        match decode(&mut stream).await? {
             None => io::Result::Ok(None),
             Some(op) => io::Result::Ok(Some((op, stream))),
         }

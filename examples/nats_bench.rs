@@ -6,7 +6,6 @@ use std::{
 };
 
 use nats;
-use rand::{thread_rng, Rng};
 use structopt::StructOpt;
 
 /// Simple NATS bench tool
@@ -46,7 +45,7 @@ struct Args {
 
 fn main() -> std::io::Result<()> {
     let args = Args::from_args();
-    let opts = nats::ConnectionOptions::new()
+    let opts = nats::new_client::ConnectionOptions::new()
         .with_name("nats_bench rust client")
         .tls_required(args.tls);
 
@@ -55,6 +54,7 @@ fn main() -> std::io::Result<()> {
     } else {
         opts.connect(&args.url)?
     };
+    let nc = Arc::new(nc);
 
     let messages = if args.number_of_messages.get() % args.publishers.get() != 0 {
         let bumped_idx = (args.number_of_messages.get() / args.publishers.get()) + 1;
@@ -74,8 +74,7 @@ fn main() -> std::io::Result<()> {
         let nc = nc.clone();
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
-            let mut rng = thread_rng();
-            let msg: String = (0..message_size).map(|_| rng.gen::<char>()).collect();
+            let msg: String = (0..message_size).map(|_| 'a').collect();
             barrier.wait();
             for _ in 0..messages {
                 nc.publish(&subject, &msg).unwrap();
@@ -89,7 +88,7 @@ fn main() -> std::io::Result<()> {
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
             barrier.wait();
-            let s = nc.subscribe(&subject).unwrap();
+            let mut s = nc.subscribe(&subject).unwrap();
             for _ in 0..messages {
                 s.next().unwrap();
             }

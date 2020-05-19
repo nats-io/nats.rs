@@ -44,7 +44,7 @@ impl Subscription {
     }
 
     /// Blocks until the next message is received or the connection is closed.
-    pub fn next_msg(&mut self) -> io::Result<Message> {
+    pub fn next(&mut self) -> io::Result<Message> {
         // Block on the next message in the channel.
         block_on(self.messages.next()).ok_or_else(|| ErrorKind::ConnectionReset.into())
     }

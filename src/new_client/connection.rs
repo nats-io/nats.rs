@@ -47,7 +47,7 @@ impl Connection {
     }
 
     /// Publishes a message.
-    pub fn publish(&mut self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
+    pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         let subject = subject.to_string();
         let payload = msg.as_ref().to_vec();
         let reply_to = None;
@@ -65,13 +65,13 @@ impl Connection {
     }
 
     /// Creates a new subscriber.
-    pub fn subscribe(&mut self, subject: &str) -> Subscription {
+    pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
         let sid = self.sid_gen.fetch_add(1, Ordering::SeqCst);
-        Subscription::new(subject, sid, self.user_ops.clone())
+        Ok(Subscription::new(subject, sid, self.user_ops.clone()))
     }
 
     /// Flushes by performing a round trip to the server.
-    pub fn flush(&mut self) -> io::Result<()> {
+    pub fn flush(&self) -> io::Result<()> {
         let (sender, receiver) = oneshot::channel();
 
         // Enqueue a PING operation.
