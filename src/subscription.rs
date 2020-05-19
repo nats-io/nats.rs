@@ -155,14 +155,17 @@ impl Subscription {
         // will not unsubscribe from the server.
         self.do_unsub = false;
         let r = self.recv.clone();
-        thread::spawn(move || {
-            for m in r.iter() {
-                if let Err(e) = handler(m) {
-                    // TODO(dlc) - Capture for last error?
-                    log::error!("Error in callback! {:?}", e);
+        thread::Builder::new()
+            .name(format!("nats_subscriber_{}_{}", self.sid, self.subject))
+            .spawn(move || {
+                for m in r.iter() {
+                    if let Err(e) = handler(m) {
+                        // TODO(dlc) - Capture for last error?
+                        log::error!("Error in callback! {:?}", e);
+                    }
                 }
-            }
-        });
+            })
+            .expect("threads should be spawnable");
         Handler { sub: self }
     }
 
