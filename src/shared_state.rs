@@ -200,13 +200,13 @@ impl SharedState {
         };
 
         let inbound_thread = thread::Builder::new()
-            .name("nats_inbound_read_loop".to_string())
+            .name(format!("nats_inbound_{}", shared_state.id))
             .spawn(move || inbound.read_loop())
             .expect("threads should be spawnable");
 
         let outbound_state = shared_state.clone();
         let outbound_thread = thread::Builder::new()
-            .name("nats_outbound_flush_loop".to_string())
+            .name(format!("nats_outbound_{}", shared_state.id))
             .spawn(move || outbound_state.outbound.flush_loop())
             .expect("threads should be spawnable");
 
