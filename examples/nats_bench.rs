@@ -26,7 +26,7 @@ struct Args {
 
     /// Number of Messages to Publish (default 100000)
     #[structopt(long, short, default_value = "100000")]
-    messages: NonZeroUsize,
+    number_of_messages: NonZeroUsize,
 
     /// Number of Concurrent Publishers (default 1)
     #[structopt(short, long, default_value = "1")]
@@ -56,11 +56,11 @@ fn main() -> std::io::Result<()> {
         opts.connect(&args.url)?
     };
 
-    let messages = if args.messages.get() % args.publishers.get() != 0 {
-        let bumped_idx = (args.messages.get() / args.publishers.get()) + 1;
+    let messages = if args.number_of_messages.get() % args.publishers.get() != 0 {
+        let bumped_idx = (args.number_of_messages.get() / args.publishers.get()) + 1;
         bumped_idx * args.publishers.get()
     } else {
-        args.messages.get()
+        args.number_of_messages.get()
     };
 
     let message_size = args.message_size;
