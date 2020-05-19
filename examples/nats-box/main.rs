@@ -8,9 +8,11 @@ struct Cli {
     /// NATS server
     #[structopt(long, short, default_value = "demo.nats.io")]
     server: String,
-    // Optional credentials for NATS 2.x
-    #[structopt(long, default_value = "")]
-    creds: String,
+
+    /// User Credentials File
+    #[structopt(long = "creds")]
+    creds: Option<String>,
+
     /// Command: pub, sub, request, reply
     #[structopt(subcommand)]
     cmd: Command,
@@ -31,18 +33,13 @@ enum Command {
 
 fn main() -> CliResult {
     let args = Cli::from_args();
-    let nc: nats::Connection;
+    let opts = nats::ConnectionOptions::new().with_name("nats-box rust example");
 
-    if args.creds.len() > 0 {
-        nc = nats::ConnectionOptions::new()
-            .with_name("nats-box rust example")
-            .with_credentials(&args.creds)
-            .connect(&args.server)?;
+    let nc = if let Some(creds_path) = args.creds {
+        opts.with_credentials(creds_path).connect(&args.server)?
     } else {
-        nc = nats::ConnectionOptions::new()
-            .with_name("nats-box rust example")
-            .connect(&args.server)?;
-    }
+        opts.connect(&args.server)?
+    };
 
     match args.cmd {
         Command::Pub { subject, msg } => {
