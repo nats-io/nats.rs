@@ -5,7 +5,7 @@ use std::str::FromStr;
 pub(crate) struct Server {
     pub(crate) host: String,
     pub(crate) port: u16,
-    pub(crate) tls: bool,
+    pub(crate) tls_required: bool,
 }
 
 impl FromStr for Server {
@@ -19,7 +19,7 @@ impl FromStr for Server {
             ));
         }
 
-        let tls = if let Some("tls") = input.split("://").next() {
+        let tls_required = if let Some("tls") = input.split("://").next() {
             true
         } else {
             false
@@ -47,6 +47,6 @@ impl FromStr for Server {
             .and_then(|port_str| port_str.parse().ok());
         let port = port_opt.unwrap_or(4222);
 
-        Ok(Server { host, port, tls })
+        Ok(Server { host, port, tls_required })
     }
 }

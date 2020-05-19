@@ -11,14 +11,16 @@ use futures::{
     io::{BufReader, BufWriter},
     prelude::*,
 };
-use piper::Arc;
+use piper::{Arc, Mutex};
 use rand::{seq::SliceRandom, thread_rng};
 use smol::{Async, Timer};
 
 use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
+use crate::new_client::options::{AuthStyle, FinalizedOptions};
 use crate::new_client::server::Server;
-use crate::{inject_io_failure, Message, ServerInfo};
+use crate::secure_wipe::SecureString;
+use crate::{connect::ConnectInfo, inject_io_failure, Message, ServerInfo};
 
 /// An operation enqueued by the user of this crate.
 ///
@@ -53,21 +55,26 @@ pub(crate) enum UserOp {
 /// Spawns a client thread.
 pub(crate) fn spawn(
     url: &str,
+    options: FinalizedOptions,
     user_ops: mpsc::UnboundedReceiver<UserOp>,
 ) -> thread::JoinHandle<io::Result<()>> {
     let url = url.to_string();
-    thread::spawn(move || smol::run(connect_loop(&url, user_ops)))
+    thread::spawn(move || smol::run(connect_loop(&url, &options, user_ops)))
 }
 
 /// Runs the loop that connects and reconnects the client.
-async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>) -> io::Result<()> {
+async fn connect_loop(
+    urls: &str,
+    options: &FinalizedOptions,
+    mut user_ops: mpsc::UnboundedReceiver<UserOp>,
+) -> io::Result<()> {
     // Current subscriptions in the form `(subject, sid, messages)`.
     let mut subscriptions: Vec<(String, usize, mpsc::UnboundedSender<Message>)> = Vec::new();
 
     // Expected pongs and their notification channels.
     let mut pongs: VecDeque<oneshot::Sender<()>> = VecDeque::new();
 
-    // The server table in the form `(server, reconnects)`.
+    // Server table in the form `(server, reconnects)`.
     let mut server_reconnects: HashMap<Server, usize> = HashMap::new();
 
     // Populate the server table with the initial URLs.
@@ -85,7 +92,7 @@ async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>)
 
         // Iterate over the server table in random order.
         for server in &servers {
-            // Calculate the backoff sleep duration and bump the reconnect counter.
+            // Calculate sleep duration for exponential backoff and bump the reconnect counter.
             let reconnects = server_reconnects.get_mut(server).unwrap();
             let sleep_duration = backoff(*reconnects);
             *reconnects += 1;
@@ -107,7 +114,10 @@ async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>)
                 Timer::after(sleep_duration).await;
 
                 // Try connecting to this address.
-                let (mut server_info, server_ops, stream) = match try_connect(addr).await {
+                let res = try_connect(addr, &server, &options).await;
+
+                // Check if connecting worked out.
+                let (mut server_info, server_ops, writer) = match res {
                     Ok(val) => val,
                     Err(err) => {
                         last_err = err;
@@ -117,7 +127,7 @@ async fn connect_loop(urls: &str, mut user_ops: mpsc::UnboundedReceiver<UserOp>)
 
                 // Connected! Now run the client loop.
                 let res = client_loop(
-                    stream,
+                    writer,
                     server_ops,
                     &mut user_ops,
                     &mut subscriptions,
@@ -165,8 +175,11 @@ fn backoff(reconnects: usize) -> Duration {
     }
 }
 
+/// Attempt to establish a connection to a single socket address.
 async fn try_connect(
     addr: SocketAddr,
+    server: &Server,
+    options: &FinalizedOptions,
 ) -> io::Result<(
     ServerInfo,
     Pin<Box<dyn Stream<Item = io::Result<ServerOp>> + Send>>,
@@ -175,10 +188,91 @@ async fn try_connect(
     // Inject random I/O failures when testing.
     inject_io_failure()?;
 
-    let stream = Arc::new(Async::<TcpStream>::connect(addr).await?);
+    // Connect to the remote socket.
+    let stream = Async::<TcpStream>::connect(addr).await?;
+
+    // Expect an INFO message.
+    let mut reader = BufReader::new(stream);
+    let server_info = match decode(&mut reader).await? {
+        Some(ServerOp::Info(server_info)) => server_info,
+        Some(op) => {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("expected INFO, received: {:?}", op),
+            ))
+        }
+        None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
+    };
+    let stream = reader.into_inner();
+
+    // Check if TLS authentication is required:
+    // - Has `options.tls_required(true)` been set?
+    // - Was the server address prefixed with `tls://`?
+    // - Does the INFO line contain `tls_required: true`?
+    let tls_required = options.tls_required || server.tls_required || server_info.tls_required;
+
+    // Upgrade to TLS if required.
+    let (reader, writer): (
+        Pin<Box<dyn AsyncRead + Send>>,
+        Pin<Box<dyn AsyncWrite + Send>>,
+    ) = if tls_required {
+        // TODO(stjepang): Allow specifying a custom TLS connector.
+        match async_native_tls::connect(&server.host, stream).await {
+            Ok(stream) => {
+                // Split the TLS stream into a reader and a writer.
+                let stream = Arc::new(Mutex::new(stream));
+                (Box::pin(stream.clone()), Box::pin(stream))
+            }
+            Err(err) => return Err(io::Error::new(io::ErrorKind::PermissionDenied, err)),
+        }
+    } else {
+        // Split the TCP stream into a reader and a writer.
+        let stream = Arc::new(stream);
+        (Box::pin(stream.clone()), Box::pin(stream))
+    };
+
+    // Data that will be formatted as a CONNECT message.
+    let mut connect_info = ConnectInfo {
+        tls_required,
+        name: options.name.clone().map(SecureString::from),
+        pedantic: false,
+        verbose: false,
+        lang: crate::LANG.to_string(),
+        version: crate::VERSION.to_string(),
+        user: None,
+        pass: None,
+        auth_token: None,
+        user_jwt: None,
+        signature: None,
+        echo: !options.no_echo,
+    };
+
+    // Fill in the info that authenticates the client.
+    match &options.auth {
+        AuthStyle::UserPass(user, pass) => {
+            connect_info.user = Some(SecureString::from(user.to_string()));
+            connect_info.pass = Some(SecureString::from(pass.to_string()));
+        }
+        AuthStyle::Token(token) => {
+            connect_info.auth_token = Some(token.to_string().into());
+        }
+        AuthStyle::Credentials { jwt_cb, sig_cb } => {
+            let jwt = jwt_cb()?;
+            let sig = sig_cb(server_info.nonce.as_bytes())?;
+            connect_info.user_jwt = Some(jwt);
+            connect_info.signature = Some(sig);
+        }
+        AuthStyle::None => {}
+    }
+
+    // Send CONNECT and INFO messages.
+    let mut writer = BufWriter::new(writer);
+    encode(&mut writer, ClientOp::Connect(connect_info)).await?;
+    encode(&mut writer, ClientOp::Ping).await?;
+    writer.flush().await?;
 
     // Create an endless stream parsing operations from the server.
-    let mut server_ops = stream::try_unfold(BufReader::new(stream.clone()), |mut stream| async {
+    let mut server_ops = stream::try_unfold(BufReader::new(reader), |mut stream| async {
         // Decode a single operation.
         match dbg!(decode(&mut stream).await)? {
             None => io::Result::Ok(None),
@@ -187,17 +281,37 @@ async fn try_connect(
     })
     .boxed();
 
-    // Expect an INFO message.
-    let server_info = match server_ops
-        .try_next()
-        .await?
-        .expect("end of what should be an infinite stream")
-    {
-        ServerOp::Info(server_info) => server_info,
-        _ => return Err(Error::new(ErrorKind::Other, "expected an INFO message")),
-    };
+    // Wait for a PONG.
+    loop {
+        match server_ops.try_next().await? {
+            // If we get PONG, the server is happy and we're done connecting.
+            Some(ServerOp::Pong) => break,
 
-    Ok((server_info, server_ops, Box::pin(stream)))
+            // Respond to a PING with a PONG.
+            Some(ServerOp::Ping) => {
+                encode(&mut writer, ClientOp::Pong).await?;
+                writer.flush().await?;
+            }
+
+            // No other operations should arrive at this time.
+            Some(op) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("unexpected line while connecting: {:?}", op),
+                ));
+            }
+
+            // Error if the connection was closed.
+            None => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "connection closed while waiting for the first PONG",
+                ));
+            }
+        }
+    }
+
+    Ok((server_info, server_ops, writer.into_inner()))
 }
 
 /// Runs the main loop for a connected client.

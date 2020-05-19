@@ -4,8 +4,10 @@ mod client;
 mod connection;
 mod decoder;
 mod encoder;
+mod options;
 mod server;
 mod subscription;
 
 pub use connection::Connection;
+pub use options::ConnectionOptions;
 pub use subscription::Subscription;
