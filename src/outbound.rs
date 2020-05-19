@@ -153,8 +153,8 @@ impl Outbound {
 
     pub(crate) fn flush_loop(&self) {
         inject_delay();
-        let mut writer = self.writer.lock();
         loop {
+            let mut writer = self.writer.lock();
             while writer.flusher_should_wait() {
                 self.updated.wait(&mut writer);
             }
@@ -163,6 +163,8 @@ impl Outbound {
                 log::info!("flusher thread shutting down");
                 return;
             }
+
+            let before = std::time::Instant::now();
 
             if let Err(error) = writer.flush() {
                 log::error!("Outbound thread failed to flush: {:?}", error);
@@ -173,6 +175,10 @@ impl Outbound {
                 // replaces our buffer
                 self.updated.wait(&mut writer);
             }
+
+            drop(writer);
+
+            std::thread::sleep(before.elapsed());
         }
     }
 
