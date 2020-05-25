@@ -74,7 +74,8 @@ fn main() -> std::io::Result<()> {
         let nc = nc.clone();
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
-            let msg: String = (0..message_size).map(|_| 'a').collect();
+            let mut rng = thread_rng();
+            let msg: Vec<u8> = (0..message_size).map(|_| rng.gen::<u8>()).collect();
             barrier.wait();
             for _ in 0..messages {
                 nc.publish(&subject, &msg).unwrap();
