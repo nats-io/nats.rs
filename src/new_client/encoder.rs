@@ -8,15 +8,15 @@ use crate::{connect::ConnectInfo, inject_io_failure};
 
 /// A protocol operation sent by the client.
 #[derive(Debug)]
-pub(crate) enum ClientOp {
+pub(crate) enum ClientOp<'a> {
     /// `CONNECT {["option_name":option_value],...}`
     Connect(ConnectInfo),
 
     /// `PUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n`
     Pub {
-        subject: String,
+        subject: &'a str,
         reply_to: Option<String>,
-        payload: Vec<u8>,
+        payload: &'a [u8],
     },
 
     /// `SUB <subject> [queue group] <sid>\r\n`
@@ -37,7 +37,10 @@ pub(crate) enum ClientOp {
 }
 
 /// Encodes a single operation from the client.
-pub(crate) async fn encode(mut stream: impl AsyncWrite + Unpin, op: ClientOp) -> io::Result<()> {
+pub(crate) async fn encode(
+    mut stream: impl AsyncWrite + Unpin,
+    op: ClientOp<'_>,
+) -> io::Result<()> {
     // Inject random I/O failures when testing.
     inject_io_failure()?;
 
@@ -52,12 +55,19 @@ pub(crate) async fn encode(mut stream: impl AsyncWrite + Unpin, op: ClientOp) ->
             reply_to,
             payload,
         } => {
-            let op = if let Some(reply_to) = reply_to {
-                format!("PUB {} {} {}\r\n", subject, reply_to, payload.len())
-            } else {
-                format!("PUB {} {}\r\n", subject, payload.len())
-            };
-            stream.write_all(op.as_bytes()).await?;
+            stream.write_all(b"PUB ").await?;
+            stream.write_all(subject.as_bytes()).await?;
+            stream.write_all(b" ").await?;
+
+            if let Some(reply_to) = reply_to {
+                stream.write_all(reply_to.as_bytes()).await?;
+                stream.write_all(b" ").await?;
+            }
+
+            let mut buf = itoa::Buffer::new();
+            stream.write_all(buf.format(payload.len()).as_bytes()).await?;
+            stream.write_all(b"\r\n").await?;
+
             stream.write_all(payload).await?;
             stream.write_all(b"\r\n").await?;
         }

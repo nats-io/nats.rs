@@ -1,4 +1,5 @@
 use std::cmp;
+use std::sync::Arc;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Error, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -6,15 +7,16 @@ use std::pin::Pin;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use async_mutex::Mutex;
 use futures::{
     channel::{mpsc, oneshot},
     io::{BufReader, BufWriter},
     prelude::*,
 };
-use piper::{Arc, Mutex};
 use rand::{seq::SliceRandom, thread_rng};
 use smol::{Async, Timer};
 
+use crate::new_client::writer::Writer;
 use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
 use crate::new_client::options::{AuthStyle, Options};
@@ -27,13 +29,6 @@ use crate::{connect::ConnectInfo, inject_io_failure, Message, ServerInfo};
 /// These operations are enqueued by `Connection` or `Subscription` and are then handled by the
 /// client thread.
 pub(crate) enum UserOp {
-    /// Publish a message.
-    Pub {
-        subject: String,
-        reply_to: Option<String>,
-        payload: Vec<u8>,
-    },
-
     /// Subscribe to a subject.
     Sub {
         subject: String,
@@ -57,9 +52,10 @@ pub(crate) fn spawn(
     url: &str,
     options: Options,
     user_ops: mpsc::UnboundedReceiver<UserOp>,
+    writer: Arc<Mutex<Writer>>,
 ) -> thread::JoinHandle<io::Result<()>> {
     let url = url.to_string();
-    thread::spawn(move || smol::run(connect_loop(&url, options, user_ops)))
+    thread::spawn(move || smol::run(connect_loop(&url, options, user_ops, writer)))
 }
 
 /// Runs the loop that connects and reconnects the client.
@@ -67,6 +63,7 @@ async fn connect_loop(
     urls: &str,
     options: Options,
     mut user_ops: mpsc::UnboundedReceiver<UserOp>,
+    writer: Arc<Mutex<Writer>>,
 ) -> io::Result<()> {
     // Current subscriptions in the form `(subject, sid, messages)`.
     let mut subscriptions: Vec<(String, usize, mpsc::UnboundedSender<Message>)> = Vec::new();
@@ -117,17 +114,18 @@ async fn connect_loop(
                 let res = try_connect(addr, &server, &options).await;
 
                 // Check if connecting worked out.
-                let (mut server_info, server_ops, writer) = match res {
+                let (mut server_info, server_ops, w) = match res {
                     Ok(val) => val,
                     Err(err) => {
                         last_err = err;
                         continue;
                     }
                 };
+                writer.lock().await.reconnect(w).await.unwrap(); // TODO: unwrap -> match
 
                 // Connected! Now run the client loop.
                 let res = client_loop(
-                    writer,
+                    writer.clone(),
                     server_ops,
                     &mut user_ops,
                     &mut subscriptions,
@@ -183,7 +181,7 @@ async fn try_connect(
 ) -> io::Result<(
     ServerInfo,
     Pin<Box<dyn Stream<Item = io::Result<ServerOp>> + Send>>,
-    Pin<Box<dyn AsyncWrite + Send>>,
+    BufWriter<Pin<Box<dyn AsyncWrite + Send>>>,
 )> {
     // Inject random I/O failures when testing.
     inject_io_failure()?;
@@ -220,14 +218,14 @@ async fn try_connect(
         match async_native_tls::connect(&server.host, stream).await {
             Ok(stream) => {
                 // Split the TLS stream into a reader and a writer.
-                let stream = Arc::new(Mutex::new(stream));
+                let stream = piper::Arc::new(piper::Mutex::new(stream));
                 (Box::pin(stream.clone()), Box::pin(stream))
             }
             Err(err) => return Err(io::Error::new(io::ErrorKind::PermissionDenied, err)),
         }
     } else {
         // Split the TCP stream into a reader and a writer.
-        let stream = Arc::new(stream);
+        let stream = piper::Arc::new(stream);
         (Box::pin(stream.clone()), Box::pin(stream))
     };
 
@@ -266,7 +264,7 @@ async fn try_connect(
     }
 
     // Send CONNECT and INFO messages.
-    let mut writer = BufWriter::new(writer);
+    let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, writer);
     encode(&mut writer, ClientOp::Connect(connect_info)).await?;
     encode(&mut writer, ClientOp::Ping).await?;
     writer.flush().await?;
@@ -311,30 +309,29 @@ async fn try_connect(
         }
     }
 
-    Ok((server_info, server_ops, writer.into_inner()))
+    Ok((server_info, server_ops, writer))
 }
 
 /// Runs the main loop for a connected client.
-async fn client_loop(
-    stream: impl AsyncWrite + Unpin,
-    mut server_ops: impl Stream<Item = io::Result<ServerOp>> + Unpin,
-    user_ops: &mut mpsc::UnboundedReceiver<UserOp>,
-    subscriptions: &mut Vec<(String, usize, mpsc::UnboundedSender<Message>)>,
-    pongs: &mut VecDeque<oneshot::Sender<()>>,
-    server_info: &mut ServerInfo,
+async fn client_loop<'a>(
+    writer: Arc<Mutex<Writer>>,
+    mut server_ops: impl Stream<Item = io::Result<ServerOp>> + Unpin + 'a,
+    user_ops: &'a mut mpsc::UnboundedReceiver<UserOp>,
+    subscriptions: &'a mut Vec<(String, usize, mpsc::UnboundedSender<Message>)>,
+    pongs: &'a mut VecDeque<oneshot::Sender<()>>,
+    server_info: &'a mut ServerInfo,
 ) -> io::Result<()> {
     // TODO(stjepang): Make this option configurable.
     let flush_timeout = Duration::from_millis(100);
 
     // Bytes written to the server are buffered and periodically flushed.
     let mut next_flush = Instant::now() + flush_timeout;
-    let mut writer = BufWriter::new(stream);
 
     // Restart subscriptions that existed before the last reconnect.
     for (subject, sid, _messages) in subscriptions.iter() {
         // Send a SUB operation to the server.
         encode(
-            &mut writer,
+            &mut *writer.lock().await,
             ClientOp::Sub {
                 subject: subject.clone(),
                 queue_group: None, // TODO(stjepang): Use actual queue group here.
@@ -362,7 +359,10 @@ async fn client_loop(
 
                     ServerOp::Ping => {
                         // Send a PONG operation to the server.
-                        encode(&mut writer, ClientOp::Pong).await?;
+                        encode(
+                            &mut *writer.lock().await,
+                            ClientOp::Pong,
+                        ).await?;
                     }
 
                     ServerOp::Pong => {
@@ -400,26 +400,14 @@ async fn client_loop(
             // The user has enqueued an operation.
             msg = user_ops.next().fuse() => {
                 match msg.expect("user_ops disconnected") {
-                    UserOp::Pub { subject, reply_to, payload } => {
-                        // Send a PUB operation to the server.
-                        encode(
-                            &mut writer,
-                            ClientOp::Pub {
-                                subject,
-                                reply_to: None,
-                                payload
-                            },
-                        )
-                        .await?;
-                    }
-
                     UserOp::Sub { subject, queue_group, sid, messages } => {
                         // Add the subscription to the list.
                         subscriptions.push((subject.clone(), sid, messages));
 
                         // Send a SUB operation to the server.
+                        let mut writer = writer.lock().await;
                         encode(
-                            &mut writer,
+                            &mut *writer,
                             ClientOp::Sub {
                                 subject,
                                 queue_group,
@@ -434,8 +422,9 @@ async fn client_loop(
                         subscriptions.retain(|(_, s, _)| *s != sid);
 
                         // Send an UNSUB operation to the server.
+                        let mut writer = writer.lock().await;
                         encode(
-                            &mut writer,
+                            &mut *writer,
                             ClientOp::Unsub {
                                 sid,
                                 max_msgs,
@@ -445,8 +434,10 @@ async fn client_loop(
                     }
 
                     UserOp::Ping { pong } => {
+                        let mut writer = writer.lock().await;
+
                         // Send a PING operation to the server.
-                        encode(&mut writer, ClientOp::Ping).await?;
+                        encode(&mut *writer, ClientOp::Ping).await?;
 
                         // Flush to make sure the PING goes through.
                         writer.flush().await?;
@@ -464,7 +455,7 @@ async fn client_loop(
 
             // Periodically flush writes to the server.
             _ = Timer::at(next_flush).fuse() => {
-                writer.flush().await?;
+                // writer.lock().await.flush().await?;
                 next_flush = Instant::now() + flush_timeout;
             }
         }

@@ -1,13 +1,19 @@
 use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 
+use async_mutex::Mutex;
 use futures::channel::{mpsc, oneshot};
+use futures::prelude::*;
 use smol::block_on;
 
+use crate::inject_io_failure;
 use crate::new_client::client::{self, UserOp};
+use crate::new_client::encoder::{encode, ClientOp};
 use crate::new_client::options::{ConnectionOptions, Options};
 use crate::new_client::subscription::Subscription;
+use crate::new_client::writer::Writer;
 
 /// A NATS client connection.
 pub struct Connection {
@@ -17,6 +23,8 @@ pub struct Connection {
     /// Subscription ID generator.
     sid_gen: AtomicUsize,
 
+    writer: Arc<Mutex<Writer>>,
+
     /// Thread running the main future.
     thread: Option<thread::JoinHandle<io::Result<()>>>,
 }
@@ -25,12 +33,15 @@ impl Connection {
     pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
         // Spawn a client thread.
         let (sender, receiver) = mpsc::unbounded();
-        let thread = client::spawn(url, options, receiver);
+        // TODO(stjepang): make this constant configurable
+        let writer = Arc::new(Mutex::new(Writer::new(8 * 1024 * 1024)));
+        let thread = client::spawn(url, options, receiver, writer.clone());
 
         // Connection handle controlling the client thread.
-        let mut conn = Connection {
+        let conn = Connection {
             user_ops: sender,
             sid_gen: AtomicUsize::new(1),
+            writer,
             thread: Some(thread),
         };
 
@@ -48,26 +59,36 @@ impl Connection {
 
     /// Publishes a message.
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        let subject = subject.to_string();
-        let payload = msg.as_ref().to_vec();
+        // Inject random I/O failures when testing.
+        inject_io_failure()?;
+
+        let payload = msg.as_ref();
         let reply_to = None;
 
         // Enqueue a PUB operation.
-        self.user_ops
-            .unbounded_send(UserOp::Pub {
-                subject,
-                reply_to,
-                payload,
-            })
-            .map_err(|err| Error::new(ErrorKind::ConnectionReset, err))?;
-
-        Ok(())
+        block_on(async {
+            let mut writer = self.writer.lock().await;
+            encode(
+                &mut *writer,
+                ClientOp::Pub {
+                    subject,
+                    reply_to,
+                    payload,
+                },
+            )
+            .await?;
+            writer.commit();
+            Ok(())
+        })
     }
 
     /// Creates a new subscriber.
     pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
         let sid = self.sid_gen.fetch_add(1, Ordering::SeqCst);
-        Ok(Subscription::new(subject, sid, self.user_ops.clone()))
+        let sub = Subscription::new(subject, sid, self.user_ops.clone());
+
+        self.flush()?;
+        Ok(sub)
     }
 
     /// Flushes by performing a round trip to the server.
