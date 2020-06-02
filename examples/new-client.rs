@@ -18,15 +18,17 @@ fn main() -> io::Result<()> {
 
     nc.publish("hello", "hi from new-client")?;
     nc.flush()?;
-
+    
     let mut i = 1;
     loop {
         println!("publish {}", i);
         dbg!(nc.publish("hello", format!("msg {}", i)));
         i += 1;
         thread::sleep(Duration::from_secs(1));
-
+    
         // let msg = dbg!(sub.next());
         // println!("{:?}", msg);
     }
+
+    Ok(())
 }

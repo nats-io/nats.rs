@@ -1,19 +1,20 @@
 use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::thread;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use async_mutex::Mutex;
 use futures::channel::{mpsc, oneshot};
-use futures::prelude::*;
 use smol::block_on;
 
-use crate::inject_io_failure;
 use crate::new_client::client::{self, UserOp};
 use crate::new_client::encoder::{encode, ClientOp};
+use crate::new_client::message::Message;
 use crate::new_client::options::{ConnectionOptions, Options};
 use crate::new_client::subscription::Subscription;
 use crate::new_client::writer::Writer;
+use crate::{inject_delay, inject_io_failure};
 
 /// A NATS client connection.
 pub struct Connection {
@@ -26,7 +27,10 @@ pub struct Connection {
     writer: Arc<Mutex<Writer>>,
 
     /// Thread running the main future.
-    thread: Option<thread::JoinHandle<io::Result<()>>>,
+    thread: Option<JoinHandle<io::Result<()>>>,
+
+    /// Close signal that stops the main future.
+    close_signal: Option<oneshot::Sender<()>>,
 }
 
 impl Connection {
@@ -35,7 +39,7 @@ impl Connection {
         let (sender, receiver) = mpsc::unbounded();
         // TODO(stjepang): make this constant configurable
         let writer = Arc::new(Mutex::new(Writer::new(8 * 1024 * 1024)));
-        let thread = client::spawn(url, options, receiver, writer.clone());
+        let (thread, close_signal) = client::spawn(url, options, receiver, writer.clone());
 
         // Connection handle controlling the client thread.
         let conn = Connection {
@@ -43,7 +47,11 @@ impl Connection {
             sid_gen: AtomicUsize::new(1),
             writer,
             thread: Some(thread),
+            close_signal: Some(close_signal),
         };
+
+        // Inject random I/O failures when testing.
+        inject_io_failure()?;
 
         // Flush to send a ping and wait for the connection to establish.
         conn.flush()?;
@@ -59,15 +67,18 @@ impl Connection {
 
     /// Publishes a message.
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        // Inject random I/O failures when testing.
-        inject_io_failure()?;
-
         let payload = msg.as_ref();
         let reply_to = None;
 
-        // Enqueue a PUB operation.
         block_on(async {
+            // Inject random delays when testing.
+            inject_delay();
+
             let mut writer = self.writer.lock().await;
+
+            // Inject random I/O failures when testing.
+            inject_io_failure()?;
+
             encode(
                 &mut *writer,
                 ClientOp::Pub {
@@ -77,8 +88,66 @@ impl Connection {
                 },
             )
             .await?;
+
             writer.commit();
             Ok(())
+        })
+    }
+
+    pub fn new_inbox(&self) -> String {
+        format!("_INBOX.{}", nuid::next())
+    }
+
+    /// Publish a message on the given subject with a reply subject for responses.
+    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+        // Publish a request.
+        let mut sub = self.prepare_request(subject, msg)?;
+
+        // Wait for the response.
+        sub.next()
+    }
+
+    pub fn request_timeout(
+        &self,
+        subject: &str,
+        msg: impl AsRef<[u8]>,
+        timeout: Duration,
+    ) -> io::Result<Option<Message>> {
+        // Publish a request.
+        let mut sub = self.prepare_request(subject, msg)?;
+
+        // Wait for the response.
+        sub.next_timeout(timeout)
+    }
+
+    fn prepare_request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
+        let reply_to = self.new_inbox();
+        let sub = self.subscribe(&reply_to)?;
+
+        let payload = msg.as_ref();
+        let reply_to = Some(reply_to.as_str());
+
+        block_on(async {
+            // Inject random delays when testing.
+            inject_delay();
+
+            let mut writer = self.writer.lock().await;
+
+            // Inject random I/O failures when testing.
+            inject_io_failure()?;
+
+            encode(
+                &mut *writer,
+                ClientOp::Pub {
+                    subject,
+                    reply_to,
+                    payload,
+                },
+            )
+            .await?;
+
+            writer.commit();
+            Ok(sub)
         })
     }
 
@@ -108,10 +177,10 @@ impl Connection {
 
     /// Close the connection.
     pub fn close(&mut self) -> io::Result<()> {
-        if let Some(thread) = self.thread.take() {
-            // Enqueue a close operation.
-            let _ = self.user_ops.unbounded_send(UserOp::Close);
+        // Send the close signal.
+        self.close_signal.take();
 
+        if let Some(thread) = self.thread.take() {
             // Wait for the client thread to stop.
             thread
                 .join()

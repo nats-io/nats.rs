@@ -12,7 +12,7 @@ keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [features]
-fault_injection= []
+fault_injection = []
 
 [lib]
 name = "nats"
@@ -43,7 +43,7 @@ log = "0.4.8"
 nkeys = "0.0.9"
 base64-url = "1.1.13"
 once_cell = "1.3.1"
-smol = "=0.1.7"
+smol = "=0.1.4"
 piper = "0.1.1"
 futures = "0.3.4"
 async-mutex = "1.1.3"

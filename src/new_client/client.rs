@@ -1,10 +1,10 @@
 use std::cmp;
-use std::sync::Arc;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Error, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
-use std::thread;
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use async_mutex::Mutex;
@@ -14,20 +14,22 @@ use futures::{
     prelude::*,
 };
 use rand::{seq::SliceRandom, thread_rng};
-use smol::{Async, Timer};
+use smol::{Async, Task, Timer};
 
-use crate::new_client::writer::Writer;
 use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
+use crate::new_client::message::Message;
 use crate::new_client::options::{AuthStyle, Options};
 use crate::new_client::server::Server;
+use crate::new_client::writer::Writer;
 use crate::secure_wipe::SecureString;
-use crate::{connect::ConnectInfo, inject_io_failure, Message, ServerInfo};
+use crate::{connect::ConnectInfo, inject_delay, inject_io_failure, ServerInfo};
 
 /// An operation enqueued by the user of this crate.
 ///
 /// These operations are enqueued by `Connection` or `Subscription` and are then handled by the
 /// client thread.
+#[derive(Debug)]
 pub(crate) enum UserOp {
     /// Subscribe to a subject.
     Sub {
@@ -42,9 +44,6 @@ pub(crate) enum UserOp {
 
     /// Send a ping and wait for a pong.
     Ping { pong: oneshot::Sender<()> },
-
-    /// Close the connection.
-    Close,
 }
 
 /// Spawns a client thread.
@@ -53,9 +52,21 @@ pub(crate) fn spawn(
     options: Options,
     user_ops: mpsc::UnboundedReceiver<UserOp>,
     writer: Arc<Mutex<Writer>>,
-) -> thread::JoinHandle<io::Result<()>> {
+) -> (JoinHandle<io::Result<()>>, oneshot::Sender<()>) {
     let url = url.to_string();
-    thread::spawn(move || smol::run(connect_loop(&url, options, user_ops, writer)))
+    let (s, r) = oneshot::channel();
+    let t = thread::spawn(move || {
+        // TODO(stjepang): Make panics in the client thread louder.
+        smol::run(async move {
+            loop {
+                futures::select! {
+                    res = connect_loop(&url, options, user_ops, writer).fuse() => break res,
+                    _ = r.fuse() => break Ok(()),
+                }
+            }
+        })
+    });
+    (t, s)
 }
 
 /// Runs the loop that connects and reconnects the client.
@@ -121,17 +132,24 @@ async fn connect_loop(
                         continue;
                     }
                 };
-                writer.lock().await.reconnect(w).await.unwrap(); // TODO: unwrap -> match
 
-                // Connected! Now run the client loop.
-                let res = client_loop(
-                    writer.clone(),
-                    server_ops,
-                    &mut user_ops,
-                    &mut subscriptions,
-                    &mut pongs,
-                    &mut server_info,
-                )
+                let res = async {
+                    // Inject random delays when testing.
+                    inject_delay();
+
+                    writer.lock().await.reconnect(w).await
+                }
+                .and_then(|()| {
+                    // Connected! Now run the client loop.
+                    client_loop(
+                        writer.clone(),
+                        server_ops,
+                        &mut user_ops,
+                        &mut subscriptions,
+                        &mut pongs,
+                        &mut server_info,
+                    )
+                })
                 .await;
 
                 // If the client stopped gracefully, all is good. Return to stop the client thread.
@@ -141,6 +159,7 @@ async fn connect_loop(
 
                 // Clear the pending PONG list, dropping all senders and thus failing operations
                 // waiting on PONGs.
+                // TODO #56(stjepang): Keep track of pongs inside Writer.
                 pongs.clear();
 
                 // Go over the latest list of server URLs and add them to the table.
@@ -155,8 +174,12 @@ async fn connect_loop(
             }
         }
 
-        // All connect attempts have failed.
-        return Err(last_err);
+        // If this is the first connect attempt, fail fast.
+        // TODO(stjepang): Find a better way to check this.
+        if server_reconnects.values().sum::<usize>() == 1 {
+            // All connect attempts have failed.
+            return Err(last_err);
+        }
     }
 }
 
@@ -214,15 +237,22 @@ async fn try_connect(
         Pin<Box<dyn AsyncRead + Send>>,
         Pin<Box<dyn AsyncWrite + Send>>,
     ) = if tls_required {
-        // TODO(stjepang): Allow specifying a custom TLS connector.
-        match async_native_tls::connect(&server.host, stream).await {
-            Ok(stream) => {
-                // Split the TLS stream into a reader and a writer.
-                let stream = piper::Arc::new(piper::Mutex::new(stream));
-                (Box::pin(stream.clone()), Box::pin(stream))
-            }
-            Err(err) => return Err(io::Error::new(io::ErrorKind::PermissionDenied, err)),
-        }
+        let conn = async move {
+            // Inject random I/O failures when testing.
+            inject_io_failure()?;
+
+            // TODO(stjepang): Allow specifying a custom TLS connector.
+            async_native_tls::connect(&server.host, stream)
+                .await
+                .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err))
+        };
+
+        // Connect using TLS.
+        let stream = conn.await?;
+
+        // Split the TLS stream into a reader and a writer.
+        let stream = piper::Arc::new(piper::Mutex::new(stream));
+        (Box::pin(stream.clone()), Box::pin(stream))
     } else {
         // Split the TCP stream into a reader and a writer.
         let stream = piper::Arc::new(stream);
@@ -329,6 +359,9 @@ async fn client_loop<'a>(
 
     // Restart subscriptions that existed before the last reconnect.
     for (subject, sid, _messages) in subscriptions.iter() {
+        // Inject random delays when testing.
+        inject_delay();
+
         // Send a SUB operation to the server.
         encode(
             &mut *writer.lock().await,
@@ -358,6 +391,9 @@ async fn client_loop<'a>(
                     }
 
                     ServerOp::Ping => {
+                        // Inject random delays when testing.
+                        inject_delay();
+
                         // Send a PONG operation to the server.
                         encode(
                             &mut *writer.lock().await,
@@ -382,7 +418,7 @@ async fn client_loop<'a>(
                                 subject: subject.clone(),
                                 reply: reply_to.clone(),
                                 data: payload.clone(),
-                                responder: None,
+                                writer: None,
                             });
                         }
                     }
@@ -404,6 +440,9 @@ async fn client_loop<'a>(
                         // Add the subscription to the list.
                         subscriptions.push((subject.clone(), sid, messages));
 
+                        // Inject random delays when testing.
+                        inject_delay();
+
                         // Send a SUB operation to the server.
                         let mut writer = writer.lock().await;
                         encode(
@@ -421,6 +460,9 @@ async fn client_loop<'a>(
                         // Remove the subscription from the list.
                         subscriptions.retain(|(_, s, _)| *s != sid);
 
+                        // Inject random delays when testing.
+                        inject_delay();
+
                         // Send an UNSUB operation to the server.
                         let mut writer = writer.lock().await;
                         encode(
@@ -434,10 +476,16 @@ async fn client_loop<'a>(
                     }
 
                     UserOp::Ping { pong } => {
+                        // Inject random delays when testing.
+                        inject_delay();
+
                         let mut writer = writer.lock().await;
 
                         // Send a PING operation to the server.
                         encode(&mut *writer, ClientOp::Ping).await?;
+
+                        // Inject random I/O failures when testing.
+                        inject_io_failure()?;
 
                         // Flush to make sure the PING goes through.
                         writer.flush().await?;
@@ -445,17 +493,20 @@ async fn client_loop<'a>(
                         // Record that we're expecting a PONG.
                         pongs.push_back(pong);
                     }
-
-                    UserOp::Close => {
-                        // TODO(stjepang): Perhaps we should flush before closing abruptly.
-                        return Ok(());
-                    }
                 }
             }
 
             // Periodically flush writes to the server.
             _ = Timer::at(next_flush).fuse() => {
-                // writer.lock().await.flush().await?;
+                // Inject random delays when testing.
+                inject_delay();
+
+                let mut writer = writer.lock().await;
+
+                // Inject random I/O failures when testing.
+                inject_io_failure()?;
+
+                writer.flush().await?;
                 next_flush = Instant::now() + flush_timeout;
             }
         }

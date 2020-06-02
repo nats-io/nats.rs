@@ -15,7 +15,7 @@ pub(crate) enum ClientOp<'a> {
     /// `PUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n`
     Pub {
         subject: &'a str,
-        reply_to: Option<String>,
+        reply_to: Option<&'a str>,
         payload: &'a [u8],
     },
 

@@ -1,13 +1,15 @@
 use std::io::{self, ErrorKind};
+use std::time::Duration;
 
 use futures::channel::mpsc;
 use futures::prelude::*;
-use smol::block_on;
+use smol::{block_on, Timer};
 
-use crate::Message;
 use crate::new_client::client::UserOp;
+use crate::new_client::message::Message;
 
 /// A subscription to a subject.
+#[derive(Debug)]
 pub struct Subscription {
     /// Subscription ID.
     sid: usize,
@@ -47,6 +49,22 @@ impl Subscription {
     pub fn next(&mut self) -> io::Result<Message> {
         // Block on the next message in the channel.
         block_on(self.messages.next()).ok_or_else(|| ErrorKind::ConnectionReset.into())
+    }
+
+    /// Get the next message, or a timeout error if no messages are available for timeout.
+    pub fn next_timeout(&mut self, timeout: Duration) -> io::Result<Option<Message>> {
+        // Block on the next message in the channel.
+        block_on(async move {
+            futures::select! {
+                msg = self.messages.next().fuse() => {
+                    match msg {
+                        Some(msg) => Ok(Some(msg)),
+                        None => Err(ErrorKind::ConnectionReset.into()),
+                    }
+                }
+                _ = Timer::after(timeout).fuse() => Ok(None),
+            }
+        })
     }
 }
 
