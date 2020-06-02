@@ -272,7 +272,7 @@ fn reconnect_test() {
         move || {
             thread::sleep(Duration::from_secs(10 * 60));
             if !success.load(Ordering::Acquire) {
-                log::error!("killing process after 5 minutes");
+                log::error!("killing process after 10 minutes");
                 std::process::exit(1);
             }
         }

@@ -1,5 +1,5 @@
 use std::cmp;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::io::{self, Error, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
@@ -14,7 +14,7 @@ use futures::{
     prelude::*,
 };
 use rand::{seq::SliceRandom, thread_rng};
-use smol::{Async, Task, Timer};
+use smol::{Async, Timer};
 
 use crate::new_client::decoder::{decode, ServerOp};
 use crate::new_client::encoder::{encode, ClientOp};
@@ -41,9 +41,6 @@ pub(crate) enum UserOp {
 
     /// Unsubscribe from a subject.
     Unsub { sid: usize, max_msgs: Option<u64> },
-
-    /// Send a ping and wait for a pong.
-    Ping { pong: oneshot::Sender<()> },
 }
 
 /// Spawns a client thread.
@@ -78,9 +75,6 @@ async fn connect_loop(
 ) -> io::Result<()> {
     // Current subscriptions in the form `(subject, sid, messages)`.
     let mut subscriptions: Vec<(String, usize, mpsc::UnboundedSender<Message>)> = Vec::new();
-
-    // Expected pongs and their notification channels.
-    let mut pongs: VecDeque<oneshot::Sender<()>> = VecDeque::new();
 
     // Server table in the form `(server, reconnects)`.
     let mut server_reconnects: HashMap<Server, usize> = HashMap::new();
@@ -146,7 +140,6 @@ async fn connect_loop(
                         server_ops,
                         &mut user_ops,
                         &mut subscriptions,
-                        &mut pongs,
                         &mut server_info,
                     )
                 })
@@ -156,11 +149,6 @@ async fn connect_loop(
                 if res.is_ok() {
                     return Ok(());
                 }
-
-                // Clear the pending PONG list, dropping all senders and thus failing operations
-                // waiting on PONGs.
-                // TODO #56(stjepang): Keep track of pongs inside Writer.
-                pongs.clear();
 
                 // Go over the latest list of server URLs and add them to the table.
                 for url in server_info.connect_urls {
@@ -348,7 +336,6 @@ async fn client_loop<'a>(
     mut server_ops: impl Stream<Item = io::Result<ServerOp>> + Unpin + 'a,
     user_ops: &'a mut mpsc::UnboundedReceiver<UserOp>,
     subscriptions: &'a mut Vec<(String, usize, mpsc::UnboundedSender<Message>)>,
-    pongs: &'a mut VecDeque<oneshot::Sender<()>>,
     server_info: &'a mut ServerInfo,
 ) -> io::Result<()> {
     // TODO(stjepang): Make this option configurable.
@@ -402,11 +389,11 @@ async fn client_loop<'a>(
                     }
 
                     ServerOp::Pong => {
-                        // Take the next expected pong from the queue.
-                        let pong = pongs.pop_front().expect("unexpected pong");
+                        // Inject random delays when testing.
+                        inject_delay();
 
-                        // Complete the pong by sending a message into the channel.
-                        let _ = pong.send(());
+                        let mut writer = writer.lock().await;
+                        writer.pong();
                     }
 
                     ServerOp::Msg { subject, sid, reply_to, payload } => {
@@ -474,25 +461,6 @@ async fn client_loop<'a>(
                         )
                         .await?;
                     }
-
-                    UserOp::Ping { pong } => {
-                        // Inject random delays when testing.
-                        inject_delay();
-
-                        let mut writer = writer.lock().await;
-
-                        // Send a PING operation to the server.
-                        encode(&mut *writer, ClientOp::Ping).await?;
-
-                        // Inject random I/O failures when testing.
-                        inject_io_failure()?;
-
-                        // Flush to make sure the PING goes through.
-                        writer.flush().await?;
-
-                        // Record that we're expecting a PONG.
-                        pongs.push_back(pong);
-                    }
                 }
             }
 
@@ -502,10 +470,6 @@ async fn client_loop<'a>(
                 inject_delay();
 
                 let mut writer = writer.lock().await;
-
-                // Inject random I/O failures when testing.
-                inject_io_failure()?;
-
                 writer.flush().await?;
                 next_flush = Instant::now() + flush_timeout;
             }

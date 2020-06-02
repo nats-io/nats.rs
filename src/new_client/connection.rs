@@ -8,13 +8,13 @@ use async_mutex::Mutex;
 use futures::channel::{mpsc, oneshot};
 use smol::block_on;
 
+use crate::inject_delay;
 use crate::new_client::client::{self, UserOp};
 use crate::new_client::encoder::{encode, ClientOp};
 use crate::new_client::message::Message;
 use crate::new_client::options::{ConnectionOptions, Options};
 use crate::new_client::subscription::Subscription;
 use crate::new_client::writer::Writer;
-use crate::{inject_delay, inject_io_failure};
 
 /// A NATS client connection.
 pub struct Connection {
@@ -50,9 +50,6 @@ impl Connection {
             close_signal: Some(close_signal),
         };
 
-        // Inject random I/O failures when testing.
-        inject_io_failure()?;
-
         // Flush to send a ping and wait for the connection to establish.
         conn.flush()?;
 
@@ -75,9 +72,6 @@ impl Connection {
             inject_delay();
 
             let mut writer = self.writer.lock().await;
-
-            // Inject random I/O failures when testing.
-            inject_io_failure()?;
 
             encode(
                 &mut *writer,
@@ -133,9 +127,6 @@ impl Connection {
 
             let mut writer = self.writer.lock().await;
 
-            // Inject random I/O failures when testing.
-            inject_io_failure()?;
-
             encode(
                 &mut *writer,
                 ClientOp::Pub {
@@ -162,17 +153,19 @@ impl Connection {
 
     /// Flushes by performing a round trip to the server.
     pub fn flush(&self) -> io::Result<()> {
-        let (sender, receiver) = oneshot::channel();
+        let pong = block_on(async {
+            // Inject random delays when testing.
+            inject_delay();
 
-        // Enqueue a PING operation.
-        self.user_ops
-            .unbounded_send(UserOp::Ping { pong: sender })
-            .map_err(|err| Error::new(ErrorKind::ConnectionReset, err))?;
+            let mut writer = self.writer.lock().await;
+            writer.ping().await
+        })?;
 
         // Wait until the PONG operation is received.
-        let _ = block_on(receiver);
-
-        Ok(())
+        match block_on(pong) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
+        }
     }
 
     /// Close the connection.

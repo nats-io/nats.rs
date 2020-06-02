@@ -1,16 +1,20 @@
+use std::collections::VecDeque;
 use std::io::{self, Error, ErrorKind};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use futures::channel::oneshot;
 use futures::prelude::*;
 
 use crate::inject_io_failure;
+use crate::new_client::encoder::{encode, ClientOp};
 
 pub(crate) struct Writer {
     stream: Option<Pin<Box<dyn AsyncWrite + Send>>>,
     bytes: Box<[u8]>,
     written: usize,
     committed: usize,
+    pongs: VecDeque<oneshot::Sender<()>>,
 }
 
 impl Writer {
@@ -20,6 +24,7 @@ impl Writer {
             bytes: vec![0u8; buf_size].into_boxed_slice(),
             written: 0,
             committed: 0,
+            pongs: VecDeque::new(),
         }
     }
 
@@ -45,6 +50,30 @@ impl Writer {
         // Use the new stream from now on.
         self.stream = Some(stream);
         Ok(())
+    }
+
+    /// Sends a PING to the server.
+    pub(crate) async fn ping(&mut self) -> io::Result<oneshot::Receiver<()>> {
+        encode(&mut *self, ClientOp::Ping).await?;
+        self.commit();
+
+        // Flush to make sure the PING goes through.
+        self.flush().await?;
+
+        let (sender, receiver) = oneshot::channel();
+        self.pongs.push_back(sender);
+
+        Ok(receiver)
+    }
+
+    /// Processes a PONG received from the server.
+    pub(crate) fn pong(&mut self) {
+        // Take the next expected pong from the queue.
+        // TODO(stjepang): pongs should be marked with connection #
+        let pong = self.pongs.pop_front().expect("unexpected pong");
+
+        // Complete the pong by sending a message into the channel.
+        let _ = pong.send(());
     }
 
     pub(crate) fn commit(&mut self) {
@@ -82,9 +111,10 @@ impl AsyncWrite for Writer {
             }
         };
 
-        // In case of I/O errors, drop the connection.
+        // In case of I/O errors, drop the connection and clear the pong list.
         if res.is_err() {
             self.stream = None;
+            self.pongs.clear();
         }
         Poll::Ready(res)
     }
@@ -101,9 +131,10 @@ impl AsyncWrite for Writer {
             None => Ok(()),
         };
 
-        // In case of I/O errors, drop the connection.
+        // In case of I/O errors, drop the connection and clear the pong list.
         if res.is_err() {
             self.stream = None;
+            self.pongs.clear();
         }
         Poll::Ready(res)
     }
