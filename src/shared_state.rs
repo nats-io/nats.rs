@@ -267,15 +267,13 @@ impl SharedState {
         inject_delay();
         let mut pongs = self.pongs.lock();
 
-        // This will throw an error if the system is disconnected.
-        self.outbound.send_ping()?;
-
         // We only push to the mutex if the ping was successfully queued.
         // By holding the mutex across calls, we guarantee ordering in the
         // queue will match the order of calls to `send_ping`.
         pongs.push_back(s);
-        drop(pongs);
 
+        // continue holding the pongs lock while calling the below function
+        // which will send a ping.
         self.outbound.drain(sids, &r)
     }
 }
