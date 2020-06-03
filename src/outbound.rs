@@ -263,6 +263,66 @@ impl Outbound {
         })
     }
 
+    pub(crate) fn drain(
+        &self,
+        sids: Vec<usize>,
+        pong_rx: crossbeam_channel::Receiver<bool>,
+    ) -> io::Result<()> {
+        // take lock, which will be held for the duration
+        // of this operation
+        let mut writer = self.writer.lock();
+
+        if writer.is_disconnected() {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "The client is not currently connected to a server",
+            ));
+        }
+
+        if writer.is_closed() {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "the connection is permanently closed",
+            ));
+        }
+
+        // send unsubs
+        for sid in sids {
+            write!(writer, "UNSUB {}\r\n", sid)?;
+        }
+
+        // send PING
+        writer.write_all(b"PING\r\n")?;
+
+        // Flush in place on pings.
+        writer.flush()?;
+
+        // wait for PONG
+        let success = pong_rx
+            .recv_timeout(crate::DEFAULT_FLUSH_TIMEOUT)
+            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))?;
+
+        if !success {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "The connection to the remote server was lost",
+            ));
+        }
+
+        // transition to closed state
+        if let Err(error) = writer.shutdown() {
+            log::error!(
+                "encountered error during outbound \
+                transition to Closed state: {:?}",
+                error
+            );
+        }
+
+        *writer = Writer::Closed;
+
+        Ok(())
+    }
+
     pub(crate) fn send_ping(&self) -> io::Result<()> {
         inject_delay();
 

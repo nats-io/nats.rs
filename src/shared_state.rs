@@ -7,6 +7,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 use parking_lot::{Mutex, RwLock};
@@ -225,5 +226,56 @@ impl SharedState {
     pub(crate) fn close(&self) {
         self.shutting_down.store(true, Ordering::Release);
         self.outbound.close();
+    }
+
+    pub(crate) fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
+        let (s, r) = crossbeam_channel::bounded(1);
+
+        // We take out the mutex before sending a ping (which may fail)
+        inject_delay();
+        let mut pongs = self.pongs.lock();
+
+        // This will throw an error if the system is disconnected.
+        self.outbound.send_ping()?;
+
+        // We only push to the mutex if the ping was successfully queued.
+        // By holding the mutex across calls, we guarantee ordering in the
+        // queue will match the order of calls to `send_ping`.
+        pongs.push_back(s);
+        drop(pongs);
+
+        let success = r
+            .recv_timeout(duration)
+            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))?;
+
+        if !success {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "The connection to the remote server was lost",
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn drain(&self) -> io::Result<()> {
+        // take out lock, send unsubs, send flush, wait for return
+        let sids = self.subs.read().keys().copied().collect();
+        let (s, r) = crossbeam_channel::bounded(1);
+
+        // We take out the mutex before sending a ping (which may fail)
+        inject_delay();
+        let mut pongs = self.pongs.lock();
+
+        // This will throw an error if the system is disconnected.
+        self.outbound.send_ping()?;
+
+        // We only push to the mutex if the ping was successfully queued.
+        // By holding the mutex across calls, we guarantee ordering in the
+        // queue will match the order of calls to `send_ping`.
+        pongs.push_back(s);
+        drop(pongs);
+
+        self.outbound.drain(sids, r)
     }
 }
