@@ -266,7 +266,7 @@ impl Outbound {
     pub(crate) fn drain(
         &self,
         sids: Vec<usize>,
-        pong_rx: crossbeam_channel::Receiver<bool>,
+        pong_rx: &crossbeam_channel::Receiver<bool>,
     ) -> io::Result<()> {
         // take lock, which will be held for the duration
         // of this operation

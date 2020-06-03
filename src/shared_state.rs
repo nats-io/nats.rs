@@ -276,6 +276,6 @@ impl SharedState {
         pongs.push_back(s);
         drop(pongs);
 
-        self.outbound.drain(sids, r)
+        self.outbound.drain(sids, &r)
     }
 }
