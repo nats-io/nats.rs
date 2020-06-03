@@ -260,7 +260,8 @@ impl SharedState {
 
     pub(crate) fn drain(&self) -> io::Result<()> {
         // take out lock, send unsubs, send flush, wait for return
-        let sids = self.subs.read().keys().copied().collect();
+        let mut subs = self.subs.write();
+        let sids = subs.keys().copied().collect();
         let (s, r) = crossbeam_channel::bounded(1);
 
         // We take out the mutex before sending a ping (which may fail)
@@ -274,6 +275,10 @@ impl SharedState {
 
         // continue holding the pongs lock while calling the below function
         // which will send a ping.
-        self.outbound.drain(sids, &r)
+        self.outbound.drain(sids, &r)?;
+
+        subs.clear();
+
+        Ok(())
     }
 }
