@@ -282,7 +282,7 @@ impl Outbound {
         if writer.is_closed() {
             return Err(Error::new(
                 ErrorKind::Other,
-                "the connection is permanently closed",
+                "the client's connection is permanently closed",
             ));
         }
 
@@ -305,7 +305,7 @@ impl Outbound {
         if !success {
             return Err(Error::new(
                 ErrorKind::BrokenPipe,
-                "The connection to the remote server was lost",
+                "The client's connection to the remote server was lost",
             ));
         }
 
