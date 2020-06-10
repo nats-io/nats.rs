@@ -313,7 +313,7 @@ fn reconnect_test() {
         let success = success.clone();
         let shutdown = shutdown.clone();
         move || {
-            const EXPECTED_SUCCESSES: usize = 100;
+            const EXPECTED_SUCCESSES: usize = 25;
             let mut received = 0;
 
             while received < EXPECTED_SUCCESSES && !shutdown.load(Ordering::Acquire) {
