@@ -226,29 +226,28 @@ impl Subscription {
     /// the closed state afterward.
     ///
     /// # Example
+    ///
     /// ```
     /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let received = Arc::new(AtomicBool::new(false));
-    /// let received_2 = received.clone();
     ///
-    /// let sub = nc.subscribe("test.drain")?;
-    ///
-    /// sub.with_handler(move |m| {
-    ///     received_2.store(true, SeqCst);
-    ///     Ok(())
-    /// });
+    /// let mut sub = nc.subscribe("test.drain")?;
     ///
     /// nc.publish("test.drain", "message")?;
     /// sub.drain()?;
     ///
-    /// assert!(received.load(SeqCst));
+    /// let mut received = false;
+    /// for _ in sub {
+    ///     received = true;
+    /// }
+    ///
+    /// assert!(received);
     ///
     /// # Ok(())
     /// # }
     /// ```
-    pub fn drain(mut self) -> io::Result<()> {
+    pub fn drain(&mut self) -> io::Result<()> {
         self.shared_state.outbound.send_unsub(self.sid)?;
 
         self.do_unsub = false;

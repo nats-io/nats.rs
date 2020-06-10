@@ -856,7 +856,7 @@ impl Connection {
         let sid = self.sid.fetch_add(1, Ordering::Relaxed);
         self.shared_state
             .outbound
-            .send_sub_msg(subject, queue, sid)?;
+            .send_sub_msg(subject, queue, sid, &self.shared_state)?;
         let (sub, recv) = crossbeam_channel::unbounded();
         {
             let mut subs = self.shared_state.subs.write();
@@ -893,7 +893,7 @@ impl Connection {
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.shared_state
             .outbound
-            .send_pub_msg(subject, None, msg.as_ref())
+            .send_pub_msg(subject, None, msg.as_ref(), &self.shared_state)
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -914,9 +914,12 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.shared_state
-            .outbound
-            .send_pub_msg(subject, Some(reply), msg.as_ref())
+        self.shared_state.outbound.send_pub_msg(
+            subject,
+            Some(reply),
+            msg.as_ref(),
+            &self.shared_state,
+        )
     }
 
     /// Create a new globally unique inbox which can be used for replies.

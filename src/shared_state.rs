@@ -140,6 +140,7 @@ pub(crate) struct SharedState {
     pub(crate) threads: Mutex<Option<WorkerThreads>>,
     pub(crate) id: String,
     pub(crate) shutting_down: AtomicBool,
+    pub(crate) draining: AtomicBool,
     pub(crate) last_error: RwLock<io::Result<()>>,
     pub(crate) subs: RwLock<HashMap<usize, SubscriptionState>>,
     pub(crate) pongs: Mutex<VecDeque<Sender<bool>>>,
@@ -184,6 +185,7 @@ impl SharedState {
         let shared_state = Arc::new(SharedState {
             id: nuid::next(),
             shutting_down: AtomicBool::new(false),
+            draining: AtomicBool::new(false),
             last_error: RwLock::new(Ok(())),
             subs: RwLock::new(HashMap::new()),
             pongs: Mutex::new(VecDeque::new()),
@@ -259,25 +261,20 @@ impl SharedState {
     }
 
     pub(crate) fn drain(&self) -> io::Result<()> {
+        self.draining.store(true, Ordering::Release);
+
         // take out lock, send unsubs, send flush, wait for return
-        let mut subs = self.subs.write();
-        let sids = subs.keys().copied().collect();
-        let (s, r) = crossbeam_channel::bounded(1);
+        let sids = self.subs.read().keys().copied().collect();
 
         // We take out the mutex before sending a ping (which may fail)
         inject_delay();
-        let mut pongs = self.pongs.lock();
-
-        // We only push to the mutex if the ping was successfully queued.
-        // By holding the mutex across calls, we guarantee ordering in the
-        // queue will match the order of calls to `send_ping`.
-        pongs.push_back(s);
+        let pongs = self.pongs.lock();
 
         // continue holding the pongs lock while calling the below function
         // which will send a ping.
-        self.outbound.drain(sids, &r)?;
+        self.outbound.drain(sids, pongs)?;
 
-        subs.clear();
+        self.subs.write().clear();
 
         Ok(())
     }

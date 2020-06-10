@@ -2,11 +2,12 @@ use std::{
     collections::HashMap,
     io::{self, BufWriter, Error, ErrorKind, Write},
     net::{Shutdown, TcpStream},
+    sync::atomic::Ordering,
 };
 
 use parking_lot::{Condvar, Mutex};
 
-use crate::{inject_delay, inject_io_failure, SubscriptionState, TlsWriter};
+use crate::{inject_delay, inject_io_failure, SharedState, SubscriptionState, TlsWriter};
 
 #[derive(Debug)]
 pub(crate) struct DisconnectWriter {
@@ -266,7 +267,10 @@ impl Outbound {
     pub(crate) fn drain(
         &self,
         sids: Vec<usize>,
-        pong_rx: &crossbeam_channel::Receiver<bool>,
+        mut pongs_mu: parking_lot::MutexGuard<
+            '_,
+            std::collections::VecDeque<crossbeam_channel::Sender<bool>>,
+        >,
     ) -> io::Result<()> {
         // take lock, which will be held for the duration
         // of this operation
@@ -291,11 +295,19 @@ impl Outbound {
             write!(writer, "UNSUB {}\r\n", sid)?;
         }
 
+        // We only push to the mutex if the ping was successfully queued.
+        // By holding the mutex across calls, we guarantee ordering in the
+        // queue will match the order of calls to `send_ping`.
+        let (pong_sender, pong_rx) = crossbeam_channel::bounded(1);
+
         // send PING
         writer.write_all(b"PING\r\n")?;
 
         // Flush in place on pings.
         writer.flush()?;
+
+        pongs_mu.push_back(pong_sender);
+        drop(pongs_mu);
 
         // wait for PONG
         let success = pong_rx
@@ -357,8 +369,16 @@ impl Outbound {
         subj: &str,
         reply: Option<&str>,
         msgb: &[u8],
+        shared_state: &SharedState,
     ) -> io::Result<()> {
         self.with_writer(|writer| {
+            if shared_state.draining.load(Ordering::Acquire) {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "The client is not currently draining",
+                ));
+            }
+
             if let Some(reply) = reply {
                 write!(writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
             } else {
@@ -376,8 +396,15 @@ impl Outbound {
         subject: &str,
         queue: Option<&str>,
         sid: usize,
+        shared_state: &SharedState,
     ) -> std::io::Result<()> {
         let res = self.with_writer(|writer| {
+            if shared_state.draining.load(Ordering::Acquire) {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "The client is not currently draining",
+                ));
+            }
             match queue {
                 Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
                 None => write!(writer, "SUB {} {}\r\n", subject, sid)?,
