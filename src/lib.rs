@@ -15,8 +15,9 @@
 //!
 //! Basic connections, and those with options. The compiler will force these to be correct.
 //!
-//! ```rust
-//! let nc = nats::connect("localhost")?;
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! let nc = nats::connect("demo.nats.io")?;
 //!
 //! let nc2 = nats::ConnectionOptions::new()
 //!     .with_name("My Rust NATS App")
@@ -26,32 +27,31 @@
 //! let nc3 = nats::ConnectionOptions::new()
 //!     .with_credentials("path/to/my.creds")
 //!     .connect("connect.ngs.global")?;
+//! # Ok(()) }
 //! ```
 //!
 //! ### Publish
 //!
-//! ```rust
-//! nc.publish("foo", "Hello World!")?;
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! let nc = nats::connect("demo.nats.io")?;
+//! nc.publish("my.subject", "Hello World!")?;
 //!
-//! // Serde serialization.
-//! let p = Person {
-//!     first_name: "derek",
-//!     last_name: "collison",
-//!     age: 22,
-//! };
-//!
-//! let json = serde_json::to_vec(&p)?;
-//! nc.publish("foo", json)?;
+//! nc.publish("my.subject", "my message")?;
 //!
 //! // Publish a request manually.
 //! let reply = nc.new_inbox();
-//! let rsub = nc.subscribe(reply)?;
-//! nc.publish_request("foo", reply, "Help me!")?;
+//! let rsub = nc.subscribe(&reply)?;
+//! nc.publish_request("my.subject", &reply, "Help me!")?;
+//! # Ok(()) }
 //! ```
 //!
 //! ### Subscribe
 //!
-//! ```rust
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! # use std::time::Duration;
+//! let nc = nats::connect("demo.nats.io")?;
 //! let sub = nc.subscribe("foo")?;
 //! for msg in sub.messages() {}
 //!
@@ -65,15 +65,20 @@
 //! // Using a threaded handler.
 //! let sub = nc.subscribe("bar")?.with_handler(move |msg| {
 //!     println!("Received {}", &msg);
-//! }
+//!     Ok(())
+//! });
 //!
 //! // Queue subscription.
 //! let qsub = nc.queue_subscribe("foo", "my_group")?;
+//! # Ok(()) }
 //! ```
 //!
 //! ### Request/Response
 //!
-//! ```rust
+//! ```no_run
+//! # use std::time::Duration;
+//! # fn main() -> std::io::Result<()> {
+//! let nc = nats::connect("demo.nats.io")?;
 //! let resp = nc.request("foo", "Help me?")?;
 //!
 //! // With a timeout.
@@ -84,9 +89,10 @@
 //!
 //! // Publish a request manually.
 //! let reply = nc.new_inbox();
-//! let rsub = nc.subscribe(reply)?;
-//! nc.publish_request("foo", reply, "Help me!")?;
+//! let rsub = nc.subscribe(&reply)?;
+//! nc.publish_request("foo", &reply, "Help me!")?;
 //! let response = rsub.iter().take(1);
+//! # Ok(()) }
 //! ```
 
 #![cfg_attr(test, deny(warnings))]

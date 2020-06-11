@@ -47,7 +47,7 @@ as well!
 Basic connections, and those with options. The compiler will force these to be correct.
 
 ```rust
-let nc = nats::connect("localhost")?;
+let nc = nats::connect("demo.nats.io")?;
 
 let nc2 = nats::ConnectionOptions::new()
     .with_name("My Rust NATS App")
@@ -62,22 +62,14 @@ let nc3 = nats::ConnectionOptions::new()
 ### Publish
 
 ```rust
-nc.publish("foo", "Hello World!")?;
+nc.publish("my.subject", "Hello World!")?;
 
-// Serde serialization.
-let p = Person {
-    first_name: "derek",
-    last_name: "collison",
-    age: 22,
-};
-
-let json = serde_json::to_vec(&p)?;
-nc.publish("foo", json)?;
+nc.publish("my.subject", "my message")?;
 
 // Publish a request manually.
 let reply = nc.new_inbox();
-let rsub = nc.subscribe(reply)?;
-nc.publish_request("foo", reply, "Help me!")?;
+let rsub = nc.subscribe(&reply)?;
+nc.publish_request("my.subject", &reply, "Help me!")?;
 ```
 
 ### Subscribe
@@ -96,7 +88,8 @@ for msg in sub.timeout_iter(Duration::from_secs(10)) {}
 // Using a threaded handler.
 let sub = nc.subscribe("bar")?.with_handler(move |msg| {
     println!("Received {}", &msg);
-}
+    Ok(())
+});
 
 // Queue subscription.
 let qsub = nc.queue_subscribe("foo", "my_group")?;
@@ -115,8 +108,8 @@ for msg in nc.request_multi("foo", "Help")?.iter() {}
 
 // Publish a request manually.
 let reply = nc.new_inbox();
-let rsub = nc.subscribe(reply)?;
-nc.publish_request("foo", reply, "Help me!")?;
+let rsub = nc.subscribe(&reply)?;
+nc.publish_request("foo", &reply, "Help me!")?;
 let response = rsub.iter().take(1);
 ```
 
