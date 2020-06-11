@@ -53,6 +53,10 @@ let nc2 = nats::ConnectionOptions::new()
     .with_name("My Rust NATS App")
     .with_user_pass("derek", "s3cr3t!")
     .connect("127.0.0.1")?;
+
+let nc3 = nats::ConnectionOptions::new()
+    .with_credentials("path/to/my.creds")
+    .connect("connect.ngs.global")?;
 ```
 
 ### Publish

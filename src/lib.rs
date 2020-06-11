@@ -8,6 +8,86 @@
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
+//!
+//! ## Examples
+//!
+//! `> cargo run --example nats-box -- -h`
+//!
+//! Basic connections, and those with options. The compiler will force these to be correct.
+//!
+//! ```rust
+//! let nc = nats::connect("localhost")?;
+//!
+//! let nc2 = nats::ConnectionOptions::new()
+//!     .with_name("My Rust NATS App")
+//!     .with_user_pass("derek", "s3cr3t!")
+//!     .connect("127.0.0.1")?;
+//!
+//! let nc3 = nats::ConnectionOptions::new()
+//!     .with_credentials("path/to/my.creds")
+//!     .connect("connect.ngs.global")?;
+//! ```
+//!
+//! ### Publish
+//!
+//! ```rust
+//! nc.publish("foo", "Hello World!")?;
+//!
+//! // Serde serialization.
+//! let p = Person {
+//!     first_name: "derek",
+//!     last_name: "collison",
+//!     age: 22,
+//! };
+//!
+//! let json = serde_json::to_vec(&p)?;
+//! nc.publish("foo", json)?;
+//!
+//! // Publish a request manually.
+//! let reply = nc.new_inbox();
+//! let rsub = nc.subscribe(reply)?;
+//! nc.publish_request("foo", reply, "Help me!")?;
+//! ```
+//!
+//! ### Subscribe
+//!
+//! ```rust
+//! let sub = nc.subscribe("foo")?;
+//! for msg in sub.messages() {}
+//!
+//! // Using next.
+//! if let Some(msg) = sub.next() {}
+//!
+//! // Other iterators.
+//! for msg in sub.try_iter() {}
+//! for msg in sub.timeout_iter(Duration::from_secs(10)) {}
+//!
+//! // Using a threaded handler.
+//! let sub = nc.subscribe("bar")?.with_handler(move |msg| {
+//!     println!("Received {}", &msg);
+//! }
+//!
+//! // Queue subscription.
+//! let qsub = nc.queue_subscribe("foo", "my_group")?;
+//! ```
+//!
+//! ### Request/Response
+//!
+//! ```rust
+//! let resp = nc.request("foo", "Help me?")?;
+//!
+//! // With a timeout.
+//! let resp = nc.request_timeout("foo", "Help me?", Duration::from_secs(2))?;
+//!
+//! // With multiple responses.
+//! for msg in nc.request_multi("foo", "Help")?.iter() {}
+//!
+//! // Publish a request manually.
+//! let reply = nc.new_inbox();
+//! let rsub = nc.subscribe(reply)?;
+//! nc.publish_request("foo", reply, "Help me!")?;
+//! let response = rsub.iter().take(1);
+//! ```
 
 #![cfg_attr(test, deny(warnings))]
 #![deny(
