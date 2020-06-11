@@ -121,7 +121,7 @@ such as async-std and tokio. Going forward we look to provide an async client.
 Publish today is mostly non-blocking, so largest API change would be around
 subscriptions being streams vs iterators by default. Also been researching
 sinks and whether or not they make sense. Would probably be a config feature
-for async wnd options for most runtimes like async-std and tokio.
+for async and options for most runtimes like async-std and tokio.
 
 ## Features
 The following is a list of features currently supported and planned for the near future.
