@@ -16,7 +16,7 @@
 //! Basic connections, and those with options. The compiler will force these to be correct.
 //!
 //! ```no_run
-//! # fn main() -> std::io::Result<()> {
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("demo.nats.io")?;
 //!
 //! let nc2 = nats::ConnectionOptions::new()
@@ -27,6 +27,15 @@
 //! let nc3 = nats::ConnectionOptions::new()
 //!     .with_credentials("path/to/my.creds")
 //!     .connect("connect.ngs.global")?;
+//!
+//! let tls_connector = nats::tls::builder()
+//!     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
+//!     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
+//!     .build()?;
+//!
+//! let nc4 = nats::ConnectionOptions::new()
+//!     .tls_connector(tls_connector)
+//!     .connect("tls://demo.nats.io:4443")?;
 //! # Ok(()) }
 //! ```
 //!
@@ -730,7 +739,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Examples
     /// ```no_run
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut tls_connector = nats::tls::builder()
+    /// let tls_connector = nats::tls::builder()
     ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
     ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
     ///     .build()?;
