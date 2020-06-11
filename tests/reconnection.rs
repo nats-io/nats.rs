@@ -266,13 +266,13 @@ fn reconnect_test() {
     let restart = Arc::new(AtomicBool::new(false));
     let success = Arc::new(AtomicBool::new(false));
 
-    // kill process if we take longer than 10 minutes to run the test
+    // kill process if we take longer than 15 minutes to run the test
     thread::spawn({
         let success = success.clone();
         move || {
-            thread::sleep(Duration::from_secs(10 * 60));
+            thread::sleep(Duration::from_secs(15 * 60));
             if !success.load(Ordering::Acquire) {
-                log::error!("killing process after 5 minutes");
+                log::error!("killing process after 15 minutes");
                 std::process::exit(1);
             }
         }
@@ -313,7 +313,7 @@ fn reconnect_test() {
         let success = success.clone();
         let shutdown = shutdown.clone();
         move || {
-            const EXPECTED_SUCCESSES: usize = 100;
+            const EXPECTED_SUCCESSES: usize = 25;
             let mut received = 0;
 
             while received < EXPECTED_SUCCESSES && !shutdown.load(Ordering::Acquire) {
