@@ -7,18 +7,29 @@
 </p>
 
 ## Status
+
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Crates.io](https://img.shields.io/crates/v/nats.svg)](https://crates.io/crates/nats)
 [![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
 [![Build Status](https://travis-ci.org/nats-io/nats.rs.svg?branch=master)](http://travis-ci.org/nats-io/nats.rs)
 
 ## Motivation
-Rust may be the most interesting new language the NATS ecosystem has seen. We believe this client will have a large impact on NATS, distributed systems, and embedded and IoT environments. With Rust we wanted to be as idiomatic as we could be and embrace the language. We moved many things that would have been runtime checks and errors to the compiler, most notably options on connections, and having subscriptions generate multiple styles of iterators, since iterators are a first class citizen in Rust. We also wanted to be aligned with the NATS philosophy of simple, secure, and fast! (The security is coming soon!)
+
+Rust may be the most interesting new language the NATS ecosystem has seen. We
+believe this client will have a large impact on NATS, distributed systems, and
+embedded and IoT environments. With Rust we wanted to be as idiomatic as we
+could be and lean into the strengths of the language. We moved many things that
+would have been runtime checks and errors to the compiler, most notably options
+on connections, and having subscriptions generate multiple styles of iterators,
+since iterators are a first class citizen in Rust. We also wanted to be aligned
+with the NATS philosophy of simple, secure, and fast!
 
 ## Feedback
 
-This is a new client, and I and the team are new to Rust, so all feedback welcome!
-We encourage all folks in the NATS and Rust ecosystems to help us improve this library. Please open issues, submit PRs, etc.
+We encourage all folks in the NATS and Rust ecosystems to help us
+improve this library. Please open issues, submit PRs, etc. We're
+available in the `rust` channel on [the NATS slack](https://slack.nats.io)
+as well!
 
 ## Example Usage
 
