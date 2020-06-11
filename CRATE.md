@@ -12,8 +12,9 @@
 [![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
 [![Build Status](https://travis-ci.org/nats-io/nats.rs.svg?branch=master)](http://travis-ci.org/nats-io/nats.rs)
 
-Warning: as of version 0.4.0, this crate has been rewritten, and several public
-APIs have changed. Please see the [docs](https://docs.rs/nats), the [new
+Warning: as of version 0.4.0, this crate has switched code bases
+to a Synadia (official maintainers of NATS.io) implementation.
+Please see the [new API docs](https://docs.rs/nats), the [new
 repo](https://github.com/nats-io/nats.rs), and [the
 changelog](https://github.com/nats-io/nats.rs/blob/master/CHANGELOG.md) for
 details.
