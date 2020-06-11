@@ -1,21 +1,19 @@
 [package]
-name = "natsio"
-version = "0.3.2"
+name = "nats"
+version = "0.4.0"
 description = "A Rust NATS client"
-authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>"]
+authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
 license = "Apache-2.0"
+documentation = "https://docs.rs/nats"
 homepage = "https://github.com/nats-io/nats.rs"
 repository = "https://github.com/nats-io/nats.rs"
-readme = "README.md"
+readme = "CRATE.md"
 keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [features]
 fault_injection = []
-
-[lib]
-name = "nats"
 
 [badges]
 travis-ci = { repository = "nats-io/nats.rs", branch = "master" }

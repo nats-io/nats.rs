@@ -14,7 +14,7 @@ pub use native_tls::{Certificate, Identity, Protocol, TlsConnector, TlsConnector
 /// # Examples
 /// ```no_run
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let mut tls_connector = nats::tls::builder()
+/// let tls_connector = nats::tls::builder()
 ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
 ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
 ///     .build()?;

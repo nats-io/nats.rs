@@ -7,6 +7,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 use parking_lot::{Mutex, RwLock};
@@ -139,6 +140,7 @@ pub(crate) struct SharedState {
     pub(crate) threads: Mutex<Option<WorkerThreads>>,
     pub(crate) id: String,
     pub(crate) shutting_down: AtomicBool,
+    pub(crate) draining: AtomicBool,
     pub(crate) last_error: RwLock<io::Result<()>>,
     pub(crate) subs: RwLock<HashMap<usize, SubscriptionState>>,
     pub(crate) pongs: Mutex<VecDeque<Sender<bool>>>,
@@ -183,6 +185,7 @@ impl SharedState {
         let shared_state = Arc::new(SharedState {
             id: nuid::next(),
             shutting_down: AtomicBool::new(false),
+            draining: AtomicBool::new(false),
             last_error: RwLock::new(Ok(())),
             subs: RwLock::new(HashMap::new()),
             pongs: Mutex::new(VecDeque::new()),
@@ -225,5 +228,54 @@ impl SharedState {
     pub(crate) fn close(&self) {
         self.shutting_down.store(true, Ordering::Release);
         self.outbound.close();
+    }
+
+    pub(crate) fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
+        let (s, r) = crossbeam_channel::bounded(1);
+
+        // We take out the mutex before sending a ping (which may fail)
+        inject_delay();
+        let mut pongs = self.pongs.lock();
+
+        // This will throw an error if the system is disconnected.
+        self.outbound.send_ping()?;
+
+        // We only push to the mutex if the ping was successfully queued.
+        // By holding the mutex across calls, we guarantee ordering in the
+        // queue will match the order of calls to `send_ping`.
+        pongs.push_back(s);
+        drop(pongs);
+
+        let success = r
+            .recv_timeout(duration)
+            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))?;
+
+        if !success {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "The connection to the remote server was lost",
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn drain(&self) -> io::Result<()> {
+        self.draining.store(true, Ordering::Release);
+
+        // take out lock, send unsubs, send flush, wait for return
+        let sids = self.subs.read().keys().copied().collect();
+
+        // We take out the mutex before sending a ping (which may fail)
+        inject_delay();
+        let pongs = self.pongs.lock();
+
+        // continue holding the pongs lock while calling the below function
+        // which will send a ping.
+        self.outbound.drain(sids, pongs)?;
+
+        self.subs.write().clear();
+
+        Ok(())
     }
 }

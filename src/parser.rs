@@ -39,7 +39,7 @@ pub(crate) fn parse_control_op<R: BufRead>(mut reader: R) -> io::Result<ControlO
             match r {
                 Ok((input, (op, args))) => Some((input, start_len, (op, args))),
                 Err(Incomplete(_)) => None,
-                _ => return Err(parse_error()),
+                Err(nom::Err::Error(_)) | Err(nom::Err::Failure(_)) => return Err(parse_error()),
             }
         } {
             (input, start_len, (op, args))

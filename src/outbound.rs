@@ -2,11 +2,12 @@ use std::{
     collections::HashMap,
     io::{self, BufWriter, Error, ErrorKind, Write},
     net::{Shutdown, TcpStream},
+    sync::atomic::Ordering,
 };
 
 use parking_lot::{Condvar, Mutex};
 
-use crate::{inject_delay, inject_io_failure, SubscriptionState, TlsWriter};
+use crate::{inject_delay, inject_io_failure, SharedState, SubscriptionState, TlsWriter};
 
 #[derive(Debug)]
 pub(crate) struct DisconnectWriter {
@@ -263,6 +264,77 @@ impl Outbound {
         })
     }
 
+    pub(crate) fn drain(
+        &self,
+        sids: Vec<usize>,
+        mut pongs_mu: parking_lot::MutexGuard<
+            '_,
+            std::collections::VecDeque<crossbeam_channel::Sender<bool>>,
+        >,
+    ) -> io::Result<()> {
+        // take lock, which will be held for the duration
+        // of this operation
+        let mut writer = self.writer.lock();
+
+        if writer.is_disconnected() {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "The client is not currently connected to a server",
+            ));
+        }
+
+        if writer.is_closed() {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "the client's connection is permanently closed",
+            ));
+        }
+
+        // send unsubs
+        for sid in sids {
+            write!(writer, "UNSUB {}\r\n", sid)?;
+        }
+
+        // We only push to the mutex if the ping was successfully queued.
+        // By holding the mutex across calls, we guarantee ordering in the
+        // queue will match the order of calls to `send_ping`.
+        let (pong_sender, pong_rx) = crossbeam_channel::bounded(1);
+
+        // send PING
+        writer.write_all(b"PING\r\n")?;
+
+        // Flush in place on pings.
+        writer.flush()?;
+
+        pongs_mu.push_back(pong_sender);
+        drop(pongs_mu);
+
+        // wait for PONG
+        let success = pong_rx
+            .recv_timeout(crate::DEFAULT_FLUSH_TIMEOUT)
+            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))?;
+
+        if !success {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "The client's connection to the remote server was lost",
+            ));
+        }
+
+        // transition to closed state
+        if let Err(error) = writer.shutdown() {
+            log::error!(
+                "encountered error during outbound \
+                transition to Closed state: {:?}",
+                error
+            );
+        }
+
+        *writer = Writer::Closed;
+
+        Ok(())
+    }
+
     pub(crate) fn send_ping(&self) -> io::Result<()> {
         inject_delay();
 
@@ -297,8 +369,16 @@ impl Outbound {
         subj: &str,
         reply: Option<&str>,
         msgb: &[u8],
+        shared_state: &SharedState,
     ) -> io::Result<()> {
         self.with_writer(|writer| {
+            if shared_state.draining.load(Ordering::Acquire) {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "The client is not currently draining",
+                ));
+            }
+
             if let Some(reply) = reply {
                 write!(writer, "PUB {} {} {}\r\n", subj, reply, msgb.len())?;
             } else {
@@ -316,8 +396,15 @@ impl Outbound {
         subject: &str,
         queue: Option<&str>,
         sid: usize,
+        shared_state: &SharedState,
     ) -> std::io::Result<()> {
         let res = self.with_writer(|writer| {
+            if shared_state.draining.load(Ordering::Acquire) {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "The client is not currently draining",
+                ));
+            }
             match queue {
                 Some(q) => write!(writer, "SUB {} {} {}\r\n", subject, q, sid)?,
                 None => write!(writer, "SUB {} {}\r\n", subject, sid)?,
