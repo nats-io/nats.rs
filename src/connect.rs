@@ -9,7 +9,7 @@ use crate::{
     inject_io_failure,
     parser::ControlOp,
     parser::{expect_info, parse_control_op},
-    split_tls, AuthStyle, FinalizedOptions, Reader, SecureString, ServerInfo, Writer,
+    split_tls, AuthStyle, ConnectionOptions, Reader, SecureString, ServerInfo, Writer,
 };
 
 fn default_echo() -> bool {
@@ -87,7 +87,7 @@ pub(crate) fn connect_to_socket_addr(
     addr: SocketAddr,
     host: &str,
     tls_required: bool,
-    options: &FinalizedOptions,
+    options: &ConnectionOptions,
 ) -> io::Result<(Reader, Writer, ServerInfo)> {
     inject_io_failure()?;
 
@@ -119,7 +119,7 @@ pub(crate) fn connect_to_socket_addr(
 fn authenticate(
     stream: TcpStream,
     server_info: &ServerInfo,
-    options: &FinalizedOptions,
+    options: &ConnectionOptions,
     tls_required: bool,
     host: &str,
 ) -> io::Result<(Reader, Writer)> {
