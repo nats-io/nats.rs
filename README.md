@@ -122,7 +122,7 @@ The following is a list of features currently supported and planned for the near
 ### Miscellaneous TODOs
 * [ ] Ping timer
 * [X] msg.respond
-* [ ] Drain mode
+* [X] Drain mode
 * [ ] COW for received messages
 * [X] Sub w/ handler can't do iter()
 * [X] Backup servers for option

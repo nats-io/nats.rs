@@ -66,7 +66,6 @@
     clippy::print_stdout,
     clippy::pub_enum_variant_names,
     clippy::redundant_closure_for_method_calls,
-    clippy::replace_consts,
     clippy::result_map_unwrap_or_else,
     clippy::shadow_reuse,
     clippy::shadow_same,
@@ -83,6 +82,8 @@
     clippy::wildcard_enum_match_arm,
     clippy::wrong_pub_self_convention,
 )]
+
+const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 mod connect;
 mod creds_utils;
@@ -854,7 +855,7 @@ impl Connection {
         let sid = self.sid.fetch_add(1, Ordering::Relaxed);
         self.shared_state
             .outbound
-            .send_sub_msg(subject, queue, sid)?;
+            .send_sub_msg(subject, queue, sid, &self.shared_state)?;
         let (sub, recv) = crossbeam_channel::unbounded();
         {
             let mut subs = self.shared_state.subs.write();
@@ -891,7 +892,7 @@ impl Connection {
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.shared_state
             .outbound
-            .send_pub_msg(subject, None, msg.as_ref())
+            .send_pub_msg(subject, None, msg.as_ref(), &self.shared_state)
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -912,9 +913,12 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.shared_state
-            .outbound
-            .send_pub_msg(subject, Some(reply), msg.as_ref())
+        self.shared_state.outbound.send_pub_msg(
+            subject,
+            Some(reply),
+            msg.as_ref(),
+            &self.shared_state,
+        )
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -1012,7 +1016,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        self.flush_timeout(Duration::from_secs(10))
+        self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -1029,33 +1033,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
-        let (s, r) = crossbeam_channel::bounded(1);
-
-        // We take out the mutex before sending a ping (which may fail)
-        inject_delay();
-        let mut pongs = self.shared_state.pongs.lock();
-
-        // This will throw an error if the system is disconnected.
-        self.shared_state.outbound.send_ping()?;
-
-        // We only push to the mutex if the ping was successfully queued.
-        // By holding the mutex across calls, we guarantee ordering in the
-        // queue will match the order of calls to `send_ping`.
-        pongs.push_back(s);
-        drop(pongs);
-
-        let success = r
-            .recv_timeout(duration)
-            .map_err(|_| Error::new(ErrorKind::TimedOut, "No response"))?;
-
-        if !success {
-            return Err(Error::new(
-                ErrorKind::BrokenPipe,
-                "The connection to the remote server was lost",
-            ));
-        }
-
-        Ok(())
+        self.shared_state.flush_timeout(duration)
     }
 
     /// Close a NATS connection. All clones of
@@ -1093,7 +1071,7 @@ impl Connection {
     /// ```
     pub fn rtt(&self) -> io::Result<Duration> {
         let start = Instant::now();
-        self.flush_timeout(Duration::from_secs(10))?;
+        self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)?;
         Ok(start.elapsed())
     }
 
@@ -1147,5 +1125,40 @@ impl Connection {
     pub fn client_id(&self) -> u64 {
         let info = self.shared_state.info.read();
         info.client_id
+    }
+
+    /// Send an unsubscription for all subs then flush the connection, allowing any unprocessed
+    /// messages to be handled by a handler function if one is configured.
+    ///
+    /// After the flush returns, we know that a round-trip to the server has happened after it
+    /// received our unsubscription, so we shut down the subscriber afterwards.
+    ///
+    /// A similar method exists for the `Subscription` struct which will drain
+    /// a single `Subscription` without shutting down the entire connection
+    /// afterward.
+    ///
+    /// # Example
+    /// ```
+    /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let received = Arc::new(AtomicBool::new(false));
+    /// let received_2 = received.clone();
+    ///
+    /// nc.subscribe("test.drain")?.with_handler(move |m| {
+    ///     received_2.store(true, SeqCst);
+    ///     Ok(())
+    /// });
+    ///
+    /// nc.publish("test.drain", "message")?;
+    /// nc.drain()?;
+    ///
+    /// assert!(received.load(SeqCst));
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn drain(&self) -> io::Result<()> {
+        self.shared_state.drain()
     }
 }

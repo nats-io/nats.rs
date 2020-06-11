@@ -170,13 +170,15 @@ impl Subscription {
     }
 
     fn unsub(&mut self) -> io::Result<()> {
+        self.shared_state.outbound.send_unsub(self.sid)?;
         self.do_unsub = false;
         self.shared_state.subs.write().remove(&self.sid);
-
-        self.shared_state.outbound.send_unsub(self.sid)
+        Ok(())
     }
 
-    /// Unsubscribe a subscription.
+    /// Unsubscribe a subscription immediately without draining.
+    /// Use `drain` instead if you want any pending messages
+    /// to be processed by a handler, if one is configured.
     ///
     /// # Example
     /// ```
@@ -193,6 +195,9 @@ impl Subscription {
 
     /// Close a subscription. Same as `unsubscribe`
     ///
+    /// Use `drain` instead if you want any pending messages
+    /// to be processed by a handler, if one is configured.
+    ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
@@ -204,6 +209,56 @@ impl Subscription {
     /// ```
     pub fn close(mut self) -> io::Result<()> {
         self.unsub()
+    }
+
+    /// Send an unsubscription then flush the connection,
+    /// allowing any unprocessed messages to be handled
+    /// by a handler function if one is configured.
+    ///
+    /// After the flush returns, we know that a round-trip
+    /// to the server has happened after it received our
+    /// unsubscription, so we shut down the subscriber
+    /// afterwards.
+    ///
+    /// A similar method exists on the `Connection` struct
+    /// which will drain all subscriptions for the NATS
+    /// client, and transition the entire system into
+    /// the closed state afterward.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    ///
+    /// let mut sub = nc.subscribe("test.drain")?;
+    ///
+    /// nc.publish("test.drain", "message")?;
+    /// sub.drain()?;
+    ///
+    /// let mut received = false;
+    /// for _ in sub {
+    ///     received = true;
+    /// }
+    ///
+    /// assert!(received);
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn drain(&mut self) -> io::Result<()> {
+        self.shared_state.outbound.send_unsub(self.sid)?;
+
+        self.do_unsub = false;
+
+        let ret = self
+            .shared_state
+            .flush_timeout(crate::DEFAULT_FLUSH_TIMEOUT);
+
+        self.shared_state.subs.write().remove(&self.sid);
+
+        ret
     }
 }
 

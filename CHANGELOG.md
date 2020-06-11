@@ -1,5 +1,10 @@
 # 0.4.0
 
+## New Features
+
+* #57 The `drain` method has been added to the
+  `Connection` and `Subscription` structs.
+
 ## Breaking Changes
 
 * #36 `Connection::close` is now infallible and has no
