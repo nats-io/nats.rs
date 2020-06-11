@@ -8,6 +8,101 @@
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
+//!
+//! ## Examples
+//!
+//! `> cargo run --example nats-box -- -h`
+//!
+//! Basic connections, and those with options. The compiler will force these to be correct.
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let nc = nats::connect("demo.nats.io")?;
+//!
+//! let nc2 = nats::ConnectionOptions::new()
+//!     .with_name("My Rust NATS App")
+//!     .with_user_pass("derek", "s3cr3t!")
+//!     .connect("127.0.0.1")?;
+//!
+//! let nc3 = nats::ConnectionOptions::new()
+//!     .with_credentials("path/to/my.creds")
+//!     .connect("connect.ngs.global")?;
+//!
+//! let tls_connector = nats::tls::builder()
+//!     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
+//!     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
+//!     .build()?;
+//!
+//! let nc4 = nats::ConnectionOptions::new()
+//!     .tls_connector(tls_connector)
+//!     .connect("tls://demo.nats.io:4443")?;
+//! # Ok(()) }
+//! ```
+//!
+//! ### Publish
+//!
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! let nc = nats::connect("demo.nats.io")?;
+//! nc.publish("my.subject", "Hello World!")?;
+//!
+//! nc.publish("my.subject", "my message")?;
+//!
+//! // Publish a request manually.
+//! let reply = nc.new_inbox();
+//! let rsub = nc.subscribe(&reply)?;
+//! nc.publish_request("my.subject", &reply, "Help me!")?;
+//! # Ok(()) }
+//! ```
+//!
+//! ### Subscribe
+//!
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! # use std::time::Duration;
+//! let nc = nats::connect("demo.nats.io")?;
+//! let sub = nc.subscribe("foo")?;
+//! for msg in sub.messages() {}
+//!
+//! // Using next.
+//! if let Some(msg) = sub.next() {}
+//!
+//! // Other iterators.
+//! for msg in sub.try_iter() {}
+//! for msg in sub.timeout_iter(Duration::from_secs(10)) {}
+//!
+//! // Using a threaded handler.
+//! let sub = nc.subscribe("bar")?.with_handler(move |msg| {
+//!     println!("Received {}", &msg);
+//!     Ok(())
+//! });
+//!
+//! // Queue subscription.
+//! let qsub = nc.queue_subscribe("foo", "my_group")?;
+//! # Ok(()) }
+//! ```
+//!
+//! ### Request/Response
+//!
+//! ```no_run
+//! # use std::time::Duration;
+//! # fn main() -> std::io::Result<()> {
+//! let nc = nats::connect("demo.nats.io")?;
+//! let resp = nc.request("foo", "Help me?")?;
+//!
+//! // With a timeout.
+//! let resp = nc.request_timeout("foo", "Help me?", Duration::from_secs(2))?;
+//!
+//! // With multiple responses.
+//! for msg in nc.request_multi("foo", "Help")?.iter() {}
+//!
+//! // Publish a request manually.
+//! let reply = nc.new_inbox();
+//! let rsub = nc.subscribe(&reply)?;
+//! nc.publish_request("foo", &reply, "Help me!")?;
+//! let response = rsub.iter().take(1);
+//! # Ok(()) }
+//! ```
 
 #![cfg_attr(test, deny(warnings))]
 #![deny(
@@ -644,7 +739,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Examples
     /// ```no_run
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut tls_connector = nats::tls::builder()
+    /// let tls_connector = nats::tls::builder()
     ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
     ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
     ///     .build()?;
@@ -1152,6 +1247,8 @@ impl Connection {
     ///
     /// nc.publish("test.drain", "message")?;
     /// nc.drain()?;
+    ///
+    /// # std::thread::sleep(std::time::Duration::from_secs(1));
     ///
     /// assert!(received.load(SeqCst));
     ///

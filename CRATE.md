@@ -13,6 +13,15 @@
 [![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
 [![Build Status](https://travis-ci.org/nats-io/nats.rs.svg?branch=master)](http://travis-ci.org/nats-io/nats.rs)
 
+##### Warning
+
+As of version 0.4.0, this crate has switched code bases
+to a Synadia (official maintainers of NATS.io) implementation.
+Please see the [new API docs](https://docs.rs/nats), the [new
+repo](https://github.com/nats-io/nats.rs), and [the
+changelog](https://github.com/nats-io/nats.rs/blob/master/CHANGELOG.md) for
+details.
+
 ## Motivation
 
 Rust may be the most interesting new language the NATS ecosystem has seen. We
@@ -119,7 +128,13 @@ The minimum supported Rust version is 1.39.0.
 
 ## Sync vs Async
 
-The Rust ecosystem has a diverse set of options for async behaviors. This client library can be used somewhat effectively already with async runtimes such as async-std and tokio. Going forward we look to provide an async client. Publish today is mostly non-blocking, so largest API change would be around subscriptions being streams vs iterators by default. Also been researching sinks and whether or not they make sense. Would probably be a config feature for async wnd options for most runtimes like async-std and tokio.
+The Rust ecosystem has a diverse set of options for async behaviors. This
+client library can be used somewhat effectively already with async runtimes
+such as async-std and tokio. Going forward we look to provide an async client.
+Publish today is mostly non-blocking, so largest API change would be around
+subscriptions being streams vs iterators by default. Also been researching
+sinks and whether or not they make sense. Would probably be a config feature
+for async and options for most runtimes like async-std and tokio.
 
 ## Features
 The following is a list of features currently supported and planned for the near future.
