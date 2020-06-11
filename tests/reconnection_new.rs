@@ -344,7 +344,7 @@ fn reconnect_test() {
     };
 
     while !success.load(Ordering::Acquire) {
-        while let Ok(Some(mut msg)) = subscriber.next_timeout(Duration::from_millis(10)) {
+        while let Ok(msg) = subscriber.next_timeout(Duration::from_millis(10)) {
             let _unchecked = msg.respond("Anything for the story");
         }
     }

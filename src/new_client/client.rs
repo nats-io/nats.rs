@@ -1,478 +1,529 @@
-use std::cmp;
-use std::collections::HashMap;
-use std::io::{self, Error, ErrorKind};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::collections::{HashMap, VecDeque};
+use std::io::{self, Error, ErrorKind, Write};
+use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::thread;
+use std::time::Duration;
 
 use async_mutex::Mutex;
-use futures::{
-    channel::{mpsc, oneshot},
-    io::{BufReader, BufWriter},
-    prelude::*,
-};
-use rand::{seq::SliceRandom, thread_rng};
-use smol::{Async, Timer};
+use futures::channel::{mpsc, oneshot};
+use futures::io::{AllowStdIo, BufReader, BufWriter};
+use futures::prelude::*;
+use smol::{Task, Timer};
 
-use crate::new_client::decoder::{decode, ServerOp};
-use crate::new_client::encoder::{encode, ClientOp};
+use crate::new_client::connector::Connector;
 use crate::new_client::message::Message;
-use crate::new_client::options::{AuthStyle, Options};
-use crate::new_client::server::Server;
-use crate::new_client::writer::Writer;
-use crate::secure_wipe::SecureString;
-use crate::{connect::ConnectInfo, inject_delay, inject_io_failure, ServerInfo};
+use crate::new_client::options::Options;
+use crate::new_client::proto::{self, ClientOp, ServerOp};
+use crate::{inject_delay, inject_io_failure};
 
-/// An operation enqueued by the user of this crate.
-///
-/// These operations are enqueued by `Connection` or `Subscription` and are then handled by the
-/// client thread.
-#[derive(Debug)]
-pub(crate) enum UserOp {
-    /// Subscribe to a subject.
-    Sub {
-        subject: String,
-        queue_group: Option<String>,
-        sid: usize,
-        messages: mpsc::UnboundedSender<Message>,
-    },
+/// Client state.
+struct State {
+    /// Buffered writer with an active connection.
+    ///
+    /// When `None`, the client is either reconnecting or closed.
+    writer: Option<Pin<Box<dyn AsyncWrite + Send>>>,
 
-    /// Unsubscribe from a subject.
-    Unsub { sid: usize, max_msgs: Option<u64> },
+    /// Signals to the client thread that the writer needs a flush.
+    flush_kicker: mpsc::Sender<()>,
+
+    /// The reconnect buffer.
+    ///
+    /// When the client is reconnecting, PUB messages get buffered here. When the connection is
+    /// re-established, contents of the buffer are flushed to the server.
+    buffer: Buffer,
+
+    /// Next subscription ID.
+    next_sid: u64,
+
+    /// Current subscriptions.
+    subscriptions: HashMap<u64, Subscription>,
+
+    /// Expected pongs and their notification channels.
+    pongs: VecDeque<oneshot::Sender<()>>,
+
+    /// A channel for coordinating shutdown.
+    ///
+    /// When `None`, that means the client is closed or in the process of closing.
+    ///
+    /// To initiate shutdown, we create a channel and send its sender. The client thread receives
+    /// this sender and sends `()` when it stops.
+    shutdown: Option<oneshot::Sender<oneshot::Sender<()>>>,
 }
 
-/// Spawns a client thread.
-pub(crate) fn spawn(
-    url: &str,
-    options: Options,
-    user_ops: mpsc::UnboundedReceiver<UserOp>,
-    writer: Arc<Mutex<Writer>>,
-) -> (JoinHandle<io::Result<()>>, oneshot::Sender<()>) {
-    let url = url.to_string();
-    let (s, r) = oneshot::channel();
-    let t = thread::spawn(move || {
-        // TODO(stjepang): Make panics in the client thread louder.
-        smol::run(async move {
-            loop {
-                futures::select! {
-                    res = connect_loop(&url, options, user_ops, writer).fuse() => break res,
-                    _ = r.fuse() => break Ok(()),
-                }
-            }
-        })
-    });
-    (t, s)
+/// A registered subscription.
+struct Subscription {
+    subject: String,
+    queue_group: Option<String>,
+    messages: mpsc::UnboundedSender<Message>,
 }
 
-/// Runs the loop that connects and reconnects the client.
-async fn connect_loop(
-    urls: &str,
-    options: Options,
-    mut user_ops: mpsc::UnboundedReceiver<UserOp>,
-    writer: Arc<Mutex<Writer>>,
-) -> io::Result<()> {
-    // Current subscriptions in the form `(subject, sid, messages)`.
-    let mut subscriptions: Vec<(String, usize, mpsc::UnboundedSender<Message>)> = Vec::new();
-
-    // Server table in the form `(server, reconnects)`.
-    let mut server_reconnects: HashMap<Server, usize> = HashMap::new();
-
-    // Populate the server table with the initial URLs.
-    for url in urls.split(',') {
-        server_reconnects.insert(url.parse()?, 0);
-    }
-
-    'start: loop {
-        // The last seen error, which gets returned if all connect attempts fail.
-        let mut last_err = Error::new(ErrorKind::AddrNotAvailable, "no socket addresses");
-
-        // Shuffle the list of servers.
-        let mut servers: Vec<Server> = server_reconnects.keys().cloned().collect();
-        servers.shuffle(&mut thread_rng());
-
-        // Iterate over the server table in random order.
-        for server in &servers {
-            // Calculate sleep duration for exponential backoff and bump the reconnect counter.
-            let reconnects = server_reconnects.get_mut(server).unwrap();
-            let sleep_duration = backoff(*reconnects);
-            *reconnects += 1;
-
-            // Resolve the server URL into socket addresses.
-            let mut addrs = match (server.host.as_str(), server.port).to_socket_addrs() {
-                Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
-                Err(err) => {
-                    last_err = err;
-                    continue;
-                }
-            };
-
-            // Shuffle the resolved socket addresses.
-            addrs.shuffle(&mut thread_rng());
-
-            for addr in addrs {
-                // Sleep for some time if this is not the first connection attempt for this server.
-                Timer::after(sleep_duration).await;
-
-                // Try connecting to this address.
-                let res = try_connect(addr, &server, &options).await;
-
-                // Check if connecting worked out.
-                let (mut server_info, server_ops, w) = match res {
-                    Ok(val) => val,
-                    Err(err) => {
-                        last_err = err;
-                        continue;
-                    }
-                };
-
-                let res = async {
-                    // Inject random delays when testing.
-                    inject_delay();
-
-                    writer.lock().await.reconnect(w).await
-                }
-                .and_then(|()| {
-                    // Connected! Now run the client loop.
-                    client_loop(
-                        writer.clone(),
-                        server_ops,
-                        &mut user_ops,
-                        &mut subscriptions,
-                        &mut server_info,
-                    )
-                })
-                .await;
-
-                // If the client stopped gracefully, all is good. Return to stop the client thread.
-                if res.is_ok() {
-                    return Ok(());
-                }
-
-                // Go over the latest list of server URLs and add them to the table.
-                for url in server_info.connect_urls {
-                    if let Ok(server) = url.parse() {
-                        server_reconnects.entry(server).or_insert(0);
-                    }
-                }
-
-                // Go to the beginning of the connect loop.
-                continue 'start;
-            }
-        }
-
-        // If this is the first connect attempt, fail fast.
-        // TODO(stjepang): Find a better way to check this.
-        if server_reconnects.values().sum::<usize>() == 1 {
-            // All connect attempts have failed.
-            return Err(last_err);
-        }
-    }
+/// A NATS client.
+#[derive(Clone)]
+pub(crate) struct Client {
+    state: Arc<Mutex<State>>,
 }
 
-/// Calculates how long to sleep for before connecting to a server.
-fn backoff(reconnects: usize) -> Duration {
-    // 0ms, 1ms, 2ms, 4ms, 8ms, 16ms, ..., 4sec
-    if reconnects == 0 {
-        Duration::from_millis(0)
-    } else {
-        cmp::min(
-            Duration::from_millis(2u64.saturating_pow(reconnects as u32 - 1)),
-            Duration::from_secs(4),
-        )
-    }
-}
+impl Client {
+    /// Creates a new client that will begin connecting in the background.
+    pub(crate) fn new(url: &str, options: Options) -> io::Result<Client> {
+        // A channel for coordinating shutdown.
+        let (shutdown, stop) = oneshot::channel();
 
-/// Attempt to establish a connection to a single socket address.
-async fn try_connect(
-    addr: SocketAddr,
-    server: &Server,
-    options: &Options,
-) -> io::Result<(
-    ServerInfo,
-    Pin<Box<dyn Stream<Item = io::Result<ServerOp>> + Send>>,
-    BufWriter<Pin<Box<dyn AsyncWrite + Send>>>,
-)> {
-    // Inject random I/O failures when testing.
-    inject_io_failure()?;
+        // A channel for coordinating flushes.
+        let (flush_kicker, mut dirty) = mpsc::channel(1);
 
-    // Connect to the remote socket.
-    let stream = Async::<TcpStream>::connect(addr).await?;
-
-    // Expect an INFO message.
-    let mut reader = BufReader::new(stream);
-    let server_info = match decode(&mut reader).await? {
-        Some(ServerOp::Info(server_info)) => server_info,
-        Some(op) => {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("expected INFO, received: {:?}", op),
-            ))
-        }
-        None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
-    };
-    let stream = reader.into_inner();
-
-    // Check if TLS authentication is required:
-    // - Has `options.tls_required(true)` been set?
-    // - Was the server address prefixed with `tls://`?
-    // - Does the INFO line contain `tls_required: true`?
-    let tls_required = options.tls_required || server.tls_required || server_info.tls_required;
-
-    // Upgrade to TLS if required.
-    let (reader, writer): (
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
-    ) = if tls_required {
-        let conn = async move {
-            // Inject random I/O failures when testing.
-            inject_io_failure()?;
-
-            // TODO(stjepang): Allow specifying a custom TLS connector.
-            async_native_tls::connect(&server.host, stream)
-                .await
-                .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err))
+        // The client state.
+        let client = Client {
+            state: Arc::new(Mutex::new(State {
+                writer: None,
+                flush_kicker,
+                buffer: Buffer::new(options.reconnect_buffer_size),
+                next_sid: 1,
+                subscriptions: HashMap::new(),
+                pongs: VecDeque::new(),
+                shutdown: Some(shutdown),
+            })),
         };
 
-        // Connect using TLS.
-        let stream = conn.await?;
+        // Connector for creating the initial connection and reconnecting when it is broken.
+        let connector = Connector::new(&url, options)?;
 
-        // Split the TLS stream into a reader and a writer.
-        let stream = piper::Arc::new(piper::Mutex::new(stream));
-        (Box::pin(stream.clone()), Box::pin(stream))
-    } else {
-        // Split the TCP stream into a reader and a writer.
-        let stream = piper::Arc::new(stream);
-        (Box::pin(stream.clone()), Box::pin(stream))
-    };
+        // Spawn the client thread responsible for:
+        // - Maintaining a connection to the server and reconnecting when it is broken.
+        // - Reading messages from the server and processing them.
+        // - Forwarding MSG operations to subscribers.
+        thread::spawn({
+            let client = client.clone();
+            move || {
+                smol::run(async move {
+                    // Spawn a task that periodically flushes buffered messages.
+                    let flusher = Task::local({
+                        let client = client.clone();
+                        async move {
+                            // Wait until at least one message is buffered.
+                            while dirty.next().await.is_some() {
+                                {
+                                    // Flush the writer.
+                                    let mut state = client.state.lock().await;
+                                    if let Some(writer) = state.writer.as_mut() {
+                                        let _ = writer.flush().await;
+                                    }
+                                }
+                                // Wait a little bit before flushing again.
+                                Timer::after(Duration::from_millis(1)).await;
+                            }
+                        }
+                    });
 
-    // Data that will be formatted as a CONNECT message.
-    let mut connect_info = ConnectInfo {
-        tls_required,
-        name: options.name.clone().map(SecureString::from),
-        pedantic: false,
-        verbose: false,
-        lang: crate::LANG.to_string(),
-        version: crate::VERSION.to_string(),
-        user: None,
-        pass: None,
-        auth_token: None,
-        user_jwt: None,
-        signature: None,
-        echo: !options.no_echo,
-    };
+                    // Spawn the main task that processes messages from the server.
+                    let runner = Task::local(async move { client.run(connector).await });
 
-    // Fill in the info that authenticates the client.
-    match &options.auth {
-        AuthStyle::NoAuth => {}
-        AuthStyle::UserPass(user, pass) => {
-            connect_info.user = Some(SecureString::from(user.to_string()));
-            connect_info.pass = Some(SecureString::from(pass.to_string()));
-        }
-        AuthStyle::Token(token) => {
-            connect_info.auth_token = Some(token.to_string().into());
-        }
-        AuthStyle::Credentials { jwt_cb, sig_cb } => {
-            let jwt = jwt_cb()?;
-            let sig = sig_cb(server_info.nonce.as_bytes())?;
-            connect_info.user_jwt = Some(jwt);
-            connect_info.signature = Some(sig);
+                    // Wait until the client is closed.
+                    let res = stop.await;
+
+                    // Cancel spawned tasks.
+                    flusher.cancel().await;
+                    runner.cancel().await;
+
+                    // Signal to the shutdown initiator that it is now complete.
+                    if let Ok(s) = res {
+                        let _ = s.send(());
+                    }
+                })
+            }
+        });
+
+        Ok(client)
+    }
+
+    /// Makes a round trip to the server to ensure buffered messages reach it.
+    pub(crate) async fn flush(&self) -> io::Result<()> {
+        let pong = {
+            // Inject random delays when testing.
+            inject_delay();
+
+            let mut state = self.state.lock().await;
+
+            let (sender, receiver) = oneshot::channel();
+
+            // If connected, send a PING.
+            match state.writer.as_mut() {
+                None => {}
+                Some(mut writer) => {
+                    proto::encode(&mut writer, ClientOp::Ping).await?;
+                    writer.flush().await?;
+                }
+            }
+
+            // Enqueue an expected PONG.
+            state.pongs.push_back(sender);
+            receiver
+        };
+
+        // Wait until the PONG operation is received.
+        match pong.await {
+            Ok(()) => Ok(()),
+            Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
         }
     }
 
-    // Send CONNECT and INFO messages.
-    let mut writer = BufWriter::with_capacity(8 * 1024 * 1024, writer);
-    encode(&mut writer, ClientOp::Connect(connect_info)).await?;
-    encode(&mut writer, ClientOp::Ping).await?;
-    writer.flush().await?;
-
-    // Create an endless stream parsing operations from the server.
-    let mut server_ops = stream::try_unfold(BufReader::new(reader), |mut stream| async {
-        // Decode a single operation.
-        match decode(&mut stream).await? {
-            None => io::Result::Ok(None),
-            Some(op) => io::Result::Ok(Some((op, stream))),
-        }
-    })
-    .boxed();
-
-    // Wait for a PONG.
-    loop {
-        match server_ops.try_next().await? {
-            // If we get PONG, the server is happy and we're done connecting.
-            Some(ServerOp::Pong) => break,
-
-            // Respond to a PING with a PONG.
-            Some(ServerOp::Ping) => {
-                encode(&mut writer, ClientOp::Pong).await?;
-                writer.flush().await?;
-            }
-
-            // No other operations should arrive at this time.
-            Some(op) => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("unexpected line while connecting: {:?}", op),
-                ));
-            }
-
-            // Error if the connection was closed.
-            None => {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "connection closed while waiting for the first PONG",
-                ));
-            }
-        }
-    }
-
-    Ok((server_info, server_ops, writer))
-}
-
-/// Runs the main loop for a connected client.
-async fn client_loop<'a>(
-    writer: Arc<Mutex<Writer>>,
-    mut server_ops: impl Stream<Item = io::Result<ServerOp>> + Unpin + 'a,
-    user_ops: &'a mut mpsc::UnboundedReceiver<UserOp>,
-    subscriptions: &'a mut Vec<(String, usize, mpsc::UnboundedSender<Message>)>,
-    server_info: &'a mut ServerInfo,
-) -> io::Result<()> {
-    // TODO(stjepang): Make this option configurable.
-    let flush_timeout = Duration::from_millis(100);
-
-    // Bytes written to the server are buffered and periodically flushed.
-    let mut next_flush = Instant::now() + flush_timeout;
-
-    // Restart subscriptions that existed before the last reconnect.
-    for (subject, sid, _messages) in subscriptions.iter() {
+    /// Closes the client.
+    pub(crate) async fn close(&mut self) -> io::Result<()> {
         // Inject random delays when testing.
         inject_delay();
 
-        // Send a SUB operation to the server.
-        encode(
-            &mut *writer.lock().await,
-            ClientOp::Sub {
-                subject: subject.clone(),
-                queue_group: None, // TODO(stjepang): Use actual queue group here.
-                sid: *sid,
-            },
-        )
-        .await?;
+        let mut state = self.state.lock().await;
+
+        // Initiate shutdown process.
+        if let Some(shutdown) = state.shutdown.take() {
+            // Flush the writer in case there are buffered messages.
+            if let Some(writer) = state.writer.as_mut() {
+                let _ = writer.flush().await;
+            }
+            drop(state);
+
+            let (s, r) = oneshot::channel();
+            // Signal the thread to stop.
+            let _ = shutdown.send(s);
+            // Wait for the thread to stop.
+            let _ = r.await;
+        }
+
+        Ok(())
     }
 
-    // Handle events in a loop.
-    loop {
-        futures::select! {
-            // An operation was received from the server.
-            res = server_ops.try_next().fuse() => {
-                // Extract the next operation or return an error if the connection is closed.
-                let op = match res? {
-                    None => return Err(ErrorKind::ConnectionReset.into()),
-                    Some(op) => op,
-                };
+    /// Subscribes to a subject.
+    pub(crate) async fn subscribe(
+        &self,
+        subject: &str,
+        queue_group: Option<&str>,
+    ) -> io::Result<(u64, mpsc::UnboundedReceiver<Message>)> {
+        // Inject random delays when testing.
+        inject_delay();
 
-                match op {
-                    ServerOp::Info(new_server_info) => {
-                        *server_info = new_server_info;
-                    }
+        let mut state = self.state.lock().await;
 
-                    ServerOp::Ping => {
-                        // Inject random delays when testing.
-                        inject_delay();
+        // Generate a subject ID.
+        let sid = state.next_sid;
+        state.next_sid += 1;
 
-                        // Send a PONG operation to the server.
-                        encode(
-                            &mut *writer.lock().await,
-                            ClientOp::Pong,
-                        ).await?;
-                    }
+        // If connected, send a SUB operation.
+        if let Some(writer) = state.writer.as_mut() {
+            let op = ClientOp::Sub {
+                subject,
+                queue_group,
+                sid,
+            };
+            let _ = proto::encode(writer, op).await;
+            let _ = state.flush_kicker.try_send(());
+        }
 
-                    ServerOp::Pong => {
-                        // Inject random delays when testing.
-                        inject_delay();
+        // Register the subscription in the hash map.
+        let (sender, receiver) = mpsc::unbounded();
+        state.subscriptions.insert(
+            sid,
+            Subscription {
+                subject: subject.to_string(),
+                queue_group: queue_group.map(|g| g.to_string()),
+                messages: sender,
+            },
+        );
+        Ok((sid, receiver))
+    }
 
-                        let mut writer = writer.lock().await;
-                        writer.pong();
-                    }
+    /// Unsubscribes from a subject.
+    pub(crate) async fn unsubscribe(&self, sid: u64) -> io::Result<()> {
+        // Inject random delays when testing.
+        inject_delay();
 
-                    ServerOp::Msg { subject, sid, reply_to, payload } => {
-                        // Send the message to matching subscriptions.
-                        for (_, _, messages) in
-                            subscriptions.iter().filter(|(_, s, _)| *s == sid)
-                        {
-                            let _ = messages.unbounded_send(Message {
-                                subject: subject.clone(),
-                                reply: reply_to.clone(),
-                                data: payload.clone(),
-                                writer: None,
-                            });
-                        }
-                    }
+        let mut state = self.state.lock().await;
 
-                    ServerOp::Err(msg) => {
-                        return Err(Error::new(ErrorKind::Other, msg));
-                    }
+        // Remove the subscription from the hash map.
+        state.subscriptions.remove(&sid);
 
-                    ServerOp::Unknown(line) => {
-                        log::warn!("unknown op: {}", line);
-                    }
-                }
+        // Send an UNSUB message and ignore errors.
+        if let Some(writer) = state.writer.as_mut() {
+            let max_msgs = None;
+            let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
+            let _ = state.flush_kicker.try_send(());
+        }
+
+        Ok(())
+    }
+
+    /// Publishes a message with optional reply subject.
+    pub(crate) async fn publish(
+        &self,
+        subject: &str,
+        reply_to: Option<&str>,
+        msg: &[u8],
+    ) -> io::Result<()> {
+        // Inject random delays when testing.
+        inject_delay();
+
+        let mut state = self.state.lock().await;
+
+        let op = ClientOp::Pub {
+            subject,
+            reply_to,
+            payload: msg,
+        };
+
+        match state.writer.as_mut() {
+            None => {
+                // If reconnecting, write into the buffer.
+                proto::encode(AllowStdIo::new(&mut state.buffer), op).await?;
+                state.buffer.flush()?;
+                Ok(())
             }
+            Some(mut writer) => {
+                // If connected, write into the writer.
+                let res = proto::encode(&mut writer, op).await;
+                let _ = state.flush_kicker.try_send(());
 
-            // The user has enqueued an operation.
-            msg = user_ops.next().fuse() => {
-                match msg.expect("user_ops disconnected") {
-                    UserOp::Sub { subject, queue_group, sid, messages } => {
-                        // Add the subscription to the list.
-                        subscriptions.push((subject.clone(), sid, messages));
-
-                        // Inject random delays when testing.
-                        inject_delay();
-
-                        // Send a SUB operation to the server.
-                        let mut writer = writer.lock().await;
-                        encode(
-                            &mut *writer,
-                            ClientOp::Sub {
-                                subject,
-                                queue_group,
-                                sid,
-                            },
-                        )
-                        .await?;
-                    }
-
-                    UserOp::Unsub { sid, max_msgs } => {
-                        // Remove the subscription from the list.
-                        subscriptions.retain(|(_, s, _)| *s != sid);
-
-                        // Inject random delays when testing.
-                        inject_delay();
-
-                        // Send an UNSUB operation to the server.
-                        let mut writer = writer.lock().await;
-                        encode(
-                            &mut *writer,
-                            ClientOp::Unsub {
-                                sid,
-                                max_msgs,
-                            },
-                        )
-                        .await?;
-                    }
+                // If writing fails, disconnect.
+                if res.is_err() {
+                    state.writer = None;
+                    state.pongs.clear();
                 }
-            }
-
-            // Periodically flush writes to the server.
-            _ = Timer::at(next_flush).fuse() => {
-                // Inject random delays when testing.
-                inject_delay();
-
-                let mut writer = writer.lock().await;
-                writer.flush().await?;
-                next_flush = Instant::now() + flush_timeout;
+                res
             }
         }
+    }
+
+    /// Runs the loop that connects and reconnects the client.
+    async fn run(&self, mut connector: Connector) -> io::Result<()> {
+        // Don't use backoff on first connect.
+        let mut use_backoff = false;
+
+        loop {
+            // Make a connection to the server.
+            let (reader, writer) = connector.connect(use_backoff).await?;
+            use_backoff = true;
+
+            let reader = BufReader::with_capacity(32 * 1024, reader);
+            let writer = BufWriter::with_capacity(32 * 1024, writer);
+
+            // Create an endless stream parsing operations from the server.
+            let server_ops = stream::try_unfold(reader, |mut stream| async {
+                // Decode a single operation.
+                match proto::decode(&mut stream).await? {
+                    None => io::Result::Ok(None),
+                    Some(op) => io::Result::Ok(Some((op, stream))),
+                }
+            })
+            .boxed();
+
+            // Set up the new connection for this client.
+            if self.reconnect(writer).await.is_ok() {
+                // Connected! Now dispatch MSG operations.
+                if self.dispatch(server_ops, &mut connector).await.is_ok() {
+                    // If the client stopped gracefully, return.
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Puts the client back into connected state with the given writer.
+    async fn reconnect(&self, writer: impl AsyncWrite + Send + 'static) -> io::Result<()> {
+        // Inject random delays when testing.
+        inject_delay();
+
+        let mut state = self.state.lock().await;
+
+        // Drop the current writer, if there is one.
+        state.writer = None;
+
+        // Pin the new writer on the heap.
+        let mut writer = Box::pin(writer);
+
+        // Inject random I/O failures when testing.
+        inject_io_failure()?;
+
+        // Restart subscriptions that existed before the last reconnect.
+        for (sid, subscription) in state.subscriptions.iter() {
+            // Send a SUB operation to the server.
+            proto::encode(
+                &mut writer,
+                ClientOp::Sub {
+                    subject: subscription.subject.as_str(),
+                    queue_group: subscription.queue_group.as_ref().map(|g| g.as_str()),
+                    sid: *sid,
+                },
+            )
+            .await?;
+        }
+
+        // Take out expected PONGs.
+        let pongs = mem::replace(&mut state.pongs, VecDeque::new());
+
+        // Take out buffered operations.
+        let buffered = state.buffer.clear();
+
+        // Write buffered PUB operations into the new writer.
+        writer.write_all(buffered).await?;
+        writer.flush().await?;
+
+        // Complete PONGs because the connection is healthy.
+        for p in pongs {
+            let _ = p.send(());
+        }
+
+        // All good! Use the new writer from now on.
+        state.writer = Some(writer);
+        Ok(())
+    }
+
+    /// Reads messages from the server and dispatches them to subscribers.
+    async fn dispatch(
+        &self,
+        mut server_ops: impl Stream<Item = io::Result<ServerOp>> + Unpin,
+        connector: &mut Connector,
+    ) -> io::Result<()> {
+        // Handle operations received from the server.
+        while let Some(op) = server_ops.try_next().await? {
+            // Inject random delays when testing.
+            inject_delay();
+
+            let mut state = self.state.lock().await;
+
+            match op {
+                ServerOp::Info(server_info) => {
+                    for url in server_info.connect_urls {
+                        connector.add_url(&url)?;
+                    }
+                }
+
+                ServerOp::Ping => {
+                    // Respond with a PONG if connected.
+                    if let Some(w) = state.writer.as_mut() {
+                        proto::encode(w, ClientOp::Pong).await?;
+                        let _ = state.flush_kicker.try_send(());
+                    }
+                }
+
+                ServerOp::Pong => {
+                    // If a PONG is received while disconnected, it came from a connection that isn't
+                    // alive anymore and therefore doesn't correspond to the next expected PONG.
+                    if state.writer.is_some() {
+                        // Take the next expected PONG and complete it by sending a message.
+                        if let Some(pong) = state.pongs.pop_front() {
+                            let _ = pong.send(());
+                        }
+                    }
+                }
+
+                ServerOp::Msg {
+                    subject,
+                    sid,
+                    reply_to,
+                    payload,
+                } => {
+                    // Send the message to matching subscription.
+                    if let Some(subscription) = state.subscriptions.get(&sid) {
+                        let msg = Message {
+                            subject,
+                            reply: reply_to,
+                            data: payload,
+                            client: Client {
+                                state: self.state.clone(),
+                            },
+                        };
+
+                        if subscription.messages.unbounded_send(msg).is_err() {
+                            // If the channel is disconnected, remove the subscription.
+                            state.subscriptions.remove(&sid);
+
+                            // Send an UNSUB message and ignore errors.
+                            if let Some(writer) = state.writer.as_mut() {
+                                let max_msgs = None;
+                                let _ =
+                                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
+                                let _ = state.flush_kicker.try_send(());
+                            }
+                        }
+                    }
+                }
+
+                ServerOp::Err(msg) => return Err(Error::new(ErrorKind::Other, msg)),
+
+                ServerOp::Unknown(line) => log::warn!("unknown op: {}", line),
+            }
+        }
+
+        // The stream of operation is broken, meaning the connection was lost.
+        Err(ErrorKind::ConnectionReset.into())
+    }
+}
+
+/// Reconnect buffer.
+///
+/// If the connection was broken and the client is currently reconnecting, PUB messages get stored
+/// in this buffer of limited size. As soon as the connection is then re-established, buffered
+/// messages will be sent to the server.
+struct Buffer {
+    /// Bytes in the buffer.
+    ///
+    /// There are three interesting ranges in this slice:
+    ///
+    /// - `..flushed` contains buffered PUB messages.
+    /// - `flushed..written` contains a partial PUB message at the end.
+    /// - `written..` is empty space in the buffer.
+    bytes: Box<[u8]>,
+
+    /// Number of written bytes.
+    written: usize,
+
+    /// Number of bytes marked as "flushed".
+    flushed: usize,
+}
+
+impl Buffer {
+    /// Creates a new buffer with the given size.
+    fn new(size: usize) -> Buffer {
+        Buffer {
+            bytes: vec![0u8; size].into_boxed_slice(),
+            written: 0,
+            flushed: 0,
+        }
+    }
+
+    /// Clears the buffer and returns buffered bytes.
+    fn clear(&mut self) -> &[u8] {
+        let buffered = &self.bytes[..self.flushed];
+        self.written = 0;
+        self.flushed = 0;
+        buffered
+    }
+}
+
+impl Write for Buffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = buf.len();
+
+        // Check if `buf` will fit into this `Buffer`.
+        if self.bytes.len() - self.written < n {
+            // Fill the buffer to prevent subsequent smaller writes.
+            self.written = self.bytes.len();
+
+            Err(Error::new(
+                ErrorKind::Other,
+                "the disconnect buffer is full",
+            ))
+        } else {
+            // Append `buf` into the buffer.
+            let range = self.written..self.written + n;
+            self.bytes[range].copy_from_slice(&buf[..n]);
+            self.written += n;
+            Ok(n)
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flushed = self.written;
+        Ok(())
     }
 }

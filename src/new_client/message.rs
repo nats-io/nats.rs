@@ -1,65 +1,52 @@
 use std::fmt;
 use std::io::{self, Error, ErrorKind};
-use std::sync::Arc;
 
-use async_mutex::Mutex;
-use smol::block_on;
+use blocking::block_on;
 
-use crate::inject_io_failure;
-use crate::new_client::encoder::{encode, ClientOp};
-use crate::new_client::writer::Writer;
+use crate::new_client::client::Client;
 
-/// A `Message` that has been published to a NATS `Subject`.
+/// A message received on a subject.
 pub struct Message {
-    /// The NATS `Subject` that this `Message` has been published to.
+    /// The subject this message came from.
     pub subject: String,
-    /// The optional reply `Subject` that may be used for sending
-    /// responses when using the request/reply pattern.
+
+    /// Optional reply subject that may be used for sending a response to this message.
     pub reply: Option<String>,
-    /// The `Message` contents.
+
+    /// The message contents.
     pub data: Vec<u8>,
 
-    pub(crate) writer: Option<Arc<Mutex<Writer>>>,
+    /// Client for publishing on the reply subject.
+    pub(crate) client: Client,
 }
 
 impl Message {
-    /// Respond to a request message.
-    pub fn respond(&mut self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        let writer = match self.writer.as_ref() {
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "No reply subject available",
-                ))
-            }
-            Some(w) => w,
-        };
-
-        block_on(async {
-            let mut writer = writer.lock().await;
-
-            // Inject random I/O failures when testing.
-            inject_io_failure()?;
-
-            encode(
-                &mut *writer,
-                ClientOp::Pub {
-                    subject: self.subject.as_ref(),
-                    reply_to: self.reply.as_ref().map(|s| s.as_str()),
-                    payload: msg.as_ref(),
-                },
-            )
-            .await?;
-
-            writer.commit();
-            Ok(())
-        })
+    /// Responds to a request.
+    ///
+    /// The response will be published as a message on the `reply` subject.
+    ///
+    /// If `reply` is [`None`], an error will be returned.
+    pub fn respond(self, msg: impl AsRef<[u8]>) -> io::Result<()> {
+        match self.reply.as_ref() {
+            None => Err(Error::new(
+                ErrorKind::InvalidInput,
+                "no reply subject available",
+            )),
+            Some(reply) => block_on(self.client.publish(
+                self.subject.as_ref(),
+                Some(reply),
+                msg.as_ref(),
+            )),
+        }
     }
 }
 
 impl fmt::Debug for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        // TODO(stjepang): fill out fields
-        write!(f, "Message")
+        f.debug_struct("Message")
+            .field("subject", &self.subject)
+            .field("reply", &self.reply)
+            .field("length", &self.data.len())
+            .finish()
     }
 }

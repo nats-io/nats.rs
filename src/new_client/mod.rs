@@ -2,13 +2,11 @@
 
 mod client;
 mod connection;
-mod decoder;
-mod encoder;
+mod connector;
 mod message;
 mod options;
-mod server;
+mod proto;
 mod subscription;
-mod writer;
 
 pub use connection::Connection;
 pub use message::Message;

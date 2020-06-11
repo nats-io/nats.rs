@@ -1,68 +1,58 @@
+use std::fmt;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
 
+use blocking::block_on;
 use futures::channel::mpsc;
 use futures::prelude::*;
-use smol::{block_on, Timer};
+use smol::Timer;
 
-use crate::new_client::client::UserOp;
+use crate::new_client::client::Client;
 use crate::new_client::message::Message;
 
 /// A subscription to a subject.
-#[derive(Debug)]
 pub struct Subscription {
     /// Subscription ID.
-    sid: usize,
+    sid: u64,
 
     /// MSG operations received from the server.
     messages: mpsc::UnboundedReceiver<Message>,
 
-    /// Enqueues user operations.
-    user_ops: mpsc::UnboundedSender<UserOp>,
+    client: Client,
 }
 
 impl Subscription {
     /// Creates a subscription.
     pub(crate) fn new(
-        subject: &str,
-        sid: usize,
-        user_ops: mpsc::UnboundedSender<UserOp>,
+        sid: u64,
+        messages: mpsc::UnboundedReceiver<Message>,
+        client: Client,
     ) -> Subscription {
-        let (msg_sender, msg_receiver) = mpsc::unbounded();
-
-        // Enqueue a SUB operation.
-        let _ = user_ops.unbounded_send(UserOp::Sub {
-            subject: subject.to_string(),
-            queue_group: None,
-            sid,
-            messages: msg_sender,
-        });
-
         Subscription {
             sid,
-            messages: msg_receiver,
-            user_ops,
+            messages,
+            client,
         }
     }
 
-    /// Blocks until the next message is received or the connection is closed.
+    /// Waits for the next message.
     pub fn next(&mut self) -> io::Result<Message> {
         // Block on the next message in the channel.
         block_on(self.messages.next()).ok_or_else(|| ErrorKind::ConnectionReset.into())
     }
 
-    /// Get the next message, or a timeout error if no messages are available for timeout.
-    pub fn next_timeout(&mut self, timeout: Duration) -> io::Result<Option<Message>> {
+    /// Waits for the next message or times out after a duration of time.
+    pub fn next_timeout(&mut self, timeout: Duration) -> io::Result<Message> {
         // Block on the next message in the channel.
         block_on(async move {
             futures::select! {
                 msg = self.messages.next().fuse() => {
                     match msg {
-                        Some(msg) => Ok(Some(msg)),
+                        Some(msg) => Ok(msg),
                         None => Err(ErrorKind::ConnectionReset.into()),
                     }
                 }
-                _ = Timer::after(timeout).fuse() => Ok(None),
+                _ = Timer::after(timeout).fuse() => Err(ErrorKind::TimedOut.into()),
             }
         })
     }
@@ -70,10 +60,15 @@ impl Subscription {
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        // Enqueue an UNSUB operation.
-        let _ = self.user_ops.unbounded_send(UserOp::Unsub {
-            sid: self.sid,
-            max_msgs: None,
-        });
+        // Send an UNSUB operation to the server.
+        let _ = block_on(self.client.unsubscribe(self.sid));
+    }
+}
+
+impl fmt::Debug for Subscription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("Subscription")
+            .field("sid", &self.sid)
+            .finish()
     }
 }

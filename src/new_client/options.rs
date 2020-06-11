@@ -379,7 +379,7 @@ pub(crate) enum AuthStyle {
 impl fmt::Debug for AuthStyle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            AuthStyle::NoAuth => f.debug_struct("None").finish(),
+            AuthStyle::NoAuth => f.debug_struct("NoAuth").finish(),
             AuthStyle::Token(s) => f.debug_tuple("Token").field(s).finish(),
             AuthStyle::UserPass(user, pass) => {
                 f.debug_tuple("Token").field(user).field(pass).finish()
