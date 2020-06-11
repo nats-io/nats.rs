@@ -4,7 +4,7 @@
 
 * #60 `ConnectionOptions` construction has been simplified,
   and the `with_user_pass`, `with_token`, and
-  `with_credentials` muthods have been changed to being
+  `with_credentials` methods have been changed to being
   constructors for the type, rather than producing
   intermediate states.
 
