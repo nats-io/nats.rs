@@ -1248,6 +1248,8 @@ impl Connection {
     /// nc.publish("test.drain", "message")?;
     /// nc.drain()?;
     ///
+    /// # std::thread::sleep(std::time::Duration::from_secs(1));
+    ///
     /// assert!(received.load(SeqCst));
     ///
     /// # Ok(())
