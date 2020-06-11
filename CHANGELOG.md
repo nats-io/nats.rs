@@ -2,7 +2,7 @@
 
 ## Breaking Changes
 
-* `ConnectionOptions` construction has been simplified,
+* #60 `ConnectionOptions` construction has been simplified,
   and the `with_user_pass`, `with_token`, and
   `with_credentials` muthods have been changed to being
   constructors for the type, rather than producing
