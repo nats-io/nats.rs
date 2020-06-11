@@ -118,6 +118,7 @@ The following is a list of features currently supported and planned for the near
 * [X] TLS support
 * [ ] Direct async support
 * [X] Crates.io listing
+* [ ] Header Support
 
 ### Miscellaneous TODOs
 * [ ] Ping timer
