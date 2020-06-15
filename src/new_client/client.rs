@@ -303,8 +303,8 @@ impl Client {
             let (reader, writer) = connector.connect(use_backoff).await?;
             use_backoff = true;
 
-            let reader = BufReader::with_capacity(32 * 1024, reader);
-            let writer = BufWriter::with_capacity(32 * 1024, writer);
+            let reader = BufReader::with_capacity(128 * 1024, reader);
+            let writer = BufWriter::with_capacity(128 * 1024, writer);
 
             // Create an endless stream parsing operations from the server.
             let server_ops = stream::try_unfold(reader, |mut stream| async {
