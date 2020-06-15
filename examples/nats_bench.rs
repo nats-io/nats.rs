@@ -49,17 +49,12 @@ fn main() -> std::io::Result<()> {
         .with_name("nats_bench rust client")
         .tls_required(args.tls);
 
-    let opts = if let Some(creds_path) = args.creds {
-        nats::ConnectionOptions::with_credentials(creds_path)
+    let nc = if let Some(creds_path) = args.creds {
+        opts.with_credentials(creds_path).connect(&args.url)?
     } else {
-        nats::ConnectionOptions::new()
+        opts.connect(&args.url)?
     };
     let nc = Arc::new(nc);
-
-    let nc = opts
-        .with_name("nats_bench rust client")
-        .tls_required(args.tls)
-        .connect(&args.url)?;
 
     let messages = if args.number_of_messages.get() % args.publishers.get() != 0 {
         let bumped_idx = (args.number_of_messages.get() / args.publishers.get()) + 1;
