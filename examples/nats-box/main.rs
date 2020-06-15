@@ -33,13 +33,16 @@ enum Command {
 
 fn main() -> CliResult {
     let args = Cli::from_args();
-    let opts = nats::ConnectionOptions::new().with_name("nats-box rust example");
 
-    let nc = if let Some(creds_path) = args.creds {
-        opts.with_credentials(creds_path).connect(&args.server)?
+    let opts = if let Some(creds_path) = args.creds {
+        nats::ConnectionOptions::with_credentials(creds_path)
     } else {
-        opts.connect(&args.server)?
+        nats::ConnectionOptions::new()
     };
+
+    let nc = opts
+        .with_name("nats-box rust example")
+        .connect(&args.server)?;
 
     match args.cmd {
         Command::Pub { subject, msg } => {

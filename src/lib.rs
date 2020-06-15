@@ -19,13 +19,11 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("demo.nats.io")?;
 //!
-//! let nc2 = nats::ConnectionOptions::new()
+//! let nc2 = nats::ConnectionOptions::with_user_pass("derek", "s3cr3t!")
 //!     .with_name("My Rust NATS App")
-//!     .with_user_pass("derek", "s3cr3t!")
 //!     .connect("127.0.0.1")?;
 //!
-//! let nc3 = nats::ConnectionOptions::new()
-//!     .with_credentials("path/to/my.creds")
+//! let nc3 = nats::ConnectionOptions::with_credentials("path/to/my.creds")
 //!     .connect("connect.ngs.global")?;
 //!
 //! let tls_connector = nats::tls::builder()
@@ -216,7 +214,6 @@ use std::{
     convert::TryFrom,
     fmt,
     io::{self, Error, ErrorKind},
-    marker::PhantomData,
     path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -306,33 +303,8 @@ impl fmt::Debug for Callback {
     }
 }
 
-mod options_typestate {
-    /// `ConnectionOptions` typestate indicating
-    /// that there has not yet been
-    /// any auth-related configuration
-    /// provided yet.
-    #[derive(Debug, Copy, Clone, Default)]
-    pub struct NoAuth;
-
-    /// `ConnectionOptions` typestate indicating
-    /// that auth-related configuration
-    /// has been provided, and may not
-    /// be provided again.
-    #[derive(Debug, Copy, Clone)]
-    pub struct Authenticated;
-
-    /// `ConnectionOptions` typestate indicating that
-    /// this `ConnectionOptions` has been used to create
-    /// a `Connection` and may not be changed.
-    #[derive(Debug, Copy, Clone)]
-    pub struct Finalized;
-}
-
-type FinalizedOptions = ConnectionOptions<options_typestate::Finalized>;
-
 /// A configuration object for a NATS connection.
-pub struct ConnectionOptions<TypeState> {
-    typestate: PhantomData<TypeState>,
+pub struct ConnectionOptions {
     auth: AuthStyle,
     name: Option<String>,
     no_echo: bool,
@@ -361,10 +333,9 @@ fn default_reconnect_delay_callback(reconnects: usize) -> Duration {
     }
 }
 
-impl Default for ConnectionOptions<options_typestate::NoAuth> {
-    fn default() -> ConnectionOptions<options_typestate::NoAuth> {
+impl Default for ConnectionOptions {
+    fn default() -> ConnectionOptions {
         ConnectionOptions {
-            typestate: PhantomData,
             auth: AuthStyle::None,
             name: None,
             no_echo: false,
@@ -382,7 +353,7 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
     }
 }
 
-impl<T> fmt::Debug for ConnectionOptions<T> {
+impl fmt::Debug for ConnectionOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_map()
             .entry(&"auth", &self.auth)
@@ -407,7 +378,7 @@ impl<T> fmt::Debug for ConnectionOptions<T> {
     }
 }
 
-impl ConnectionOptions<options_typestate::NoAuth> {
+impl ConnectionOptions {
     /// `ConnectionOptions` for establishing a new NATS `Connection`.
     ///
     /// # Example
@@ -418,7 +389,7 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new() -> ConnectionOptions<options_typestate::NoAuth> {
+    pub fn new() -> ConnectionOptions {
         ConnectionOptions::default()
     }
 
@@ -427,26 +398,15 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .with_token("t0k3n!")
+    /// let nc = nats::ConnectionOptions::with_token("t0k3n!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_token(self, token: &str) -> ConnectionOptions<options_typestate::Authenticated> {
+    pub fn with_token(token: &str) -> ConnectionOptions {
         ConnectionOptions {
             auth: AuthStyle::Token(token.to_string()),
-            typestate: PhantomData,
-            no_echo: self.no_echo,
-            name: self.name,
-            close_callback: self.close_callback,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            reconnect_delay_callback: self.reconnect_delay_callback,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            max_reconnects: self.max_reconnects,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
+            ..Default::default()
         }
     }
 
@@ -455,30 +415,15 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .with_user_pass("derek", "s3cr3t!")
+    /// let nc = nats::ConnectionOptions::with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_user_pass(
-        self,
-        user: &str,
-        password: &str,
-    ) -> ConnectionOptions<options_typestate::Authenticated> {
+    pub fn with_user_pass(user: &str, password: &str) -> ConnectionOptions {
         ConnectionOptions {
             auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
-            typestate: PhantomData,
-            no_echo: self.no_echo,
-            name: self.name,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            close_callback: self.close_callback,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            reconnect_delay_callback: self.reconnect_delay_callback,
-            max_reconnects: self.max_reconnects,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
+            ..Default::default()
         }
     }
 
@@ -487,16 +432,12 @@ impl ConnectionOptions<options_typestate::NoAuth> {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .with_credentials("path/to/my.creds")
+    /// let nc = nats::ConnectionOptions::with_credentials("path/to/my.creds")
     ///     .connect("connect.ngs.global")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_credentials(
-        self,
-        path: impl AsRef<Path>,
-    ) -> ConnectionOptions<options_typestate::Authenticated> {
+    pub fn with_credentials(path: impl AsRef<Path>) -> ConnectionOptions {
         ConnectionOptions {
             auth: AuthStyle::Credentials {
                 jwt_cb: {
@@ -508,22 +449,10 @@ impl ConnectionOptions<options_typestate::NoAuth> {
                     Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
                 },
             },
-            typestate: PhantomData,
-            no_echo: self.no_echo,
-            name: self.name,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            reconnect_delay_callback: self.reconnect_delay_callback,
-            max_reconnects: self.max_reconnects,
-            close_callback: self.close_callback,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
+            ..Default::default()
         }
     }
-}
 
-impl<TypeState> ConnectionOptions<TypeState> {
     /// Add a name option to this configuration.
     ///
     /// # Example
@@ -535,7 +464,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_name(mut self, name: &str) -> ConnectionOptions<TypeState> {
+    pub fn with_name(mut self, name: &str) -> ConnectionOptions {
         self.name = Some(name.to_string());
         self
     }
@@ -551,7 +480,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn no_echo(mut self) -> ConnectionOptions<TypeState> {
+    pub const fn no_echo(mut self) -> ConnectionOptions {
         self.no_echo = true;
         self
     }
@@ -569,10 +498,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn max_reconnects(
-        mut self,
-        max_reconnects: Option<usize>,
-    ) -> ConnectionOptions<TypeState> {
+    pub const fn max_reconnects(mut self, max_reconnects: Option<usize>) -> ConnectionOptions {
         self.max_reconnects = max_reconnects;
         self
     }
@@ -595,7 +521,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     pub const fn reconnect_buffer_size(
         mut self,
         reconnect_buffer_size: usize,
-    ) -> ConnectionOptions<TypeState> {
+    ) -> ConnectionOptions {
         self.reconnect_buffer_size = reconnect_buffer_size;
         self
     }
@@ -642,9 +568,6 @@ impl<TypeState> ConnectionOptions<TypeState> {
             close_callback: self.close_callback,
             tls_connector: self.tls_connector,
             tls_required: self.tls_required,
-            // move options into the Finalized state by setting
-            // `typestate` to `PhantomData<Finalized>`
-            typestate: PhantomData,
         };
 
         let shared_state = SharedState::connect(options, nats_url)?;

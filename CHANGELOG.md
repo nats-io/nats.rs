@@ -1,3 +1,13 @@
+# 0.5.0
+
+## Breaking Changes
+
+* #60 `ConnectionOptions` construction has been simplified,
+  and the `with_user_pass`, `with_token`, and
+  `with_credentials` methods have been changed to being
+  constructors for the type, rather than producing
+  intermediate states.
+
 # 0.4.0
 
 ## New Features

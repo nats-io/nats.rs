@@ -14,7 +14,7 @@ use parking_lot::{Mutex, RwLock};
 use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
-    inject_delay, inject_io_failure, FinalizedOptions, Inbound, Message, Outbound, Reader,
+    inject_delay, inject_io_failure, ConnectionOptions, Inbound, Message, Outbound, Reader,
     ServerInfo, Writer,
 };
 
@@ -87,7 +87,7 @@ impl Server {
 
     pub(crate) fn try_connect(
         &mut self,
-        options: &FinalizedOptions,
+        options: &ConnectionOptions,
     ) -> io::Result<(Reader, Writer, ServerInfo)> {
         inject_io_failure()?;
 
@@ -136,7 +136,7 @@ pub(crate) struct SubscriptionState {
 
 #[derive(Debug)]
 pub(crate) struct SharedState {
-    pub(crate) options: FinalizedOptions,
+    pub(crate) options: ConnectionOptions,
     pub(crate) threads: Mutex<Option<WorkerThreads>>,
     pub(crate) id: String,
     pub(crate) shutting_down: AtomicBool,
@@ -150,7 +150,7 @@ pub(crate) struct SharedState {
 
 impl SharedState {
     pub(crate) fn connect(
-        options: FinalizedOptions,
+        options: ConnectionOptions,
         nats_url: &str,
     ) -> io::Result<Arc<SharedState>> {
         inject_io_failure()?;
