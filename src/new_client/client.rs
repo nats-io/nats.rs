@@ -485,7 +485,7 @@ impl Buffer {
     /// Creates a new buffer with the given size.
     fn new(size: usize) -> Buffer {
         Buffer {
-            bytes: vec![0u8; size].into_boxed_slice(),
+            bytes: vec![0_u8; size].into_boxed_slice(),
             written: 0,
             flushed: 0,
         }

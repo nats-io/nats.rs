@@ -110,10 +110,10 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
 
         // Read the payload.
         let mut payload = Vec::new();
-        payload.resize(num_bytes as usize, 0u8);
+        payload.resize(num_bytes as usize, 0_u8);
         stream.read_exact(&mut payload[..]).await?;
         // Read "\r\n".
-        stream.read_exact(&mut [0u8; 2]).await?;
+        stream.read_exact(&mut [0_u8; 2]).await?;
 
         return Ok(Some(ServerOp::Msg {
             subject,

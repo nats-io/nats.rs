@@ -132,7 +132,7 @@ fn backoff(reconnects: usize) -> Duration {
         Duration::from_millis(0)
     } else {
         cmp::min(
-            Duration::from_millis(2u64.saturating_pow(reconnects as u32 - 1)),
+            Duration::from_millis(2_u64.saturating_pow(reconnects as u32 - 1)),
             Duration::from_secs(4),
         )
     };
