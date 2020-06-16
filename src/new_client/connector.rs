@@ -98,7 +98,7 @@ impl Connector {
                     Timer::after(sleep_duration).await;
 
                     // Try connecting to this address.
-                    let res = connect_addr(addr, &server, &self.options).await;
+                    let res = connect_addr(addr, server, &self.options).await;
 
                     // Check if connecting worked out.
                     let (server_info, reader, writer) = match res {

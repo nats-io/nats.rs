@@ -61,7 +61,7 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
 
     if line_uppercase.starts_with("INFO") {
         // Parse the JSON-formatted server information.
-        let server_info = serde_json::from_slice(&line["INFO".len()..].as_bytes())
+        let server_info = serde_json::from_slice(line["INFO".len()..].as_bytes())
             .map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
 
         return Ok(Some(ServerOp::Info(server_info)));

@@ -88,7 +88,7 @@ impl Client {
         };
 
         // Connector for creating the initial connection and reconnecting when it is broken.
-        let connector = Connector::new(&url, options)?;
+        let connector = Connector::new(url, options)?;
 
         // Spawn the client thread responsible for:
         // - Maintaining a connection to the server and reconnecting when it is broken.
