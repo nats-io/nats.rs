@@ -90,12 +90,13 @@ impl Default for ConnectionOptions<options_typestate::NoAuth> {
 }
 
 impl ConnectionOptions<options_typestate::NoAuth> {
-    /// `ConnectionOptions` for establishing a new NATS `Connection`.
+    /// Options for establishing a new NATS [`Connection`].
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::ConnectionOptions::new();
+    /// let options = nats::new_client::ConnectionOptions::new();
     /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -106,10 +107,11 @@ impl ConnectionOptions<options_typestate::NoAuth> {
 
     /// Authenticate with NATS using a token.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .with_token("t0k3n!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -127,10 +129,11 @@ impl ConnectionOptions<options_typestate::NoAuth> {
 
     /// Authenticate with NATS using a username and password.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -150,12 +153,13 @@ impl ConnectionOptions<options_typestate::NoAuth> {
         }
     }
 
-    /// Authenticate with NATS using a credentials file
+    /// Authenticate with NATS using a credentials file.
     ///
     /// # Example
+    ///
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .with_credentials("path/to/my.creds")
     ///     .connect("connect.ngs.global")?;
     /// # Ok(())
@@ -187,10 +191,11 @@ impl ConnectionOptions<options_typestate::NoAuth> {
 impl<TypeState> ConnectionOptions<TypeState> {
     /// Add a name option to this configuration.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .with_name("My App")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -203,10 +208,11 @@ impl<TypeState> ConnectionOptions<TypeState> {
 
     /// Select option to not deliver messages that we have published.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .no_echo()
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -217,14 +223,16 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    /// Set the maximum number of reconnect attempts.
+    /// Sets the maximum number of reconnect attempts.
+    ///
     /// If no servers remain that are under this threshold,
     /// all servers will still be attempted.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .max_reconnects(Some(3))
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -235,16 +243,17 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    /// Set the maximum amount of bytes to buffer
+    /// Sets the maximum amount of bytes to buffer
     /// when accepting outgoing traffic in disconnected
     /// mode.
     ///
     /// The default value is 8mb.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .reconnect_buffer_size(64 * 1024)
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -258,12 +267,13 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    /// Establish a `Connection` with a NATS server.
+    /// Establishes a `Connection` with a NATS server.
     ///
-    /// # Example
+    /// # Examples
+    ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::ConnectionOptions::new();
+    /// let options = nats::new_client::ConnectionOptions::new();
     /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -272,7 +282,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         Connection::connect_with_options(nats_url, self.options)
     }
 
-    /// Set a callback to be executed when connectivity to
+    /// Sets a callback to be executed when connectivity to
     /// a server has been lost.
     pub fn set_disconnect_callback<F>(mut self, cb: F) -> Self
     where
@@ -282,7 +292,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    /// Set a callback to be executed when connectivity to a
+    /// Sets a callback to be executed when connectivity to a
     /// server has been established.
     pub fn set_reconnect_callback<F>(mut self, cb: F) -> Self
     where
@@ -292,7 +302,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
         self
     }
 
-    /// Set a callback to be executed when the client has been
+    /// Sets a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
     pub fn set_close_callback<F>(mut self, cb: F) -> Self
@@ -315,10 +325,11 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// to apply the desired configuration to all server connections.
     ///
     /// # Examples
+    ///
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     ///
-    /// let nc = nats::ConnectionOptions::new()
+    /// let nc = nats::new_client::ConnectionOptions::new()
     ///     .tls_required(true)
     ///     .connect("tls://demo.nats.io:4443")?;
     /// # Ok(())
@@ -336,6 +347,7 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// enabled for all connections to all servers.
     ///
     /// # Examples
+    ///
     /// ```no_run
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut tls_connector = nats::tls::builder()
