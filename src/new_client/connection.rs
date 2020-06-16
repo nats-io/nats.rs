@@ -70,7 +70,14 @@ impl Connection {
         block_on(self.client.flush())
     }
 
-    /// Close the connection.
+    /// Unsubscribes all subscriptions and flushes the connection.
+    ///
+    /// Remaining messages can still be received by existing [`Subscription`]s.
+    pub fn drain(&mut self) -> io::Result<()> {
+        self.close()
+    }
+
+    /// Closes the connection.
     pub fn close(&mut self) -> io::Result<()> {
         block_on(self.client.close())
     }

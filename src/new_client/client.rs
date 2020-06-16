@@ -146,6 +146,11 @@ impl Client {
 
             let mut state = self.state.lock().await;
 
+            // Check if the client is closed.
+            if state.shutdown.is_none() {
+                return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+            }
+
             let (sender, receiver) = oneshot::channel();
 
             // If connected, send a PING.
@@ -178,6 +183,15 @@ impl Client {
 
         // Initiate shutdown process.
         if let Some(shutdown) = state.shutdown.take() {
+            // Unsubscribe all subscriptions.
+            for (sid, _) in mem::replace(&mut state.subscriptions, HashMap::new()) {
+                // Send an UNSUB message and ignore errors.
+                if let Some(writer) = state.writer.as_mut() {
+                    let max_msgs = None;
+                    let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
+                }
+            }
+
             // Flush the writer in case there are buffered messages.
             if let Some(writer) = state.writer.as_mut() {
                 let _ = writer.flush().await;
@@ -204,6 +218,11 @@ impl Client {
         inject_delay();
 
         let mut state = self.state.lock().await;
+
+        // Check if the client is closed.
+        if state.shutdown.is_none() {
+            return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+        }
 
         // Generate a subject ID.
         let sid = state.next_sid;
@@ -241,13 +260,13 @@ impl Client {
         let mut state = self.state.lock().await;
 
         // Remove the subscription from the hash map.
-        state.subscriptions.remove(&sid);
-
-        // Send an UNSUB message and ignore errors.
-        if let Some(writer) = state.writer.as_mut() {
-            let max_msgs = None;
-            let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
-            let _ = state.flush_kicker.try_send(());
+        if let Some(_) = state.subscriptions.remove(&sid) {
+            // Send an UNSUB message and ignore errors.
+            if let Some(writer) = state.writer.as_mut() {
+                let max_msgs = None;
+                let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
+                let _ = state.flush_kicker.try_send(());
+            }
         }
 
         Ok(())
@@ -264,6 +283,11 @@ impl Client {
         inject_delay();
 
         let mut state = self.state.lock().await;
+
+        // Check if the client is closed.
+        if state.shutdown.is_none() {
+            return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+        }
 
         let op = ClientOp::Pub {
             subject,
@@ -324,6 +348,16 @@ impl Client {
                     return Ok(());
                 }
             }
+
+            // Inject random delays when testing.
+            inject_delay();
+
+            let state = self.state.lock().await;
+
+            // Check if the client is closed.
+            if state.shutdown.is_none() {
+                return Ok(());
+            }
         }
     }
 
@@ -333,6 +367,11 @@ impl Client {
         inject_delay();
 
         let mut state = self.state.lock().await;
+
+        // Check if the client is closed.
+        if state.shutdown.is_none() {
+            return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+        }
 
         // Drop the current writer, if there is one.
         state.writer = None;
@@ -435,14 +474,15 @@ impl Client {
 
                         if subscription.messages.unbounded_send(msg).is_err() {
                             // If the channel is disconnected, remove the subscription.
-                            state.subscriptions.remove(&sid);
-
-                            // Send an UNSUB message and ignore errors.
-                            if let Some(writer) = state.writer.as_mut() {
-                                let max_msgs = None;
-                                let _ =
-                                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
-                                let _ = state.flush_kicker.try_send(());
+                            if let Some(_) = state.subscriptions.remove(&sid) {
+                                // Send an UNSUB message and ignore errors.
+                                if let Some(writer) = state.writer.as_mut() {
+                                    let max_msgs = None;
+                                    let _ =
+                                        proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
+                                            .await;
+                                    let _ = state.flush_kicker.try_send(());
+                                }
                             }
                         }
                     }

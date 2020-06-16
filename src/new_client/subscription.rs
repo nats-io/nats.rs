@@ -18,7 +18,10 @@ pub struct Subscription {
     /// MSG operations received from the server.
     messages: mpsc::UnboundedReceiver<Message>,
 
+    /// Client associated with subscription.
     client: Client,
+
+    draining: bool,
 }
 
 impl Subscription {
@@ -32,6 +35,7 @@ impl Subscription {
             sid,
             messages,
             client,
+            draining: false,
         }
     }
 
@@ -56,12 +60,32 @@ impl Subscription {
             }
         })
     }
+
+    /// Unsubscribes and flushes the connection.
+    ///
+    /// The remaining messages can still be received.
+    pub fn drain(&mut self) -> io::Result<()> {
+        if !self.draining {
+            self.draining = true;
+
+            block_on(async move {
+                // Send an UNSUB operation to the server.
+                self.client.unsubscribe(self.sid).await?;
+                self.client.flush().await?;
+                Ok(())
+            })
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        // Send an UNSUB operation to the server.
-        let _ = block_on(self.client.unsubscribe(self.sid));
+        if !self.draining {
+            // Send an UNSUB operation to the server.
+            let _ = block_on(self.client.unsubscribe(self.sid));
+        }
     }
 }
 
