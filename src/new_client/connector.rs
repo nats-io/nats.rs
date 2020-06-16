@@ -60,6 +60,7 @@ impl Connector {
         &mut self,
         use_backoff: bool,
     ) -> io::Result<(
+        ServerInfo,
         Pin<Box<dyn AsyncRead + Send>>,
         Pin<Box<dyn AsyncWrite + Send>>,
     )> {
@@ -110,10 +111,10 @@ impl Connector {
                     };
 
                     // Add URLs discovered through the INFO message.
-                    for url in server_info.connect_urls {
+                    for url in &server_info.connect_urls {
                         self.add_url(&url)?;
                     }
-                    return Ok((reader, writer));
+                    return Ok((server_info, reader, writer));
                 }
             }
 

@@ -21,7 +21,8 @@ pub struct Subscription {
     /// Client associated with subscription.
     client: Client,
 
-    draining: bool,
+    /// Whether the subscription is actively listening for new messages.
+    active: bool,
 }
 
 impl Subscription {
@@ -35,7 +36,7 @@ impl Subscription {
             sid,
             messages,
             client,
-            draining: false,
+            active: false,
         }
     }
 
@@ -65,8 +66,8 @@ impl Subscription {
     ///
     /// The remaining messages can still be received.
     pub fn drain(&mut self) -> io::Result<()> {
-        if !self.draining {
-            self.draining = true;
+        if !self.active {
+            self.active = true;
 
             block_on(async move {
                 // Send an UNSUB operation to the server.
@@ -82,7 +83,7 @@ impl Subscription {
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        if !self.draining {
+        if !self.active {
             // Send an UNSUB operation to the server.
             let _ = block_on(self.client.unsubscribe(self.sid));
         }

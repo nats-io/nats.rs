@@ -16,7 +16,7 @@ use crate::new_client::connector::Connector;
 use crate::new_client::message::Message;
 use crate::new_client::options::Options;
 use crate::new_client::proto::{self, ClientOp, ServerOp};
-use crate::{inject_delay, inject_io_failure};
+use crate::{inject_delay, inject_io_failure, ServerInfo};
 
 /// Client state.
 struct State {
@@ -62,7 +62,11 @@ struct Subscription {
 /// A NATS client.
 #[derive(Clone)]
 pub(crate) struct Client {
+    /// Shared client state.
     state: Arc<Mutex<State>>,
+
+    /// Server info provided by the last INFO message.
+    server_info: Arc<std::sync::Mutex<Option<ServerInfo>>>,
 }
 
 impl Client {
@@ -85,6 +89,7 @@ impl Client {
                 pongs: VecDeque::new(),
                 shutdown: Some(shutdown),
             })),
+            server_info: Default::default(),
         };
 
         // Connector for creating the initial connection and reconnecting when it is broken.
@@ -136,6 +141,11 @@ impl Client {
         });
 
         Ok(client)
+    }
+
+    /// Retrieves server info as received by the most recent connection.
+    pub(crate) fn server_info(&self) -> Option<ServerInfo> {
+        self.server_info.lock().unwrap().clone()
     }
 
     /// Makes a round trip to the server to ensure buffered messages reach it.
@@ -324,7 +334,7 @@ impl Client {
 
         loop {
             // Make a connection to the server.
-            let (reader, writer) = connector.connect(use_backoff).await?;
+            let (server_info, reader, writer) = connector.connect(use_backoff).await?;
             use_backoff = true;
 
             let reader = BufReader::with_capacity(128 * 1024, reader);
@@ -341,7 +351,7 @@ impl Client {
             .boxed();
 
             // Set up the new connection for this client.
-            if self.reconnect(writer).await.is_ok() {
+            if self.reconnect(server_info, writer).await.is_ok() {
                 // Connected! Now dispatch MSG operations.
                 if self.dispatch(server_ops, &mut connector).await.is_ok() {
                     // If the client stopped gracefully, return.
@@ -362,7 +372,11 @@ impl Client {
     }
 
     /// Puts the client back into connected state with the given writer.
-    async fn reconnect(&self, writer: impl AsyncWrite + Send + 'static) -> io::Result<()> {
+    async fn reconnect(
+        &self,
+        server_info: ServerInfo,
+        writer: impl AsyncWrite + Send + 'static,
+    ) -> io::Result<()> {
         // Inject random delays when testing.
         inject_delay();
 
@@ -411,7 +425,8 @@ impl Client {
             let _ = p.send(());
         }
 
-        // All good! Use the new writer from now on.
+        // All good!
+        *self.server_info.lock().unwrap() = Some(server_info);
         state.writer = Some(writer);
         Ok(())
     }
@@ -431,9 +446,10 @@ impl Client {
 
             match op {
                 ServerOp::Info(server_info) => {
-                    for url in server_info.connect_urls {
-                        connector.add_url(&url)?;
+                    for url in &server_info.connect_urls {
+                        let _ = connector.add_url(&url);
                     }
+                    *self.server_info.lock().unwrap() = Some(server_info);
                 }
 
                 ServerOp::Ping => {
@@ -469,6 +485,7 @@ impl Client {
                             data: payload,
                             client: Client {
                                 state: self.state.clone(),
+                                server_info: self.server_info.clone(),
                             },
                         };
 
