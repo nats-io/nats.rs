@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::creds_utils;
-use crate::new_client::Connection;
+use crate::new_client::{AsyncConnection, Connection};
 use crate::secure_wipe::SecureString;
 use crate::tls;
 
@@ -280,6 +280,21 @@ impl<TypeState> ConnectionOptions<TypeState> {
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
         Connection::connect_with_options(nats_url, self.options)
+    }
+
+    /// Establishes a `Connection` with a NATS server asynchronously.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let options = nats::new_client::ConnectionOptions::new();
+    /// let nc = options.connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn connect_async(self, nats_url: &str) -> io::Result<AsyncConnection> {
+        AsyncConnection::connect_with_options(nats_url, self.options).await
     }
 
     /// Sets a callback to be executed when connectivity to
