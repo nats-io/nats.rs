@@ -255,7 +255,7 @@ impl Client {
             sid,
             Subscription {
                 subject: subject.to_string(),
-                queue_group: queue_group.map(|g| g.to_string()),
+                queue_group: queue_group.map(ToString::to_string),
                 messages: sender,
             },
         );
@@ -397,13 +397,13 @@ impl Client {
         inject_io_failure()?;
 
         // Restart subscriptions that existed before the last reconnect.
-        for (sid, subscription) in state.subscriptions.iter() {
+        for (sid, subscription) in &state.subscriptions {
             // Send a SUB operation to the server.
             proto::encode(
                 &mut writer,
                 ClientOp::Sub {
                     subject: subscription.subject.as_str(),
-                    queue_group: subscription.queue_group.as_ref().map(|g| g.as_str()),
+                    queue_group: subscription.queue_group.as_ref().map(String::as_str),
                     sid: *sid,
                 },
             )
@@ -447,7 +447,7 @@ impl Client {
             match op {
                 ServerOp::Info(server_info) => {
                     for url in &server_info.connect_urls {
-                        let _ = connector.add_url(&url);
+                        let _ = connector.add_url(url);
                     }
                     *self.server_info.lock().unwrap() = Some(server_info);
                 }

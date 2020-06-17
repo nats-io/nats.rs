@@ -113,7 +113,7 @@ impl Connector {
 
                     // Add URLs discovered through the INFO message.
                     for url in &server_info.connect_urls {
-                        self.add_url(&url)?;
+                        self.add_url(url)?;
                     }
                     return Ok((server_info, reader, writer));
                 }
