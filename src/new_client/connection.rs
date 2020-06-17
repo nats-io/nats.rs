@@ -14,6 +14,7 @@ use crate::new_client::subscription::{AsyncSubscription, Subscription};
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A NATS client connection.
+#[derive(Clone)]
 pub struct AsyncConnection {
     client: Client,
 }
@@ -191,6 +192,7 @@ impl AsyncConnection {
 }
 
 /// A NATS client connection.
+#[derive(Clone)]
 pub struct Connection(pub(crate) AsyncConnection);
 
 impl Connection {

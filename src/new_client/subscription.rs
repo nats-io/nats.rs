@@ -46,14 +46,14 @@ impl AsyncSubscription {
     ///
     /// The remaining messages can still be received.
     pub async fn drain(&mut self) -> io::Result<()> {
-        if !self.active {
+        if self.active {
+            Ok(())
+        } else {
             self.active = true;
 
             // Send an UNSUB operation to the server.
             self.client.unsubscribe(self.sid).await?;
             self.client.flush().await?;
-            Ok(())
-        } else {
             Ok(())
         }
     }
