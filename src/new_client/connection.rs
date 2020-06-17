@@ -7,9 +7,9 @@ use futures::prelude::*;
 use smol::Timer;
 
 use crate::new_client::client::Client;
-use crate::new_client::message::Message;
+use crate::new_client::message::{AsyncMessage, Message};
 use crate::new_client::options::{ConnectionOptions, Options};
-use crate::new_client::subscription::Subscription;
+use crate::new_client::subscription::{AsyncSubscription, Subscription};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -57,7 +57,7 @@ impl AsyncConnection {
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<AsyncMessage> {
         // Publish a request.
         let reply = self.new_inbox();
         let mut sub = self.subscribe(&reply).await?;
@@ -65,22 +65,8 @@ impl AsyncConnection {
 
         // Wait for the response.
         sub.next()
-    }
-
-    /// Publishes a message and waits for the response or times out after a duration of time.
-    pub async fn request_timeout(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-        timeout: Duration,
-    ) -> io::Result<Message> {
-        // Publish a request.
-        let reply = self.new_inbox();
-        let mut sub = self.subscribe(&reply).await?;
-        self.do_publish(subject, Some(reply.as_str()), msg).await?;
-
-        // Wait for the response.
-        sub.next_timeout(timeout)
+            .await
+            .ok_or_else(|| ErrorKind::ConnectionReset.into())
     }
 
     /// Publishes a message and returns a subscription for awaiting the response.
@@ -88,7 +74,7 @@ impl AsyncConnection {
         &self,
         subject: &str,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<Subscription> {
+    ) -> io::Result<AsyncSubscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply).await?;
@@ -99,12 +85,16 @@ impl AsyncConnection {
     }
 
     /// Creates a subscription.
-    pub async fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
+    pub async fn subscribe(&self, subject: &str) -> io::Result<AsyncSubscription> {
         self.do_subscribe(subject, None).await
     }
 
     /// Creates a queue subscription.
-    pub async fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
+    pub async fn queue_subscribe(
+        &self,
+        subject: &str,
+        queue: &str,
+    ) -> io::Result<AsyncSubscription> {
         self.do_subscribe(subject, Some(queue)).await
     }
 
@@ -171,7 +161,7 @@ impl AsyncConnection {
 
     /// Unsubscribes all subscriptions and flushes the connection.
     ///
-    /// Remaining messages can still be received by existing [`Subscription`]s.
+    /// Remaining messages can still be received by existing [`AsyncSubscription`]s.
     pub async fn drain(&mut self) -> io::Result<()> {
         self.close().await
     }
@@ -190,14 +180,18 @@ impl AsyncConnection {
         self.client.publish(subject, reply, msg.as_ref()).await
     }
 
-    async fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
+    async fn do_subscribe(
+        &self,
+        subject: &str,
+        queue: Option<&str>,
+    ) -> io::Result<AsyncSubscription> {
         let (sid, receiver) = self.client.subscribe(subject, queue).await?;
-        Ok(Subscription::new(sid, receiver, self.client.clone()))
+        Ok(AsyncSubscription::new(sid, receiver, self.client.clone()))
     }
 }
 
 /// A NATS client connection.
-pub struct Connection(AsyncConnection);
+pub struct Connection(pub(crate) AsyncConnection);
 
 impl Connection {
     /// Connects on a URL with the given options.
@@ -234,7 +228,7 @@ impl Connection {
 
     /// Publishes a message and waits for the response.
     pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        block_on(self.0.request(subject, msg))
+        block_on(self.0.request(subject, msg)).map(Message::from_async)
     }
 
     /// Publishes a message and waits for the response or times out after a duration of time.
@@ -244,22 +238,27 @@ impl Connection {
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        block_on(self.0.request_timeout(subject, msg, timeout))
+        block_on(async move {
+            futures::select! {
+                res = self.0.request(subject, msg).fuse() => res.map(Message::from_async),
+                _ = Timer::after(timeout).fuse() => Err(ErrorKind::TimedOut.into()),
+            }
+        })
     }
 
     /// Publishes a message and returns a subscription for awaiting the response.
     pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
-        block_on(self.0.request_multi(subject, msg))
+        block_on(self.0.request_multi(subject, msg)).map(Subscription)
     }
 
     /// Creates a subscription.
     pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
-        block_on(self.0.subscribe(subject))
+        block_on(self.0.subscribe(subject)).map(Subscription)
     }
 
     /// Creates a queue subscription.
     pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        block_on(self.0.queue_subscribe(subject, queue))
+        block_on(self.0.queue_subscribe(subject, queue)).map(Subscription)
     }
 
     /// Flushes by performing a round trip to the server.

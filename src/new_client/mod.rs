@@ -9,6 +9,6 @@ mod proto;
 mod subscription;
 
 pub use connection::{AsyncConnection, Connection};
-pub use message::Message;
+pub use message::{AsyncMessage, Message};
 pub use options::ConnectionOptions;
-pub use subscription::Subscription;
+pub use subscription::{AsyncSubscription, Subscription};
