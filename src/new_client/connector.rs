@@ -1,5 +1,6 @@
 use std::cmp;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::io::{self, Error, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
@@ -132,8 +133,9 @@ fn backoff(reconnects: usize) -> Duration {
     let base = if reconnects == 0 {
         Duration::from_millis(0)
     } else {
+        let exp: u32 = (reconnects - 1).try_into().unwrap_or(u32::MAX);
         cmp::min(
-            Duration::from_millis(2_u64.saturating_pow(reconnects as u32 - 1)),
+            Duration::from_millis(2_u64.saturating_pow(exp)),
             Duration::from_secs(4),
         )
     };

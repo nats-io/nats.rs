@@ -98,7 +98,7 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
         })?;
 
         // Convert the slice into an owned string.
-        let reply_to = reply_to.map(|s| s.to_string());
+        let reply_to = reply_to.map(ToString::to_string);
 
         // Parse the number of payload bytes.
         let num_bytes = u32::from_str(num_bytes).map_err(|_| {
