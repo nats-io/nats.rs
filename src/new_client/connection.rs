@@ -8,7 +8,7 @@ use smol::Timer;
 
 use crate::new_client::client::Client;
 use crate::new_client::message::{AsyncMessage, Message};
-use crate::new_client::options::{ConnectionOptions, Options};
+use crate::new_client::options::Options;
 use crate::new_client::subscription::{AsyncSubscription, Subscription};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -31,7 +31,7 @@ impl AsyncConnection {
 
     /// Connects a NATS client.
     pub async fn connect(url: &str) -> io::Result<AsyncConnection> {
-        ConnectionOptions::new().connect_async(url).await
+        Options::new().connect_async(url).await
     }
 
     /// Publishes a message.

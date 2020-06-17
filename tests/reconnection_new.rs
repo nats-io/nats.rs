@@ -300,7 +300,7 @@ fn reconnect_test() {
     barrier.wait();
 
     let nc = loop {
-        if let Ok(nc) = nats::new_client::ConnectionOptions::new()
+        if let Ok(nc) = nats::new_client::Options::new()
             .max_reconnects(None)
             .connect("localhost:22222")
         {

@@ -10,5 +10,5 @@ mod subscription;
 
 pub use connection::{AsyncConnection, Connection};
 pub use message::{AsyncMessage, Message};
-pub use options::ConnectionOptions;
+pub use options::Options;
 pub use subscription::{AsyncSubscription, Subscription};
