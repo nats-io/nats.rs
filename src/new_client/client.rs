@@ -206,6 +206,9 @@ impl Client {
             if let Some(writer) = state.writer.as_mut() {
                 let _ = writer.flush().await;
             }
+
+            // Wake up all pending flushes.
+            state.pongs.clear();
             drop(state);
 
             let (s, r) = oneshot::channel();
@@ -395,6 +398,9 @@ impl Client {
 
         // Inject random I/O failures when testing.
         inject_io_failure()?;
+
+        // Remove subscriptions whose handles were dropped.
+        state.subscriptions.retain(|_, subscription| !subscription.messages.is_closed());
 
         // Restart subscriptions that existed before the last reconnect.
         for (sid, subscription) in &state.subscriptions {

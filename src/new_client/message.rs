@@ -32,12 +32,18 @@ impl AsyncMessage {
                 ErrorKind::InvalidInput,
                 "no reply subject available",
             )),
-            Some(reply) => {
-                self.client
-                    .publish(self.subject.as_ref(), Some(reply), msg.as_ref())
-                    .await
-            }
+            Some(reply) => self.client.publish(reply, None, msg.as_ref()).await,
         }
+    }
+}
+
+impl fmt::Debug for AsyncMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("AsyncMessage")
+            .field("subject", &self.subject)
+            .field("reply", &self.reply)
+            .field("length", &self.data.len())
+            .finish()
     }
 }
 
@@ -77,11 +83,7 @@ impl Message {
                 ErrorKind::InvalidInput,
                 "no reply subject available",
             )),
-            Some(reply) => block_on(self.client.publish(
-                self.subject.as_ref(),
-                Some(reply),
-                msg.as_ref(),
-            )),
+            Some(reply) => block_on(self.client.publish(reply, None, msg.as_ref())),
         }
     }
 }

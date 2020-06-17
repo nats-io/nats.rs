@@ -38,7 +38,7 @@ impl AsyncSubscription {
             sid,
             messages,
             client,
-            active: false,
+            active: true,
         }
     }
 
@@ -47,14 +47,26 @@ impl AsyncSubscription {
     /// The remaining messages can still be received.
     pub async fn drain(&mut self) -> io::Result<()> {
         if self.active {
-            Ok(())
-        } else {
-            self.active = true;
+            self.active = false;
 
             // Send an UNSUB operation to the server.
             self.client.unsubscribe(self.sid).await?;
             self.client.flush().await?;
             Ok(())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for AsyncSubscription {
+    fn drop(&mut self) {
+        if self.active {
+            self.active = false;
+
+            // TODO(stjepang): Instead of blocking, we should just enqueue a dead subscription ID
+            // for later cleanup.
+            let _ = block_on(self.client.unsubscribe(self.sid));
         }
     }
 }
