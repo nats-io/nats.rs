@@ -777,7 +777,7 @@ pub fn connect(nats_url: &str) -> io::Result<Connection> {
 }
 
 /// A `Message` that has been published to a NATS `Subject`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Message {
     /// The NATS `Subject` that this `Message` has been published to.
     pub subject: String,
