@@ -1,16 +1,6 @@
-use std::{
-    io::{self, BufReader, BufWriter, Write},
-    net::{SocketAddr, TcpStream},
-};
-
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    inject_io_failure,
-    parser::ControlOp,
-    parser::{expect_info, parse_control_op},
-    split_tls, AuthStyle, ConnectionOptions, SecureString, ServerInfo,
-};
+use crate::SecureString;
 
 fn default_echo() -> bool {
     true

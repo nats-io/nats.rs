@@ -187,7 +187,6 @@ const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 mod connect;
 mod creds_utils;
-mod parser;
 mod secure_wipe;
 
 pub mod asynk;
@@ -214,7 +213,6 @@ pub mod tls;
 pub mod subscription;
 
 use std::{
-    convert::TryFrom,
     fmt,
     io::{self, Error, ErrorKind},
     path::Path,
@@ -222,7 +220,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::{thread_rng, Rng};
 use serde::Deserialize;
 
 pub use subscription::Subscription;
@@ -230,10 +227,7 @@ pub use subscription::Subscription;
 #[doc(hidden)]
 pub use connect::ConnectInfo;
 
-use {
-    secure_wipe::{SecureString, SecureVec},
-    tls::{split_tls, TlsReader, TlsWriter},
-};
+use secure_wipe::{SecureString, SecureVec};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
@@ -278,40 +272,9 @@ pub struct ServerInfo {
     pub client_ip: String,
 }
 
-pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
-
-#[derive(Default)]
-pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
-
-impl fmt::Debug for Callback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(
-                &"callback",
-                if self.0.is_some() { &"set" } else { &"unset" },
-            )
-            .finish()
-    }
-}
-
 /// A configuration object for a NATS connection.
 #[derive(Debug, Default)]
 pub struct ConnectionOptions(Options);
-
-fn default_reconnect_delay_callback(reconnects: usize) -> Duration {
-    if reconnects > 0 {
-        let log_2_four_seconds_in_ms = 12_u32;
-        let truncated_exponent = std::cmp::min(
-            log_2_four_seconds_in_ms,
-            u32::try_from(std::cmp::min(u32::max_value() as usize, reconnects)).unwrap(),
-        );
-
-        let jitter = thread_rng().gen_range(0, 1000);
-        Duration::from_millis(jitter + 2_u64.checked_pow(truncated_exponent).unwrap())
-    } else {
-        Duration::from_millis(0)
-    }
-}
 
 impl ConnectionOptions {
     /// `ConnectionOptions` for establishing a new NATS `Connection`.
@@ -432,10 +395,7 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn reconnect_buffer_size(
-        self,
-        reconnect_buffer_size: usize,
-    ) -> ConnectionOptions {
+    pub fn reconnect_buffer_size(self, reconnect_buffer_size: usize) -> ConnectionOptions {
         Self(self.0.reconnect_buffer_size(reconnect_buffer_size))
     }
 
@@ -569,45 +529,6 @@ impl ConnectionOptions {
 /// A NATS connection.
 #[derive(Debug, Clone)]
 pub struct Connection(asynk::AsyncConnection);
-
-#[derive(Clone)]
-enum AuthStyle {
-    /// Authenticate using a token.
-    Token(String),
-
-    /// Authenticate using a username and password.
-    UserPass(String, String),
-
-    /// Authenticate using a `.creds` file.
-    Credentials {
-        /// Securely loads the user JWT.
-        jwt_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
-        /// Securely loads the nkey and signs the nonce passed as an argument.
-        sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
-    },
-
-    /// No authentication.
-    None,
-}
-
-impl fmt::Debug for AuthStyle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            AuthStyle::Token(s) => f.debug_tuple("Token").field(s).finish(),
-            AuthStyle::UserPass(user, pass) => {
-                f.debug_tuple("Token").field(user).field(pass).finish()
-            }
-            AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
-            AuthStyle::None => f.debug_struct("None").finish(),
-        }
-    }
-}
-
-impl Default for AuthStyle {
-    fn default() -> AuthStyle {
-        AuthStyle::None
-    }
-}
 
 /// Connect to a NATS server at the given url.
 ///
