@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::asynk::{AsyncConnection, Connection};
+use crate::asynk::AsyncConnection;
 use crate::creds_utils;
 use crate::secure_wipe::SecureString;
 use crate::tls;
@@ -221,21 +221,6 @@ impl Options {
     pub fn reconnect_buffer_size(mut self, reconnect_buffer_size: usize) -> Options {
         self.reconnect_buffer_size = reconnect_buffer_size;
         self
-    }
-
-    /// Establishes a `Connection` with a NATS server.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::asynk::Options::new();
-    /// let nc = options.connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        Connection::connect_with_options(nats_url, self)
     }
 
     /// Establishes a `Connection` with a NATS server asynchronously.

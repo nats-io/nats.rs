@@ -8,7 +8,7 @@ mod options;
 mod proto;
 mod subscription;
 
-pub use connection::{AsyncConnection, Connection};
-pub use message::{AsyncMessage, Message};
+pub use connection::AsyncConnection;
+pub use message::AsyncMessage;
 pub use options::Options;
-pub use subscription::{AsyncSubscription, Subscription};
+pub use subscription::AsyncSubscription;
