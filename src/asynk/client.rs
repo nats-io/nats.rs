@@ -424,14 +424,15 @@ impl Client {
         writer.write_all(buffered).await?;
         writer.flush().await?;
 
+        // All good, continue with this connection.
+        *self.server_info.lock().unwrap() = Some(server_info);
+        state.writer = Some(writer);
+
         // Complete PONGs because the connection is healthy.
         for p in pongs {
             let _ = p.send(());
         }
 
-        // All good!
-        *self.server_info.lock().unwrap() = Some(server_info);
-        state.writer = Some(writer);
         Ok(())
     }
 

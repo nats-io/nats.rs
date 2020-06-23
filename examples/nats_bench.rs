@@ -89,7 +89,7 @@ fn main() -> std::io::Result<()> {
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
             barrier.wait();
-            let mut s = nc.subscribe(&subject).unwrap();
+            let s = nc.subscribe(&subject).unwrap();
             for _ in 0..messages {
                 s.next().unwrap();
             }

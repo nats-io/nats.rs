@@ -103,7 +103,7 @@
 //! ```
 
 #![recursion_limit = "1024"]
-// #![cfg_attr(test, deny(warnings))]
+#![cfg_attr(test, deny(warnings))]
 #![deny(
     missing_docs,
     future_incompatible,
@@ -183,8 +183,6 @@ use crate::asynk::client::Client;
 use crate::asynk::AsyncMessage;
 use crate::asynk::Options;
 
-const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
-
 mod asynk;
 mod connect;
 mod creds_utils;
@@ -216,7 +214,7 @@ use std::{
     io::{self, Error, ErrorKind},
     path::Path,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde::Deserialize;
@@ -287,7 +285,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn new() -> ConnectionOptions {
-        ConnectionOptions::default()
+        Self(Options::new())
     }
 
     /// Authenticate with NATS using a token.
@@ -814,9 +812,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn rtt(&self) -> io::Result<Duration> {
-        let start = Instant::now();
-        self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)?;
-        Ok(start.elapsed())
+        block_on(self.0.rtt())
     }
 
     /// Returns the client IP as known by the server.

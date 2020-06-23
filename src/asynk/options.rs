@@ -71,31 +71,11 @@ impl Default for Options {
 
 impl Options {
     /// Options for establishing a new NATS [`Connection`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::asynk::Options::new();
-    /// let nc = options.connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn new() -> Options {
         Options::default()
     }
 
     /// Authenticate with NATS using a token.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::with_token("t0k3n!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_token(token: &str) -> Options {
         Options {
             auth: AuthStyle::Token(token.to_string()),
@@ -104,16 +84,6 @@ impl Options {
     }
 
     /// Authenticate with NATS using a username and password.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::with_user_pass("derek", "s3cr3t!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_user_pass(user: &str, password: &str) -> Options {
         Options {
             auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
@@ -122,16 +92,6 @@ impl Options {
     }
 
     /// Authenticate with NATS using a credentials file.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::with_credentials("path/to/my.creds")
-    ///     .connect("connect.ngs.global")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_credentials(path: impl AsRef<Path>) -> Options {
         Options {
             auth: AuthStyle::Credentials {
@@ -149,34 +109,12 @@ impl Options {
     }
 
     /// Add a name option to this configuration.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::new()
-    ///     .with_name("My App")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_name(mut self, name: &str) -> Options {
         self.name = Some(name.to_string());
         self
     }
 
     /// Select option to not deliver messages that we have published.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::new()
-    ///     .no_echo()
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn no_echo(mut self) -> Options {
         self.no_echo = true;
         self
@@ -186,17 +124,6 @@ impl Options {
     ///
     /// If no servers remain that are under this threshold,
     /// all servers will still be attempted.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::new()
-    ///     .max_reconnects(Some(3))
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn max_reconnects(mut self, max_reconnects: Option<usize>) -> Options {
         self.max_reconnects = max_reconnects;
         self
@@ -207,33 +134,12 @@ impl Options {
     /// mode.
     ///
     /// The default value is 8mb.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::asynk::Options::new()
-    ///     .reconnect_buffer_size(64 * 1024)
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn reconnect_buffer_size(mut self, reconnect_buffer_size: usize) -> Options {
         self.reconnect_buffer_size = reconnect_buffer_size;
         self
     }
 
     /// Establishes a `Connection` with a NATS server asynchronously.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::asynk::Options::new();
-    /// let nc = options.connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn connect(self, nats_url: &str) -> io::Result<AsyncConnection> {
         AsyncConnection::connect_with_options(nats_url, self).await
     }
@@ -296,18 +202,6 @@ impl Options {
     /// the `nats::tls::tls_connector` method and the
     /// `nats::ConnectionOptions::tls_connector` method below
     /// to apply the desired configuration to all server connections.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
-    ///
-    /// let nc = nats::asynk::Options::new()
-    ///     .tls_required(true)
-    ///     .connect("tls://demo.nats.io:4443")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn tls_required(mut self, tls_required: bool) -> Options {
         self.tls_required = tls_required;
         self
@@ -318,22 +212,6 @@ impl Options {
     ///
     /// Note that this also enforces that TLS will be
     /// enabled for all connections to all servers.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut tls_connector = nats::tls::builder()
-    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
-    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
-    ///     .build()?;
-    ///
-    /// let nc = nats::asynk::Options::new()
-    ///     .tls_connector(tls_connector)
-    ///     .connect("tls://demo.nats.io:4443")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn tls_connector(mut self, connector: tls::TlsConnector) -> Options {
         self.tls_connector = Some(connector);
         self.tls_required = true;

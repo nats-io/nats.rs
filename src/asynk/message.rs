@@ -1,5 +1,4 @@
 use std::fmt;
-use std::io::{self, Error, ErrorKind};
 
 use crate::asynk::client::Client;
 
@@ -16,23 +15,6 @@ pub struct AsyncMessage {
 
     /// Client for publishing on the reply subject.
     pub(crate) client: Client,
-}
-
-impl AsyncMessage {
-    /// Responds to a request.
-    ///
-    /// The response will be published as a message on the `reply` subject.
-    ///
-    /// If `reply` is [`None`], an error will be returned.
-    pub async fn respond(self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match self.reply.as_ref() {
-            None => Err(Error::new(
-                ErrorKind::InvalidInput,
-                "no reply subject available",
-            )),
-            Some(reply) => self.client.publish(reply, None, msg.as_ref()).await,
-        }
-    }
 }
 
 impl fmt::Debug for AsyncMessage {

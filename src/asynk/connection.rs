@@ -29,11 +29,6 @@ impl AsyncConnection {
         Ok(AsyncConnection { client })
     }
 
-    /// Connects a NATS client.
-    pub async fn connect(url: &str) -> io::Result<AsyncConnection> {
-        Options::new().connect(url).await
-    }
-
     /// Publishes a message.
     pub async fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.do_publish(subject, None, msg).await

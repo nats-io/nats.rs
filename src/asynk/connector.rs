@@ -160,11 +160,16 @@ async fn connect_addr(
     inject_io_failure()?;
 
     // Connect to the remote socket.
-    let stream = Async::<TcpStream>::connect(addr).await?;
+    let mut stream = Async::<TcpStream>::connect(addr).await?;
 
     // Expect an INFO message.
-    let mut reader = BufReader::new(stream);
-    let server_info = match proto::decode(&mut reader).await? {
+    let mut line = crate::SecureVec::with_capacity(512);
+    while !line.ends_with(b"\r\n") {
+        let byte = &mut [0];
+        stream.read_exact(byte).await?;
+        line.push(byte[0]);
+    }
+    let server_info = match proto::decode(&line[..]).await? {
         Some(ServerOp::Info(server_info)) => server_info,
         Some(op) => {
             return Err(Error::new(
@@ -174,7 +179,6 @@ async fn connect_addr(
         }
         None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
     };
-    let stream = reader.into_inner();
 
     // Check if TLS authentication is required:
     // - Has `options.tls_required(true)` been set?
