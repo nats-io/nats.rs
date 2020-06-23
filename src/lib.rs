@@ -175,17 +175,22 @@
     clippy::wrong_pub_self_convention,
 )]
 
+use blocking::block_on;
+use futures::prelude::*;
+use smol::Timer;
+
+use crate::asynk::client::Client;
+use crate::asynk::AsyncMessage;
+use crate::asynk::Options;
+
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 mod connect;
 mod creds_utils;
-mod inbound;
-mod outbound;
 mod parser;
 mod secure_wipe;
-mod shared_state;
 
-pub mod new_client;
+pub mod asynk;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -213,10 +218,7 @@ use std::{
     fmt,
     io::{self, Error, ErrorKind},
     path::Path,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -229,10 +231,7 @@ pub use subscription::Subscription;
 pub use connect::ConnectInfo;
 
 use {
-    inbound::{Inbound, Reader},
-    outbound::{Outbound, Writer},
     secure_wipe::{SecureString, SecureVec},
-    shared_state::{parse_server_addresses, Server, SharedState, SubscriptionState},
     tls::{split_tls, TlsReader, TlsWriter},
 };
 
@@ -279,12 +278,6 @@ pub struct ServerInfo {
     pub client_ip: String,
 }
 
-impl ServerInfo {
-    pub(crate) fn learned_servers(&self) -> Vec<Server> {
-        parse_server_addresses(&self.connect_urls)
-    }
-}
-
 pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
 
 #[derive(Default)]
@@ -302,19 +295,8 @@ impl fmt::Debug for Callback {
 }
 
 /// A configuration object for a NATS connection.
-pub struct ConnectionOptions {
-    auth: AuthStyle,
-    name: Option<String>,
-    no_echo: bool,
-    max_reconnects: Option<usize>,
-    reconnect_buffer_size: usize,
-    disconnect_callback: Callback,
-    reconnect_callback: Callback,
-    reconnect_delay_callback: ReconnectDelayCallback,
-    close_callback: Callback,
-    tls_connector: Option<tls::TlsConnector>,
-    tls_required: bool,
-}
+#[derive(Debug, Default)]
+pub struct ConnectionOptions(Options);
 
 fn default_reconnect_delay_callback(reconnects: usize) -> Duration {
     if reconnects > 0 {
@@ -328,51 +310,6 @@ fn default_reconnect_delay_callback(reconnects: usize) -> Duration {
         Duration::from_millis(jitter + 2_u64.checked_pow(truncated_exponent).unwrap())
     } else {
         Duration::from_millis(0)
-    }
-}
-
-impl Default for ConnectionOptions {
-    fn default() -> ConnectionOptions {
-        ConnectionOptions {
-            auth: AuthStyle::None,
-            name: None,
-            no_echo: false,
-            reconnect_buffer_size: 8 * 1024 * 1024,
-            max_reconnects: Some(60),
-            disconnect_callback: Callback(None),
-            reconnect_callback: Callback(None),
-            reconnect_delay_callback: ReconnectDelayCallback(Box::new(
-                default_reconnect_delay_callback,
-            )),
-            close_callback: Callback(None),
-            tls_connector: None,
-            tls_required: false,
-        }
-    }
-}
-
-impl fmt::Debug for ConnectionOptions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(&"auth", &self.auth)
-            .entry(&"name", &self.name)
-            .entry(&"no_echo", &self.no_echo)
-            .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
-            .entry(&"max_reconnects", &self.max_reconnects)
-            .entry(&"disconnect_callback", &self.disconnect_callback)
-            .entry(&"reconnect_callback", &self.reconnect_callback)
-            .entry(&"reconnect_delay_callback", &"set")
-            .entry(&"close_callback", &self.close_callback)
-            .entry(
-                &"tls_connector",
-                if self.tls_connector.is_some() {
-                    &"set"
-                } else {
-                    &"unset"
-                },
-            )
-            .entry(&"tls_required", &self.tls_required)
-            .finish()
     }
 }
 
@@ -402,10 +339,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn with_token(token: &str) -> ConnectionOptions {
-        ConnectionOptions {
-            auth: AuthStyle::Token(token.to_string()),
-            ..Default::default()
-        }
+        Self(Options::with_token(token))
     }
 
     /// Authenticate with NATS using a username and password.
@@ -419,10 +353,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn with_user_pass(user: &str, password: &str) -> ConnectionOptions {
-        ConnectionOptions {
-            auth: AuthStyle::UserPass(user.to_string(), password.to_string()),
-            ..Default::default()
-        }
+        Self(Options::with_user_pass(user, password))
     }
 
     /// Authenticate with NATS using a credentials file
@@ -436,19 +367,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn with_credentials(path: impl AsRef<Path>) -> ConnectionOptions {
-        ConnectionOptions {
-            auth: AuthStyle::Credentials {
-                jwt_cb: {
-                    let path = path.as_ref().to_owned();
-                    Arc::new(move || creds_utils::user_jwt_from_file(&path))
-                },
-                sig_cb: {
-                    let path = path.as_ref().to_owned();
-                    Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
-                },
-            },
-            ..Default::default()
-        }
+        Self(Options::with_credentials(path))
     }
 
     /// Add a name option to this configuration.
@@ -462,9 +381,8 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_name(mut self, name: &str) -> ConnectionOptions {
-        self.name = Some(name.to_string());
-        self
+    pub fn with_name(self, name: &str) -> ConnectionOptions {
+        Self(self.0.with_name(name))
     }
 
     /// Select option to not deliver messages that we have published.
@@ -478,9 +396,8 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn no_echo(mut self) -> ConnectionOptions {
-        self.no_echo = true;
-        self
+    pub fn no_echo(self) -> ConnectionOptions {
+        Self(self.0.no_echo())
     }
 
     /// Set the maximum number of reconnect attempts.
@@ -496,9 +413,8 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn max_reconnects(mut self, max_reconnects: Option<usize>) -> ConnectionOptions {
-        self.max_reconnects = max_reconnects;
-        self
+    pub fn max_reconnects(self, max_reconnects: Option<usize>) -> ConnectionOptions {
+        Self(self.0.max_reconnects(max_reconnects))
     }
 
     /// Set the maximum amount of bytes to buffer
@@ -516,12 +432,11 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn reconnect_buffer_size(
-        mut self,
+    pub fn reconnect_buffer_size(
+        self,
         reconnect_buffer_size: usize,
     ) -> ConnectionOptions {
-        self.reconnect_buffer_size = reconnect_buffer_size;
-        self
+        Self(self.0.reconnect_buffer_size(reconnect_buffer_size))
     }
 
     /// Establish a `Connection` with a NATS server.
@@ -554,61 +469,35 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let options = ConnectionOptions {
-            auth: self.auth,
-            no_echo: self.no_echo,
-            name: self.name,
-            reconnect_buffer_size: self.reconnect_buffer_size,
-            max_reconnects: self.max_reconnects,
-            disconnect_callback: self.disconnect_callback,
-            reconnect_callback: self.reconnect_callback,
-            reconnect_delay_callback: self.reconnect_delay_callback,
-            close_callback: self.close_callback,
-            tls_connector: self.tls_connector,
-            tls_required: self.tls_required,
-        };
-
-        let shared_state = SharedState::connect(options, nats_url)?;
-
-        let conn = Connection {
-            sid: Arc::new(AtomicUsize::new(1)),
-            shutdown_dropper: Arc::new(ShutdownDropper {
-                shared_state: shared_state.clone(),
-            }),
-            shared_state,
-        };
-        Ok(conn)
+        Ok(Connection(block_on(self.0.connect_async(nats_url))?))
     }
 
     /// Set a callback to be executed when connectivity to
     /// a server has been lost.
-    pub fn set_disconnect_callback<F>(mut self, cb: F) -> Self
+    pub fn set_disconnect_callback<F>(self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Box::new(cb)));
-        self
+        Self(self.0.set_disconnect_callback(cb))
     }
 
     /// Set a callback to be executed when connectivity to a
     /// server has been established.
-    pub fn set_reconnect_callback<F>(mut self, cb: F) -> Self
+    pub fn set_reconnect_callback<F>(self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Box::new(cb)));
-        self
+        Self(self.0.set_reconnect_callback(cb))
     }
 
     /// Set a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
-    pub fn set_close_callback<F>(mut self, cb: F) -> Self
+    pub fn set_close_callback<F>(self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.close_callback = Callback(Some(Box::new(cb)));
-        self
+        Self(self.0.set_close_callback(cb))
     }
 
     /// Set a callback to be executed for calculating the backoff duration
@@ -620,12 +509,11 @@ impl ConnectionOptions {
     ///
     /// It is recommended that some random jitter is added to
     /// your returned `Duration`.
-    pub fn set_reconnect_delay_callback<F>(mut self, cb: F) -> Self
+    pub fn set_reconnect_delay_callback<F>(self, cb: F) -> Self
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
     {
-        self.reconnect_delay_callback = ReconnectDelayCallback(Box::new(cb));
-        self
+        Self(self.0.set_reconnect_delay_callback(cb))
     }
 
     /// Setting this requires that TLS be set for all server connections.
@@ -649,9 +537,8 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn tls_required(mut self, tls_required: bool) -> Self {
-        self.tls_required = tls_required;
-        self
+    pub fn tls_required(self, tls_required: bool) -> Self {
+        Self(self.0.tls_required(tls_required))
     }
 
     /// Allows a particular TLS configuration to be set
@@ -674,56 +561,14 @@ impl ConnectionOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tls_connector(mut self, connector: tls::TlsConnector) -> Self {
-        self.tls_connector = Some(connector);
-        self.tls_required = true;
-        self
-    }
-}
-
-// This type exists to hold a reference count
-// for all high-level user-controlled structures.
-// Once all of the user structures drop,
-// the background IO system should flush
-// everything and shut down.
-#[derive(Debug)]
-pub(crate) struct ShutdownDropper {
-    shared_state: Arc<SharedState>,
-}
-
-impl Drop for ShutdownDropper {
-    fn drop(&mut self) {
-        self.shared_state.close();
-
-        inject_delay();
-        if let Some(mut threads) = self.shared_state.threads.lock().take() {
-            let inbound = threads.inbound.take().unwrap();
-            let outbound = threads.outbound.take().unwrap();
-
-            if let Err(error) = inbound.join() {
-                log::error!("error encountered in inbound thread: {:?}", error);
-            }
-            if let Err(error) = outbound.join() {
-                log::error!("error encountered in outbound thread: {:?}", error);
-            }
-        }
+    pub fn tls_connector(self, connector: tls::TlsConnector) -> Self {
+        Self(self.0.tls_connector(connector))
     }
 }
 
 /// A NATS connection.
 #[derive(Debug, Clone)]
-pub struct Connection {
-    sid: Arc<AtomicUsize>,
-    shared_state: Arc<SharedState>,
-    // we split the `ShutdownDropper` into
-    // a separate Arc from the `SharedState`
-    // because the `ShutdownDropper` will only
-    // be held by "user-facing" structures, and
-    // the `SharedState` may be held by background
-    // threads that we wish to terminate once
-    // all of the user-held structures are destroyed.
-    shutdown_dropper: Arc<ShutdownDropper>,
-}
+pub struct Connection(asynk::AsyncConnection);
 
 #[derive(Clone)]
 enum AuthStyle {
@@ -787,10 +632,20 @@ pub struct Message {
     pub reply: Option<String>,
     /// The `Message` contents.
     pub data: Vec<u8>,
-    pub(crate) responder: Option<Arc<SharedState>>,
+    /// Client for publishing on the reply subject.
+    pub(crate) client: Client,
 }
 
 impl Message {
+    pub(crate) fn from_async(msg: AsyncMessage) -> Message {
+        Message {
+            subject: msg.subject,
+            reply: msg.reply,
+            data: msg.data,
+            client: msg.client,
+        }
+    }
+
     /// Respond to a request message.
     ///
     /// # Example
@@ -804,17 +659,12 @@ impl Message {
     /// # }
     /// ```
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match (&self.responder, &self.reply) {
-            (Some(shared_state), Some(reply)) => {
-                shared_state.outbound.send_response(reply, msg.as_ref())
-            }
-            (None, None) => Err(Error::new(
+        match self.reply.as_ref() {
+            None => Err(Error::new(
                 ErrorKind::InvalidInput,
-                "No reply subject available",
+                "no reply subject available",
             )),
-            (Some(_), None) | (None, Some(_)) => unreachable!(
-                "`reply` and `shared_state` should either both be `Some` or both be `None`"
-            ),
+            Some(reply) => block_on(self.client.publish(reply, None, msg.as_ref())),
         }
     }
 }
@@ -853,7 +703,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
-        self.do_subscribe(subject, None)
+        block_on(self.0.subscribe(subject)).map(|s| Subscription(Arc::new(s.into())))
     }
 
     /// Create a queue subscription for the given NATS connection.
@@ -867,35 +717,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        self.do_subscribe(subject, Some(queue))
-    }
-
-    fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
-        let sid = self.sid.fetch_add(1, Ordering::Relaxed);
-        self.shared_state
-            .outbound
-            .send_sub_msg(subject, queue, sid, &self.shared_state)?;
-        let (sub, recv) = crossbeam_channel::unbounded();
-        {
-            let mut subs = self.shared_state.subs.write();
-            subs.insert(
-                sid,
-                SubscriptionState {
-                    subject: subject.to_string(),
-                    queue: queue.map(ToString::to_string),
-                    sender: sub,
-                },
-            );
-        }
-        // TODO(dlc) - Should we do a flush and check errors?
-        Ok(Subscription {
-            subject: subject.to_string(),
-            sid,
-            recv,
-            shared_state: self.shared_state.clone(),
-            shutdown_dropper: self.shutdown_dropper.clone(),
-            do_unsub: true,
-        })
+        block_on(self.0.queue_subscribe(subject, queue)).map(|s| Subscription(Arc::new(s.into())))
     }
 
     /// Publish a message on the given subject.
@@ -909,9 +731,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.shared_state
-            .outbound
-            .send_pub_msg(subject, None, msg.as_ref(), &self.shared_state)
+        block_on(self.0.publish(subject, msg))
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -932,12 +752,7 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.shared_state.outbound.send_pub_msg(
-            subject,
-            Some(reply),
-            msg.as_ref(),
-            &self.shared_state,
-        )
+        block_on(self.0.publish_request(subject, reply, msg))
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -952,7 +767,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}.{}", self.shared_state.id, nuid::next())
+        self.0.new_inbox()
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -967,13 +782,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        let reply = self.new_inbox();
-        let sub = self.subscribe(&reply)?;
-        self.publish_request(subject, &reply, msg)?;
-        match sub.next() {
-            Some(msg) => Ok(msg),
-            None => Err(Error::new(ErrorKind::NotConnected, "No response")),
-        }
+        block_on(self.0.request(subject, msg)).map(Message::from_async)
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -994,13 +803,12 @@ impl Connection {
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        let reply = self.new_inbox();
-        let sub = self.subscribe(&reply)?;
-        self.publish_request(subject, &reply, msg)?;
-        match sub.next_timeout(timeout) {
-            Ok(msg) => Ok(msg),
-            Err(_) => Err(Error::new(ErrorKind::TimedOut, "No response")),
-        }
+        block_on(async move {
+            futures::select! {
+                res = self.0.request(subject, msg).fuse() => res.map(Message::from_async),
+                _ = Timer::after(timeout).fuse() => Err(ErrorKind::TimedOut.into()),
+            }
+        })
     }
 
     /// Publish a message on the given subject as a request and allow multiple responses.
@@ -1015,10 +823,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
-        let reply = self.new_inbox();
-        let sub = self.subscribe(&reply)?;
-        self.publish_request(subject, &reply, msg)?;
-        Ok(sub)
+        block_on(self.0.request_multi(subject, msg)).map(|s| Subscription(Arc::new(s.into())))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -1035,7 +840,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)
+        block_on(self.0.flush())
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -1052,7 +857,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
-        self.shared_state.flush_timeout(duration)
+        block_on(self.0.flush_timeout(duration))
     }
 
     /// Close a NATS connection. All clones of
@@ -1073,7 +878,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn close(self) {
-        self.shared_state.close()
+        let _ = block_on(self.0.close());
     }
 
     /// Calculates the round trip time between this client and the server,
@@ -1105,30 +910,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn client_ip(&self) -> io::Result<std::net::IpAddr> {
-        let info = self.shared_state.info.read();
-        if info.client_ip.is_empty() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                &*format!(
-                    "client_ip was not provided by the server. \
-                    It is supported on servers above version 2.1.6. \
-                    The server version is {}",
-                    info.version
-                ),
-            ));
-        }
-
-        match info.client_ip.parse() {
-            Ok(addr) => Ok(addr),
-            Err(_) => Err(Error::new(
-                ErrorKind::InvalidData,
-                &*format!(
-                    "client_ip provided by the server cannot be parsed.
-                    The server provided IP: {}",
-                    info.client_ip
-                ),
-            )),
-        }
+        self.0.client_ip()
     }
 
     /// Returns the client ID as known by the most recently connected server.
@@ -1142,8 +924,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn client_id(&self) -> u64 {
-        let info = self.shared_state.info.read();
-        info.client_id
+        self.0.client_id()
     }
 
     /// Send an unsubscription for all subs then flush the connection, allowing any unprocessed
@@ -1180,6 +961,6 @@ impl Connection {
     /// # }
     /// ```
     pub fn drain(&self) -> io::Result<()> {
-        self.shared_state.drain()
+        block_on(self.0.drain())
     }
 }

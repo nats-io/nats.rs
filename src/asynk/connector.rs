@@ -12,8 +12,8 @@ use futures::prelude::*;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use smol::{Async, Timer};
 
-use crate::new_client::options::{AuthStyle, Options};
-use crate::new_client::proto::{self, ClientOp, ServerOp};
+use crate::asynk::options::{AuthStyle, Options};
+use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
 use crate::{connect::ConnectInfo, inject_io_failure, ServerInfo};
 
@@ -128,7 +128,7 @@ impl Connector {
 }
 
 /// Calculates how long to sleep for before connecting to a server.
-fn backoff(reconnects: usize) -> Duration {
+pub(crate) fn backoff(reconnects: usize) -> Duration {
     // Exponential backoff: 0ms, 1ms, 2ms, 4ms, 8ms, 16ms, ..., 4sec
     let base = if reconnects == 0 {
         Duration::from_millis(0)

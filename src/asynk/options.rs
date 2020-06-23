@@ -2,9 +2,10 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
+use crate::asynk::{AsyncConnection, Connection};
 use crate::creds_utils;
-use crate::new_client::{AsyncConnection, Connection};
 use crate::secure_wipe::SecureString;
 use crate::tls;
 
@@ -17,6 +18,7 @@ pub struct Options {
     pub(crate) reconnect_buffer_size: usize,
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
+    pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
     pub(crate) tls_connector: Option<tls::TlsConnector>,
     pub(crate) tls_required: bool,
@@ -32,6 +34,7 @@ impl fmt::Debug for Options {
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
+            .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
             .entry(
                 &"tls_connector",
@@ -56,6 +59,9 @@ impl Default for Options {
             max_reconnects: Some(60),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
+            reconnect_delay_callback: ReconnectDelayCallback(Box::new(
+                crate::asynk::connector::backoff,
+            )),
             close_callback: Callback(None),
             tls_connector: None,
             tls_required: false,
@@ -70,7 +76,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::new_client::Options::new();
+    /// let options = nats::asynk::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -85,7 +91,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::with_token("t0k3n!")
+    /// let nc = nats::asynk::Options::with_token("t0k3n!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -103,7 +109,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::with_user_pass("derek", "s3cr3t!")
+    /// let nc = nats::asynk::Options::with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -121,7 +127,7 @@ impl Options {
     ///
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::with_credentials("path/to/my.creds")
+    /// let nc = nats::asynk::Options::with_credentials("path/to/my.creds")
     ///     .connect("connect.ngs.global")?;
     /// # Ok(())
     /// # }
@@ -148,7 +154,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .with_name("My App")
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -165,7 +171,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .no_echo()
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -185,7 +191,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .max_reconnects(Some(3))
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -206,7 +212,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::new_client::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .reconnect_buffer_size(64 * 1024)
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
@@ -223,7 +229,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::new_client::Options::new();
+    /// let options = nats::asynk::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -238,7 +244,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::new_client::Options::new();
+    /// let options = nats::asynk::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
@@ -264,6 +270,23 @@ impl Options {
         F: Fn() + Send + Sync + 'static,
     {
         self.disconnect_callback = Callback(Some(Box::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed for calculating the backoff duration
+    /// to wait before a server reconnection attempt.
+    ///
+    /// The function takes the number of reconnects as an argument
+    /// and returns the `Duration` that should be waited before
+    /// making the next connection attempt.
+    ///
+    /// It is recommended that some random jitter is added to
+    /// your returned `Duration`.
+    pub fn set_reconnect_delay_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(usize) -> Duration + Send + Sync + 'static,
+    {
+        self.reconnect_delay_callback = ReconnectDelayCallback(Box::new(cb));
         self
     }
 
@@ -294,7 +317,7 @@ impl Options {
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     ///
-    /// let nc = nats::new_client::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .tls_required(true)
     ///     .connect("tls://demo.nats.io:4443")?;
     /// # Ok(())
@@ -320,7 +343,7 @@ impl Options {
     ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
     ///     .build()?;
     ///
-    /// let nc = nats::new_client::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .tls_connector(tls_connector)
     ///     .connect("tls://demo.nats.io:4443")?;
     /// # Ok(())
@@ -385,3 +408,5 @@ impl fmt::Debug for Callback {
             .finish()
     }
 }
+
+pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);

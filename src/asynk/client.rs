@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::io::{self, Error, ErrorKind, Write};
 use std::mem;
 use std::pin::Pin;
@@ -12,10 +13,10 @@ use futures::io::{AllowStdIo, BufReader, BufWriter};
 use futures::prelude::*;
 use smol::{Task, Timer};
 
-use crate::new_client::connector::Connector;
-use crate::new_client::message::AsyncMessage;
-use crate::new_client::options::Options;
-use crate::new_client::proto::{self, ClientOp, ServerOp};
+use crate::asynk::connector::Connector;
+use crate::asynk::message::AsyncMessage;
+use crate::asynk::options::Options;
+use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, ServerInfo};
 
 /// Client state.
@@ -56,7 +57,7 @@ struct State {
 struct Subscription {
     subject: String,
     queue_group: Option<String>,
-    messages: mpsc::UnboundedSender<AsyncMessage>,
+    messages: async_channel::Sender<AsyncMessage>,
 }
 
 /// A NATS client.
@@ -185,7 +186,7 @@ impl Client {
     }
 
     /// Closes the client.
-    pub(crate) async fn close(&mut self) -> io::Result<()> {
+    pub(crate) async fn close(&self) -> io::Result<()> {
         // Inject random delays when testing.
         inject_delay();
 
@@ -226,7 +227,7 @@ impl Client {
         &self,
         subject: &str,
         queue_group: Option<&str>,
-    ) -> io::Result<(u64, mpsc::UnboundedReceiver<AsyncMessage>)> {
+    ) -> io::Result<(u64, async_channel::Receiver<AsyncMessage>)> {
         // Inject random delays when testing.
         inject_delay();
 
@@ -253,7 +254,7 @@ impl Client {
         }
 
         // Register the subscription in the hash map.
-        let (sender, receiver) = mpsc::unbounded();
+        let (sender, receiver) = async_channel::unbounded();
         state.subscriptions.insert(
             sid,
             Subscription {
@@ -399,9 +400,6 @@ impl Client {
         // Inject random I/O failures when testing.
         inject_io_failure()?;
 
-        // Remove subscriptions whose handles were dropped.
-        state.subscriptions.retain(|_, subscription| !subscription.messages.is_closed());
-
         // Restart subscriptions that existed before the last reconnect.
         for (sid, subscription) in &state.subscriptions {
             // Send a SUB operation to the server.
@@ -495,7 +493,7 @@ impl Client {
                             },
                         };
 
-                        if subscription.messages.unbounded_send(msg).is_err() {
+                        if subscription.messages.try_send(msg).is_err() {
                             // If the channel is disconnected, remove the subscription.
                             if let Some(_) = state.subscriptions.remove(&sid) {
                                 // Send an UNSUB message and ignore errors.
@@ -519,6 +517,12 @@ impl Client {
 
         // The stream of operation is broken, meaning the connection was lost.
         Err(ErrorKind::ConnectionReset.into())
+    }
+}
+
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("Client").finish()
     }
 }
 

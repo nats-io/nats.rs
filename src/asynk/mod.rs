@@ -1,6 +1,6 @@
 //! A proof-of-concept client based on smol.
 
-mod client;
+pub(crate) mod client;
 mod connection;
 mod connector;
 mod message;

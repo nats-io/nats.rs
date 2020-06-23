@@ -5,20 +5,22 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use blocking::block_on;
-use futures::channel::mpsc;
 use futures::prelude::*;
 use smol::Timer;
 
-use crate::new_client::client::Client;
-use crate::new_client::message::{AsyncMessage, Message};
+use crate::asynk::client::Client;
+use crate::asynk::message::{AsyncMessage, Message};
 
 /// A subscription to a subject.
 pub struct AsyncSubscription {
     /// Subscription ID.
-    sid: u64,
+    pub(crate) sid: u64,
+
+    /// Subject.
+    pub(crate) subject: String,
 
     /// MSG operations received from the server.
-    messages: mpsc::UnboundedReceiver<AsyncMessage>,
+    pub(crate) messages: async_channel::Receiver<AsyncMessage>,
 
     /// Client associated with subscription.
     client: Client,
@@ -31,15 +33,21 @@ impl AsyncSubscription {
     /// Creates a subscription.
     pub(crate) fn new(
         sid: u64,
-        messages: mpsc::UnboundedReceiver<AsyncMessage>,
+        subject: String,
+        messages: async_channel::Receiver<AsyncMessage>,
         client: Client,
     ) -> AsyncSubscription {
         AsyncSubscription {
             sid,
+            subject,
             messages,
             client,
             active: true,
         }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Option<AsyncMessage> {
+        self.messages.try_recv().ok()
     }
 
     /// Unsubscribes and flushes the connection.

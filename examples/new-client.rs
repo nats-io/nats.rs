@@ -2,7 +2,7 @@ use std::io;
 use std::thread;
 use std::time::Duration;
 
-use nats::new_client::{Connection, Options};
+use nats::asynk::{Connection, Options};
 
 fn main() -> io::Result<()> {
     // Useful commands for testing:

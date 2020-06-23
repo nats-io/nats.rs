@@ -1,19 +1,17 @@
-use std::{io, sync::Arc, thread, time::Duration};
+use std::io;
+use std::{sync::Arc, thread, time::Duration};
 
-use crossbeam_channel::{Receiver, RecvTimeoutError};
+use async_mutex::Mutex;
+use blocking::block_on;
+use crossbeam_channel::{ RecvTimeoutError};
+use futures::prelude::*;
+use smol::Timer;
 
-use crate::{Message, SharedState, ShutdownDropper};
+use crate::{asynk, Message};
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
-pub struct Subscription {
-    pub(crate) subject: String,
-    pub(crate) sid: usize,
-    pub(crate) recv: Receiver<Message>,
-    pub(crate) shared_state: Arc<SharedState>,
-    pub(crate) do_unsub: bool,
-    pub(crate) shutdown_dropper: Arc<ShutdownDropper>,
-}
+pub struct Subscription(pub(crate) Arc<Mutex<asynk::AsyncSubscription>>);
 
 impl Subscription {
     /// Get the next message, or None if the subscription
@@ -30,7 +28,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next(&self) -> Option<Message> {
-        self.recv.iter().next()
+        block_on(async { self.0.lock().await.next().await }).map(Message::from_async)
     }
 
     /// Try to get the next message, or None if no messages
@@ -49,7 +47,10 @@ impl Subscription {
     /// # }
     /// ```
     pub fn try_next(&self) -> Option<Message> {
-        self.recv.try_iter().next()
+        self.0
+            .try_lock()
+            .and_then(|mut s| s.try_next())
+            .map(Message::from_async)
     }
 
     /// Get the next message, or a timeout error if no messages are available for timout.
@@ -64,7 +65,17 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next_timeout(&self, timeout: Duration) -> Result<Message, RecvTimeoutError> {
-        self.recv.recv_timeout(timeout)
+        block_on(async move {
+            futures::select! {
+                msg = async { self.0.lock().await.next().await }.fuse() => {
+                    match msg {
+                        Some(msg) => Ok(Message::from_async(msg)),
+                        None => Err(RecvTimeoutError::Disconnected),
+                    }
+                }
+                _ = Timer::after(timeout).fuse() => Err(RecvTimeoutError::Timeout),
+            }
+        })
     }
 
     /// Returns a blocking message iterator. Same as calling `iter()`.
@@ -147,18 +158,22 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_handler<F>(mut self, handler: F) -> Handler
+    pub fn with_handler<F>(self, handler: F) -> Handler
     where
         F: Fn(Message) -> io::Result<()> + Sync + Send + 'static,
     {
         // This will allow us to not have to capture the return. When it is dropped it
         // will not unsubscribe from the server.
-        self.do_unsub = false;
-        let r = self.recv.clone();
+        // self.do_unsub = false;
+        let (sid, subject, messages) = block_on(async {
+            let inner = self.0.lock().await;
+            (inner.sid, inner.subject.clone(), inner.messages.clone())
+        });
         thread::Builder::new()
-            .name(format!("nats_subscriber_{}_{}", self.sid, self.subject))
+            .name(format!("nats_subscriber_{}_{}", sid, subject))
             .spawn(move || {
-                for m in r.iter() {
+                while let Ok(m) = block_on(messages.recv()) {
+                    let m = Message::from_async(m);
                     if let Err(e) = handler(m) {
                         // TODO(dlc) - Capture for last error?
                         log::error!("Error in callback! {:?}", e);
@@ -167,13 +182,6 @@ impl Subscription {
             })
             .expect("threads should be spawnable");
         Handler { sub: self }
-    }
-
-    fn unsub(&mut self) -> io::Result<()> {
-        self.shared_state.outbound.send_unsub(self.sid)?;
-        self.do_unsub = false;
-        self.shared_state.subs.write().remove(&self.sid);
-        Ok(())
     }
 
     /// Unsubscribe a subscription immediately without draining.
@@ -189,8 +197,8 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn unsubscribe(mut self) -> io::Result<()> {
-        self.unsub()
+    pub fn unsubscribe(self) -> io::Result<()> {
+        Ok(())
     }
 
     /// Close a subscription. Same as `unsubscribe`
@@ -207,8 +215,8 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn close(mut self) -> io::Result<()> {
-        self.unsub()
+    pub fn close(self) -> io::Result<()> {
+        Ok(())
     }
 
     /// Send an unsubscription then flush the connection,
@@ -248,27 +256,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn drain(&mut self) -> io::Result<()> {
-        self.shared_state.outbound.send_unsub(self.sid)?;
-
-        self.do_unsub = false;
-
-        let ret = self
-            .shared_state
-            .flush_timeout(crate::DEFAULT_FLUSH_TIMEOUT);
-
-        self.shared_state.subs.write().remove(&self.sid);
-
-        ret
-    }
-}
-
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        if self.do_unsub {
-            if let Err(error) = self.unsub() {
-                log::error!("error unsubscribing during Subscription Drop: {:?}", error);
-            }
-        }
+        block_on(async { self.0.lock().await.drain().await })
     }
 }
 
@@ -311,7 +299,7 @@ impl Handler {
     /// # }
     /// ```
     pub fn unsubscribe(mut self) -> io::Result<()> {
-        self.sub.unsub()
+        self.sub.drain() // TODO(stjepang): is draining the right thing to do?
     }
 }
 
@@ -323,7 +311,7 @@ pub struct TryIter<'a> {
 impl<'a> Iterator for TryIter<'a> {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        self.subscription.recv.try_recv().ok()
+        self.subscription.try_next()
     }
 }
 
@@ -335,9 +323,10 @@ pub struct Iter<'a> {
 impl<'a> Iterator for Iter<'a> {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        self.subscription.recv.recv().ok()
+        self.subscription.next()
     }
 }
+
 /// An iterator over messages from a `Subscription`
 pub struct IntoIter {
     subscription: Subscription,
@@ -346,7 +335,7 @@ pub struct IntoIter {
 impl Iterator for IntoIter {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        self.subscription.recv.recv().ok()
+        self.subscription.next()
     }
 }
 
@@ -361,6 +350,6 @@ pub struct TimeoutIter<'a> {
 impl<'a> Iterator for TimeoutIter<'a> {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        self.subscription.recv.recv_timeout(self.to).ok()
+        self.subscription.next_timeout(self.to).ok()
     }
 }

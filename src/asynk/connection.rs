@@ -6,15 +6,15 @@ use blocking::block_on;
 use futures::prelude::*;
 use smol::Timer;
 
-use crate::new_client::client::Client;
-use crate::new_client::message::{AsyncMessage, Message};
-use crate::new_client::options::Options;
-use crate::new_client::subscription::{AsyncSubscription, Subscription};
+use crate::asynk::client::Client;
+use crate::asynk::message::{AsyncMessage, Message};
+use crate::asynk::options::Options;
+use crate::asynk::subscription::{AsyncSubscription, Subscription};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A NATS client connection.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AsyncConnection {
     client: Client,
 }
@@ -163,12 +163,12 @@ impl AsyncConnection {
     /// Unsubscribes all subscriptions and flushes the connection.
     ///
     /// Remaining messages can still be received by existing [`AsyncSubscription`]s.
-    pub async fn drain(&mut self) -> io::Result<()> {
+    pub async fn drain(&self) -> io::Result<()> {
         self.close().await
     }
 
     /// Closes the connection.
-    pub async fn close(&mut self) -> io::Result<()> {
+    pub async fn close(&self) -> io::Result<()> {
         self.client.close().await
     }
 
@@ -187,7 +187,12 @@ impl AsyncConnection {
         queue: Option<&str>,
     ) -> io::Result<AsyncSubscription> {
         let (sid, receiver) = self.client.subscribe(subject, queue).await?;
-        Ok(AsyncSubscription::new(sid, receiver, self.client.clone()))
+        Ok(AsyncSubscription::new(
+            sid,
+            subject.to_string(),
+            receiver,
+            self.client.clone(),
+        ))
     }
 }
 
@@ -293,12 +298,12 @@ impl Connection {
     /// Unsubscribes all subscriptions and flushes the connection.
     ///
     /// Remaining messages can still be received by existing [`Subscription`]s.
-    pub fn drain(&mut self) -> io::Result<()> {
+    pub fn drain(&self) -> io::Result<()> {
         block_on(self.0.drain())
     }
 
     /// Closes the connection.
-    pub fn close(&mut self) -> io::Result<()> {
+    pub fn close(&self) -> io::Result<()> {
         block_on(self.0.close())
     }
 }

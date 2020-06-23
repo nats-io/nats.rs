@@ -3,7 +3,7 @@ use std::io::{self, Error, ErrorKind};
 
 use blocking::block_on;
 
-use crate::new_client::client::Client;
+use crate::asynk::client::Client;
 
 /// A message received on a subject.
 pub struct AsyncMessage {
