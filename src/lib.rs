@@ -104,7 +104,7 @@
 
 #![recursion_limit = "1024"]
 // #![cfg_attr(test, deny(warnings))]
-#![warn(
+#![deny(
     missing_docs,
     future_incompatible,
     nonstandard_style,
