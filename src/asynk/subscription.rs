@@ -57,9 +57,9 @@ impl AsyncSubscription {
         if self.active {
             self.active = false;
 
-            // Send an UNSUB operation to the server.
-            self.client.unsubscribe(self.sid).await?;
+            // Flush and unsubscribe.
             self.client.flush().await?;
+            self.client.unsubscribe(self.sid).await?;
             Ok(())
         } else {
             Ok(())

@@ -169,6 +169,7 @@ impl AsyncConnection {
 
     /// Closes the connection.
     pub async fn close(&self) -> io::Result<()> {
+        self.client.flush().await?;
         self.client.close().await
     }
 

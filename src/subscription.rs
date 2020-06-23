@@ -165,15 +165,15 @@ impl Subscription {
         // This will allow us to not have to capture the return. When it is dropped it
         // will not unsubscribe from the server.
         // self.do_unsub = false;
-        let (sid, subject, messages) = block_on(async {
+        let (sid, subject) = block_on(async {
             let inner = self.0.lock().await;
-            (inner.sid, inner.subject.clone(), inner.messages.clone())
+            (inner.sid, inner.subject.clone())
         });
+        let sub = self.clone();
         thread::Builder::new()
             .name(format!("nats_subscriber_{}_{}", sid, subject))
             .spawn(move || {
-                while let Ok(m) = block_on(messages.recv()) {
-                    let m = Message::from_async(m);
+                for m in sub.iter() {
                     if let Err(e) = handler(m) {
                         // TODO(dlc) - Capture for last error?
                         log::error!("Error in callback! {:?}", e);
@@ -237,6 +237,8 @@ impl Subscription {
     ///
     /// ```
     /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
+    /// # use std::thread;
+    /// # use std::time::Duration;
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     ///
