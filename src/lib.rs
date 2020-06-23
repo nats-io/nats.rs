@@ -185,11 +185,10 @@ use crate::asynk::Options;
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
+mod asynk;
 mod connect;
 mod creds_utils;
 mod secure_wipe;
-
-pub mod asynk;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -429,7 +428,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        Ok(Connection(block_on(self.0.connect_async(nats_url))?))
+        Ok(Connection(block_on(self.0.connect(nats_url))?))
     }
 
     /// Set a callback to be executed when connectivity to

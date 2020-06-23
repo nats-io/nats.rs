@@ -234,7 +234,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect_async(self, nats_url: &str) -> io::Result<AsyncConnection> {
+    pub async fn connect(self, nats_url: &str) -> io::Result<AsyncConnection> {
         AsyncConnection::connect_with_options(nats_url, self).await
     }
 

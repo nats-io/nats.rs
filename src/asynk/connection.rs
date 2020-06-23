@@ -31,7 +31,7 @@ impl AsyncConnection {
 
     /// Connects a NATS client.
     pub async fn connect(url: &str) -> io::Result<AsyncConnection> {
-        Options::new().connect_async(url).await
+        Options::new().connect(url).await
     }
 
     /// Publishes a message.
