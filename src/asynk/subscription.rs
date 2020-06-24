@@ -21,10 +21,10 @@ pub struct Subscription {
     pub(crate) messages: async_channel::Receiver<Message>,
 
     /// Client associated with subscription.
-    client: Client,
+    pub(crate) client: Client,
 
     /// Whether the subscription is actively listening for new messages.
-    active: bool,
+    pub(crate) active: bool,
 }
 
 impl Subscription {

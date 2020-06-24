@@ -300,8 +300,10 @@ impl Handler {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn unsubscribe(mut self) -> io::Result<()> {
-        self.sub.drain() // TODO(stjepang): is draining the right thing to do?
+    pub fn unsubscribe(self) -> io::Result<()> {
+        let mut sub = block_on(self.sub.0.lock());
+        sub.active = false;
+        block_on(sub.client.unsubscribe(sub.sid))
     }
 }
 
