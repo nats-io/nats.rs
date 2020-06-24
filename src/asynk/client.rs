@@ -15,9 +15,8 @@ use smol::{Task, Timer};
 
 use crate::asynk::connector::Connector;
 use crate::asynk::message::Message;
-use crate::asynk::options::Options;
 use crate::asynk::proto::{self, ClientOp, ServerOp};
-use crate::{inject_delay, inject_io_failure, ServerInfo};
+use crate::{Options, inject_delay, inject_io_failure, ServerInfo};
 
 /// Client state.
 struct State {

@@ -19,11 +19,11 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("demo.nats.io")?;
 //!
-//! let nc2 = nats::ConnectionOptions::with_user_pass("derek", "s3cr3t!")
+//! let nc2 = nats::Options::with_user_pass("derek", "s3cr3t!")
 //!     .with_name("My Rust NATS App")
 //!     .connect("127.0.0.1")?;
 //!
-//! let nc3 = nats::ConnectionOptions::with_credentials("path/to/my.creds")
+//! let nc3 = nats::Options::with_credentials("path/to/my.creds")
 //!     .connect("connect.ngs.global")?;
 //!
 //! let tls_connector = nats::tls::builder()
@@ -31,7 +31,7 @@
 //!     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
 //!     .build()?;
 //!
-//! let nc4 = nats::ConnectionOptions::new()
+//! let nc4 = nats::Options::new()
 //!     .tls_connector(tls_connector)
 //!     .connect("tls://demo.nats.io:4443")?;
 //! # Ok(()) }
@@ -185,6 +185,7 @@ mod asynk;
 mod connect;
 mod creds_utils;
 mod secure_wipe;
+mod options;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -207,10 +208,16 @@ pub mod tls;
 /// subject.
 pub mod subscription;
 
+#[doc(hidden)]
+#[deprecated(
+    since = "0.5.1",
+    note = "this has been renamed to `Options`."
+)]
+pub type ConnectionOptions = Options;
+
 use std::{
     fmt,
     io::{self, Error, ErrorKind},
-    path::Path,
     sync::Arc,
     time::Duration,
 };
@@ -268,258 +275,9 @@ pub struct ServerInfo {
 }
 
 /// A configuration object for a NATS connection.
-#[derive(Debug, Default)]
-pub struct ConnectionOptions(asynk::Options);
+pub use options::{ Options};
 
-impl ConnectionOptions {
-    /// `ConnectionOptions` for establishing a new NATS `Connection`.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::ConnectionOptions::new();
-    /// let nc = options.connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new() -> ConnectionOptions {
-        Self(asynk::Options::new())
-    }
-
-    /// Authenticate with NATS using a token.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::with_token("t0k3n!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_token(token: &str) -> ConnectionOptions {
-        Self(asynk::Options::with_token(token))
-    }
-
-    /// Authenticate with NATS using a username and password.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::with_user_pass("derek", "s3cr3t!")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_user_pass(user: &str, password: &str) -> ConnectionOptions {
-        Self(asynk::Options::with_user_pass(user, password))
-    }
-
-    /// Authenticate with NATS using a credentials file
-    ///
-    /// # Example
-    /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::with_credentials("path/to/my.creds")
-    ///     .connect("connect.ngs.global")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_credentials(path: impl AsRef<Path>) -> ConnectionOptions {
-        Self(asynk::Options::with_credentials(path))
-    }
-
-    /// Add a name option to this configuration.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .with_name("My App")
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_name(self, name: &str) -> ConnectionOptions {
-        Self(self.0.with_name(name))
-    }
-
-    /// Select option to not deliver messages that we have published.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .no_echo()
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn no_echo(self) -> ConnectionOptions {
-        Self(self.0.no_echo())
-    }
-
-    /// Set the maximum number of reconnect attempts.
-    /// If no servers remain that are under this threshold,
-    /// all servers will still be attempted.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .max_reconnects(Some(3))
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn max_reconnects(self, max_reconnects: Option<usize>) -> ConnectionOptions {
-        Self(self.0.max_reconnects(max_reconnects))
-    }
-
-    /// Set the maximum amount of bytes to buffer
-    /// when accepting outgoing traffic in disconnected
-    /// mode.
-    ///
-    /// The default value is 8mb.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .reconnect_buffer_size(64 * 1024)
-    ///     .connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn reconnect_buffer_size(self, reconnect_buffer_size: usize) -> ConnectionOptions {
-        Self(self.0.reconnect_buffer_size(reconnect_buffer_size))
-    }
-
-    /// Establish a `Connection` with a NATS server.
-    ///
-    /// Multiple servers may be specified by separating
-    /// them with commas.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::ConnectionOptions::new();
-    /// let nc = options.connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// In the below case, the second server is configured
-    /// to use TLS but the first one is not. Using the
-    /// `tls_required` method can ensure that all
-    /// servers are connected to with TLS, if that is
-    /// your intention.
-    ///
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let options = nats::ConnectionOptions::new();
-    /// let nc = options.connect("nats://demo.nats.io:4222,tls://demo.nats.io:4443")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        Ok(Connection(block_on(self.0.connect(nats_url))?))
-    }
-
-    /// Set a callback to be executed when connectivity to
-    /// a server has been lost.
-    pub fn set_disconnect_callback<F>(self, cb: F) -> Self
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        Self(self.0.set_disconnect_callback(cb))
-    }
-
-    /// Set a callback to be executed when connectivity to a
-    /// server has been established.
-    pub fn set_reconnect_callback<F>(self, cb: F) -> Self
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        Self(self.0.set_reconnect_callback(cb))
-    }
-
-    /// Set a callback to be executed when the client has been
-    /// closed due to exhausting reconnect retries to known servers
-    /// or by completing a drain request.
-    pub fn set_close_callback<F>(self, cb: F) -> Self
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        Self(self.0.set_close_callback(cb))
-    }
-
-    /// Set a callback to be executed for calculating the backoff duration
-    /// to wait before a server reconnection attempt.
-    ///
-    /// The function takes the number of reconnects as an argument
-    /// and returns the `Duration` that should be waited before
-    /// making the next connection attempt.
-    ///
-    /// It is recommended that some random jitter is added to
-    /// your returned `Duration`.
-    pub fn set_reconnect_delay_callback<F>(self, cb: F) -> Self
-    where
-        F: Fn(usize) -> Duration + Send + Sync + 'static,
-    {
-        Self(self.0.set_reconnect_delay_callback(cb))
-    }
-
-    /// Setting this requires that TLS be set for all server connections.
-    ///
-    /// If you only want to use TLS for some server connections, you may
-    /// declare them separately in the connect string by prefixing them
-    /// with `tls://host:port` instead of `nats://host:port`.
-    ///
-    /// If you want to use a particular TLS configuration, see
-    /// the `nats::tls::tls_connector` method and the
-    /// `nats::ConnectionOptions::tls_connector` method below
-    /// to apply the desired configuration to all server connections.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
-    ///
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .tls_required(true)
-    ///     .connect("tls://demo.nats.io:4443")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn tls_required(self, tls_required: bool) -> Self {
-        Self(self.0.tls_required(tls_required))
-    }
-
-    /// Allows a particular TLS configuration to be set
-    /// for upgrading TCP connections to TLS connections.
-    ///
-    /// Note that this also enforces that TLS will be
-    /// enabled for all connections to all servers.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let tls_connector = nats::tls::builder()
-    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
-    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
-    ///     .build()?;
-    ///
-    /// let nc = nats::ConnectionOptions::new()
-    ///     .tls_connector(tls_connector)
-    ///     .connect("tls://demo.nats.io:4443")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn tls_connector(self, connector: tls::TlsConnector) -> Self {
-        Self(self.0.tls_connector(connector))
-    }
-}
+use options::AuthStyle;
 
 /// A NATS connection.
 #[derive(Debug, Clone)]
@@ -535,7 +293,7 @@ pub struct Connection(asynk::Connection);
 /// # }
 /// ```
 pub fn connect(nats_url: &str) -> io::Result<Connection> {
-    ConnectionOptions::new().connect(nats_url)
+    Options::new().connect(nats_url)
 }
 
 /// A `Message` that has been published to a NATS `Subject`.

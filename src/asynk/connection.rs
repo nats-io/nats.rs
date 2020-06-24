@@ -7,8 +7,8 @@ use smol::Timer;
 
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
-use crate::asynk::options::Options;
 use crate::asynk::subscription::Subscription;
+use crate::Options;
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 

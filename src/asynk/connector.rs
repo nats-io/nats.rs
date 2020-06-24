@@ -12,10 +12,9 @@ use futures::prelude::*;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use smol::{Async, Timer};
 
-use crate::asynk::options::{AuthStyle, Options};
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
-use crate::{connect::ConnectInfo, inject_io_failure, ServerInfo};
+use crate::{connect::ConnectInfo, inject_io_failure, ServerInfo, Options, AuthStyle};
 
 /// Maintains a list of servers and establishes connections.
 ///
