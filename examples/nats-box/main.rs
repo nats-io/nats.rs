@@ -35,9 +35,9 @@ fn main() -> CliResult {
     let args = Cli::from_args();
 
     let opts = if let Some(creds_path) = args.creds {
-        nats::ConnectionOptions::with_credentials(creds_path)
+        nats::Options::with_credentials(creds_path)
     } else {
-        nats::ConnectionOptions::new()
+        nats::Options::new()
     };
 
     let nc = opts
