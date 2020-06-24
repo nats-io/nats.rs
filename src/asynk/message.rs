@@ -3,7 +3,7 @@ use std::fmt;
 use crate::asynk::client::Client;
 
 /// A message received on a subject.
-pub struct AsyncMessage {
+pub struct Message {
     /// The subject this message came from.
     pub subject: String,
 
@@ -17,9 +17,9 @@ pub struct AsyncMessage {
     pub(crate) client: Client,
 }
 
-impl fmt::Debug for AsyncMessage {
+impl fmt::Debug for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("AsyncMessage")
+        f.debug_struct("Message")
             .field("subject", &self.subject)
             .field("reply", &self.reply)
             .field("length", &self.data.len())

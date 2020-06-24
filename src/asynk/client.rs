@@ -14,7 +14,7 @@ use futures::prelude::*;
 use smol::{Task, Timer};
 
 use crate::asynk::connector::Connector;
-use crate::asynk::message::AsyncMessage;
+use crate::asynk::message::Message;
 use crate::asynk::options::Options;
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, ServerInfo};
@@ -57,7 +57,7 @@ struct State {
 struct Subscription {
     subject: String,
     queue_group: Option<String>,
-    messages: async_channel::Sender<AsyncMessage>,
+    messages: async_channel::Sender<Message>,
 }
 
 /// A NATS client.
@@ -227,7 +227,7 @@ impl Client {
         &self,
         subject: &str,
         queue_group: Option<&str>,
-    ) -> io::Result<(u64, async_channel::Receiver<AsyncMessage>)> {
+    ) -> io::Result<(u64, async_channel::Receiver<Message>)> {
         // Inject random delays when testing.
         inject_delay();
 
@@ -484,7 +484,7 @@ impl Client {
                 } => {
                     // Send the message to matching subscription.
                     if let Some(subscription) = state.subscriptions.get(&sid) {
-                        let msg = AsyncMessage {
+                        let msg = Message {
                             subject,
                             reply: reply_to,
                             data: payload,

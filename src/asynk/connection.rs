@@ -6,27 +6,27 @@ use futures::prelude::*;
 use smol::Timer;
 
 use crate::asynk::client::Client;
-use crate::asynk::message::AsyncMessage;
+use crate::asynk::message::Message;
 use crate::asynk::options::Options;
-use crate::asynk::subscription::AsyncSubscription;
+use crate::asynk::subscription::Subscription;
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A NATS client connection.
 #[derive(Clone, Debug)]
-pub struct AsyncConnection {
+pub struct Connection {
     client: Client,
 }
 
-impl AsyncConnection {
+impl Connection {
     /// Connects on a URL with the given options.
     pub(crate) async fn connect_with_options(
         url: &str,
         options: Options,
-    ) -> io::Result<AsyncConnection> {
+    ) -> io::Result<Connection> {
         let client = Client::new(url, options)?;
         client.flush().await?;
-        Ok(AsyncConnection { client })
+        Ok(Connection { client })
     }
 
     /// Publishes a message.
@@ -52,7 +52,7 @@ impl AsyncConnection {
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<AsyncMessage> {
+    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         // Publish a request.
         let reply = self.new_inbox();
         let mut sub = self.subscribe(&reply).await?;
@@ -69,7 +69,7 @@ impl AsyncConnection {
         &self,
         subject: &str,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<AsyncSubscription> {
+    ) -> io::Result<Subscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply).await?;
@@ -80,16 +80,12 @@ impl AsyncConnection {
     }
 
     /// Creates a subscription.
-    pub async fn subscribe(&self, subject: &str) -> io::Result<AsyncSubscription> {
+    pub async fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
         self.do_subscribe(subject, None).await
     }
 
     /// Creates a queue subscription.
-    pub async fn queue_subscribe(
-        &self,
-        subject: &str,
-        queue: &str,
-    ) -> io::Result<AsyncSubscription> {
+    pub async fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
         self.do_subscribe(subject, Some(queue)).await
     }
 
@@ -156,7 +152,7 @@ impl AsyncConnection {
 
     /// Unsubscribes all subscriptions and flushes the connection.
     ///
-    /// Remaining messages can still be received by existing [`AsyncSubscription`]s.
+    /// Remaining messages can still be received by existing [`Subscription`]s.
     pub async fn drain(&self) -> io::Result<()> {
         self.close().await
     }
@@ -176,13 +172,9 @@ impl AsyncConnection {
         self.client.publish(subject, reply, msg.as_ref()).await
     }
 
-    async fn do_subscribe(
-        &self,
-        subject: &str,
-        queue: Option<&str>,
-    ) -> io::Result<AsyncSubscription> {
+    async fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
         let (sid, receiver) = self.client.subscribe(subject, queue).await?;
-        Ok(AsyncSubscription::new(
+        Ok(Subscription::new(
             sid,
             subject.to_string(),
             receiver,

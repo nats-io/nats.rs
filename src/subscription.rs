@@ -3,7 +3,7 @@ use std::{sync::Arc, thread, time::Duration};
 
 use async_mutex::Mutex;
 use blocking::block_on;
-use crossbeam_channel::{ RecvTimeoutError};
+use crossbeam_channel::RecvTimeoutError;
 use futures::prelude::*;
 use smol::Timer;
 
@@ -11,7 +11,7 @@ use crate::{asynk, Message};
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
-pub struct Subscription(pub(crate) Arc<Mutex<asynk::AsyncSubscription>>);
+pub struct Subscription(pub(crate) Arc<Mutex<asynk::Subscription>>);
 
 impl Subscription {
     /// Get the next message, or None if the subscription

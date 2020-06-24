@@ -180,8 +180,6 @@ use futures::prelude::*;
 use smol::Timer;
 
 use crate::asynk::client::Client;
-use crate::asynk::AsyncMessage;
-use crate::asynk::Options;
 
 mod asynk;
 mod connect;
@@ -271,7 +269,7 @@ pub struct ServerInfo {
 
 /// A configuration object for a NATS connection.
 #[derive(Debug, Default)]
-pub struct ConnectionOptions(Options);
+pub struct ConnectionOptions(asynk::Options);
 
 impl ConnectionOptions {
     /// `ConnectionOptions` for establishing a new NATS `Connection`.
@@ -285,7 +283,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn new() -> ConnectionOptions {
-        Self(Options::new())
+        Self(asynk::Options::new())
     }
 
     /// Authenticate with NATS using a token.
@@ -299,7 +297,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn with_token(token: &str) -> ConnectionOptions {
-        Self(Options::with_token(token))
+        Self(asynk::Options::with_token(token))
     }
 
     /// Authenticate with NATS using a username and password.
@@ -313,7 +311,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn with_user_pass(user: &str, password: &str) -> ConnectionOptions {
-        Self(Options::with_user_pass(user, password))
+        Self(asynk::Options::with_user_pass(user, password))
     }
 
     /// Authenticate with NATS using a credentials file
@@ -327,7 +325,7 @@ impl ConnectionOptions {
     /// # }
     /// ```
     pub fn with_credentials(path: impl AsRef<Path>) -> ConnectionOptions {
-        Self(Options::with_credentials(path))
+        Self(asynk::Options::with_credentials(path))
     }
 
     /// Add a name option to this configuration.
@@ -525,7 +523,7 @@ impl ConnectionOptions {
 
 /// A NATS connection.
 #[derive(Debug, Clone)]
-pub struct Connection(asynk::AsyncConnection);
+pub struct Connection(asynk::Connection);
 
 /// Connect to a NATS server at the given url.
 ///
@@ -555,7 +553,7 @@ pub struct Message {
 }
 
 impl Message {
-    pub(crate) fn from_async(msg: AsyncMessage) -> Message {
+    pub(crate) fn from_async(msg: asynk::Message) -> Message {
         Message {
             subject: msg.subject,
             reply: msg.reply,

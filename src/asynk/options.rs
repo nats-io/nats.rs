@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::asynk::AsyncConnection;
+use crate::asynk::Connection;
 use crate::creds_utils;
 use crate::secure_wipe::SecureString;
 use crate::tls;
@@ -140,8 +140,8 @@ impl Options {
     }
 
     /// Establishes a `Connection` with a NATS server asynchronously.
-    pub async fn connect(self, nats_url: &str) -> io::Result<AsyncConnection> {
-        AsyncConnection::connect_with_options(nats_url, self).await
+    pub async fn connect(self, nats_url: &str) -> io::Result<Connection> {
+        Connection::connect_with_options(nats_url, self).await
     }
 
     /// Sets a callback to be executed when connectivity to
