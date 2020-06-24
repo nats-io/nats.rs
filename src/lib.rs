@@ -145,7 +145,6 @@
     clippy::items_after_statements,
     clippy::map_flatten,
     clippy::map_unwrap_or,
-    clippy::map_unwrap_or_else,
     clippy::match_same_arms,
     clippy::maybe_infinite_iter,
     clippy::mem_forget,
