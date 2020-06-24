@@ -6,7 +6,6 @@ use std::{
 };
 
 use nats;
-use rand::{thread_rng, Rng};
 use structopt::StructOpt;
 
 /// Simple NATS bench tool
@@ -76,8 +75,7 @@ fn main() -> std::io::Result<()> {
         let nc = nc.clone();
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
-            let mut rng = thread_rng();
-            let msg: Vec<u8> = (0..message_size).map(|_| rng.gen::<u8>()).collect();
+            let msg: String = (0..message_size).map(|_| 'a').collect();
             barrier.wait();
             for _ in 0..messages {
                 nc.publish(&subject, &msg).unwrap();
