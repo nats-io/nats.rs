@@ -406,7 +406,7 @@ impl Client {
                 &mut writer,
                 ClientOp::Sub {
                     subject: subscription.subject.as_str(),
-                    queue_group: subscription.queue_group.as_ref().map(String::as_str),
+                    queue_group: subscription.queue_group.as_deref(),
                     sid: *sid,
                 },
             )
@@ -495,7 +495,7 @@ impl Client {
 
                         if subscription.messages.try_send(msg).is_err() {
                             // If the channel is disconnected, remove the subscription.
-                            if let Some(_) = state.subscriptions.remove(&sid) {
+                            if state.subscriptions.remove(&sid).is_some() {
                                 // Send an UNSUB message and ignore errors.
                                 if let Some(writer) = state.writer.as_mut() {
                                     let max_msgs = None;

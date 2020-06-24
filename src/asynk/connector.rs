@@ -186,6 +186,7 @@ async fn connect_addr(
     let tls_required = options.tls_required || server.tls_required || server_info.tls_required;
 
     // Upgrade to TLS if required.
+    #[allow(clippy::type_complexity)]
     let (reader, mut writer): (
         Pin<Box<dyn AsyncRead + Send>>,
         Pin<Box<dyn AsyncWrite + Send>>,
