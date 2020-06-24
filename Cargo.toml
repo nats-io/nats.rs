@@ -46,10 +46,6 @@ itoa = "0.4.6"
 blocking = "0.4.6"
 async-channel = "1.1.0"
 
-# Delete this dependency when the following issue gets fixed:
-# https://github.com/marshallpierce/rust-base64/issues/135
-base64 = "0.12.2"
-
 [dev-dependencies]
 criterion = "0.3.2"
 quicli = "0.4.0"
