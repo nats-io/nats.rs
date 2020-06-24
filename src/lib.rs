@@ -159,7 +159,6 @@
     clippy::print_stdout,
     clippy::pub_enum_variant_names,
     clippy::redundant_closure_for_method_calls,
-    clippy::result_map_unwrap_or_else,
     clippy::shadow_reuse,
     clippy::shadow_same,
     clippy::shadow_unrelated,
