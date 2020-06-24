@@ -273,7 +273,7 @@ impl Client {
         let mut state = self.state.lock().await;
 
         // Remove the subscription from the hash map.
-        if let Some(_) = state.subscriptions.remove(&sid) {
+        if state.subscriptions.remove(&sid).is_some() {
             // Send an UNSUB message and ignore errors.
             if let Some(writer) = state.writer.as_mut() {
                 let max_msgs = None;
