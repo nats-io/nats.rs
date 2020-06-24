@@ -205,11 +205,11 @@ async fn connect_addr(
         let stream = conn.await?;
 
         // Split the TLS stream into a reader and a writer.
-        let stream = piper::Arc::new(piper::Mutex::new(stream));
+        let stream = async_dup::Arc::new(async_dup::Mutex::new(stream));
         (Box::pin(stream.clone()), Box::pin(stream))
     } else {
         // Split the TCP stream into a reader and a writer.
-        let stream = piper::Arc::new(stream);
+        let stream = async_dup::Arc::new(stream);
         (Box::pin(stream.clone()), Box::pin(stream))
     };
 
