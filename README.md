@@ -11,7 +11,8 @@
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Crates.io](https://img.shields.io/crates/v/nats.svg)](https://crates.io/crates/nats)
 [![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
-[![Build Status](https://travis-ci.org/nats-io/nats.rs.svg?branch=master)](http://travis-ci.org/nats-io/nats.rs)
+[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
+
 
 ## Motivation
 
