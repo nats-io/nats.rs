@@ -1,0 +1,81 @@
+name: Rust
+
+on:
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  clippy_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            components: clippy
+            override: true
+      - run: rustup component add clippy
+      - uses: actions-rs/clippy-check@v1.0.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+  default:
+    name: Cargo Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+    - uses: actions/checkout@v1
+    - name: Cache target
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-target
+      with:
+        path: target
+        key: ${{ runner.os }}-${{ env.cache-name }}
+        restore-keys: |
+          ${{ runner.os }}-
+    - name: cargo test
+      run: |
+        rustup update
+        cargo test
+  fault-injection:
+    name: Fault Injection
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Cache target msrv
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-target
+      with:
+        path: target
+        key: ${{ runner.os }}-${{ env.cache-name }}
+        restore-keys: |
+          ${{ runner.os }}-
+    - name: fault injection test
+      run: |
+        rustup update
+        cargo test reconnect_test --features=fault_injection -- --ignored
+  msrv:
+    name: MSRV
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Cache target
+      uses: actions/cache@v1
+      env:
+        cache-name: cache-target-msrv
+      with:
+        path: target
+        key: ${{ runner.os }}-${{ env.cache-name }}
+        restore-keys: |
+          ${{ runner.os }}-
+    - name: MSRV check
+      run: |
+        set -eo pipefail
+        echo "msrv check"
+        rustup install 1.40.0
+        cargo +1.40.0 check
