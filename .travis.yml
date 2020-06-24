@@ -16,6 +16,6 @@ matrix:
       script: cargo test
     - rust: stable
       script: cargo test reconnect_test --features=fault_injection -- --ignored
-    - rust: 1.39.0
+    - rust: 1.40.0
       script: cargo check
   fast_finish: true
