@@ -61,7 +61,7 @@ jobs:
         cargo test reconnect_test --features=fault_injection -- --ignored
   msrv:
     name: MSRV
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
     - name: Cache target
