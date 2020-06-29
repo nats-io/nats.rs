@@ -24,7 +24,7 @@ impl Connection {
         url: &str,
         options: Options,
     ) -> io::Result<Connection> {
-        let client = Client::new(url, options)?;
+        let client = Client::connect(url, options).await?;
         client.flush().await?;
         Ok(Connection { client })
     }
