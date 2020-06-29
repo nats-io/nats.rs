@@ -208,7 +208,7 @@ pub mod subscription;
 
 #[doc(hidden)]
 #[deprecated(
-    since = "0.5.1",
+    since = "0.6.0",
     note = "this has been renamed to `Options`."
 )]
 pub type ConnectionOptions = Options;

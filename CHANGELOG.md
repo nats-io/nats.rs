@@ -1,7 +1,14 @@
-# Unreleased
+# 0.6.0
+
+## New Features
+
+* An experimental async `Connection` is now available
+  to adventurous explorers by calling
+  `Options::connect_async`.
 
 ## Breaking Changes
 
+* `ConnectionOptions` has been renamed `Options`.
 * The minimum supported Rust version (MSRV) is now
   1.40.0.
 

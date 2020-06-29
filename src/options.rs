@@ -249,6 +249,7 @@ impl Options {
 
 
     /// Establishes a `Connection` with a NATS server asynchronously.
+    #[doc(hidden)]
     pub async fn connect_async(self, nats_url: &str) -> io::Result<asynk::Connection> {
         asynk::Connection::connect_with_options(nats_url, self).await
     }
