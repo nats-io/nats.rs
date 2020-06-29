@@ -167,7 +167,7 @@ impl Client {
     pub(crate) async fn flush(&self) -> io::Result<()> {
         let pong = {
             // Inject random delays when testing.
-            inject_delay();
+            inject_delay().await;
 
             let mut state = self.state.lock().await;
 
@@ -202,7 +202,7 @@ impl Client {
     /// Closes the client.
     pub(crate) async fn close(&self) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay();
+        inject_delay().await;
 
         let mut state = self.state.lock().await;
 
@@ -243,7 +243,7 @@ impl Client {
         queue_group: Option<&str>,
     ) -> io::Result<(u64, async_channel::Receiver<Message>)> {
         // Inject random delays when testing.
-        inject_delay();
+        inject_delay().await;
 
         let mut state = self.state.lock().await;
 
@@ -283,7 +283,7 @@ impl Client {
     /// Unsubscribes from a subject.
     pub(crate) async fn unsubscribe(&self, sid: u64) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay();
+        inject_delay().await;
 
         let mut state = self.state.lock().await;
 
@@ -308,7 +308,7 @@ impl Client {
         msg: &[u8],
     ) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay();
+        inject_delay().await;
 
         let mut state = self.state.lock().await;
 
@@ -378,7 +378,7 @@ impl Client {
             }
 
             // Inject random delays when testing.
-            inject_delay();
+            inject_delay().await;
 
             let state = self.state.lock().await;
 
@@ -396,7 +396,7 @@ impl Client {
         writer: impl AsyncWrite + Send + 'static,
     ) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay();
+        inject_delay().await;
 
         let mut state = self.state.lock().await;
 
@@ -459,7 +459,7 @@ impl Client {
         // Handle operations received from the server.
         while let Some(op) = server_ops.try_next().await? {
             // Inject random delays when testing.
-            inject_delay();
+            inject_delay().await;
 
             let mut state = self.state.lock().await;
 

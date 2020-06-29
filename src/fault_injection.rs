@@ -4,11 +4,12 @@ use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use rand::{thread_rng, Rng};
+use smol::Timer;
 
 /// This function is useful for inducing random jitter into our operations that trigger
 /// cross-thread communication, shaking out more possible interleavings quickly. It gets fully
 /// eliminated by the compiler in non-test code.
-pub fn inject_delay() {
+pub async fn inject_delay() {
     use std::thread;
     use std::time::Duration;
 
@@ -37,7 +38,7 @@ pub fn inject_delay() {
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
-        thread::sleep(Duration::from_millis(duration));
+        Timer::after(Duration::from_millis(duration)).await;
     }
 
     if thread_rng().gen_ratio(1, 2) {
