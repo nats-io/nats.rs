@@ -133,14 +133,27 @@ pub(crate) fn backoff(reconnects: usize) -> Duration {
         Duration::from_millis(0)
     } else {
         let exp: u32 = (reconnects - 1).try_into().unwrap_or(std::u32::MAX);
+
+        let max = if cfg!(feature = "fault_injection") {
+            Duration::from_millis(20)
+        } else {
+            Duration::from_secs(4)
+        };
+
         cmp::min(
             Duration::from_millis(2_u64.saturating_pow(exp)),
-            Duration::from_secs(4),
+            max,
         )
     };
 
     // Add some random jitter.
-    let jitter = Duration::from_millis(thread_rng().gen_range(0, 1000));
+    let max_jitter = if cfg!(feature = "fault_injection") {
+        10
+    } else {
+        1000
+    };
+
+    let jitter = Duration::from_millis(thread_rng().gen_range(0, max_jitter));
 
     base + jitter
 }

@@ -192,7 +192,7 @@ mod fault_injection;
 use fault_injection::{inject_delay, inject_io_failure};
 
 #[cfg(not(feature = "fault_injection"))]
-fn inject_delay() {}
+async fn inject_delay() {}
 
 #[cfg(not(feature = "fault_injection"))]
 fn inject_io_failure() -> io::Result<()> {

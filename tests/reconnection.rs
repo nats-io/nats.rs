@@ -321,7 +321,7 @@ fn reconnect_test() {
                     .request_timeout(
                         "rust.tests.faulty_requests",
                         "Help me?",
-                        std::time::Duration::from_secs(2),
+                        std::time::Duration::from_millis(200),
                     )
                     .is_ok()
                 {
