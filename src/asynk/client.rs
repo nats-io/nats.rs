@@ -71,12 +71,16 @@ pub(crate) struct Client {
 
 impl Client {
     /// Creates a new client that will begin connecting in the background.
-    pub(crate) fn new(url: &str, options: Options) -> io::Result<Client> {
+    pub(crate) async fn connect(url: &str, options: Options) -> io::Result<Client> {
         // A channel for coordinating shutdown.
         let (shutdown, stop) = oneshot::channel();
 
         // A channel for coordinating flushes.
         let (flush_kicker, mut dirty) = mpsc::channel(1);
+
+        // Channels for coordinating initial connect.
+        let (run_sender, run_receiver) = oneshot::channel();
+        let (pong_sender, pong_receiver) = oneshot::channel();
 
         // The client state.
         let client = Client {
@@ -86,7 +90,7 @@ impl Client {
                 buffer: Buffer::new(options.reconnect_buffer_size),
                 next_sid: 1,
                 subscriptions: HashMap::new(),
-                pongs: VecDeque::new(),
+                pongs: VecDeque::from(vec![pong_sender]),
                 shutdown: Some(shutdown),
             })),
             server_info: Default::default(),
@@ -123,7 +127,10 @@ impl Client {
                     });
 
                     // Spawn the main task that processes messages from the server.
-                    let runner = Task::local(async move { client.run(connector).await });
+                    let runner = Task::local(async move {
+                        let res = client.run(connector).await;
+                        let _ = run_sender.send(res);
+                    });
 
                     // Wait until the client is closed.
                     let res = stop.await;
@@ -140,7 +147,15 @@ impl Client {
             }
         });
 
-        Ok(client)
+        futures::select! {
+            // The `run()` invocation has errored.
+            res = run_receiver.fuse() => {
+                res.expect("client has panicked")?;
+                panic!("client has stopped unexpectedly");
+            }
+            // Connection is established.
+            _ = pong_receiver.fuse() => Ok(client),
+        }
     }
 
     /// Retrieves server info as received by the most recent connection.
