@@ -177,8 +177,8 @@ use crate::asynk::client::Client;
 mod asynk;
 mod connect;
 mod creds_utils;
-mod secure_wipe;
 mod options;
+mod secure_wipe;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -199,10 +199,7 @@ fn inject_io_failure() -> io::Result<()> {
 pub mod subscription;
 
 #[doc(hidden)]
-#[deprecated(
-    since = "0.6.0",
-    note = "this has been renamed to `Options`."
-)]
+#[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
 
 use std::{
@@ -265,7 +262,7 @@ pub struct ServerInfo {
 }
 
 /// A configuration object for a NATS connection.
-pub use options::{ Options};
+pub use options::Options;
 
 use options::AuthStyle;
 

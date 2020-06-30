@@ -236,9 +236,10 @@ impl Options {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<crate::Connection> {
-        Ok(crate::Connection(smol::block_on(self.connect_async(nats_url))?))
+        Ok(crate::Connection(smol::block_on(
+            self.connect_async(nats_url),
+        )?))
     }
-
 
     /// Establishes a `Connection` with a NATS server asynchronously.
     #[doc(hidden)]
@@ -389,4 +390,3 @@ impl fmt::Debug for Callback {
 }
 
 pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
-

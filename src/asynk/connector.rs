@@ -45,7 +45,9 @@ impl Connector {
             tls_config
                 .root_store
                 .add_pem_file(&mut cursor)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))?;
+                .map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid certificate file")
+                })?;
         }
 
         let mut connector = Connector {
