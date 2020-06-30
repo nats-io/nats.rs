@@ -1,10 +1,11 @@
+use std::convert::TryFrom;
 use std::io::{self, Error, ErrorKind};
 use std::str::FromStr;
 
 use futures::prelude::*;
 
 use crate::connect::ConnectInfo;
-use crate::{inject_io_failure, ServerInfo};
+use crate::{inject_io_failure, ServerInfo, Headers};
 
 /// A protocol operation sent by the server.
 #[derive(Debug)]
@@ -15,6 +16,16 @@ pub(crate) enum ServerOp {
     /// `MSG <subject> <sid> [reply-to] <#bytes>\r\n[payload]\r\n`
     Msg {
         subject: String,
+        sid: u64,
+        reply_to: Option<String>,
+        payload: Vec<u8>,
+    },
+
+    /// `HMSG <subject> <sid> [reply-to] <# header bytes> <# total bytes>\r\n<version
+    /// line>\r\n[headers]\r\n\r\n[payload]\r\n`
+    Hmsg {
+        subject: String,
+        headers: Headers,
         sid: u64,
         reply_to: Option<String>,
         payload: Vec<u8>,
@@ -123,6 +134,94 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
         }));
     }
 
+    if line_uppercase.starts_with("HMSG") {
+        // Extract whitespace-delimited arguments that come after "MSG".
+        let args = line["HMSG".len()..]
+            .split_whitespace()
+            .filter(|s| !s.is_empty());
+        let args = args.collect::<Vec<_>>();
+
+        // Parse the operation syntax:
+        // `HMSG <subject> <sid> [reply-to] <# header bytes>
+        // <# total bytes>\r\n<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
+        let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..] {
+            [subject, sid, num_header_bytes, num_bytes] => (subject, sid, None, num_header_bytes, num_bytes),
+            [subject, sid, reply_to, num_header_bytes, num_bytes] => (subject, sid, Some(reply_to), num_header_bytes, num_bytes),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "invalid number of arguments after HMSG",
+                ))
+            }
+        };
+
+        // Convert the slice into an owned string.
+        let subject = subject.to_string();
+
+        // Parse the subject ID.
+        let sid = u64::from_str(sid).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "cannot parse sid argument after HMSG",
+            )
+        })?;
+
+        // Convert the slice into an owned string.
+        let reply_to = reply_to.map(ToString::to_string);
+
+        // Parse the number of payload bytes.
+        let num_header_bytes = u32::from_str(num_header_bytes).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "cannot parse the number of header bytes argument after HMSG",
+            )
+        })?;
+
+        // Parse the number of payload bytes.
+        let num_bytes = u32::from_str(num_bytes).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "cannot parse the number of bytes argument after HMSG",
+            )
+        })?;
+
+        if num_bytes <= num_header_bytes {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "number of header bytes was greater than or \
+                equal to the total number of bytes after HMSG",
+            ));
+        }
+
+        let num_payload_bytes = num_bytes - num_header_bytes;
+
+        // `HMSG <subject> <sid> [reply-to]
+        // <# header bytes> <# total bytes>\r\n
+        // <version line>\r\n[headers]\r\n\r\n[payload]\r\n`
+
+        // Read the header payload.
+        let mut header_payload = Vec::new();
+        header_payload.resize(num_header_bytes as usize, 0_u8);
+        stream.read_exact(&mut header_payload[..]).await?;
+
+        let headers = Headers::try_from(&*header_payload)?;
+
+        // Read the payload.
+        let mut payload = Vec::new();
+        payload.resize(num_payload_bytes as usize, 0_u8);
+        stream.read_exact(&mut payload[..]).await?;
+        // Read "\r\n".
+        stream.read_exact(&mut [0_u8; 2]).await?;
+
+        return Ok(Some(ServerOp::Hmsg {
+            subject,
+            headers,
+            sid,
+            reply_to,
+            payload,
+        }));
+    }
+
     if line_uppercase.starts_with("-ERR") {
         // Extract the message argument.
         let msg = line["-ERR".len()..].trim().trim_matches('\'').to_string();
@@ -143,6 +242,14 @@ pub(crate) enum ClientOp<'a> {
     Pub {
         subject: &'a str,
         reply_to: Option<&'a str>,
+        payload: &'a [u8],
+    },
+
+    /// `HPUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n`
+    Hpub {
+        subject: &'a str,
+        reply_to: Option<&'a str>,
+        headers: &'a Headers,
         payload: &'a [u8],
     },
 
@@ -194,6 +301,45 @@ pub(crate) async fn encode(
                 .await?;
             stream.write_all(b"\r\n").await?;
 
+            stream.write_all(payload).await?;
+            stream.write_all(b"\r\n").await?;
+        }
+
+        ClientOp::Hpub {
+            subject,
+            reply_to,
+            headers,
+            payload,
+        } => {
+            stream.write_all(b"HPUB ").await?;
+            stream.write_all(subject.as_bytes()).await?;
+            stream.write_all(b" ").await?;
+
+            if let Some(reply_to) = reply_to {
+                stream.write_all(reply_to.as_bytes()).await?;
+                stream.write_all(b" ").await?;
+            }
+
+            let header_bytes = headers.to_bytes();
+
+            let header_len = header_bytes.len();
+            let total_len = header_len + payload.len();
+
+            let mut hlen_buf = itoa::Buffer::new();
+            stream
+                .write_all(hlen_buf.format(header_len).as_bytes())
+                .await?;
+
+            stream.write_all(b" ").await?;
+
+            let mut tlen_buf = itoa::Buffer::new();
+            stream
+                .write_all(tlen_buf.format(total_len).as_bytes())
+                .await?;
+
+            stream.write_all(b"\r\n").await?;
+
+            stream.write_all(&header_bytes).await?;
             stream.write_all(payload).await?;
             stream.write_all(b"\r\n").await?;
         }

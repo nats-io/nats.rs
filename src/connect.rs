@@ -56,6 +56,9 @@ pub struct ConnectInfo {
     /// Client authorization token (if auth_required is set)
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub auth_token: Option<SecureString>,
+
+    /// Whether the client supports the usage of headers.
+    pub headers: bool,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]

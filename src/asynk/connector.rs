@@ -240,6 +240,7 @@ async fn connect_addr(
         user_jwt: None,
         signature: None,
         echo: !options.no_echo,
+        headers: true,
     };
 
     // Fill in the info that authenticates the client.
