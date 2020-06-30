@@ -644,7 +644,7 @@ impl Connection {
     /// Publish a message which may have a reply subject or headers set.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.subscribe("foo.headers")?;
