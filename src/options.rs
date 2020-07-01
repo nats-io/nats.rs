@@ -249,7 +249,7 @@ impl Options {
 
     /// Set a callback to be executed when connectivity to
     /// a server has been lost.
-    pub fn set_disconnect_callback<F>(mut self, cb: F) -> Self
+    pub fn disconnect_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
@@ -259,18 +259,18 @@ impl Options {
 
     /// Set a callback to be executed when connectivity to a
     /// server has been established.
-    pub fn set_reconnect_callback<F>(mut self, cb: F) -> Self
+    pub fn reconnect_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.disconnect_callback = Callback(Some(Box::new(cb)));
+        self.reconnect_callback = Callback(Some(Box::new(cb)));
         self
     }
 
     /// Set a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
-    pub fn set_close_callback<F>(mut self, cb: F) -> Self
+    pub fn close_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
     {
@@ -287,7 +287,7 @@ impl Options {
     ///
     /// It is recommended that some random jitter is added to
     /// your returned `Duration`.
-    pub fn set_reconnect_delay_callback<F>(mut self, cb: F) -> Self
+    pub fn reconnect_delay_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
     {
