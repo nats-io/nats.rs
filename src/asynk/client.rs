@@ -16,7 +16,7 @@ use smol::{Task, Timer};
 use crate::asynk::connector::Connector;
 use crate::asynk::message::Message;
 use crate::asynk::proto::{self, ClientOp, ServerOp};
-use crate::{inject_delay, inject_io_failure, Options, ServerInfo};
+use crate::{inject_delay, inject_io_failure, Options, ServerInfo, Headers};
 
 /// Client state.
 struct State {
@@ -300,11 +300,12 @@ impl Client {
         Ok(())
     }
 
-    /// Publishes a message with optional reply subject.
+    /// Publishes a message with optional reply subject and headers.
     pub(crate) async fn publish(
         &self,
         subject: &str,
         reply_to: Option<&str>,
+        headers: Option<&Headers>,
         msg: &[u8],
     ) -> io::Result<()> {
         // Inject random delays when testing.
@@ -317,10 +318,19 @@ impl Client {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
-        let op = ClientOp::Pub {
-            subject,
-            reply_to,
-            payload: msg,
+        let op = if let Some(headers) = headers {
+            ClientOp::Hpub {
+                subject,
+                reply_to,
+                payload: msg,
+                headers
+            }
+        } else {
+            ClientOp::Pub {
+                subject,
+                reply_to,
+                payload: msg,
+            }
         };
 
         match state.writer.as_mut() {
@@ -502,6 +512,43 @@ impl Client {
                             subject,
                             reply: reply_to,
                             data: payload,
+                            headers: None,
+                            client: Client {
+                                state: self.state.clone(),
+                                server_info: self.server_info.clone(),
+                            },
+                        };
+
+                        if subscription.messages.try_send(msg).is_err() {
+                            // If the channel is disconnected, remove the subscription.
+                            if state.subscriptions.remove(&sid).is_some() {
+                                // Send an UNSUB message and ignore errors.
+                                if let Some(writer) = state.writer.as_mut() {
+                                    let max_msgs = None;
+                                    let _ =
+                                        proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
+                                            .await;
+                                    let _ = state.flush_kicker.try_send(());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ServerOp::Hmsg {
+                    subject,
+                    headers,
+                    sid,
+                    reply_to,
+                    payload,
+                } => {
+                    // Send the message to matching subscription.
+                    if let Some(subscription) = state.subscriptions.get(&sid) {
+                        let msg = Message {
+                            subject,
+                            reply: reply_to,
+                            data: payload,
+                            headers: Some(headers),
                             client: Client {
                                 state: self.state.clone(),
                                 server_info: self.server_info.clone(),

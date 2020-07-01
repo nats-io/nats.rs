@@ -220,6 +220,7 @@ impl Connector {
             user_jwt: None,
             signature: None,
             echo: !self.options.no_echo,
+            headers: true,
         };
 
         // Fill in the info that authenticates the client.

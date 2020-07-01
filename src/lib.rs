@@ -175,6 +175,7 @@ use smol::Timer;
 use crate::asynk::client::Client;
 
 mod asynk;
+mod headers;
 mod connect;
 mod creds_utils;
 mod options;
@@ -211,7 +212,12 @@ use std::{
 
 use serde::Deserialize;
 
-pub use subscription::Subscription;
+pub use {
+    subscription::Subscription,
+    options::Options,
+    headers::Headers,
+};
+
 
 #[doc(hidden)]
 pub use connect::ConnectInfo;
@@ -261,9 +267,6 @@ pub struct ServerInfo {
     pub client_ip: String,
 }
 
-/// A configuration object for a NATS connection.
-pub use options::Options;
-
 use options::AuthStyle;
 
 /// A NATS connection.
@@ -295,6 +298,9 @@ pub struct Message {
     pub data: Vec<u8>,
     /// Client for publishing on the reply subject.
     pub(crate) client: Client,
+    /// Optional headers associated with this `Message`.
+    pub headers: Option<Headers>,
+
 }
 
 impl Message {
@@ -304,6 +310,7 @@ impl Message {
             reply: msg.reply,
             data: msg.data,
             client: msg.client,
+            headers: msg.headers,
         }
     }
 
@@ -325,7 +332,7 @@ impl Message {
                 ErrorKind::InvalidInput,
                 "no reply subject available",
             )),
-            Some(reply) => block_on(self.client.publish(reply, None, msg.as_ref())),
+            Some(reply) => block_on(self.client.publish(reply, None, None, msg.as_ref())),
         }
     }
 }
@@ -621,5 +628,32 @@ impl Connection {
     /// ```
     pub fn drain(&self) -> io::Result<()> {
         block_on(self.0.drain())
+    }
+
+    /// Publish a message which may have a reply subject or headers set.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let sub = nc.subscribe("foo.headers")?;
+    /// let headers = [("header1", "value1"),
+    ///                ("header2", "value2")].iter().collect();
+    /// let reply_to = None;
+    /// nc.publish_with_reply_or_headers("foo.headers", reply_to, Some(&headers), "Hello World!")?;
+    /// nc.flush()?;
+    /// let message = sub.next_timeout(std::time::Duration::from_secs(2)).unwrap();
+    /// assert_eq!(message.headers.unwrap().len(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn publish_with_reply_or_headers(
+        &self,
+        subject: &str,
+        reply: Option<&str>,
+        headers: Option<&Headers>,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<()> {
+        block_on(self.0.publish_with_reply_or_headers(subject, reply, headers, msg.as_ref()))
     }
 }
