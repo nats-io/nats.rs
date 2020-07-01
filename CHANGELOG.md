@@ -13,6 +13,7 @@
   TLS functionality has been removed, and now you can
   supply certificates with the
   `Options::add_root_certificate` method.
+* `ServerInfo` has been made non-public.
 
 # 0.6.0
 
