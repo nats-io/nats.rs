@@ -26,13 +26,8 @@
 //! let nc3 = nats::Options::with_credentials("path/to/my.creds")
 //!     .connect("connect.ngs.global")?;
 //!
-//! let tls_connector = nats::tls::builder()
-//!     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
-//!     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
-//!     .build()?;
-//!
 //! let nc4 = nats::Options::new()
-//!     .tls_connector(tls_connector)
+//!     .add_root_certificate("my-certs.pem")
 //!     .connect("tls://demo.nats.io:4443")?;
 //! # Ok(()) }
 //! ```
@@ -183,8 +178,8 @@ mod asynk;
 mod headers;
 mod connect;
 mod creds_utils;
-mod secure_wipe;
 mod options;
+mod secure_wipe;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -200,18 +195,12 @@ fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }
 
-/// Functionality relating to TLS configuration
-pub mod tls;
-
 /// Functionality relating to subscribing to a
 /// subject.
 pub mod subscription;
 
 #[doc(hidden)]
-#[deprecated(
-    since = "0.6.0",
-    note = "this has been renamed to `Options`."
-)]
+#[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
 
 use std::{
@@ -225,7 +214,7 @@ use serde::Deserialize;
 
 pub use {
     subscription::Subscription,
-    options::{ Options},
+    options::Options,
     headers::Headers,
 };
 
