@@ -135,7 +135,7 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
     }
 
     if line_uppercase.starts_with("HMSG") {
-        // Extract whitespace-delimited arguments that come after "MSG".
+        // Extract whitespace-delimited arguments that come after "HMSG".
         let args = line["HMSG".len()..]
             .split_whitespace()
             .filter(|s| !s.is_empty());
