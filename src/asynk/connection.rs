@@ -8,7 +8,7 @@ use smol::Timer;
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
 use crate::asynk::subscription::Subscription;
-use crate::Options;
+use crate::{Options, Headers};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -31,7 +31,7 @@ impl Connection {
 
     /// Publishes a message.
     pub async fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.do_publish(subject, None, msg).await
+        self.publish_with_reply_or_headers(subject, None, None, msg).await
     }
 
     /// Publishes a message with a reply subject.
@@ -42,7 +42,7 @@ impl Connection {
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         self.client
-            .publish(subject, Some(reply), msg.as_ref())
+            .publish(subject, Some(reply), None, msg.as_ref())
             .await
     }
 
@@ -56,7 +56,7 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let mut sub = self.subscribe(&reply).await?;
-        self.do_publish(subject, Some(reply.as_str()), msg).await?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg).await?;
 
         // Wait for the response.
         sub.next()
@@ -73,7 +73,7 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply).await?;
-        self.do_publish(subject, Some(reply.as_str()), msg).await?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg).await?;
 
         // Return the subscription.
         Ok(sub)
@@ -163,13 +163,15 @@ impl Connection {
         self.client.close().await
     }
 
-    async fn do_publish(
+    /// Publish a message which may have a reply subject or headers set.
+    pub async fn publish_with_reply_or_headers(
         &self,
         subject: &str,
         reply: Option<&str>,
+        headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.client.publish(subject, reply, msg.as_ref()).await
+        self.client.publish(subject, reply, headers, msg.as_ref()).await
     }
 
     async fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
