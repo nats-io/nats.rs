@@ -158,9 +158,6 @@ impl Headers {
                 buf.extend_from_slice(b"\r\n");
             }
         }
-        if self.inner.is_empty() {
-            buf.extend_from_slice(b"\r\n");
-        }
         buf.extend_from_slice(b"\r\n");
         buf
     }
