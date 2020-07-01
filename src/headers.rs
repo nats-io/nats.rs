@@ -7,7 +7,7 @@ use std::{
 
 use log::trace;
 
-/// A multi-map for storing
+/// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Headers {
     /// A multi-map from header name to a set of values for that header
@@ -21,7 +21,7 @@ impl FromIterator<(String, String)> for Headers {
     {
         let mut inner = HashMap::default();
         for (k, v) in iter {
-            let entry = inner.entry(k).or_insert(HashSet::default());
+            let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
         Headers { inner }
@@ -37,7 +37,7 @@ impl<'a> FromIterator<(&'a String, &'a String)> for Headers {
         for (k, v) in iter {
             let k = k.to_string();
             let v = v.to_string();
-            let entry = inner.entry(k).or_insert(HashSet::default());
+            let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
         Headers { inner }
@@ -53,7 +53,7 @@ impl<'a> FromIterator<&'a (&'a String, &'a String)> for Headers {
         for (k, v) in iter {
             let k = k.to_string();
             let v = v.to_string();
-            let entry = inner.entry(k).or_insert(HashSet::default());
+            let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
         Headers { inner }
@@ -69,7 +69,7 @@ impl<'a> FromIterator<(&'a str, &'a str)> for Headers {
         for (k, v) in iter {
             let k = k.to_string();
             let v = v.to_string();
-            let entry = inner.entry(k).or_insert(HashSet::default());
+            let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
         Headers { inner }
@@ -85,7 +85,7 @@ impl<'a> FromIterator<&'a (&'a str, &'a str)> for Headers {
         for (k, v) in iter {
             let k = k.to_string();
             let v = v.to_string();
-            let entry = inner.entry(k).or_insert(HashSet::default());
+            let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
         Headers { inner }
@@ -123,7 +123,7 @@ impl TryFrom<&[u8]> for Headers {
             let splits = line.split(':').map(str::trim).collect::<Vec<_>>();
             match splits[..] {
                 [k, v] => {
-                    let entry = inner.entry(k.to_string()).or_insert(HashSet::default());
+                    let entry = inner.entry(k.to_string()).or_insert_with(HashSet::default);
                     entry.insert(v.to_string());
                 }
                 [""] => continue,
