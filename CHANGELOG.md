@@ -1,28 +1,3 @@
-# Unreleased
-
-## New Features
-
-* Support has been added for NATS Headers
-  via the `Connection::publish_with_reply_or_headers`
-  method.
-
-## Breaking Changes
-
-* The underlying TLS implementation has been switched
-  from native-tls to rustls. The previously exported
-  TLS functionality has been removed, and now you can
-  supply certificates with the
-  `Options::add_root_certificate` method.
-* `ServerInfo` has been made non-public.
-* `Options::set_disconnect_callback` is renamed
-  `Options::disconnect_callback`.
-* `Options::set_reconnect_callback` is renamed
-  `Options::reconnect_callback`.
-* `Options::set_close_callback` is renamed
-  `Options::close_callback`.
-* `Options::set_reconnect_delay_callback` is renamed
-  `Options::reconnect_delay_callback`.
-
 # 0.6.0
 
 ## New Features

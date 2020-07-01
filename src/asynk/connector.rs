@@ -4,20 +4,17 @@ use std::convert::TryInto;
 use std::io::{self, Error, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
-use async_tls::TlsConnector;
 use blocking::unblock;
 use futures::io::BufReader;
 use futures::prelude::*;
 use rand::{seq::SliceRandom, thread_rng, Rng};
-use rustls::ClientConfig;
 use smol::{Async, Timer};
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
-use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
+use crate::{connect::ConnectInfo, inject_io_failure, ServerInfo, Options, AuthStyle};
 
 /// Maintains a list of servers and establishes connections.
 ///
@@ -30,30 +27,14 @@ pub(crate) struct Connector {
 
     /// Configured options for establishing connections.
     options: Options,
-
-    /// TLS connector.
-    tls: TlsConnector,
 }
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
     pub(crate) fn new(url: &str, options: Options) -> io::Result<Connector> {
-        let mut tls_config = ClientConfig::new();
-        for path in &options.certificates {
-            let contents = std::fs::read(path)?;
-            let mut cursor = io::Cursor::new(contents);
-            tls_config
-                .root_store
-                .add_pem_file(&mut cursor)
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid certificate file")
-                })?;
-        }
-
         let mut connector = Connector {
             attempts: HashMap::new(),
             options,
-            tls: TlsConnector::from(Arc::new(tls_config)),
         };
 
         // Add all URLs in the comma-separated list.
@@ -118,7 +99,7 @@ impl Connector {
                     Timer::after(sleep_duration).await;
 
                     // Try connecting to this address.
-                    let res = self.connect_addr(addr, server).await;
+                    let res = connect_addr(addr, server, &self.options).await;
 
                     // Check if connecting worked out.
                     let (server_info, reader, writer) = match res {
@@ -143,143 +124,6 @@ impl Connector {
             }
         }
     }
-
-    /// Attempts to establish a connection to a single socket address.
-    async fn connect_addr(
-        &self,
-        addr: SocketAddr,
-        server: &Server,
-    ) -> io::Result<(
-        ServerInfo,
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
-    )> {
-        // Inject random I/O failures when testing.
-        inject_io_failure()?;
-
-        // Connect to the remote socket.
-        let mut stream = Async::<TcpStream>::connect(addr).await?;
-
-        // Expect an INFO message.
-        let mut line = crate::SecureVec::with_capacity(512);
-        while !line.ends_with(b"\r\n") {
-            let byte = &mut [0];
-            stream.read_exact(byte).await?;
-            line.push(byte[0]);
-        }
-        let server_info = match proto::decode(&line[..]).await? {
-            Some(ServerOp::Info(server_info)) => server_info,
-            Some(op) => {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("expected INFO, received: {:?}", op),
-                ))
-            }
-            None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
-        };
-
-        // Check if TLS authentication is required:
-        // - Has `self.options.tls_required(true)` been set?
-        // - Was the server address prefixed with `tls://`?
-        // - Does the INFO line contain `tls_required: true`?
-        let tls_required =
-            self.options.tls_required || server.tls_required || server_info.tls_required;
-
-        // Upgrade to TLS if required.
-        #[allow(clippy::type_complexity)]
-        let (reader, mut writer): (
-            Pin<Box<dyn AsyncRead + Send>>,
-            Pin<Box<dyn AsyncWrite + Send>>,
-        ) = if tls_required {
-            // Inject random I/O failures when testing.
-            inject_io_failure()?;
-
-            // Connect using TLS.
-            let stream = self.tls.connect(&server.host, stream).await?;
-
-            // Split the TLS stream into a reader and a writer.
-            let stream = async_dup::Arc::new(async_dup::Mutex::new(stream));
-            (Box::pin(stream.clone()), Box::pin(stream))
-        } else {
-            // Split the TCP stream into a reader and a writer.
-            let stream = async_dup::Arc::new(stream);
-            (Box::pin(stream.clone()), Box::pin(stream))
-        };
-
-        // Data that will be formatted as a CONNECT message.
-        let mut connect_info = ConnectInfo {
-            tls_required,
-            name: self.options.name.clone().map(SecureString::from),
-            pedantic: false,
-            verbose: false,
-            lang: crate::LANG.to_string(),
-            version: crate::VERSION.to_string(),
-            user: None,
-            pass: None,
-            auth_token: None,
-            user_jwt: None,
-            signature: None,
-            echo: !self.options.no_echo,
-            headers: true,
-        };
-
-        // Fill in the info that authenticates the client.
-        match &self.options.auth {
-            AuthStyle::NoAuth => {}
-            AuthStyle::UserPass(user, pass) => {
-                connect_info.user = Some(SecureString::from(user.to_string()));
-                connect_info.pass = Some(SecureString::from(pass.to_string()));
-            }
-            AuthStyle::Token(token) => {
-                connect_info.auth_token = Some(token.to_string().into());
-            }
-            AuthStyle::Credentials { jwt_cb, sig_cb } => {
-                let jwt = jwt_cb()?;
-                let sig = sig_cb(server_info.nonce.as_bytes())?;
-                connect_info.user_jwt = Some(jwt);
-                connect_info.signature = Some(sig);
-            }
-        }
-
-        // Send CONNECT and INFO messages.
-        proto::encode(&mut writer, ClientOp::Connect(connect_info)).await?;
-        proto::encode(&mut writer, ClientOp::Ping).await?;
-        writer.flush().await?;
-
-        let mut reader = BufReader::new(reader);
-
-        // Wait for a PONG.
-        loop {
-            match proto::decode(&mut reader).await? {
-                // If we get PONG, the server is happy and we're done connecting.
-                Some(ServerOp::Pong) => break,
-
-                // Respond to a PING with a PONG.
-                Some(ServerOp::Ping) => {
-                    proto::encode(&mut writer, ClientOp::Pong).await?;
-                    writer.flush().await?;
-                }
-
-                // No other operations should arrive at this time.
-                Some(op) => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("unexpected line while connecting: {:?}", op),
-                    ));
-                }
-
-                // Error if the connection was closed.
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "connection closed while waiting for the first PONG",
-                    ));
-                }
-            }
-        }
-
-        Ok((server_info, reader.into_inner(), writer))
-    }
 }
 
 /// Calculates how long to sleep for before connecting to a server.
@@ -296,7 +140,10 @@ pub(crate) fn backoff(reconnects: usize) -> Duration {
             Duration::from_secs(4)
         };
 
-        cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+        cmp::min(
+            Duration::from_millis(2_u64.saturating_pow(exp)),
+            max,
+        )
     };
 
     // Add some random jitter.
@@ -309,6 +156,149 @@ pub(crate) fn backoff(reconnects: usize) -> Duration {
     let jitter = Duration::from_millis(thread_rng().gen_range(0, max_jitter));
 
     base + jitter
+}
+
+/// Attempts to establish a connection to a single socket address.
+async fn connect_addr(
+    addr: SocketAddr,
+    server: &Server,
+    options: &Options,
+) -> io::Result<(
+    ServerInfo,
+    Pin<Box<dyn AsyncRead + Send>>,
+    Pin<Box<dyn AsyncWrite + Send>>,
+)> {
+    // Inject random I/O failures when testing.
+    inject_io_failure()?;
+
+    // Connect to the remote socket.
+    let mut stream = Async::<TcpStream>::connect(addr).await?;
+
+    // Expect an INFO message.
+    let mut line = crate::SecureVec::with_capacity(512);
+    while !line.ends_with(b"\r\n") {
+        let byte = &mut [0];
+        stream.read_exact(byte).await?;
+        line.push(byte[0]);
+    }
+    let server_info = match proto::decode(&line[..]).await? {
+        Some(ServerOp::Info(server_info)) => server_info,
+        Some(op) => {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("expected INFO, received: {:?}", op),
+            ))
+        }
+        None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
+    };
+
+    // Check if TLS authentication is required:
+    // - Has `options.tls_required(true)` been set?
+    // - Was the server address prefixed with `tls://`?
+    // - Does the INFO line contain `tls_required: true`?
+    let tls_required = options.tls_required || server.tls_required || server_info.tls_required;
+
+    // Upgrade to TLS if required.
+    #[allow(clippy::type_complexity)]
+    let (reader, mut writer): (
+        Pin<Box<dyn AsyncRead + Send>>,
+        Pin<Box<dyn AsyncWrite + Send>>,
+    ) = if tls_required {
+        let conn = async move {
+            // Inject random I/O failures when testing.
+            inject_io_failure()?;
+
+            // TODO(stjepang): Allow specifying a custom TLS connector.
+            async_native_tls::connect(&server.host, stream)
+                .await
+                .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err))
+        };
+
+        // Connect using TLS.
+        let stream = conn.await?;
+
+        // Split the TLS stream into a reader and a writer.
+        let stream = async_dup::Arc::new(async_dup::Mutex::new(stream));
+        (Box::pin(stream.clone()), Box::pin(stream))
+    } else {
+        // Split the TCP stream into a reader and a writer.
+        let stream = async_dup::Arc::new(stream);
+        (Box::pin(stream.clone()), Box::pin(stream))
+    };
+
+    // Data that will be formatted as a CONNECT message.
+    let mut connect_info = ConnectInfo {
+        tls_required,
+        name: options.name.clone().map(SecureString::from),
+        pedantic: false,
+        verbose: false,
+        lang: crate::LANG.to_string(),
+        version: crate::VERSION.to_string(),
+        user: None,
+        pass: None,
+        auth_token: None,
+        user_jwt: None,
+        signature: None,
+        echo: !options.no_echo,
+        headers: true,
+    };
+
+    // Fill in the info that authenticates the client.
+    match &options.auth {
+        AuthStyle::NoAuth => {}
+        AuthStyle::UserPass(user, pass) => {
+            connect_info.user = Some(SecureString::from(user.to_string()));
+            connect_info.pass = Some(SecureString::from(pass.to_string()));
+        }
+        AuthStyle::Token(token) => {
+            connect_info.auth_token = Some(token.to_string().into());
+        }
+        AuthStyle::Credentials { jwt_cb, sig_cb } => {
+            let jwt = jwt_cb()?;
+            let sig = sig_cb(server_info.nonce.as_bytes())?;
+            connect_info.user_jwt = Some(jwt);
+            connect_info.signature = Some(sig);
+        }
+    }
+
+    // Send CONNECT and INFO messages.
+    proto::encode(&mut writer, ClientOp::Connect(connect_info)).await?;
+    proto::encode(&mut writer, ClientOp::Ping).await?;
+    writer.flush().await?;
+
+    let mut reader = BufReader::new(reader);
+
+    // Wait for a PONG.
+    loop {
+        match proto::decode(&mut reader).await? {
+            // If we get PONG, the server is happy and we're done connecting.
+            Some(ServerOp::Pong) => break,
+
+            // Respond to a PING with a PONG.
+            Some(ServerOp::Ping) => {
+                proto::encode(&mut writer, ClientOp::Pong).await?;
+                writer.flush().await?;
+            }
+
+            // No other operations should arrive at this time.
+            Some(op) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("unexpected line while connecting: {:?}", op),
+                ));
+            }
+
+            // Error if the connection was closed.
+            None => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "connection closed while waiting for the first PONG",
+                ));
+            }
+        }
+    }
+
+    Ok((server_info, reader.into_inner(), writer))
 }
 
 /// A parsed URL.
