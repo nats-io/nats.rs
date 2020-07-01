@@ -56,8 +56,13 @@ let nc2 = nats::ConnectionOptions::with_user_pass("derek", "s3cr3t!")
 let nc3 = nats::ConnectionOptions::with_credentials("path/to/my.creds")
     .connect("connect.ngs.global")?;
 
-let nc4 = nats::Options::new()
-    .add_root_certificate("my-certs.pem")
+let tls_connector = nats::tls::builder()
+    .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
+    .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
+    .build()?;
+
+let nc4 = nats::ConnectionOptions::new()
+    .tls_connector(tls_connector)
     .connect("tls://demo.nats.io:4443")?;
 ```
 

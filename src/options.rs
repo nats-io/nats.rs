@@ -1,12 +1,13 @@
 use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::asynk;
 use crate::creds_utils;
 use crate::secure_wipe::SecureString;
+use crate::tls;
 
 /// Connect options.
 pub struct Options {
@@ -19,8 +20,8 @@ pub struct Options {
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
+    pub(crate) tls_connector: Option<tls::TlsConnector>,
     pub(crate) tls_required: bool,
-    pub(crate) certificates: Vec<PathBuf>,
 }
 
 impl fmt::Debug for Options {
@@ -35,8 +36,15 @@ impl fmt::Debug for Options {
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
+            .entry(
+                &"tls_connector",
+                if self.tls_connector.is_some() {
+                    &"set"
+                } else {
+                    &"unset"
+                },
+            )
             .entry(&"tls_required", &self.tls_required)
-            .entry(&"certificates", &self.certificates)
             .finish()
     }
 }
@@ -55,8 +63,8 @@ impl Default for Options {
                 crate::asynk::connector::backoff,
             )),
             close_callback: Callback(None),
+            tls_connector: None,
             tls_required: false,
-            certificates: Vec::new(),
         }
     }
 }
@@ -236,10 +244,9 @@ impl Options {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<crate::Connection> {
-        Ok(crate::Connection(smol::block_on(
-            self.connect_async(nats_url),
-        )?))
+        Ok(crate::Connection(smol::block_on(self.connect_async(nats_url))?))
     }
+
 
     /// Establishes a `Connection` with a NATS server asynchronously.
     #[doc(hidden)]
@@ -301,6 +308,11 @@ impl Options {
     /// declare them separately in the connect string by prefixing them
     /// with `tls://host:port` instead of `nats://host:port`.
     ///
+    /// If you want to use a particular TLS configuration, see
+    /// the `nats::tls::tls_connector` method and the
+    /// `nats::Options::tls_connector` method below
+    /// to apply the desired configuration to all server connections.
+    ///
     /// # Examples
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
@@ -316,22 +328,29 @@ impl Options {
         self
     }
 
-    /// Adds a root certificate file.
+    /// Allows a particular TLS configuration to be set
+    /// for upgrading TCP connections to TLS connections.
     ///
-    /// The file must be PEM encoded. All certificates in the file will be used.
+    /// Note that this also enforces that TLS will be
+    /// enabled for all connections to all servers.
     ///
     /// # Examples
     /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let tls_connector = nats::tls::builder()
+    ///     .identity(nats::tls::Identity::from_pkcs12(b"der_bytes", "my_password")?)
+    ///     .add_root_certificate(nats::tls::Certificate::from_pem(b"my_pem_bytes")?)
+    ///     .build()?;
     ///
     /// let nc = nats::Options::new()
-    ///     .add_root_certificate("my-certs.pem")
+    ///     .tls_connector(tls_connector)
     ///     .connect("tls://demo.nats.io:4443")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn add_root_certificate(mut self, path: impl AsRef<Path>) -> Options {
-        self.certificates.push(path.as_ref().to_owned());
+    pub fn tls_connector(mut self, connector: tls::TlsConnector) -> Options {
+        self.tls_connector = Some(connector);
+        self.tls_required = true;
         self
     }
 }
@@ -390,3 +409,4 @@ impl fmt::Debug for Callback {
 }
 
 pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
+
