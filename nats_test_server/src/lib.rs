@@ -149,6 +149,7 @@ pub fn nats_test_server(
 
     let baddr = format!("{}:{}", host, port);
     let mut listener = TcpListener::bind(baddr).unwrap();
+    log::info!("nats test server started on {}:{}", host, port);
 
     barrier.wait();
 
@@ -165,10 +166,11 @@ pub fn nats_test_server(
             || restart.load(Ordering::Acquire)
         {
             drop(listener);
+            log::debug!("evicting all connected clients");
             clients.clear();
             subs.clear();
             let baddr = format!("{}:{}", host, port);
-            log::info!("bad server listening on {}:{}", host, port);
+            log::debug!("nats test server restarted on {}:{}", host, port);
             listener = TcpListener::bind(baddr).unwrap();
             listener.set_nonblocking(true).unwrap();
         }
@@ -181,6 +183,7 @@ pub fn nats_test_server(
         }
 
         if let Ok((mut next, _addr)) = listener.accept() {
+            log::debug!("new client connected");
             max_client_id += 1;
             let client_id = max_client_id;
             next.write_all(server_info(client_id, port).as_bytes())
@@ -221,7 +224,8 @@ pub fn nats_test_server(
                 continue;
             };
 
-            log::debug!("got command {}", command);
+            log::trace!("got command {}", command);
+
             let mut parts = command.split(' ');
 
             match parts.next().unwrap() {
@@ -324,6 +328,7 @@ pub fn nats_test_server(
         }
 
         while let Some(client_id) = to_evict.pop() {
+            log::debug!("client {} evicted", client_id);
             clients.remove(&client_id);
         }
     }
