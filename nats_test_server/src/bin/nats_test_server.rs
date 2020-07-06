@@ -40,8 +40,8 @@ impl Args {
     fn parse() -> Args {
         let mut args = Args::default();
         for raw_arg in std::env::args().skip(1) {
-            let mut splits = raw_arg[2..].split('=');
-            match splits.next().unwrap() {
+            let mut splits = raw_arg.get(2..).expect(USAGE).split('=');
+            match splits.next().expect(USAGE) {
                 "host" => args.host = parse(&mut splits),
                 "port" => args.port = parse(&mut splits),
                 "bugginess" => args.bugginess = parse(&mut splits),
@@ -56,7 +56,7 @@ impl Args {
 fn main() {
     use std::sync::{atomic::AtomicBool, Arc, Barrier};
 
-    env_logger::init();
+    env_logger::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
     let args = Args::parse();
     log::info!("starting test server with args {:?}", &args);

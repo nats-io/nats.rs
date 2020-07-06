@@ -1,7 +1,7 @@
 [package]
 name = "nats_test_server"
 description = "An intentionally buggy NATS server that facilitates fault injection for testing error paths in NATS-based libraries"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Tyler Neely <tyler@nats.io>"]
 edition = "2018"
 license = "Apache-2.0"
