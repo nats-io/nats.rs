@@ -9,3 +9,8 @@ fn connect_failure() {
         .connect("demo.nats.io")
         .is_err());
 }
+
+#[test]
+fn connect_tls() {
+    assert!(nats::Options::new().connect("tls://demo.nats.io:4443").is_ok());
+}
