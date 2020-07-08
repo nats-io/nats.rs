@@ -81,7 +81,7 @@ impl Subscription {
     /// Returns a blocking message iterator. Same as calling `iter()`.
     ///
     /// # Example
-    /// ```rust,no_run
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let sub = nc.subscribe("foo")?;
@@ -96,7 +96,7 @@ impl Subscription {
     /// Returns a blocking message iterator.
     ///
     /// # Example
-    /// ```rust,no_run
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let sub = nc.subscribe("foo")?;

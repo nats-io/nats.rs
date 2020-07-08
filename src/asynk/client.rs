@@ -16,7 +16,7 @@ use smol::{Task, Timer};
 use crate::asynk::connector::Connector;
 use crate::asynk::message::Message;
 use crate::asynk::proto::{self, ClientOp, ServerOp};
-use crate::{Options, inject_delay, inject_io_failure, ServerInfo, Headers};
+use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
 /// Client state.
 struct State {
@@ -323,7 +323,7 @@ impl Client {
                 subject,
                 reply_to,
                 payload: msg,
-                headers
+                headers,
             }
         } else {
             ClientOp::Pub {
