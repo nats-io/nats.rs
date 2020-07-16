@@ -1,17 +1,21 @@
 use nats;
 use quicli::prelude::*;
-use structopt::StructOpt;
+use structopt::{clap::ArgGroup, StructOpt};
 
 /// NATS utility that can perform basic publish, subscribe, request and reply functions.
 #[derive(Debug, StructOpt)]
+#[structopt(group = ArgGroup::with_name("auth").required(false))]
 struct Cli {
     /// NATS server
     #[structopt(long, short, default_value = "demo.nats.io")]
     server: String,
 
     /// User Credentials File
-    #[structopt(long = "creds")]
+    #[structopt(long = "creds", group = "auth")]
     creds: Option<String>,
+    /// Server authorization token
+    #[structopt(long = "auth-token", group = "auth")]
+    auth_token: Option<String>,
 
     /// Command: pub, sub, request, reply
     #[structopt(subcommand)]
@@ -36,6 +40,8 @@ fn main() -> CliResult {
 
     let opts = if let Some(creds_path) = args.creds {
         nats::Options::with_credentials(creds_path)
+    } else if let Some(token) = args.auth_token {
+        nats::Options::with_token(&token)
     } else {
         nats::Options::new()
     };
