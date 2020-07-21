@@ -2,6 +2,7 @@ use std::fmt;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use blocking::block_on;
 use futures::prelude::*;
@@ -24,7 +25,7 @@ pub struct Subscription {
     pub(crate) client: Client,
 
     /// Whether the subscription is actively listening for new messages.
-    pub(crate) active: bool,
+    pub(crate) active: AtomicBool,
 }
 
 impl Subscription {
@@ -40,22 +41,20 @@ impl Subscription {
             subject,
             messages,
             client,
-            active: true,
+            active: AtomicBool::new(true),
         }
     }
 
     /// Attemps to receive the next message without blocking.
-    pub(crate) fn try_next(&mut self) -> Option<Message> {
+    pub(crate) fn try_next(&self) -> Option<Message> {
         self.messages.try_recv().ok()
     }
 
     /// Unsubscribes and flushes the connection.
     ///
     /// The remaining messages can still be received.
-    pub async fn drain(&mut self) -> io::Result<()> {
-        if self.active {
-            self.active = false;
-
+    pub async fn drain(&self) -> io::Result<()> {
+        if self.active.swap(false, Ordering::SeqCst) {
             // Flush and unsubscribe.
             self.client.flush().await?;
             self.client.unsubscribe(self.sid).await?;
@@ -68,9 +67,7 @@ impl Subscription {
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        if self.active {
-            self.active = false;
-
+        if self.active.swap(false, Ordering::SeqCst) {
             // TODO(stjepang): Instead of blocking, we should just enqueue a dead subscription ID
             // for later cleanup.
             let _ = block_on(self.client.unsubscribe(self.sid));

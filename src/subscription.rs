@@ -1,7 +1,6 @@
 use std::io;
 use std::{sync::Arc, thread, time::Duration};
 
-use async_mutex::Mutex;
 use blocking::block_on;
 use crossbeam_channel::RecvTimeoutError;
 use futures::prelude::*;
@@ -11,7 +10,7 @@ use crate::{asynk, Message};
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
-pub struct Subscription(pub(crate) Arc<Mutex<asynk::Subscription>>);
+pub struct Subscription(pub(crate) Arc<asynk::Subscription>);
 
 impl Subscription {
     /// Get the next message, or None if the subscription
@@ -28,7 +27,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next(&self) -> Option<Message> {
-        block_on(async { self.0.lock().await.next().await }).map(Message::from_async)
+        block_on(async { self.0.messages.recv().await.ok() }).map(Message::from_async)
     }
 
     /// Try to get the next message, or None if no messages
@@ -47,10 +46,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn try_next(&self) -> Option<Message> {
-        self.0
-            .try_lock()
-            .and_then(|mut s| s.try_next())
-            .map(Message::from_async)
+        self.0.try_next().map(Message::from_async)
     }
 
     /// Get the next message, or a timeout error if no messages are available for timout.
@@ -67,7 +63,7 @@ impl Subscription {
     pub fn next_timeout(&self, timeout: Duration) -> Result<Message, RecvTimeoutError> {
         block_on(async move {
             futures::select! {
-                msg = async { self.0.lock().await.next().await }.fuse() => {
+                msg = async { self.0.messages.recv().await.ok() }.fuse() => {
                     match msg {
                         Some(msg) => Ok(Message::from_async(msg)),
                         None => Err(RecvTimeoutError::Disconnected),
@@ -164,14 +160,9 @@ impl Subscription {
     {
         // This will allow us to not have to capture the return. When it is dropped it
         // will not unsubscribe from the server.
-        // self.do_unsub = false;
-        let (sid, subject) = block_on(async {
-            let inner = self.0.lock().await;
-            (inner.sid, inner.subject.clone())
-        });
         let sub = self.clone();
         thread::Builder::new()
-            .name(format!("nats_subscriber_{}_{}", sid, subject))
+            .name(format!("nats_subscriber_{}_{}", self.0.sid, self.0.subject))
             .spawn(move || {
                 for m in sub.iter() {
                     if let Err(e) = handler(m) {
@@ -257,8 +248,8 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn drain(&mut self) -> io::Result<()> {
-        block_on(async { self.0.lock().await.drain().await })
+    pub fn drain(&self) -> io::Result<()> {
+        block_on(async { self.0.drain().await })
     }
 }
 
@@ -301,9 +292,7 @@ impl Handler {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        let mut sub = block_on(self.sub.0.lock());
-        sub.active = false;
-        block_on(sub.client.unsubscribe(sub.sid))
+        self.sub.drain()
     }
 }
 
