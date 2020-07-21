@@ -1,3 +1,14 @@
+# 0.7.1
+
+## Bug Fixes
+
+* Fix a deadlock in `Subscription` when concurently
+  receiving the next message and draining.
+
+## Misc
+
+* Add `--auth-token` flag to the `nats-box` example.
+
 # 0.7.0
 
 ## New Features
