@@ -2,7 +2,7 @@
 
 ## Bug Fixes
 
-* Fix a deadlock in `Subscription` when concurently
+* Fix a deadlock in `Subscription` when concurrently
   receiving the next message and draining.
 
 ## Misc
