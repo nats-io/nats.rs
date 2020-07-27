@@ -1,13 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::SecureString;
 
-fn default_echo() -> bool {
-    true
-}
-
 /// Info to construct a CONNECT message.
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Debug)]
 #[doc(hidden)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
@@ -32,7 +28,7 @@ pub struct ConnectInfo {
     /// If set to `true`, the server (version 1.2.0+) will not send originating messages from this
     /// connection to its own subscriptions. Clients should set this to `true` only for server
     /// supporting this feature, which is when proto in the INFO protocol is set to at least 1.
-    #[serde(skip_serializing_if = "is_true", default = "default_echo")]
+    #[serde(skip_serializing_if = "is_true")]
     pub echo: bool,
 
     /// The implementation language of the client.

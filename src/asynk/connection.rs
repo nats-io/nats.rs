@@ -2,13 +2,14 @@ use std::io::{self, Error, ErrorKind};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use futures::prelude::*;
+use smol::future::FutureExt;
+use smol::stream::StreamExt;
 use smol::Timer;
 
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
 use crate::asynk::subscription::Subscription;
-use crate::{Options, Headers};
+use crate::{Headers, Options};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -31,7 +32,8 @@ impl Connection {
 
     /// Publishes a message.
     pub async fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.publish_with_reply_or_headers(subject, None, None, msg).await
+        self.publish_with_reply_or_headers(subject, None, None, msg)
+            .await
     }
 
     /// Publishes a message with a reply subject.
@@ -56,7 +58,8 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let mut sub = self.subscribe(&reply).await?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg).await?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)
+            .await?;
 
         // Wait for the response.
         sub.next()
@@ -73,7 +76,8 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply).await?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg).await?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)
+            .await?;
 
         // Return the subscription.
         Ok(sub)
@@ -96,10 +100,13 @@ impl Connection {
 
     /// Flushes by performing a round trip to the server or times out after a duration of time.
     pub async fn flush_timeout(&self, timeout: Duration) -> io::Result<()> {
-        futures::select! {
-            res = self.client.flush().fuse() => res,
-            _ = Timer::after(timeout).fuse() => Err(ErrorKind::TimedOut.into()),
-        }
+        self.client
+            .flush()
+            .or(async {
+                Timer::new(timeout).await;
+                Err(ErrorKind::TimedOut.into())
+            })
+            .await
     }
 
     /// Calculates the round trip time between this client and the server.
@@ -171,7 +178,9 @@ impl Connection {
         headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.client.publish(subject, reply, headers, msg.as_ref()).await
+        self.client
+            .publish(subject, reply, headers, msg.as_ref())
+            .await
     }
 
     async fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {

@@ -2,10 +2,10 @@ use std::convert::TryFrom;
 use std::io::{self, Error, ErrorKind};
 use std::str::FromStr;
 
-use futures::prelude::*;
+use smol::prelude::*;
 
 use crate::connect::ConnectInfo;
-use crate::{inject_io_failure, ServerInfo, Headers};
+use crate::{inject_io_failure, Headers, ServerInfo};
 
 /// A protocol operation sent by the server.
 #[derive(Debug)]
@@ -145,8 +145,12 @@ pub(crate) async fn decode(mut stream: impl AsyncBufRead + Unpin) -> io::Result<
         // `HMSG <subject> <sid> [reply-to] <# header bytes>
         // <# total bytes>\r\n<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
         let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..] {
-            [subject, sid, num_header_bytes, num_bytes] => (subject, sid, None, num_header_bytes, num_bytes),
-            [subject, sid, reply_to, num_header_bytes, num_bytes] => (subject, sid, Some(reply_to), num_header_bytes, num_bytes),
+            [subject, sid, num_header_bytes, num_bytes] => {
+                (subject, sid, None, num_header_bytes, num_bytes)
+            }
+            [subject, sid, reply_to, num_header_bytes, num_bytes] => {
+                (subject, sid, Some(reply_to), num_header_bytes, num_bytes)
+            }
             _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,

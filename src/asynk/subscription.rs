@@ -1,11 +1,10 @@
 use std::fmt;
 use std::io;
 use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
 
-use blocking::block_on;
-use futures::prelude::*;
+use smol::{future, stream::Stream};
 
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
@@ -70,7 +69,7 @@ impl Drop for Subscription {
         if self.active.swap(false, Ordering::SeqCst) {
             // TODO(stjepang): Instead of blocking, we should just enqueue a dead subscription ID
             // for later cleanup.
-            let _ = block_on(self.client.unsubscribe(self.sid));
+            let _ = future::block_on(self.client.unsubscribe(self.sid));
         }
     }
 }
