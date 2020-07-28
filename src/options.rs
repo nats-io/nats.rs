@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use smol::future;
+
 use crate::asynk;
 use crate::creds_utils;
 use crate::secure_wipe::SecureString;
@@ -236,7 +238,7 @@ impl Options {
     /// # }
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<crate::Connection> {
-        Ok(crate::Connection(smol::block_on(
+        Ok(crate::Connection(future::block_on(
             self.connect_async(nats_url),
         )?))
     }

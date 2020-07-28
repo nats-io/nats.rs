@@ -8,10 +8,9 @@ use std::thread;
 use std::time::Duration;
 
 use async_mutex::Mutex;
-use futures::channel::{mpsc, oneshot};
-use futures::io::{AllowStdIo, BufReader, BufWriter};
-use futures::prelude::*;
-use smol::{Task, Timer};
+use futures_channel::{mpsc, oneshot};
+use smol::io::{AssertAsync, BufReader, BufWriter};
+use smol::{future, prelude::*, stream, Task, Timer};
 
 use crate::asynk::connector::Connector;
 use crate::asynk::message::Message;
@@ -121,7 +120,7 @@ impl Client {
                                     }
                                 }
                                 // Wait a little bit before flushing again.
-                                Timer::after(Duration::from_millis(1)).await;
+                                Timer::new(Duration::from_millis(1)).await;
                             }
                         }
                     });
@@ -147,15 +146,19 @@ impl Client {
             }
         });
 
-        futures::select! {
-            // The `run()` invocation has errored.
-            res = run_receiver.fuse() => {
-                res.expect("client has panicked")?;
+        future::race(
+            async {
+                // Wait for `run()` to error.
+                run_receiver.await.expect("client has panicked")?;
                 panic!("client has stopped unexpectedly");
-            }
-            // Connection is established.
-            _ = pong_receiver.fuse() => Ok(client),
-        }
+            },
+            async {
+                // Wait for the connection to get established.
+                let _ = pong_receiver.await;
+                Ok(client)
+            },
+        )
+        .await
     }
 
     /// Retrieves server info as received by the most recent connection.
@@ -336,7 +339,7 @@ impl Client {
         match state.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                proto::encode(AllowStdIo::new(&mut state.buffer), op).await?;
+                proto::encode(AssertAsync::new(&mut state.buffer), op).await?;
                 state.buffer.flush()?;
                 Ok(())
             }
@@ -467,7 +470,9 @@ impl Client {
         connector: &mut Connector,
     ) -> io::Result<()> {
         // Handle operations received from the server.
-        while let Some(op) = server_ops.try_next().await? {
+        while let Some(op) = server_ops.next().await {
+            let op = op?;
+
             // Inject random delays when testing.
             inject_delay().await;
 

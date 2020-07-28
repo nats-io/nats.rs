@@ -168,9 +168,7 @@
     clippy::wrong_pub_self_convention,
 )]
 
-use blocking::block_on;
-use futures::prelude::*;
-use smol::Timer;
+use smol::{future, prelude::*, Timer};
 
 use crate::asynk::client::Client;
 
@@ -326,7 +324,7 @@ impl Message {
                 ErrorKind::InvalidInput,
                 "no reply subject available",
             )),
-            Some(reply) => block_on(self.client.publish(reply, None, None, msg.as_ref())),
+            Some(reply) => future::block_on(self.client.publish(reply, None, None, msg.as_ref())),
         }
     }
 }
@@ -365,7 +363,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
-        block_on(self.0.subscribe(subject)).map(|s| Subscription(Arc::new(s.into())))
+        future::block_on(self.0.subscribe(subject)).map(|s| Subscription(Arc::new(s.into())))
     }
 
     /// Create a queue subscription for the given NATS connection.
@@ -379,7 +377,8 @@ impl Connection {
     /// # }
     /// ```
     pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        block_on(self.0.queue_subscribe(subject, queue)).map(|s| Subscription(Arc::new(s.into())))
+        future::block_on(self.0.queue_subscribe(subject, queue))
+            .map(|s| Subscription(Arc::new(s.into())))
     }
 
     /// Publish a message on the given subject.
@@ -393,7 +392,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        block_on(self.0.publish(subject, msg))
+        future::block_on(self.0.publish(subject, msg))
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -414,7 +413,7 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        block_on(self.0.publish_request(subject, reply, msg))
+        future::block_on(self.0.publish_request(subject, reply, msg))
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -444,7 +443,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        block_on(self.0.request(subject, msg)).map(Message::from_async)
+        future::block_on(self.0.request(subject, msg)).map(Message::from_async)
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -465,11 +464,15 @@ impl Connection {
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        block_on(async move {
-            futures::select! {
-                res = self.0.request(subject, msg).fuse() => res.map(Message::from_async),
-                _ = Timer::after(timeout).fuse() => Err(ErrorKind::TimedOut.into()),
-            }
+        future::block_on(async {
+            self.0
+                .request(subject, msg)
+                .or(async {
+                    Timer::new(timeout).await;
+                    Err(ErrorKind::TimedOut.into())
+                })
+                .await
+                .map(Message::from_async)
         })
     }
 
@@ -485,7 +488,8 @@ impl Connection {
     /// # }
     /// ```
     pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
-        block_on(self.0.request_multi(subject, msg)).map(|s| Subscription(Arc::new(s.into())))
+        future::block_on(self.0.request_multi(subject, msg))
+            .map(|s| Subscription(Arc::new(s.into())))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -502,7 +506,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        block_on(self.0.flush())
+        future::block_on(self.0.flush())
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -519,7 +523,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
-        block_on(self.0.flush_timeout(duration))
+        future::block_on(self.0.flush_timeout(duration))
     }
 
     /// Close a NATS connection. All clones of
@@ -540,7 +544,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn close(self) {
-        let _ = block_on(self.0.close());
+        let _ = future::block_on(self.0.close());
     }
 
     /// Calculates the round trip time between this client and the server,
@@ -556,7 +560,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn rtt(&self) -> io::Result<Duration> {
-        block_on(self.0.rtt())
+        future::block_on(self.0.rtt())
     }
 
     /// Returns the client IP as known by the server.
@@ -621,7 +625,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn drain(&self) -> io::Result<()> {
-        block_on(self.0.drain())
+        future::block_on(self.0.drain())
     }
 
     /// Publish a message which may have a reply subject or headers set.
@@ -648,9 +652,11 @@ impl Connection {
         headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        block_on(
-            self.0
-                .publish_with_reply_or_headers(subject, reply, headers, msg.as_ref()),
-        )
+        future::block_on(self.0.publish_with_reply_or_headers(
+            subject,
+            reply,
+            headers,
+            msg.as_ref(),
+        ))
     }
 }

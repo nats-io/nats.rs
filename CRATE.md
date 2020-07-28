@@ -49,11 +49,11 @@ Basic connections, and those with options. The compiler will force these to be c
 ```rust
 let nc = nats::connect("demo.nats.io")?;
 
-let nc2 = nats::ConnectionOptions::with_user_pass("derek", "s3cr3t!")
+let nc2 = nats::Options::with_user_pass("derek", "s3cr3t!")
     .with_name("My Rust NATS App")
     .connect("127.0.0.1")?;
 
-let nc3 = nats::ConnectionOptions::with_credentials("path/to/my.creds")
+let nc3 = nats::Options::with_credentials("path/to/my.creds")
     .connect("connect.ngs.global")?;
 
 let nc4 = nats::Options::new()

@@ -8,12 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_tls::TlsConnector;
-use blocking::unblock;
-use futures::io::BufReader;
-use futures::prelude::*;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use rustls::ClientConfig;
-use smol::{Async, Timer};
+use smol::{io::BufReader, prelude::*, Async, Timer};
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
@@ -113,7 +110,7 @@ impl Connector {
                 // Resolve the server URL to socket addresses.
                 let host = server.host.clone();
                 let port = server.port;
-                let mut addrs = match unblock!((host.as_str(), port).to_socket_addrs()) {
+                let mut addrs = match smol::unblock!((host.as_str(), port).to_socket_addrs()) {
                     Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
                     Err(err) => {
                         last_err = err;
@@ -127,7 +124,7 @@ impl Connector {
                 for addr in addrs {
                     // Sleep for some time if this is not the first connection attempt for this
                     // server.
-                    Timer::after(sleep_duration).await;
+                    Timer::new(sleep_duration).await;
 
                     // Try connecting to this address.
                     let res = self.connect_addr(addr, server).await;

@@ -1,10 +1,8 @@
 use std::io;
 use std::{sync::Arc, thread, time::Duration};
 
-use blocking::block_on;
 use crossbeam_channel::RecvTimeoutError;
-use futures::prelude::*;
-use smol::Timer;
+use smol::{future, prelude::*, Timer};
 
 use crate::{asynk, Message};
 
@@ -27,7 +25,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next(&self) -> Option<Message> {
-        block_on(async { self.0.messages.recv().await.ok() }).map(Message::from_async)
+        future::block_on(async { self.0.messages.recv().await.ok() }).map(Message::from_async)
     }
 
     /// Try to get the next message, or None if no messages
@@ -61,17 +59,18 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next_timeout(&self, timeout: Duration) -> Result<Message, RecvTimeoutError> {
-        block_on(async move {
-            futures::select! {
-                msg = async { self.0.messages.recv().await.ok() }.fuse() => {
-                    match msg {
-                        Some(msg) => Ok(Message::from_async(msg)),
-                        None => Err(RecvTimeoutError::Disconnected),
-                    }
+        future::block_on(
+            async {
+                match self.0.messages.recv().await {
+                    Ok(msg) => Ok(Message::from_async(msg)),
+                    Err(_) => Err(RecvTimeoutError::Disconnected),
                 }
-                _ = Timer::after(timeout).fuse() => Err(RecvTimeoutError::Timeout),
             }
-        })
+            .or(async {
+                Timer::new(timeout).await;
+                Err(RecvTimeoutError::Timeout)
+            }),
+        )
     }
 
     /// Returns a blocking message iterator. Same as calling `iter()`.
@@ -249,7 +248,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn drain(&self) -> io::Result<()> {
-        block_on(async { self.0.drain().await })
+        future::block_on(async { self.0.drain().await })
     }
 }
 
