@@ -1,13 +1,12 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::io::{self, Error, ErrorKind, Write};
 use std::mem;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use async_mutex::Mutex;
 use futures_channel::{mpsc, oneshot};
 use smol::io::{AssertAsync, BufReader, BufWriter};
 use smol::{future, prelude::*, stream, Task, Timer};
@@ -62,10 +61,13 @@ struct Subscription {
 #[derive(Clone)]
 pub(crate) struct Client {
     /// Shared client state.
-    state: Arc<Mutex<State>>,
+    state: Arc<async_mutex::Mutex<State>>,
 
     /// Server info provided by the last INFO message.
-    server_info: Arc<std::sync::Mutex<Option<ServerInfo>>>,
+    server_info: Arc<Mutex<Option<ServerInfo>>>,
+
+    /// Subscriptions that have logically unsubscribed but haven't sent UNSUB yet.
+    unsubscribed: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl Client {
@@ -83,7 +85,7 @@ impl Client {
 
         // The client state.
         let client = Client {
-            state: Arc::new(Mutex::new(State {
+            state: Arc::new(async_mutex::Mutex::new(State {
                 writer: None,
                 flush_kicker,
                 buffer: Buffer::new(options.reconnect_buffer_size),
@@ -92,7 +94,8 @@ impl Client {
                 pongs: VecDeque::from(vec![pong_sender]),
                 shutdown: Some(shutdown),
             })),
-            server_info: Default::default(),
+            server_info: Arc::new(Mutex::new(None)),
+            unsubscribed: Arc::new(Mutex::new(HashSet::new())),
         };
 
         // Connector for creating the initial connection and reconnecting when it is broken.
@@ -212,13 +215,10 @@ impl Client {
         // Initiate shutdown process.
         if let Some(shutdown) = state.shutdown.take() {
             // Unsubscribe all subscriptions.
-            for (sid, _) in mem::replace(&mut state.subscriptions, HashMap::new()) {
-                // Send an UNSUB message and ignore errors.
-                if let Some(writer) = state.writer.as_mut() {
-                    let max_msgs = None;
-                    let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
-                }
+            for sid in state.subscriptions.keys() {
+                self.unsubscribe(*sid);
             }
+            self.cleanup_subscriptions(&mut state).await;
 
             // Flush the writer in case there are buffered messages.
             if let Some(writer) = state.writer.as_mut() {
@@ -255,6 +255,9 @@ impl Client {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
+        // Clean up dead subscriptions.
+        self.cleanup_subscriptions(&mut state).await;
+
         // Generate a subject ID.
         let sid = state.next_sid;
         state.next_sid += 1;
@@ -284,23 +287,8 @@ impl Client {
     }
 
     /// Unsubscribes from a subject.
-    pub(crate) async fn unsubscribe(&self, sid: u64) -> io::Result<()> {
-        // Inject random delays when testing.
-        inject_delay().await;
-
-        let mut state = self.state.lock().await;
-
-        // Remove the subscription from the hash map.
-        if state.subscriptions.remove(&sid).is_some() {
-            // Send an UNSUB message and ignore errors.
-            if let Some(writer) = state.writer.as_mut() {
-                let max_msgs = None;
-                let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
-                let _ = state.flush_kicker.try_send(());
-            }
-        }
-
-        Ok(())
+    pub(crate) fn unsubscribe(&self, sid: u64) {
+        self.unsubscribed.lock().unwrap().insert(sid);
     }
 
     /// Publishes a message with optional reply subject and headers.
@@ -427,6 +415,9 @@ impl Client {
         // Inject random I/O failures when testing.
         inject_io_failure()?;
 
+        // Clean up dead subscriptions.
+        self.cleanup_subscriptions(&mut state).await;
+
         // Restart subscriptions that existed before the last reconnect.
         for (sid, subscription) in &state.subscriptions {
             // Send a SUB operation to the server.
@@ -518,25 +509,14 @@ impl Client {
                             reply: reply_to,
                             data: payload,
                             headers: None,
-                            client: Client {
-                                state: self.state.clone(),
-                                server_info: self.server_info.clone(),
-                            },
+                            client: self.clone(),
                         };
 
-                        if subscription.messages.try_send(msg).is_err() {
-                            // If the channel is disconnected, remove the subscription.
-                            if state.subscriptions.remove(&sid).is_some() {
-                                // Send an UNSUB message and ignore errors.
-                                if let Some(writer) = state.writer.as_mut() {
-                                    let max_msgs = None;
-                                    let _ =
-                                        proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
-                                            .await;
-                                    let _ = state.flush_kicker.try_send(());
-                                }
-                            }
-                        }
+                        // Send a message or drop it if the channel is disconnected or full.
+                        let _ = subscription.messages.try_send(msg);
+                    } else {
+                        // If there is no matching subscription, clean up.
+                        self.cleanup_subscriptions(&mut state).await;
                     }
                 }
 
@@ -554,25 +534,14 @@ impl Client {
                             reply: reply_to,
                             data: payload,
                             headers: Some(headers),
-                            client: Client {
-                                state: self.state.clone(),
-                                server_info: self.server_info.clone(),
-                            },
+                            client: self.clone(),
                         };
 
-                        if subscription.messages.try_send(msg).is_err() {
-                            // If the channel is disconnected, remove the subscription.
-                            if state.subscriptions.remove(&sid).is_some() {
-                                // Send an UNSUB message and ignore errors.
-                                if let Some(writer) = state.writer.as_mut() {
-                                    let max_msgs = None;
-                                    let _ =
-                                        proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
-                                            .await;
-                                    let _ = state.flush_kicker.try_send(());
-                                }
-                            }
-                        }
+                        // Send a message or drop it if the channel is disconnected or full.
+                        let _ = subscription.messages.try_send(msg);
+                    } else {
+                        // If there is no matching subscription, clean up.
+                        self.cleanup_subscriptions(&mut state).await;
                     }
                 }
 
@@ -584,6 +553,21 @@ impl Client {
 
         // The stream of operation is broken, meaning the connection was lost.
         Err(ErrorKind::ConnectionReset.into())
+    }
+
+    /// Sends UNSUB for dead subscriptions.
+    async fn cleanup_subscriptions(&self, state: &mut async_mutex::MutexGuard<'_, State>) {
+        for sid in mem::replace(&mut *self.unsubscribed.lock().unwrap(), HashSet::new()) {
+            // Remove the subscription from the map.
+            state.subscriptions.remove(&sid);
+
+            // Send an UNSUB message and ignore errors.
+            if let Some(writer) = state.writer.as_mut() {
+                let max_msgs = None;
+                let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
+                let _ = state.flush_kicker.try_send(());
+            }
+        }
     }
 }
 

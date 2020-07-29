@@ -188,7 +188,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        Ok(())
+        future::block_on(self.0.unsubscribe())
     }
 
     /// Close a subscription. Same as `unsubscribe`
@@ -206,7 +206,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn close(self) -> io::Result<()> {
-        Ok(())
+        self.unsubscribe()
     }
 
     /// Send an unsubscription then flush the connection,
