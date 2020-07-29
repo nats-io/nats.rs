@@ -22,7 +22,7 @@ maintenance = { status = "actively-developed" }
 panic = 'abort'
 
 [dependencies]
-async-channel = "1.1.1"
+async-channel = "1.2.0"
 async-dup = "1.2.1"
 async-mutex = "1.1.5"
 async-tls = "0.8.0"

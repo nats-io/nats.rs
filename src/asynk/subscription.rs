@@ -1,10 +1,9 @@
 use std::fmt;
 use std::io;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
-use smol::{future, stream::Stream};
+use smol::stream::Stream;
 
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
@@ -22,9 +21,6 @@ pub struct Subscription {
 
     /// Client associated with subscription.
     pub(crate) client: Client,
-
-    /// Whether the subscription is actively listening for new messages.
-    pub(crate) active: AtomicBool,
 }
 
 impl Subscription {
@@ -40,7 +36,6 @@ impl Subscription {
             subject,
             messages,
             client,
-            active: AtomicBool::new(true),
         }
     }
 
@@ -49,28 +44,26 @@ impl Subscription {
         self.messages.try_recv().ok()
     }
 
-    /// Unsubscribes and flushes the connection.
-    ///
-    /// The remaining messages can still be received.
+    /// Stops listening for new messages, but the remaining queued messages can still be received.
     pub async fn drain(&self) -> io::Result<()> {
-        if self.active.swap(false, Ordering::SeqCst) {
-            // Flush and unsubscribe.
-            self.client.flush().await?;
-            self.client.unsubscribe(self.sid).await?;
-            Ok(())
-        } else {
-            Ok(())
-        }
+        self.client.flush().await?;
+        self.client.unsubscribe(self.sid);
+        self.messages.close();
+        Ok(())
+    }
+
+    /// Stops listening for new messages and discards the remaining queued messages.
+    pub async fn unsubscribe(&self) -> io::Result<()> {
+        self.drain().await?;
+        // Discard all queued messages.
+        while self.messages.try_recv().is_ok() {}
+        Ok(())
     }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        if self.active.swap(false, Ordering::SeqCst) {
-            // TODO(stjepang): Instead of blocking, we should just enqueue a dead subscription ID
-            // for later cleanup.
-            let _ = future::block_on(self.client.unsubscribe(self.sid));
-        }
+        self.client.unsubscribe(self.sid);
     }
 }
 
