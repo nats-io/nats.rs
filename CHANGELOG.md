@@ -1,3 +1,11 @@
+# 0.7.2
+
+## Bug Fixes
+
+* Implement `Subscription::close` and
+  `Subscription::unsubscribe` correctly, which would
+  previously do nothing.
+
 # 0.7.1
 
 ## Bug Fixes
