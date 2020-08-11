@@ -172,7 +172,7 @@ use smol::{future, prelude::*, Timer};
 
 use crate::asynk::client::Client;
 
-mod asynk;
+pub mod asynk;
 mod connect;
 mod creds_utils;
 mod headers;

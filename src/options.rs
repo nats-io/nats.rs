@@ -243,8 +243,24 @@ impl Options {
         )?))
     }
 
-    /// Establishes a `Connection` with a NATS server asynchronously.
-    #[doc(hidden)]
+    /// Establish a `Connection` with a NATS server asynchronously.
+    ///
+    /// Multiple servers may be specified by separating
+    /// them with commas.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::run(async {
+    /// let options = nats::Options::new();
+    /// let nc = options
+    ///     .connect_async("nats://demo.nats.io:4222,tls://demo.nats.io:4443")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub async fn connect_async(self, nats_url: &str) -> io::Result<asynk::Connection> {
         asynk::Connection::connect_with_options(nats_url, self).await
     }
