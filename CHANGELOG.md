@@ -1,3 +1,9 @@
+# 0.7.3
+
+## New Features
+
+* Expose the `asynk` module with the async client API.
+
 # 0.7.2
 
 ## Bug Fixes

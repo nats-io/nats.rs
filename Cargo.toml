@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.7.2"
+version = "0.7.3"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
@@ -8,7 +8,7 @@ license = "Apache-2.0"
 documentation = "https://docs.rs/nats"
 homepage = "https://github.com/nats-io/nats.rs"
 repository = "https://github.com/nats-io/nats.rs"
-readme = "CRATE.md"
+readme = "README.md"
 keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
