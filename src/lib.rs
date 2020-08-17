@@ -362,7 +362,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
-        future::block_on(self.0.subscribe(subject)).map(|s| Subscription(Arc::new(s.into())))
+        future::block_on(self.0.subscribe(subject)).map(|s| Subscription(Arc::new(s)))
     }
 
     /// Create a queue subscription for the given NATS connection.
@@ -376,8 +376,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        future::block_on(self.0.queue_subscribe(subject, queue))
-            .map(|s| Subscription(Arc::new(s.into())))
+        future::block_on(self.0.queue_subscribe(subject, queue)).map(|s| Subscription(Arc::new(s)))
     }
 
     /// Publish a message on the given subject.
@@ -487,8 +486,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
-        future::block_on(self.0.request_multi(subject, msg))
-            .map(|s| Subscription(Arc::new(s.into())))
+        future::block_on(self.0.request_multi(subject, msg)).map(|s| Subscription(Arc::new(s)))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.

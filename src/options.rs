@@ -136,7 +136,7 @@ impl Options {
                     let path = path.as_ref().to_owned();
                     Arc::new(move |nonce| {
                         let (_jwt, kp) = auth_utils::load_creds(&path)?;
-                        auth_utils::sign_nonce(nonce, kp)
+                        auth_utils::sign_nonce(nonce, &kp)
                     })
                 },
             },
@@ -168,7 +168,7 @@ impl Options {
                     let path = path.as_ref().to_owned();
                     Arc::new(move |nonce| {
                         let kp = auth_utils::load_nk(&path)?;
-                        auth_utils::sign_nonce(nonce, kp)
+                        auth_utils::sign_nonce(nonce, &kp)
                     })
                 },
             },

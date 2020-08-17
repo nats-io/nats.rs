@@ -50,7 +50,7 @@ pub(crate) fn load_nk(path: &Path) -> io::Result<KeyPair> {
 }
 
 /// Signs nonce using a credentials file.
-pub(crate) fn sign_nonce(nonce: &[u8], key_pair: KeyPair) -> io::Result<SecureString> {
+pub(crate) fn sign_nonce(nonce: &[u8], key_pair: &KeyPair) -> io::Result<SecureString> {
     // Use the nkey to sign the nonce.
     let sig = key_pair
         .sign(nonce)
