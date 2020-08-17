@@ -7,7 +7,7 @@ use std::time::Duration;
 use smol::future;
 
 use crate::asynk;
-use crate::creds_utils;
+use crate::auth_utils;
 use crate::secure_wipe::SecureString;
 
 /// Connect options.
@@ -112,7 +112,7 @@ impl Options {
         }
     }
 
-    /// Authenticate with NATS using a credentials file
+    /// Authenticate with NATS using a `.creds` file.
     ///
     /// # Example
     /// ```no_run
@@ -127,11 +127,49 @@ impl Options {
             auth: AuthStyle::Credentials {
                 jwt_cb: {
                     let path = path.as_ref().to_owned();
-                    Arc::new(move || creds_utils::user_jwt_from_file(&path))
+                    Arc::new(move || {
+                        let (jwt, _kp) = auth_utils::load_creds(&path)?;
+                        Ok(jwt)
+                    })
                 },
                 sig_cb: {
                     let path = path.as_ref().to_owned();
-                    Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
+                    Arc::new(move |nonce| {
+                        let (_jwt, kp) = auth_utils::load_creds(&path)?;
+                        auth_utils::sign_nonce(nonce, kp)
+                    })
+                },
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Authenticate with NATS using a `.nk` file.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::with_nkey("./path/to/my.nk")
+    ///     .connect("localhost")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_nkey(path: impl AsRef<Path>) -> Options {
+        Options {
+            auth: AuthStyle::NKey {
+                nkey_cb: {
+                    let path = path.as_ref().to_owned();
+                    Arc::new(move || {
+                        let kp = auth_utils::load_nk(&path)?;
+                        Ok(SecureString::from(kp.public_key()))
+                    })
+                },
+                sig_cb: {
+                    let path = path.as_ref().to_owned();
+                    Arc::new(move |nonce| {
+                        let kp = auth_utils::load_nk(&path)?;
+                        auth_utils::sign_nonce(nonce, kp)
+                    })
                 },
             },
             ..Default::default()
@@ -356,6 +394,9 @@ impl Options {
 
 #[derive(Clone)]
 pub(crate) enum AuthStyle {
+    /// No authentication.
+    NoAuth,
+
     /// Authenticate using a token.
     Token(String),
 
@@ -370,8 +411,13 @@ pub(crate) enum AuthStyle {
         sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
     },
 
-    /// No authentication.
-    NoAuth,
+    /// Authenticate using an nkey.
+    NKey {
+        /// Securely loads the public nkey.
+        nkey_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
+        /// Signs the nonce passed as an argument.
+        sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
+    },
 }
 
 impl fmt::Debug for AuthStyle {
@@ -383,6 +429,7 @@ impl fmt::Debug for AuthStyle {
                 f.debug_tuple("Token").field(user).field(pass).finish()
             }
             AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
+            AuthStyle::NKey { .. } => f.debug_struct("NKey").finish(),
         }
     }
 }

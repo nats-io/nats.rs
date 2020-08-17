@@ -12,5 +12,7 @@ fn connect_failure() {
 
 #[test]
 fn connect_tls() {
-    assert!(nats::Options::new().connect("tls://demo.nats.io:4443").is_ok());
+    assert!(nats::Options::new()
+        .connect("tls://demo.nats.io:4443")
+        .is_ok());
 }

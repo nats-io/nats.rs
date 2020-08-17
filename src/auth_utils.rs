@@ -6,31 +6,52 @@ use regex::Regex;
 
 use crate::SecureString;
 
-/// Loads user JWT from a credentials file.
-pub(crate) fn user_jwt_from_file(path: &Path) -> io::Result<SecureString> {
-    let contents = SecureString::from(fs::read_to_string(path)?);
-    parse_decorated_jwt(&contents).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "cannot parse user JWT from the credentails file",
-        )
-    })
-}
-
-/// Signs nonce using a credentials file.
-pub(crate) fn sign_nonce_with_file(nonce: &[u8], path: &Path) -> io::Result<SecureString> {
+/// Loads the user JWT and nkey from a `.creds` file.
+pub(crate) fn load_creds(path: &Path) -> io::Result<(SecureString, KeyPair)> {
     // Load the private nkey.
     let contents = SecureString::from(fs::read_to_string(path)?);
-    let nkey = parse_decorated_nkey(&contents).ok_or_else(|| {
+
+    let jwt = parse_decorated_jwt(&contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "cannot parse nkey from the credentails file",
+            "cannot parse user JWT from the credentials file",
         )
     })?;
 
-    // Use the nkey to sign the nonce.
-    let key_pair =
+    let nkey = parse_decorated_nkey(&contents).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "cannot parse nkey from the credentials file",
+        )
+    })?;
+    let kp =
         KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+
+    Ok((jwt, kp))
+}
+
+/// Loads the nkey from a `.nk` file.
+pub(crate) fn load_nk(path: &Path) -> io::Result<KeyPair> {
+    let contents = SecureString::from(fs::read_to_string(path)?);
+
+    for line in contents.lines() {
+        let line = line.trim();
+
+        if line.starts_with("SO") || line.starts_with("SA") || line.starts_with("SU") {
+            return KeyPair::from_seed(line)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "no nkey seed found",
+    ))
+}
+
+/// Signs nonce using a credentials file.
+pub(crate) fn sign_nonce(nonce: &[u8], key_pair: KeyPair) -> io::Result<SecureString> {
+    // Use the nkey to sign the nonce.
     let sig = key_pair
         .sign(nonce)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;

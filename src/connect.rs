@@ -17,6 +17,10 @@ pub struct ConnectInfo {
     #[serde(rename = "jwt", skip_serializing_if = "is_empty_or_none")]
     pub user_jwt: Option<SecureString>,
 
+    /// Public nkey.
+    #[serde(skip_serializing_if = "is_empty_or_none")]
+    pub nkey: Option<SecureString>,
+
     /// Signed nonce, encoded to Base64URL.
     #[serde(rename = "sig", skip_serializing_if = "is_empty_or_none")]
     pub signature: Option<SecureString>,
