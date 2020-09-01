@@ -1,3 +1,11 @@
+# 0.7.4
+
+## Improvements
+
+* Remove the `MutexGuard` held across await points
+  inside `cleanup_subscriptions()` to allow futures
+  returned by async methods to implement `Send`.
+
 # 0.7.3
 
 ## New Features
