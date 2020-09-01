@@ -144,33 +144,32 @@ impl Options {
         }
     }
 
-    /// Authenticate with NATS using a `.nk` file.
+    /// Authenticate with NATS using a public key and a signature function.
     ///
     /// # Example
     /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_nkey("./path/to/my.nk")
+    /// let public_key = "UAMMBNV2EYR65NYZZ7IAK5SIR5ODNTTERJOBOF4KJLMWI45YOXOSWULM";
+    /// let private_key = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let kp = nkeys::KeyPair::from_seed(private_key).unwrap();
+    ///
+    /// let nc = nats::Options::with_nkey(public_key, move |nonce| kp.sign(nonce).unwrap())
     ///     .connect("localhost")?;
-    /// # Ok(())
-    /// # }
+    /// # std::io::Result::Ok(())
     /// ```
-    pub fn with_nkey(path: impl AsRef<Path>) -> Options {
+    pub fn with_nkey<F>(public_key: &str, sig_cb: F) -> Options
+    where
+        F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+    {
         Options {
             auth: AuthStyle::NKey {
                 nkey_cb: {
-                    let path = path.as_ref().to_owned();
-                    Arc::new(move || {
-                        let kp = auth_utils::load_nk(&path)?;
-                        Ok(SecureString::from(kp.public_key()))
-                    })
+                    let public_key = SecureString::from(public_key.to_owned());
+                    Arc::new(move || Ok(public_key.clone()))
                 },
-                sig_cb: {
-                    let path = path.as_ref().to_owned();
-                    Arc::new(move |nonce| {
-                        let kp = auth_utils::load_nk(&path)?;
-                        auth_utils::sign_nonce(nonce, &kp)
-                    })
-                },
+                sig_cb: Arc::new(move |nonce| {
+                    let sig = sig_cb(nonce);
+                    Ok(SecureString::from(base64_url::encode(&sig)))
+                }),
             },
             ..Default::default()
         }
