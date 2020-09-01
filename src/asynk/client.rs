@@ -557,7 +557,10 @@ impl Client {
 
     /// Sends UNSUB for dead subscriptions.
     async fn cleanup_subscriptions(&self, state: &mut async_mutex::MutexGuard<'_, State>) {
-        for sid in mem::replace(&mut *self.unsubscribed.lock().unwrap(), HashSet::new()) {
+        // Keep unsubscribed list in separate variable so it won't be captured by for loop context.
+        let unsubscribed = mem::replace(&mut *self.unsubscribed.lock().unwrap(), HashSet::new());
+        
+        for sid in unsubscribed {
             // Remove the subscription from the map.
             state.subscriptions.remove(&sid);
 
