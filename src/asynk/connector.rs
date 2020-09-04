@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use async_tls::TlsConnector;
 use rand::{seq::SliceRandom, thread_rng, Rng};
-use rustls::ClientConfig;
 use smol::{io::BufReader, prelude::*, Async, Timer};
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
@@ -34,16 +33,18 @@ pub(crate) struct Connector {
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
-    pub(crate) fn new(url: &str, options: Options) -> io::Result<Connector> {
-        let mut tls_config = ClientConfig::new();
+    pub(crate) fn new(url: &str, mut options: Options) -> io::Result<Connector> {
+        let mut tls_config = options.tls_config.take().unwrap_or_default();
 
         // Include platform's native certificate store.
-        match rustls_native_certs::load_native_certs() {
-            Ok(root_store) | Err((Some(root_store), _)) => tls_config
-                .root_store
-                .roots
-                .extend(root_store.roots.into_iter()),
-            Err((None, _)) => {}
+        if options.native_certs {
+            match rustls_native_certs::load_native_certs() {
+                Ok(root_store) | Err((Some(root_store), _)) => tls_config
+                    .root_store
+                    .roots
+                    .extend(root_store.roots.into_iter()),
+                Err((None, _)) => {}
+            }
         }
 
         // Include user-provided certificates.

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::ClientConfig;
 use smol::future;
 
 use crate::asynk;
@@ -22,7 +23,9 @@ pub struct Options {
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
     pub(crate) tls_required: bool,
+    pub(crate) native_certs: bool,
     pub(crate) certificates: Vec<PathBuf>,
+    pub(crate) tls_config: Option<ClientConfig>,
 }
 
 impl fmt::Debug for Options {
@@ -58,7 +61,9 @@ impl Default for Options {
             )),
             close_callback: Callback(None),
             tls_required: false,
+            native_certs: true,
             certificates: Vec::new(),
+            tls_config: None,
         }
     }
 }
@@ -350,6 +355,46 @@ impl Options {
     /// ```
     pub fn add_root_certificate(mut self, path: impl AsRef<Path>) -> Options {
         self.certificates.push(path.as_ref().to_owned());
+        self
+    }
+
+    /// Use the provided `ClientConfig` when establishing a TLS connection.
+    ///
+    /// Certificates added using `add_root_certificate` or from the native
+    /// store (if `native_certs` is set to true) will be added to the
+    /// `ClientConfig`.
+    ///
+    /// # Examples
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    ///
+    /// let client_config = rustls::ClientConfig::new();
+    /// let nc = nats::Options::new()
+    ///     .tls_config(client_config)
+    ///     .connect("tls://demo.nats.io:4443")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_config(mut self, tls_config: ClientConfig) -> Options {
+        self.tls_config = Some(tls_config);
+        self
+    }
+
+    /// If this is `true` the platform's native certificate store will be
+    /// included. This setting defaults to `true`.
+    ///
+    /// # Examples
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    ///
+    /// let nc = nats::Options::new()
+    ///     .native_certs(true)
+    ///     .connect("tls://demo.nats.io:4443")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn native_certs(mut self, native_certs: bool) -> Options {
+        self.native_certs = native_certs;
         self
     }
 }
