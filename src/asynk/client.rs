@@ -7,9 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use futures_channel::{mpsc, oneshot};
 use smol::io::{AssertAsync, BufReader, BufWriter};
-use smol::{future, prelude::*, stream, Task, Timer};
+use smol::{channel, future, lock, prelude::*, stream, Executor, Timer};
 
 use crate::asynk::connector::Connector;
 use crate::asynk::message::Message;
@@ -24,7 +23,7 @@ struct State {
     writer: Option<Pin<Box<dyn AsyncWrite + Send>>>,
 
     /// Signals to the client thread that the writer needs a flush.
-    flush_kicker: mpsc::Sender<()>,
+    flush_kicker: channel::Sender<()>,
 
     /// The reconnect buffer.
     ///
@@ -39,7 +38,7 @@ struct State {
     subscriptions: HashMap<u64, Subscription>,
 
     /// Expected pongs and their notification channels.
-    pongs: VecDeque<oneshot::Sender<()>>,
+    pongs: VecDeque<channel::Sender<()>>,
 
     /// A channel for coordinating shutdown.
     ///
@@ -47,21 +46,21 @@ struct State {
     ///
     /// To initiate shutdown, we create a channel and send its sender. The client thread receives
     /// this sender and sends `()` when it stops.
-    shutdown: Option<oneshot::Sender<oneshot::Sender<()>>>,
+    shutdown: Option<channel::Sender<channel::Sender<()>>>,
 }
 
 /// A registered subscription.
 struct Subscription {
     subject: String,
     queue_group: Option<String>,
-    messages: async_channel::Sender<Message>,
+    messages: channel::Sender<Message>,
 }
 
 /// A NATS client.
 #[derive(Clone)]
 pub(crate) struct Client {
     /// Shared client state.
-    state: Arc<async_mutex::Mutex<State>>,
+    state: Arc<lock::Mutex<State>>,
 
     /// Server info provided by the last INFO message.
     server_info: Arc<Mutex<Option<ServerInfo>>>,
@@ -74,18 +73,18 @@ impl Client {
     /// Creates a new client that will begin connecting in the background.
     pub(crate) async fn connect(url: &str, options: Options) -> io::Result<Client> {
         // A channel for coordinating shutdown.
-        let (shutdown, stop) = oneshot::channel();
+        let (shutdown, stop) = channel::bounded(1);
 
         // A channel for coordinating flushes.
-        let (flush_kicker, mut dirty) = mpsc::channel(1);
+        let (flush_kicker, dirty) = channel::bounded(1);
 
         // Channels for coordinating initial connect.
-        let (run_sender, run_receiver) = oneshot::channel();
-        let (pong_sender, pong_receiver) = oneshot::channel();
+        let (run_sender, run_receiver) = channel::bounded(1);
+        let (pong_sender, pong_receiver) = channel::bounded(1);
 
         // The client state.
         let client = Client {
-            state: Arc::new(async_mutex::Mutex::new(State {
+            state: Arc::new(lock::Mutex::new(State {
                 writer: None,
                 flush_kicker,
                 buffer: Buffer::new(options.reconnect_buffer_size),
@@ -108,13 +107,14 @@ impl Client {
         thread::spawn({
             let client = client.clone();
             move || {
-                smol::run(async move {
+                let ex = &Executor::new();
+                smol::block_on(ex.run(async move {
                     // Spawn a task that periodically flushes buffered messages.
-                    let flusher = Task::local({
+                    let flusher = ex.spawn({
                         let client = client.clone();
                         async move {
                             // Wait until at least one message is buffered.
-                            while dirty.next().await.is_some() {
+                            while dirty.recv().await.is_ok() {
                                 {
                                     // Flush the writer.
                                     let mut state = client.state.lock().await;
@@ -123,19 +123,19 @@ impl Client {
                                     }
                                 }
                                 // Wait a little bit before flushing again.
-                                Timer::new(Duration::from_millis(1)).await;
+                                Timer::after(Duration::from_millis(1)).await;
                             }
                         }
                     });
 
                     // Spawn the main task that processes messages from the server.
-                    let runner = Task::local(async move {
+                    let runner = ex.spawn(async move {
                         let res = client.run(connector).await;
-                        let _ = run_sender.send(res);
+                        let _ = run_sender.try_send(res);
                     });
 
                     // Wait until the client is closed.
-                    let res = stop.await;
+                    let res = stop.recv().await;
 
                     // Cancel spawned tasks.
                     flusher.cancel().await;
@@ -143,21 +143,21 @@ impl Client {
 
                     // Signal to the shutdown initiator that it is now complete.
                     if let Ok(s) = res {
-                        let _ = s.send(());
+                        let _ = s.try_send(());
                     }
-                })
+                }));
             }
         });
 
         future::race(
             async {
                 // Wait for `run()` to error.
-                run_receiver.await.expect("client has panicked")?;
+                run_receiver.recv().await.expect("client has panicked")?;
                 panic!("client has stopped unexpectedly");
             },
             async {
                 // Wait for the connection to get established.
-                let _ = pong_receiver.await;
+                let _ = pong_receiver.recv().await;
                 Ok(client)
             },
         )
@@ -182,7 +182,7 @@ impl Client {
                 return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
             }
 
-            let (sender, receiver) = oneshot::channel();
+            let (sender, receiver) = channel::bounded(1);
 
             // If connected, send a PING.
             match state.writer.as_mut() {
@@ -199,7 +199,7 @@ impl Client {
         };
 
         // Wait until the PONG operation is received.
-        match pong.await {
+        match pong.recv().await {
             Ok(()) => Ok(()),
             Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
         }
@@ -229,11 +229,11 @@ impl Client {
             state.pongs.clear();
             drop(state);
 
-            let (s, r) = oneshot::channel();
+            let (s, r) = channel::bounded(1);
             // Signal the thread to stop.
-            let _ = shutdown.send(s);
+            let _ = shutdown.try_send(s);
             // Wait for the thread to stop.
-            let _ = r.await;
+            let _ = r.recv().await;
         }
 
         Ok(())
@@ -244,7 +244,7 @@ impl Client {
         &self,
         subject: &str,
         queue_group: Option<&str>,
-    ) -> io::Result<(u64, async_channel::Receiver<Message>)> {
+    ) -> io::Result<(u64, channel::Receiver<Message>)> {
         // Inject random delays when testing.
         inject_delay().await;
 
@@ -274,7 +274,7 @@ impl Client {
         }
 
         // Register the subscription in the hash map.
-        let (sender, receiver) = async_channel::unbounded();
+        let (sender, receiver) = channel::unbounded();
         state.subscriptions.insert(
             sid,
             Subscription {
@@ -448,7 +448,7 @@ impl Client {
 
         // Complete PONGs because the connection is healthy.
         for p in pongs {
-            let _ = p.send(());
+            let _ = p.try_send(());
         }
 
         Ok(())
@@ -491,7 +491,7 @@ impl Client {
                     if state.writer.is_some() {
                         // Take the next expected PONG and complete it by sending a message.
                         if let Some(pong) = state.pongs.pop_front() {
-                            let _ = pong.send(());
+                            let _ = pong.try_send(());
                         }
                     }
                 }
@@ -556,10 +556,10 @@ impl Client {
     }
 
     /// Sends UNSUB for dead subscriptions.
-    async fn cleanup_subscriptions(&self, state: &mut async_mutex::MutexGuard<'_, State>) {
+    async fn cleanup_subscriptions(&self, state: &mut lock::MutexGuard<'_, State>) {
         // Keep unsubscribed list in separate variable so it won't be captured by for loop context.
         let unsubscribed = mem::replace(&mut *self.unsubscribed.lock().unwrap(), HashSet::new());
-        
+
         for sid in unsubscribed {
             // Remove the subscription from the map.
             state.subscriptions.remove(&sid);

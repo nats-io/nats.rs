@@ -22,13 +22,10 @@ maintenance = { status = "actively-developed" }
 panic = 'abort'
 
 [dependencies]
-async-channel = "1.2.0"
 async-dup = "1.2.1"
-async-mutex = "1.1.5"
 async-tls = "0.8.0"
 base64-url = "1.4.5"
 crossbeam-channel = "0.4.2"
-futures-channel = "0.3.5"
 itoa = "0.4.6"
 lazy_static = "1.4.0"
 log = "0.4.8"
@@ -41,7 +38,7 @@ rustls = "0.18.0"
 rustls-native-certs = "0.4.0"
 serde = { version = "1.0.114", features = ["derive"] }
 serde_json = "1.0.56"
-smol = "0.3.3"
+smol = "1.0.0"
 
 [dev-dependencies]
 criterion = "0.3.3"

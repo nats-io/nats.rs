@@ -2,9 +2,7 @@ use std::io::{self, Error, ErrorKind};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use smol::future::FutureExt;
-use smol::stream::StreamExt;
-use smol::Timer;
+use smol::{prelude::*, Timer};
 
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
@@ -103,7 +101,7 @@ impl Connection {
         self.client
             .flush()
             .or(async {
-                Timer::new(timeout).await;
+                Timer::after(timeout).await;
                 Err(ErrorKind::TimedOut.into())
             })
             .await

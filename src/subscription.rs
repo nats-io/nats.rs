@@ -67,7 +67,7 @@ impl Subscription {
                 }
             }
             .or(async {
-                Timer::new(timeout).await;
+                Timer::after(timeout).await;
                 Err(RecvTimeoutError::Timeout)
             }),
         )

@@ -468,7 +468,7 @@ impl Connection {
             self.0
                 .request(subject, msg)
                 .or(async {
-                    Timer::new(timeout).await;
+                    Timer::after(timeout).await;
                     Err(ErrorKind::TimedOut.into())
                 })
                 .await

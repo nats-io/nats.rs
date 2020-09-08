@@ -38,7 +38,7 @@ pub async fn inject_delay() {
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
-        Timer::new(Duration::from_millis(duration)).await;
+        Timer::after(Duration::from_millis(duration)).await;
     }
 
     if thread_rng().gen_ratio(1, 2) {
