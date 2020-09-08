@@ -208,8 +208,6 @@ use std::{
     time::Duration,
 };
 
-use serde::Deserialize;
-
 pub use {headers::Headers, options::Options, subscription::Subscription};
 
 #[doc(hidden)]
@@ -222,12 +220,11 @@ const LANG: &str = "rust";
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
     /// Generated Server Name.
-    #[serde(default)]
     pub server_name: String,
     /// The host specified in the cluster parameter/options.
     pub host: String,
@@ -236,10 +233,8 @@ struct ServerInfo {
     /// The version of the NATS server.
     pub version: String,
     /// If this is set, then the server should try to authenticate upon connect.
-    #[serde(default)]
     pub auth_required: bool,
     /// If this is set, then the server must authenticate using TLS.
-    #[serde(default)]
     pub tls_required: bool,
     /// Maximum payload size that the server will accept.
     pub max_payload: i32,
@@ -249,15 +244,37 @@ struct ServerInfo {
     pub client_id: u64,
     /// The version of golang the NATS server was built with.
     pub go: String,
-    #[serde(default)]
     /// The nonce used for nkeys.
     pub nonce: String,
     /// A list of server urls that a client can connect to.
-    #[serde(default)]
     pub connect_urls: Vec<String>,
     /// The client IP as known by the server.
-    #[serde(default)]
     pub client_ip: String,
+}
+
+impl ServerInfo {
+    fn parse(s: &str) -> Option<ServerInfo> {
+        let mut obj = json::parse(s).ok()?;
+        Some(ServerInfo {
+            server_id: obj["server_id"].take_string()?,
+            server_name: obj["server_name"].take_string().unwrap_or_default(),
+            host: obj["host"].take_string()?,
+            port: obj["port"].as_i16()?,
+            version: obj["version"].take_string()?,
+            auth_required: obj["auth_required"].as_bool().unwrap_or(false),
+            tls_required: obj["tls_required"].as_bool().unwrap_or(false),
+            max_payload: obj["max_payload"].as_i32()?,
+            proto: obj["proto"].as_i8()?,
+            client_id: obj["client_id"].as_u64()?,
+            go: obj["go"].take_string()?,
+            nonce: obj["nonce"].take_string().unwrap_or_default(),
+            connect_urls: obj["connect_urls"]
+                .members_mut()
+                .filter_map(|m| m.take_string())
+                .collect(),
+            client_ip: obj["client_ip"].take_string().unwrap_or_default(),
+        })
+    }
 }
 
 use options::AuthStyle;

@@ -6,7 +6,6 @@ use std::{
 };
 
 use rand::{thread_rng, Rng};
-use serde::{Deserialize, Serialize};
 
 /// A `Vec<u8>` that gets scrambled on drop.
 /// Provides a vector that will scramble allocations as
@@ -19,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// Uses the basic idea (`write_volatile` + `compiler_fence`)
 /// from @bascule's zeroize crate but overwrites data with
 /// random bytes instead of zeros.
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default)]
 pub(crate) struct SecureVec(Vec<u8>);
 
 impl SecureVec {
@@ -82,7 +81,7 @@ impl Deref for SecureVec {
 /// random bytes instead of zeros.
 ///
 /// Public + hidden for testing purposes.
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default)]
 #[doc(hidden)]
 pub struct SecureString(String);
 
