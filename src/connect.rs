@@ -15,7 +15,6 @@ pub struct ConnectInfo {
     pub user_jwt: Option<SecureString>,
 
     /// Public nkey.
-    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub nkey: Option<SecureString>,
 
     /// Signed nonce, encoded to Base64URL.
