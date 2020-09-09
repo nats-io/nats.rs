@@ -10,10 +10,10 @@ use async_tls::TlsConnector;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use rustls::ClientConfig;
 
-use crate::smol::io::BufReader;
-use crate::smol::{net, prelude::*, Timer};
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
+use crate::smol::io::BufReader;
+use crate::smol::{net, prelude::*, Timer};
 use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
 
 /// Maintains a list of servers and establishes connections.

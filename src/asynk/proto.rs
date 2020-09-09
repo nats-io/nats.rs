@@ -2,8 +2,8 @@ use std::convert::TryFrom;
 use std::io::{self, Error, ErrorKind};
 use std::str::FromStr;
 
-use crate::smol::prelude::*;
 use crate::connect::ConnectInfo;
+use crate::smol::prelude::*;
 use crate::{inject_io_failure, Headers, ServerInfo};
 
 /// A protocol operation sent by the server.

@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::smol::future;
 use crate::asynk;
 use crate::auth_utils;
 use crate::secure_wipe::SecureString;
+use crate::smol::future;
 
 /// Connect options.
 pub struct Options {

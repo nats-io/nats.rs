@@ -1,7 +1,4 @@
-use std::{
-    fmt,
-    io,
-};
+use std::{fmt, io};
 
 use crate::{asynk::client::Client, Headers};
 

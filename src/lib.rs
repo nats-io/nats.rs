@@ -181,12 +181,12 @@ pub(crate) mod smol {
     pub use async_channel as channel;
     pub use async_net as net;
 
-    pub use async_executor::{Executor, Task};
-    pub use async_io::{block_on, Timer};
+    pub use async_executor::*;
+    pub use async_io::*;
     pub use futures_lite::{future, io, pin, ready, stream};
 
     pub mod lock {
-        pub use async_mutex::{Mutex, MutexGuard};
+        pub use async_mutex::*;
     }
 
     pub mod prelude {
