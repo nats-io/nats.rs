@@ -97,7 +97,6 @@
 //! # Ok(()) }
 //! ```
 
-#![recursion_limit = "1024"]
 #![cfg_attr(test, deny(warnings))]
 #![deny(
     missing_docs,
@@ -172,8 +171,8 @@ use smol::{future, prelude::*, Timer};
 use crate::asynk::client::Client;
 
 pub mod asynk;
+mod auth_utils;
 mod connect;
-mod creds_utils;
 mod headers;
 mod options;
 mod secure_wipe;
@@ -393,8 +392,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        future::block_on(self.0.queue_subscribe(subject, queue))
-            .map(|s| Subscription(Arc::new(s)))
+        future::block_on(self.0.queue_subscribe(subject, queue)).map(|s| Subscription(Arc::new(s)))
     }
 
     /// Publish a message on the given subject.
@@ -504,8 +502,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
-        future::block_on(self.0.request_multi(subject, msg))
-            .map(|s| Subscription(Arc::new(s)))
+        future::block_on(self.0.request_multi(subject, msg)).map(|s| Subscription(Arc::new(s)))
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.

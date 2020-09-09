@@ -7,7 +7,7 @@ use std::time::Duration;
 use smol::future;
 
 use crate::asynk;
-use crate::creds_utils;
+use crate::auth_utils;
 use crate::secure_wipe::SecureString;
 
 /// Connect options.
@@ -112,7 +112,7 @@ impl Options {
         }
     }
 
-    /// Authenticate with NATS using a credentials file
+    /// Authenticate with NATS using a `.creds` file.
     ///
     /// # Example
     /// ```no_run
@@ -127,12 +127,49 @@ impl Options {
             auth: AuthStyle::Credentials {
                 jwt_cb: {
                     let path = path.as_ref().to_owned();
-                    Arc::new(move || creds_utils::user_jwt_from_file(&path))
+                    Arc::new(move || {
+                        let (jwt, _kp) = auth_utils::load_creds(&path)?;
+                        Ok(jwt)
+                    })
                 },
                 sig_cb: {
                     let path = path.as_ref().to_owned();
-                    Arc::new(move |nonce| creds_utils::sign_nonce_with_file(nonce, &path))
+                    Arc::new(move |nonce| {
+                        let (_jwt, kp) = auth_utils::load_creds(&path)?;
+                        auth_utils::sign_nonce(nonce, &kp)
+                    })
                 },
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Authenticate with NATS using a public key and a signature function.
+    ///
+    /// # Example
+    /// ```no_run
+    /// let public_key = "UAMMBNV2EYR65NYZZ7IAK5SIR5ODNTTERJOBOF4KJLMWI45YOXOSWULM";
+    /// let private_key = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let kp = nkeys::KeyPair::from_seed(private_key).unwrap();
+    ///
+    /// let nc = nats::Options::with_nkey(public_key, move |nonce| kp.sign(nonce).unwrap())
+    ///     .connect("localhost")?;
+    /// # std::io::Result::Ok(())
+    /// ```
+    pub fn with_nkey<F>(public_key: &str, sig_cb: F) -> Options
+    where
+        F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+    {
+        Options {
+            auth: AuthStyle::NKey {
+                nkey_cb: {
+                    let public_key = SecureString::from(public_key.to_owned());
+                    Arc::new(move || Ok(public_key.clone()))
+                },
+                sig_cb: Arc::new(move |nonce| {
+                    let sig = sig_cb(nonce);
+                    Ok(SecureString::from(base64_url::encode(&sig)))
+                }),
             },
             ..Default::default()
         }
@@ -356,6 +393,9 @@ impl Options {
 
 #[derive(Clone)]
 pub(crate) enum AuthStyle {
+    /// No authentication.
+    NoAuth,
+
     /// Authenticate using a token.
     Token(String),
 
@@ -370,8 +410,13 @@ pub(crate) enum AuthStyle {
         sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
     },
 
-    /// No authentication.
-    NoAuth,
+    /// Authenticate using an nkey.
+    NKey {
+        /// Securely loads the public nkey.
+        nkey_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
+        /// Signs the nonce passed as an argument.
+        sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
+    },
 }
 
 impl fmt::Debug for AuthStyle {
@@ -383,6 +428,7 @@ impl fmt::Debug for AuthStyle {
                 f.debug_tuple("Token").field(user).field(pass).finish()
             }
             AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
+            AuthStyle::NKey { .. } => f.debug_struct("NKey").finish(),
         }
     }
 }

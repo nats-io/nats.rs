@@ -226,6 +226,7 @@ impl Connector {
             pass: None,
             auth_token: None,
             user_jwt: None,
+            nkey: None,
             signature: None,
             echo: !self.options.no_echo,
             headers: true,
@@ -245,6 +246,12 @@ impl Connector {
                 let jwt = jwt_cb()?;
                 let sig = sig_cb(server_info.nonce.as_bytes())?;
                 connect_info.user_jwt = Some(jwt);
+                connect_info.signature = Some(sig);
+            }
+            AuthStyle::NKey { nkey_cb, sig_cb } => {
+                let nkey = nkey_cb()?;
+                let sig = sig_cb(server_info.nonce.as_bytes())?;
+                connect_info.nkey = Some(nkey);
                 connect_info.signature = Some(sig);
             }
         }
