@@ -23,7 +23,7 @@ panic = 'abort'
 
 [dependencies]
 async-dup = "1.2.1"
-async-tls = { path = "../async-tls", default-features = false, features = ["client"] }
+async-tls = { version = "0.10.0", default-features = false, features = ["client"] }
 base64-url = "1.4.5"
 crossbeam-channel = "0.4.2"
 itoa = "0.4.6"
