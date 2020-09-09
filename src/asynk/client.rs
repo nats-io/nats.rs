@@ -7,9 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use smol::io::{AssertAsync, BufReader, BufWriter};
-use smol::{channel, future, lock, prelude::*, stream, Executor, Timer};
-
+use crate::smol::io::{AssertAsync, BufReader, BufWriter};
+use crate::smol::{self, channel, future, lock, prelude::*, stream, Executor, Timer};
 use crate::asynk::connector::Connector;
 use crate::asynk::message::Message;
 use crate::asynk::proto::{self, ClientOp, ServerOp};

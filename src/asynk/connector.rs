@@ -9,9 +9,9 @@ use std::time::Duration;
 use async_tls::TlsConnector;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use rustls::ClientConfig;
-use smol::io::BufReader;
-use smol::{net, prelude::*, Timer};
 
+use crate::smol::io::BufReader;
+use crate::smol::{net, prelude::*, Timer};
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
 use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};

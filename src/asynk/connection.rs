@@ -2,8 +2,7 @@ use std::io::{self, Error, ErrorKind};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use smol::{prelude::*, Timer};
-
+use crate::smol::{prelude::*, Timer};
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
 use crate::asynk::subscription::Subscription;

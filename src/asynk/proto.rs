@@ -2,8 +2,7 @@ use std::convert::TryFrom;
 use std::io::{self, Error, ErrorKind};
 use std::str::FromStr;
 
-use smol::prelude::*;
-
+use crate::smol::prelude::*;
 use crate::connect::ConnectInfo;
 use crate::{inject_io_failure, Headers, ServerInfo};
 

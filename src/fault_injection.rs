@@ -4,7 +4,7 @@ use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use rand::{thread_rng, Rng};
-use smol::Timer;
+use crate::smol::Timer;
 
 /// This function is useful for inducing random jitter into our operations that trigger
 /// cross-thread communication, shaking out more possible interleavings quickly. It gets fully

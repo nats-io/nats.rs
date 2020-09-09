@@ -3,11 +3,10 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use smol::channel;
-use smol::prelude::*;
-
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
+use crate::smol::channel;
+use crate::smol::prelude::*;
 
 /// A subscription to a subject.
 pub struct Subscription {

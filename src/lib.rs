@@ -166,9 +166,8 @@
     clippy::wrong_pub_self_convention,
 )]
 
-use smol::{future, prelude::*, Timer};
-
 use crate::asynk::client::Client;
+use crate::smol::{future, prelude::*, Timer};
 
 pub mod asynk;
 mod auth_utils;
@@ -176,6 +175,28 @@ mod connect;
 mod headers;
 mod options;
 mod secure_wipe;
+
+/// A subset of the smol runtime.
+pub(crate) mod smol {
+    pub use async_channel as channel;
+    pub use async_net as net;
+
+    pub use async_executor::{Executor, Task};
+    pub use async_io::{block_on, Timer};
+    pub use futures_lite::{future, io, pin, ready, stream};
+
+    pub mod lock {
+        pub use async_mutex::{Mutex, MutexGuard};
+    }
+
+    pub mod prelude {
+        pub use futures_lite::{AsyncBufRead, AsyncBufReadExt};
+        pub use futures_lite::{AsyncRead, AsyncReadExt};
+        pub use futures_lite::{AsyncWrite, AsyncWriteExt};
+        pub use futures_lite::{Future, FutureExt};
+        pub use futures_lite::{Stream, StreamExt};
+    }
+}
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
