@@ -19,7 +19,7 @@ pub use subscription::Subscription;
 ///
 /// ```
 /// # fn main() -> std::io::Result<()> {
-/// # smol::run(async {
+/// # smol::block_on(async {
 /// let nc = nats::asynk::connect("demo.nats.io").await?;
 /// # Ok(())
 /// # })

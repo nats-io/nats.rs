@@ -177,6 +177,9 @@ mod options;
 mod secure_wipe;
 
 /// A subset of the smol runtime.
+///
+/// We're only using a subset because async-process requires Rust 1.45, but our minimum required
+/// Rust version is older than that.
 pub(crate) mod smol {
     pub use async_channel as channel;
     pub use async_net as net;

@@ -288,7 +288,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// # smol::run(async {
+    /// # smol::block_on(async {
     /// let options = nats::Options::new();
     /// let nc = options
     ///     .connect_async("nats://demo.nats.io:4222,tls://demo.nats.io:4443")
