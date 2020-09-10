@@ -2,7 +2,6 @@ use std::cmp;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::io::{self, Error, ErrorKind};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,10 +9,11 @@ use std::time::Duration;
 use async_tls::TlsConnector;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use rustls::ClientConfig;
-use smol::{io::BufReader, prelude::*, Async, Timer};
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
+use crate::smol::io::BufReader;
+use crate::smol::{net, prelude::*, Timer};
 use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
 
 /// Maintains a list of servers and establishes connections.
@@ -110,8 +110,8 @@ impl Connector {
                 // Resolve the server URL to socket addresses.
                 let host = server.host.clone();
                 let port = server.port;
-                let mut addrs = match smol::unblock!((host.as_str(), port).to_socket_addrs()) {
-                    Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
+                let mut addrs = match net::resolve((host.as_str(), port)).await {
+                    Ok(addrs) => addrs,
                     Err(err) => {
                         last_err = err;
                         continue;
@@ -124,7 +124,7 @@ impl Connector {
                 for addr in addrs {
                     // Sleep for some time if this is not the first connection attempt for this
                     // server.
-                    Timer::new(sleep_duration).await;
+                    Timer::after(sleep_duration).await;
 
                     // Try connecting to this address.
                     let res = self.connect_addr(addr, server).await;
@@ -156,7 +156,7 @@ impl Connector {
     /// Attempts to establish a connection to a single socket address.
     async fn connect_addr(
         &self,
-        addr: SocketAddr,
+        addr: net::SocketAddr,
         server: &Server,
     ) -> io::Result<(
         ServerInfo,
@@ -167,7 +167,7 @@ impl Connector {
         inject_io_failure()?;
 
         // Connect to the remote socket.
-        let mut stream = Async::<TcpStream>::connect(addr).await?;
+        let mut stream = net::TcpStream::connect(addr).await?;
 
         // Expect an INFO message.
         let mut line = crate::SecureVec::with_capacity(512);
@@ -211,7 +211,6 @@ impl Connector {
             (Box::pin(stream.clone()), Box::pin(stream))
         } else {
             // Split the TCP stream into a reader and a writer.
-            let stream = async_dup::Arc::new(stream);
             (Box::pin(stream.clone()), Box::pin(stream))
         };
 

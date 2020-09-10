@@ -2,8 +2,8 @@ use std::io;
 use std::{sync::Arc, thread, time::Duration};
 
 use crossbeam_channel::RecvTimeoutError;
-use smol::{future, prelude::*, Timer};
 
+use crate::smol::{future, prelude::*, Timer};
 use crate::{asynk, Message};
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
@@ -67,7 +67,7 @@ impl Subscription {
                 }
             }
             .or(async {
-                Timer::new(timeout).await;
+                Timer::after(timeout).await;
                 Err(RecvTimeoutError::Timeout)
             }),
         )

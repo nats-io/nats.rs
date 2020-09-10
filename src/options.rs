@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use smol::future;
-
 use crate::asynk;
 use crate::auth_utils;
 use crate::secure_wipe::SecureString;
+use crate::smol::future;
 
 /// Connect options.
 pub struct Options {
@@ -289,7 +288,7 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// # smol::run(async {
+    /// # smol::block_on(async {
     /// let options = nats::Options::new();
     /// let nc = options
     ///     .connect_async("nats://demo.nats.io:4222,tls://demo.nats.io:4443")

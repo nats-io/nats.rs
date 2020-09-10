@@ -22,33 +22,36 @@ maintenance = { status = "actively-developed" }
 panic = 'abort'
 
 [dependencies]
-async-channel = "1.2.0"
+async-channel = "1.4.2"
 async-dup = "1.2.1"
-async-mutex = "1.1.5"
-async-tls = "0.8.0"
+async-executor = "1.0.0"
+async-io = "1.0.1"
+async-mutex = "1.3.0"
+async-net = "1.2.0"
+async-tls = { version = "0.10.0", default-features = false, features = ["client"] }
 base64-url = "1.4.5"
 crossbeam-channel = "0.4.2"
-futures-channel = "0.3.5"
+futures-lite = "1.3.0"
 itoa = "0.4.6"
-lazy_static = "1.4.0"
+json = "0.12.4"
 log = "0.4.8"
 nkeys = "0.0.9"
 nuid = "0.2.1"
 once_cell = "1.4.0"
 rand = "0.7.3"
-regex = "1.3.9"
+regex = { version = "1.3.9", default-features = false, features = ["std"] }
 rustls = "0.18.0"
 rustls-native-certs = "0.4.0"
-serde = { version = "1.0.114", features = ["derive"] }
-serde_json = "1.0.56"
-smol = "0.3.3"
 
 [dev-dependencies]
 criterion = "0.3.3"
 env_logger = "0.7.1"
-quicli = "0.4.0"
-structopt = "0.3.15"
 nats_test_server = { path = "nats_test_server" }
+quicli = "0.4.0"
+serde = { version = "1.0.114", features = ["derive"] }
+serde_json = "1.0.56"
+smol = "1.0.0"
+structopt = "0.3.15"
 
 [[bench]]
 name = "nats_bench"

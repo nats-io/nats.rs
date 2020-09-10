@@ -2,13 +2,10 @@ use std::io::{self, Error, ErrorKind};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use smol::future::FutureExt;
-use smol::stream::StreamExt;
-use smol::Timer;
-
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
 use crate::asynk::subscription::Subscription;
+use crate::smol::{prelude::*, Timer};
 use crate::{Headers, Options};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -103,7 +100,7 @@ impl Connection {
         self.client
             .flush()
             .or(async {
-                Timer::new(timeout).await;
+                Timer::after(timeout).await;
                 Err(ErrorKind::TimedOut.into())
             })
             .await

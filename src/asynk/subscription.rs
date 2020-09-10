@@ -3,10 +3,10 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use smol::stream::Stream;
-
 use crate::asynk::client::Client;
 use crate::asynk::message::Message;
+use crate::smol::channel;
+use crate::smol::prelude::*;
 
 /// A subscription to a subject.
 pub struct Subscription {
@@ -17,7 +17,7 @@ pub struct Subscription {
     pub(crate) subject: String,
 
     /// MSG operations received from the server.
-    pub(crate) messages: async_channel::Receiver<Message>,
+    pub(crate) messages: channel::Receiver<Message>,
 
     /// Client associated with subscription.
     pub(crate) client: Client,
@@ -28,7 +28,7 @@ impl Subscription {
     pub(crate) fn new(
         sid: u64,
         subject: String,
-        messages: async_channel::Receiver<Message>,
+        messages: channel::Receiver<Message>,
         client: Client,
     ) -> Subscription {
         Subscription {

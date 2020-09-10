@@ -1,9 +1,7 @@
-use serde::Serialize;
-
 use crate::SecureString;
 
 /// Info to construct a CONNECT message.
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Debug)]
 #[doc(hidden)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
@@ -14,25 +12,20 @@ pub struct ConnectInfo {
     pub pedantic: bool,
 
     /// User's JWT.
-    #[serde(rename = "jwt", skip_serializing_if = "is_empty_or_none")]
     pub user_jwt: Option<SecureString>,
 
     /// Public nkey.
-    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub nkey: Option<SecureString>,
 
     /// Signed nonce, encoded to Base64URL.
-    #[serde(rename = "sig", skip_serializing_if = "is_empty_or_none")]
     pub signature: Option<SecureString>,
 
     /// Optional client name.
-    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub name: Option<SecureString>,
 
     /// If set to `true`, the server (version 1.2.0+) will not send originating messages from this
     /// connection to its own subscriptions. Clients should set this to `true` only for server
     /// supporting this feature, which is when proto in the INFO protocol is set to at least 1.
-    #[serde(skip_serializing_if = "is_true")]
     pub echo: bool,
 
     /// The implementation language of the client.
@@ -42,35 +35,52 @@ pub struct ConnectInfo {
     pub version: String,
 
     /// Indicates whether the client requires an SSL connection.
-    #[serde(default)]
     pub tls_required: bool,
 
     /// Connection username (if `auth_required` is set)
-    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub user: Option<SecureString>,
 
     /// Connection password (if auth_required is set)
-    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub pass: Option<SecureString>,
 
     /// Client authorization token (if auth_required is set)
-    #[serde(skip_serializing_if = "is_empty_or_none")]
     pub auth_token: Option<SecureString>,
 
     /// Whether the client supports the usage of headers.
     pub headers: bool,
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)]
-const fn is_true(field: &bool) -> bool {
-    *field
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[inline]
-fn is_empty_or_none(field: &Option<SecureString>) -> bool {
-    match field {
-        Some(inner) => inner.is_empty(),
-        None => true,
+impl ConnectInfo {
+    pub(crate) fn dump(&self) -> Option<String> {
+        let mut obj = json::object! {
+            verbose: self.verbose,
+            pedantic: self.pedantic,
+            lang: self.lang.clone(),
+            version: self.version.clone(),
+            tls_required: self.tls_required,
+            headers: self.headers,
+        };
+        if let Some(s) = &self.user_jwt {
+            obj.insert("jwt", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.signature {
+            obj.insert("sig", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.name {
+            obj.insert("name", s.to_string()).ok()?;
+        }
+        if self.echo {
+            obj.insert("echo", true).ok()?;
+        }
+        if let Some(s) = &self.user {
+            obj.insert("user", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.pass {
+            obj.insert("pass", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.auth_token {
+            obj.insert("auth_token", s.to_string()).ok()?;
+        }
+        Some(obj.dump())
     }
 }
