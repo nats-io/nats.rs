@@ -1,3 +1,18 @@
+# 0.8.0
+
+## New Features
+
+- Add `asynk::Message::respond()`.
+- Add `Options::with_nkey()`.
+
+## Improvements
+
+- Update the `smol` dependency.
+
+## Breaking Changes
+
+- Remove `crossbeam-channel` from the public API.
+
 # 0.7.4
 
 ## Improvements
