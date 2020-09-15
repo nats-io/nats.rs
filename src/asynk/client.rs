@@ -118,7 +118,7 @@ impl Client {
                                     // Flush the writer.
                                     let mut state = client.state.lock().await;
                                     if let Some(writer) = state.writer.as_mut() {
-                                        let _ = writer.flush().await;
+                                        writer.flush().await.ok();
                                     }
                                 }
                                 // Wait a little bit before flushing again.
@@ -130,7 +130,7 @@ impl Client {
                     // Spawn the main task that processes messages from the server.
                     let runner = ex.spawn(async move {
                         let res = client.run(connector).await;
-                        let _ = run_sender.try_send(res);
+                        run_sender.try_send(res).ok();
                     });
 
                     // Wait until the client is closed.
@@ -142,7 +142,7 @@ impl Client {
 
                     // Signal to the shutdown initiator that it is now complete.
                     if let Ok(s) = res {
-                        let _ = s.try_send(());
+                        s.try_send(()).ok();
                     }
                 }));
             }
@@ -156,7 +156,7 @@ impl Client {
             },
             async {
                 // Wait for the connection to get established.
-                let _ = pong_receiver.recv().await;
+                pong_receiver.recv().await.ok();
                 Ok(client)
             },
         )
@@ -221,7 +221,7 @@ impl Client {
 
             // Flush the writer in case there are buffered messages.
             if let Some(writer) = state.writer.as_mut() {
-                let _ = writer.flush().await;
+                writer.flush().await.ok();
             }
 
             // Wake up all pending flushes.
@@ -230,9 +230,9 @@ impl Client {
 
             let (s, r) = channel::bounded(1);
             // Signal the thread to stop.
-            let _ = shutdown.try_send(s);
+            shutdown.try_send(s).ok();
             // Wait for the thread to stop.
-            let _ = r.recv().await;
+            r.recv().await.ok();
         }
 
         Ok(())
@@ -268,8 +268,8 @@ impl Client {
                 queue_group,
                 sid,
             };
-            let _ = proto::encode(writer, op).await;
-            let _ = state.flush_kicker.try_send(());
+            proto::encode(writer, op).await.ok();
+            state.flush_kicker.try_send(()).ok();
         }
 
         // Register the subscription in the hash map.
@@ -333,7 +333,7 @@ impl Client {
             Some(mut writer) => {
                 // If connected, write into the writer.
                 let res = proto::encode(&mut writer, op).await;
-                let _ = state.flush_kicker.try_send(());
+                state.flush_kicker.try_send(()).ok();
 
                 // If writing fails, disconnect.
                 if res.is_err() {
@@ -447,7 +447,7 @@ impl Client {
 
         // Complete PONGs because the connection is healthy.
         for p in pongs {
-            let _ = p.try_send(());
+            p.try_send(()).ok();
         }
 
         Ok(())
@@ -471,7 +471,7 @@ impl Client {
             match op {
                 ServerOp::Info(server_info) => {
                     for url in &server_info.connect_urls {
-                        let _ = connector.add_url(url);
+                        connector.add_url(url).ok();
                     }
                     *self.server_info.lock().unwrap() = Some(server_info);
                 }
@@ -480,7 +480,7 @@ impl Client {
                     // Respond with a PONG if connected.
                     if let Some(w) = state.writer.as_mut() {
                         proto::encode(w, ClientOp::Pong).await?;
-                        let _ = state.flush_kicker.try_send(());
+                        state.flush_kicker.try_send(()).ok();
                     }
                 }
 
@@ -490,7 +490,7 @@ impl Client {
                     if state.writer.is_some() {
                         // Take the next expected PONG and complete it by sending a message.
                         if let Some(pong) = state.pongs.pop_front() {
-                            let _ = pong.try_send(());
+                            pong.try_send(()).ok();
                         }
                     }
                 }
@@ -512,7 +512,7 @@ impl Client {
                         };
 
                         // Send a message or drop it if the channel is disconnected or full.
-                        let _ = subscription.messages.try_send(msg);
+                        subscription.messages.try_send(msg).ok();
                     } else {
                         // If there is no matching subscription, clean up.
                         self.cleanup_subscriptions(&mut state).await;
@@ -537,7 +537,7 @@ impl Client {
                         };
 
                         // Send a message or drop it if the channel is disconnected or full.
-                        let _ = subscription.messages.try_send(msg);
+                        subscription.messages.try_send(msg).ok();
                     } else {
                         // If there is no matching subscription, clean up.
                         self.cleanup_subscriptions(&mut state).await;
@@ -566,8 +566,8 @@ impl Client {
             // Send an UNSUB message and ignore errors.
             if let Some(writer) = state.writer.as_mut() {
                 let max_msgs = None;
-                let _ = proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await;
-                let _ = state.flush_kicker.try_send(());
+                proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await.ok();
+                state.flush_kicker.try_send(()).ok();
             }
         }
     }

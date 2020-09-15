@@ -581,7 +581,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn close(self) {
-        let _ = future::block_on(self.0.close());
+        future::block_on(self.0.close()).ok();
     }
 
     /// Calculates the round trip time between this client and the server,

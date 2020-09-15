@@ -1,8 +1,6 @@
 use std::io;
 use std::{sync::Arc, thread, time::Duration};
 
-use crossbeam_channel::RecvTimeoutError;
-
 use crate::smol::{future, prelude::*, Timer};
 use crate::{asynk, Message};
 
@@ -58,17 +56,23 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn next_timeout(&self, timeout: Duration) -> Result<Message, RecvTimeoutError> {
+    pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
         future::block_on(
             async {
                 match self.0.messages.recv().await {
                     Ok(msg) => Ok(Message::from_async(msg)),
-                    Err(_) => Err(RecvTimeoutError::Disconnected),
+                    Err(_) => Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "next_timeout: unsubscribed",
+                    )),
                 }
             }
             .or(async {
                 Timer::after(timeout).await;
-                Err(RecvTimeoutError::Timeout)
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "next_timeout: timed out",
+                ))
             }),
         )
     }
@@ -84,7 +88,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn messages(&self) -> Iter<'_> {
+    pub fn messages(&self) -> Iter<'_> {
         Iter { subscription: self }
     }
 
@@ -99,7 +103,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn iter(&self) -> Iter<'_> {
+    pub fn iter(&self) -> Iter<'_> {
         Iter { subscription: self }
     }
 
@@ -114,7 +118,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn try_iter(&self) -> TryIter<'_> {
+    pub fn try_iter(&self) -> TryIter<'_> {
         TryIter { subscription: self }
     }
 
@@ -129,7 +133,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub const fn timeout_iter(&self, timeout: Duration) -> TimeoutIter<'_> {
+    pub fn timeout_iter(&self, timeout: Duration) -> TimeoutIter<'_> {
         TimeoutIter {
             subscription: self,
             to: timeout,
