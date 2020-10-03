@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nats-io/nats.rs/master/logo/NATS-Rust.png">
+  <img src="logo/logo.svg">
 </p>
 
 <p align="center">
