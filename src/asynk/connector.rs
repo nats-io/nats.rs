@@ -1,7 +1,7 @@
 use std::cmp;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::io::{self, Error, ErrorKind};
+use std::io::{Error, ErrorKind};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +12,7 @@ use rustls::ClientConfig;
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
-use crate::smol::io::BufReader;
+use crate::smol::io::{self, BufReader};
 use crate::smol::{net, prelude::*, Timer};
 use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
 
@@ -49,7 +49,7 @@ impl Connector {
         // Include user-provided certificates.
         for path in &options.certificates {
             let contents = std::fs::read(path)?;
-            let mut cursor = io::Cursor::new(contents);
+            let mut cursor = std::io::Cursor::new(contents);
 
             tls_config
                 .root_store
@@ -207,11 +207,12 @@ impl Connector {
             let stream = self.tls.connect(&server.host, stream).await?;
 
             // Split the TLS stream into a reader and a writer.
-            let stream = async_dup::Arc::new(async_dup::Mutex::new(stream));
-            (Box::pin(stream.clone()), Box::pin(stream))
+            let (r, w) = io::split(stream);
+            (r.boxed_reader(), w.boxed_writer())
         } else {
             // Split the TCP stream into a reader and a writer.
-            (Box::pin(stream.clone()), Box::pin(stream))
+            let (r, w) = io::split(stream);
+            (r.boxed_reader(), w.boxed_writer())
         };
 
         // Data that will be formatted as a CONNECT message.

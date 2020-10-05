@@ -23,14 +23,13 @@ panic = 'abort'
 
 [dependencies]
 async-channel = "1.4.2"
-async-dup = "1.2.1"
 async-executor = "1.0.0"
 async-io = "1.0.1"
 async-mutex = "1.3.0"
 async-net = "1.2.0"
 async-tls = { version = "0.10.0", default-features = false, features = ["client"] }
 base64-url = "1.4.5"
-futures-lite = "1.3.0"
+futures-lite = "1.10.1"
 itoa = "0.4.6"
 json = "0.12.4"
 log = "0.4.8"
