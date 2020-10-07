@@ -6,9 +6,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_tls::TlsConnector;
+use async_rustls::{rustls::ClientConfig, webpki::DNSNameRef, TlsConnector};
 use rand::{seq::SliceRandom, thread_rng, Rng};
-use rustls::ClientConfig;
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
@@ -37,14 +36,10 @@ impl Connector {
     pub(crate) fn new(url: &str, options: Options) -> io::Result<Connector> {
         let mut tls_config = ClientConfig::new();
 
-        // Include platform's native certificate store.
-        match rustls_native_certs::load_native_certs() {
-            Ok(root_store) | Err((Some(root_store), _)) => tls_config
-                .root_store
-                .roots
-                .extend(root_store.roots.into_iter()),
-            Err((None, _)) => {}
-        }
+        // Include webpki root certificates.
+        tls_config
+            .root_store
+            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
 
         // Include user-provided certificates.
         for path in &options.certificates {
@@ -182,7 +177,7 @@ impl Connector {
                 return Err(Error::new(
                     ErrorKind::Other,
                     format!("expected INFO, received: {:?}", op),
-                ))
+                ));
             }
             None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
         };
@@ -204,7 +199,11 @@ impl Connector {
             inject_io_failure()?;
 
             // Connect using TLS.
-            let stream = self.tls.connect(&server.host, stream).await?;
+            let res = DNSNameRef::try_from_ascii_str(server.host.as_str());
+            let name = res.map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "the server name is not ASCII")
+            })?;
+            let stream = self.tls.connect(name, stream).await?;
 
             // Split the TLS stream into a reader and a writer.
             let (r, w) = io::split(stream);

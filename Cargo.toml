@@ -27,7 +27,7 @@ async-executor = "1.0.0"
 async-io = "1.0.1"
 async-mutex = "1.3.0"
 async-net = "1.2.0"
-async-tls = { version = "0.10.0", default-features = false, features = ["client"] }
+async-rustls = "0.1.0"
 base64-url = "1.4.5"
 futures-lite = "1.10.1"
 itoa = "0.4.6"
@@ -38,8 +38,7 @@ nuid = "0.2.1"
 once_cell = "1.4.0"
 rand = "0.7.3"
 regex = { version = "1.3.9", default-features = false, features = ["std"] }
-rustls = "0.18.0"
-rustls-native-certs = "0.4.0"
+webpki-roots = "0.20.0"
 
 [dev-dependencies]
 criterion = "0.3.3"
