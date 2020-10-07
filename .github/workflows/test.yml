@@ -32,15 +32,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
     - uses: actions/checkout@v1
-    - name: Cache target
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-target
-      with:
-        path: target
-        key: ${{ runner.os }}-${{ env.cache-name }}
-        restore-keys: |
-          ${{ runner.os }}-
     - name: cargo test
       run: |
         rustup update
@@ -50,15 +41,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
-    - name: Cache target msrv
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-target
-      with:
-        path: target
-        key: ${{ runner.os }}-${{ env.cache-name }}
-        restore-keys: |
-          ${{ runner.os }}-
     - name: fault injection test
       run: |
         rustup update
@@ -68,15 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
-    - name: Cache target
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-target-msrv
-      with:
-        path: target
-        key: ${{ runner.os }}-${{ env.cache-name }}
-        restore-keys: |
-          ${{ runner.os }}-
     - name: MSRV check
       run: |
         set -eo pipefail
