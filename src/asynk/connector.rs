@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_tls::TlsConnector;
+use async_rustls::TlsConnector;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use rustls::ClientConfig;
 
@@ -182,7 +182,7 @@ impl Connector {
                 return Err(Error::new(
                     ErrorKind::Other,
                     format!("expected INFO, received: {:?}", op),
-                ))
+                ));
             }
             None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
         };
@@ -204,7 +204,11 @@ impl Connector {
             inject_io_failure()?;
 
             // Connect using TLS.
-            let stream = self.tls.connect(&server.host, stream).await?;
+            let res = async_rustls::webpki::DNSNameRef::try_from_ascii_str(server.host.as_str());
+            let name = res.map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "the server name is not ASCII")
+            })?;
+            let stream = self.tls.connect(name, stream).await?;
 
             // Split the TLS stream into a reader and a writer.
             let (r, w) = io::split(stream);
