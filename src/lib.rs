@@ -181,24 +181,13 @@ mod secure_wipe;
 /// We're only using a subset because async-process requires Rust 1.45, but our minimum required
 /// Rust version is older than that.
 pub(crate) mod smol {
-    pub use async_channel as channel;
-    pub use async_net as net;
-
     pub use async_executor::*;
     pub use async_io::*;
-    pub use futures_lite::{future, io, pin, ready, stream};
+    pub use futures_lite::*;
 
-    pub mod lock {
-        pub use async_mutex::*;
-    }
-
-    pub mod prelude {
-        pub use futures_lite::{AsyncBufRead, AsyncBufReadExt};
-        pub use futures_lite::{AsyncRead, AsyncReadExt};
-        pub use futures_lite::{AsyncWrite, AsyncWriteExt};
-        pub use futures_lite::{Future, FutureExt};
-        pub use futures_lite::{Stream, StreamExt};
-    }
+    pub use async_channel as channel;
+    pub use async_lock as lock;
+    pub use async_net as net;
 }
 
 #[cfg(feature = "fault_injection")]

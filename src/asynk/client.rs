@@ -566,10 +566,18 @@ impl Client {
             // Send an UNSUB message and ignore errors.
             if let Some(writer) = state.writer.as_mut() {
                 let max_msgs = None;
-                proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).await.ok();
+                proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
+                    .await
+                    .ok();
                 state.flush_kicker.try_send(()).ok();
             }
         }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        println!("Client::drop()");
     }
 }
 
