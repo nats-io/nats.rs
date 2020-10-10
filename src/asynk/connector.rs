@@ -25,7 +25,7 @@ pub(crate) struct Connector {
     attempts: HashMap<Server, usize>,
 
     /// Configured options for establishing connections.
-    options: Options,
+    options: Arc<Options>,
 
     /// TLS connector.
     tls: TlsConnector,
@@ -33,7 +33,7 @@ pub(crate) struct Connector {
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
-    pub(crate) fn new(url: &str, options: Options) -> io::Result<Connector> {
+    pub(crate) fn new(url: &str, options: Arc<Options>) -> io::Result<Connector> {
         let mut tls_config = ClientConfig::new();
 
         // Include webpki root certificates.
@@ -75,6 +75,35 @@ impl Connector {
         Ok(())
     }
 
+    pub(crate) fn get_options(&self) -> Arc<Options> {
+        self.options.clone()
+    }
+
+    /// Get the list of servers with enough reconnection attempts left
+    fn get_servers(&mut self) -> io::Result<Vec<Server>> {
+        let mut servers: Vec<Server> = self.attempts.keys().cloned().collect();
+
+        servers = servers
+            .into_iter()
+            .filter(|server| {
+                let reconnects = self.attempts.get_mut(server).unwrap();
+                match self.options.max_reconnects.as_ref() {
+                    Some(max) => max > reconnects,
+                    None => true,
+                }
+            })
+            .collect();
+
+        if servers.is_empty() {
+            Err(Error::new(
+                ErrorKind::NotFound,
+                "no servers remaining to connect to",
+            ))
+        } else {
+            Ok(servers)
+        }
+    }
+
     /// Creates a new connection to one of the known URLs.
     ///
     /// If `use_backoff` is `true`, this method will try connecting in a loop and will back off
@@ -92,14 +121,14 @@ impl Connector {
 
         loop {
             // Shuffle the list of servers.
-            let mut servers: Vec<Server> = self.attempts.keys().cloned().collect();
+            let mut servers: Vec<Server> = self.get_servers()?;
             servers.shuffle(&mut thread_rng());
 
             // Iterate over the server list in random order.
             for server in &servers {
                 // Calculate sleep duration for exponential backoff and bump the reconnect counter.
                 let reconnects = self.attempts.get_mut(server).unwrap();
-                let sleep_duration = backoff(*reconnects);
+                let sleep_duration = self.options.reconnect_delay_callback.call(*reconnects);
                 *reconnects += 1;
 
                 // Resolve the server URL to socket addresses.
@@ -137,6 +166,8 @@ impl Connector {
                     for url in &server_info.connect_urls {
                         self.add_url(url)?;
                     }
+
+                    *self.attempts.get_mut(server).unwrap() = 0;
                     return Ok((server_info, reader, writer));
                 }
             }

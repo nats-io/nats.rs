@@ -208,19 +208,22 @@ impl Options {
 
     /// Set the maximum number of reconnect attempts.
     /// If no servers remain that are under this threshold,
-    /// all servers will still be attempted.
+    /// then no further reconnect shall be attempted.
+    /// The reconnect attempt for a server is reset upon
+    /// successfull connection.
+    /// If None then there is no maximum number of attempts.
     ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
-    ///     .max_reconnects(Some(3))
+    ///     .max_reconnects(3)
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn max_reconnects(mut self, max_reconnects: Option<usize>) -> Options {
-        self.max_reconnects = max_reconnects;
+    pub fn max_reconnects<T: Into<Option<usize>>>(mut self, max_reconnects: T) -> Options {
+        self.max_reconnects = max_reconnects.into();
         self
     }
 
@@ -303,6 +306,20 @@ impl Options {
 
     /// Set a callback to be executed when connectivity to
     /// a server has been lost.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .disconnect_callback(|| println!("connection has been lost"))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn disconnect_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
@@ -312,7 +329,21 @@ impl Options {
     }
 
     /// Set a callback to be executed when connectivity to a
-    /// server has been established.
+    /// server has been reestablished.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .reconnect_callback(|| println!("connection has been reestablished"))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn reconnect_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
@@ -324,6 +355,21 @@ impl Options {
     /// Set a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .close_callback(|| println!("connection has been closed"))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// nc.drain().await.unwrap();
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn close_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
@@ -341,6 +387,21 @@ impl Options {
     ///
     /// It is recommended that some random jitter is added to
     /// your returned `Duration`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # use std::time::Duration;
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .reconnect_delay_callback(|c| Duration::from_millis(std::cmp::min((c * 100) as u64, 8000)))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn reconnect_delay_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
@@ -440,6 +501,13 @@ impl Default for AuthStyle {
 
 #[derive(Default)]
 pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
+impl Callback {
+    pub fn call(&self) {
+        if let Some(callback) = self.0.as_ref() {
+            callback();
+        }
+    }
+}
 
 impl fmt::Debug for Callback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -453,3 +521,8 @@ impl fmt::Debug for Callback {
 }
 
 pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
+impl ReconnectDelayCallback {
+    pub fn call(&self, reconnects: usize) -> Duration {
+        self.0(reconnects)
+    }
+}

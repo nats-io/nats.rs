@@ -96,8 +96,9 @@ impl Client {
             unsubscribed: Arc::new(Mutex::new(HashSet::new())),
         };
 
+        let options = Arc::new(options);
         // Connector for creating the initial connection and reconnecting when it is broken.
-        let connector = Connector::new(url, options)?;
+        let connector = Connector::new(url, options.clone())?;
 
         // Spawn the client thread responsible for:
         // - Maintaining a connection to the server and reconnecting when it is broken.
@@ -131,6 +132,7 @@ impl Client {
                     let runner = ex.spawn(async move {
                         let res = client.run(connector).await;
                         run_sender.try_send(res).ok();
+                        client.close().await.ok();
                     });
 
                     // Wait until the client is closed.
@@ -139,6 +141,8 @@ impl Client {
                     // Cancel spawned tasks.
                     flusher.cancel().await;
                     runner.cancel().await;
+
+                    options.close_callback.call();
 
                     // Signal to the shutdown initiator that it is now complete.
                     if let Ok(s) = res {
@@ -347,13 +351,13 @@ impl Client {
 
     /// Runs the loop that connects and reconnects the client.
     async fn run(&self, mut connector: Connector) -> io::Result<()> {
-        // Don't use backoff on first connect.
-        let mut use_backoff = false;
+        let mut first_connect = true;
 
         loop {
+            // Don't use backoff on first connect.
+            let use_backoff = !first_connect;
             // Make a connection to the server.
             let (server_info, reader, writer) = connector.connect(use_backoff).await?;
-            use_backoff = true;
 
             let reader = BufReader::with_capacity(128 * 1024, reader);
             let writer = BufWriter::with_capacity(128 * 1024, writer);
@@ -371,9 +375,14 @@ impl Client {
             // Set up the new connection for this client.
             if self.reconnect(server_info, writer).await.is_ok() {
                 // Connected! Now dispatch MSG operations.
+                if !first_connect {
+                    connector.get_options().reconnect_callback.call();
+                }
                 if self.dispatch(server_ops, &mut connector).await.is_ok() {
                     // If the client stopped gracefully, return.
                     return Ok(());
+                } else {
+                    connector.get_options().disconnect_callback.call();
                 }
             }
 
@@ -386,6 +395,7 @@ impl Client {
             if state.shutdown.is_none() {
                 return Ok(());
             }
+            first_connect = false;
         }
     }
 
