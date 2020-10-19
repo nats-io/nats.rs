@@ -190,3 +190,9 @@ impl Connection {
         ))
     }
 }
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.client.shutdown();
+    }
+}
