@@ -165,6 +165,7 @@
     clippy::wildcard_enum_match_arm,
     clippy::wrong_pub_self_convention,
 )]
+#![allow(clippy::match_like_matches_macro)]
 
 use crate::asynk::client::Client;
 use crate::smol::{future, prelude::*, Timer};
