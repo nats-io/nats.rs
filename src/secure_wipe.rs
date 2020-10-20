@@ -5,8 +5,6 @@ use std::{
     sync::atomic::{compiler_fence, Ordering::SeqCst},
 };
 
-use rand::{thread_rng, Rng};
-
 /// A `Vec<u8>` that gets scrambled on drop.
 /// Provides a vector that will scramble allocations as
 /// they are discarded when the vector grows.
@@ -43,11 +41,10 @@ impl SecureVec {
     }
 
     pub(crate) fn scramble(&mut self) {
-        let mut rng = thread_rng();
         for byte in &mut self.0 {
             #[allow(unsafe_code)]
             unsafe {
-                write_volatile(byte, rng.gen());
+                write_volatile(byte, fastrand::u8(..));
             }
         }
         compiler_fence(SeqCst);
@@ -87,12 +84,10 @@ pub struct SecureString(String);
 
 impl SecureString {
     pub(crate) fn scramble(&mut self) {
-        let mut rng = thread_rng();
-
         #[allow(unsafe_code)]
         unsafe {
             for byte in self.0.as_bytes_mut() {
-                write_volatile(byte, rng.gen());
+                write_volatile(byte, fastrand::u8(..));
             }
         }
         compiler_fence(SeqCst);
