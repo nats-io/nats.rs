@@ -9,7 +9,7 @@ Make sure that these boxes are checked before submitting your issue -- thank you
  - [ ] Included below version and environment information
  - [ ] Included a [Minimal, Complete, and Verifiable example] (https://stackoverflow.com/help/mcve)
 
-#### natsio version (`grep 'name = "natsio"' Cargo.lock -A 1`)
+#### NATS version (`grep 'name = "nats"' Cargo.lock -A 1`)
 
 #### rustc version (`rustc --version` - we support Rust 1.37 and up)
 
