@@ -128,13 +128,25 @@ impl Client {
                     });
 
                     // Spawn the main task that processes messages from the server.
-                    let runner = ex.spawn(async move {
-                        let res = client.run(connector).await;
-                        run_sender.try_send(res).ok();
+                    let runner = ex.spawn({
+                        let client = client.clone();
+                        async move {
+                            let res = client.run(connector).await;
+                            run_sender.try_send(res).ok();
+                        }
                     });
 
                     // Wait until the client is closed.
                     let res = stop.recv().await;
+
+                    // One final flush before shutting down.
+                    // This way we make sure buffered published messages reach the server.
+                    {
+                        let mut state = client.state.lock().await;
+                        if let Some(writer) = state.writer.as_mut() {
+                            writer.flush().await.ok();
+                        }
+                    }
 
                     // Cancel spawned tasks.
                     flusher.cancel().await;
