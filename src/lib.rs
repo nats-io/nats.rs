@@ -687,3 +687,10 @@ impl Connection {
         ))
     }
 }
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        // Flush to make sure buffered published messages reach the server.
+        future::block_on(self.0.flush()).ok();
+    }
+}
