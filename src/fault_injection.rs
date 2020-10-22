@@ -4,7 +4,6 @@ use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use crate::smol::Timer;
-use rand::{thread_rng, Rng};
 
 /// This function is useful for inducing random jitter into our operations that trigger
 /// cross-thread communication, shaking out more possible interleavings quickly. It gets fully
@@ -33,15 +32,15 @@ pub async fn inject_delay() {
         return;
     }
 
-    if thread_rng().gen_ratio(1, 10) {
-        let duration = thread_rng().gen_range(0, 50);
+    if fastrand::i32(..10) == 0 {
+        let duration = fastrand::u64(..50);
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
         Timer::after(Duration::from_millis(duration)).await;
     }
 
-    if thread_rng().gen_ratio(1, 2) {
+    if fastrand::i32(..2) == 0 {
         thread::yield_now();
     }
 }
@@ -49,7 +48,7 @@ pub async fn inject_delay() {
 /// This allows our IO error handling code to be tested by
 /// injecting failures sometimes.
 pub fn inject_io_failure() -> io::Result<()> {
-    if thread_rng().gen_ratio(1, 100) {
+    if fastrand::i32(..100) == 0 {
         Err(Error::new(ErrorKind::Other, "injected fault"))
     } else {
         Ok(())

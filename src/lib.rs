@@ -165,6 +165,7 @@
     clippy::wildcard_enum_match_arm,
     clippy::wrong_pub_self_convention,
 )]
+#![allow(clippy::match_like_matches_macro)]
 
 use crate::asynk::client::Client;
 use crate::smol::{future, prelude::*, Timer};
@@ -684,5 +685,12 @@ impl Connection {
             headers,
             msg.as_ref(),
         ))
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        // Flush to make sure buffered published messages reach the server.
+        future::block_on(self.0.flush()).ok();
     }
 }

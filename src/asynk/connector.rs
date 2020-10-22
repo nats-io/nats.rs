@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_rustls::{rustls::ClientConfig, webpki::DNSNameRef, TlsConnector};
-use rand::{seq::SliceRandom, thread_rng, Rng};
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
@@ -122,7 +121,7 @@ impl Connector {
         loop {
             // Shuffle the list of servers.
             let mut servers: Vec<Server> = self.get_servers()?;
-            servers.shuffle(&mut thread_rng());
+            fastrand::shuffle(&mut servers);
 
             // Iterate over the server list in random order.
             for server in &servers {
@@ -143,7 +142,7 @@ impl Connector {
                 };
 
                 // Shuffle the resolved socket addresses.
-                addrs.shuffle(&mut thread_rng());
+                fastrand::shuffle(&mut addrs);
 
                 for addr in addrs {
                     // Sleep for some time if this is not the first connection attempt for this
@@ -352,7 +351,7 @@ pub(crate) fn backoff(reconnects: usize) -> Duration {
         1000
     };
 
-    let jitter = Duration::from_millis(thread_rng().gen_range(0, max_jitter));
+    let jitter = Duration::from_millis(fastrand::u64(0..max_jitter));
 
     base + jitter
 }

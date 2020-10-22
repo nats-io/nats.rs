@@ -10,8 +10,8 @@ license = "Apache-2.0"
 
 [dependencies]
 rand = "0.7.3"
-log = "0.4.8"
-serde_json = "1.0.55"
-serde = "1.0.114"
-serde_derive = "1.0.114"
-env_logger = "0.7.1"
+log = "0.4.11"
+serde_json = "1.0.59"
+serde = "1.0.117"
+serde_derive = "1.0.117"
+env_logger = "0.8.1"

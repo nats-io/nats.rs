@@ -1,3 +1,16 @@
+# 0.8.1
+
+## Improvements
+
+- Remove `async-dup` dependency.
+- Update dependencies, notably `nkeys` to v0.0.11.
+
+## Bug Fixes
+
+- Fix a bug due to which TLS authentication was not
+  working.
+- Shutdown the client thread when `Connection` is dropped.
+
 # 0.8.0
 
 ## New Features

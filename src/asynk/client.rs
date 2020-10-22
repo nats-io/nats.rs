@@ -38,14 +38,6 @@ struct State {
 
     /// Expected pongs and their notification channels.
     pongs: VecDeque<channel::Sender<()>>,
-
-    /// A channel for coordinating shutdown.
-    ///
-    /// When `None`, that means the client is closed or in the process of closing.
-    ///
-    /// To initiate shutdown, we create a channel and send its sender. The client thread receives
-    /// this sender and sends `()` when it stops.
-    shutdown: Option<channel::Sender<channel::Sender<()>>>,
 }
 
 /// A registered subscription.
@@ -66,6 +58,14 @@ pub(crate) struct Client {
 
     /// Subscriptions that have logically unsubscribed but haven't sent UNSUB yet.
     unsubscribed: Arc<Mutex<HashSet<u64>>>,
+
+    /// A channel for coordinating shutdown.
+    ///
+    /// When `None`, that means the client is closed or in the process of closing.
+    ///
+    /// To initiate shutdown, we create a channel and send its sender. The client thread receives
+    /// this sender and sends `()` when it stops.
+    shutdown: Arc<Mutex<Option<channel::Sender<channel::Sender<()>>>>>,
 }
 
 impl Client {
@@ -90,10 +90,10 @@ impl Client {
                 next_sid: 1,
                 subscriptions: HashMap::new(),
                 pongs: VecDeque::from(vec![pong_sender]),
-                shutdown: Some(shutdown),
             })),
             server_info: Arc::new(Mutex::new(None)),
             unsubscribed: Arc::new(Mutex::new(HashSet::new())),
+            shutdown: Arc::new(Mutex::new(Some(shutdown))),
         };
 
         let options = Arc::new(options);
@@ -129,14 +129,25 @@ impl Client {
                     });
 
                     // Spawn the main task that processes messages from the server.
-                    let runner = ex.spawn(async move {
-                        let res = client.run(connector).await;
-                        run_sender.try_send(res).ok();
-                        client.close().await.ok();
+                    let runner = ex.spawn({
+                        let client = client.clone();
+                        async move {
+                            let res = client.run(connector).await;
+                            run_sender.try_send(res).ok();
+                        }
                     });
 
                     // Wait until the client is closed.
                     let res = stop.recv().await;
+
+                    // One final flush before shutting down.
+                    // This way we make sure buffered published messages reach the server.
+                    {
+                        let mut state = client.state.lock().await;
+                        if let Some(writer) = state.writer.as_mut() {
+                            writer.flush().await.ok();
+                        }
+                    }
 
                     // Cancel spawned tasks.
                     flusher.cancel().await;
@@ -181,7 +192,7 @@ impl Client {
             let mut state = self.state.lock().await;
 
             // Check if the client is closed.
-            if state.shutdown.is_none() {
+            if self.shutdown.lock().unwrap().is_none() {
                 return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
             }
 
@@ -216,7 +227,7 @@ impl Client {
         let mut state = self.state.lock().await;
 
         // Initiate shutdown process.
-        if let Some(shutdown) = state.shutdown.take() {
+        if let Some(shutdown) = self.shutdown.lock().unwrap().take() {
             // Unsubscribe all subscriptions.
             for sid in state.subscriptions.keys() {
                 self.unsubscribe(*sid);
@@ -242,6 +253,11 @@ impl Client {
         Ok(())
     }
 
+    /// Kicks off the shutdown process, but doesn't wait for its completion.
+    pub(crate) fn shutdown(&self) {
+        self.shutdown.lock().unwrap().take();
+    }
+
     /// Subscribes to a subject.
     pub(crate) async fn subscribe(
         &self,
@@ -254,7 +270,7 @@ impl Client {
         let mut state = self.state.lock().await;
 
         // Check if the client is closed.
-        if state.shutdown.is_none() {
+        if self.shutdown.lock().unwrap().is_none() {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
@@ -308,7 +324,7 @@ impl Client {
         let mut state = self.state.lock().await;
 
         // Check if the client is closed.
-        if state.shutdown.is_none() {
+        if self.shutdown.lock().unwrap().is_none() {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
@@ -389,10 +405,8 @@ impl Client {
             // Inject random delays when testing.
             inject_delay().await;
 
-            let state = self.state.lock().await;
-
             // Check if the client is closed.
-            if state.shutdown.is_none() {
+            if self.shutdown.lock().unwrap().is_none() {
                 return Ok(());
             }
             first_connect = false;
@@ -411,7 +425,7 @@ impl Client {
         let mut state = self.state.lock().await;
 
         // Check if the client is closed.
-        if state.shutdown.is_none() {
+        if self.shutdown.lock().unwrap().is_none() {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
@@ -582,12 +596,6 @@ impl Client {
                 state.flush_kicker.try_send(()).ok();
             }
         }
-    }
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        println!("Client::drop()");
     }
 }
 
