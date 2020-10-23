@@ -1,10 +1,7 @@
-use std::cmp;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_rustls::{rustls::ClientConfig, webpki::DNSNameRef, TlsConnector};
 
@@ -325,35 +322,6 @@ impl Connector {
 
         Ok((server_info, reader.into_inner(), writer))
     }
-}
-
-/// Calculates how long to sleep for before connecting to a server.
-pub(crate) fn backoff(reconnects: usize) -> Duration {
-    // Exponential backoff: 0ms, 1ms, 2ms, 4ms, 8ms, 16ms, ..., 4sec
-    let base = if reconnects == 0 {
-        Duration::from_millis(0)
-    } else {
-        let exp: u32 = (reconnects - 1).try_into().unwrap_or(std::u32::MAX);
-
-        let max = if cfg!(feature = "fault_injection") {
-            Duration::from_millis(20)
-        } else {
-            Duration::from_secs(4)
-        };
-
-        cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
-    };
-
-    // Add some random jitter.
-    let max_jitter = if cfg!(feature = "fault_injection") {
-        10
-    } else {
-        1000
-    };
-
-    let jitter = Duration::from_millis(fastrand::u64(0..max_jitter));
-
-    base + jitter
 }
 
 /// A parsed URL.

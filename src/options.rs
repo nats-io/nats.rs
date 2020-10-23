@@ -1,3 +1,5 @@
+use std::cmp;
+use std::convert::TryInto;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,12 +18,13 @@ pub struct Options {
     pub(crate) no_echo: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
+    pub(crate) tls_required: bool,
+    pub(crate) certificates: Vec<PathBuf>,
+
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
-    pub(crate) tls_required: bool,
-    pub(crate) certificates: Vec<PathBuf>,
 }
 
 impl fmt::Debug for Options {
@@ -32,12 +35,12 @@ impl fmt::Debug for Options {
             .entry(&"no_echo", &self.no_echo)
             .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
             .entry(&"max_reconnects", &self.max_reconnects)
+            .entry(&"tls_required", &self.tls_required)
+            .entry(&"certificates", &self.certificates)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
-            .entry(&"tls_required", &self.tls_required)
-            .entry(&"certificates", &self.certificates)
             .finish()
     }
 }
@@ -50,16 +53,43 @@ impl Default for Options {
             no_echo: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
-            disconnect_callback: Callback(None),
-            reconnect_callback: Callback(None),
-            reconnect_delay_callback: ReconnectDelayCallback(Box::new(
-                crate::asynk::connector::backoff,
-            )),
-            close_callback: Callback(None),
             tls_required: false,
             certificates: Vec::new(),
+            disconnect_callback: Callback(None),
+            reconnect_callback: Callback(None),
+            reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
+            close_callback: Callback(None),
         }
     }
+}
+
+/// Calculates how long to sleep for before connecting to a server.
+pub(crate) fn backoff(reconnects: usize) -> Duration {
+    // Exponential backoff: 0ms, 1ms, 2ms, 4ms, 8ms, 16ms, ..., 4sec
+    let base = if reconnects == 0 {
+        Duration::from_millis(0)
+    } else {
+        let exp: u32 = (reconnects - 1).try_into().unwrap_or(std::u32::MAX);
+
+        let max = if cfg!(feature = "fault_injection") {
+            Duration::from_millis(20)
+        } else {
+            Duration::from_secs(4)
+        };
+
+        cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+    };
+
+    // Add some random jitter.
+    let max_jitter = if cfg!(feature = "fault_injection") {
+        10
+    } else {
+        1000
+    };
+
+    let jitter = Duration::from_millis(fastrand::u64(0..max_jitter));
+
+    base + jitter
 }
 
 impl Options {
