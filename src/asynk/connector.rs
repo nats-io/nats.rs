@@ -1,10 +1,7 @@
-use std::cmp;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_rustls::{rustls::ClientConfig, webpki::DNSNameRef, TlsConnector};
 
@@ -24,7 +21,7 @@ pub(crate) struct Connector {
     attempts: HashMap<Server, usize>,
 
     /// Configured options for establishing connections.
-    options: Options,
+    options: Arc<Options>,
 
     /// TLS connector.
     tls: TlsConnector,
@@ -32,7 +29,7 @@ pub(crate) struct Connector {
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
-    pub(crate) fn new(url: &str, options: Options) -> io::Result<Connector> {
+    pub(crate) fn new(url: &str, options: Arc<Options>) -> io::Result<Connector> {
         let mut tls_config = ClientConfig::new();
 
         // Include webpki root certificates.
@@ -74,6 +71,35 @@ impl Connector {
         Ok(())
     }
 
+    pub(crate) fn get_options(&self) -> Arc<Options> {
+        self.options.clone()
+    }
+
+    /// Get the list of servers with enough reconnection attempts left
+    fn get_servers(&mut self) -> io::Result<Vec<Server>> {
+        let mut servers: Vec<Server> = self.attempts.keys().cloned().collect();
+
+        servers = servers
+            .into_iter()
+            .filter(|server| {
+                let reconnects = self.attempts.get_mut(server).unwrap();
+                match self.options.max_reconnects.as_ref() {
+                    Some(max) => max > reconnects,
+                    None => true,
+                }
+            })
+            .collect();
+
+        if servers.is_empty() {
+            Err(Error::new(
+                ErrorKind::NotFound,
+                "no servers remaining to connect to",
+            ))
+        } else {
+            Ok(servers)
+        }
+    }
+
     /// Creates a new connection to one of the known URLs.
     ///
     /// If `use_backoff` is `true`, this method will try connecting in a loop and will back off
@@ -91,14 +117,14 @@ impl Connector {
 
         loop {
             // Shuffle the list of servers.
-            let mut servers: Vec<Server> = self.attempts.keys().cloned().collect();
+            let mut servers: Vec<Server> = self.get_servers()?;
             fastrand::shuffle(&mut servers);
 
             // Iterate over the server list in random order.
             for server in &servers {
                 // Calculate sleep duration for exponential backoff and bump the reconnect counter.
                 let reconnects = self.attempts.get_mut(server).unwrap();
-                let sleep_duration = backoff(*reconnects);
+                let sleep_duration = self.options.reconnect_delay_callback.call(*reconnects);
                 *reconnects += 1;
 
                 // Resolve the server URL to socket addresses.
@@ -136,6 +162,8 @@ impl Connector {
                     for url in &server_info.connect_urls {
                         self.add_url(url)?;
                     }
+
+                    *self.attempts.get_mut(server).unwrap() = 0;
                     return Ok((server_info, reader, writer));
                 }
             }
@@ -294,35 +322,6 @@ impl Connector {
 
         Ok((server_info, reader.into_inner(), writer))
     }
-}
-
-/// Calculates how long to sleep for before connecting to a server.
-pub(crate) fn backoff(reconnects: usize) -> Duration {
-    // Exponential backoff: 0ms, 1ms, 2ms, 4ms, 8ms, 16ms, ..., 4sec
-    let base = if reconnects == 0 {
-        Duration::from_millis(0)
-    } else {
-        let exp: u32 = (reconnects - 1).try_into().unwrap_or(std::u32::MAX);
-
-        let max = if cfg!(feature = "fault_injection") {
-            Duration::from_millis(20)
-        } else {
-            Duration::from_secs(4)
-        };
-
-        cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
-    };
-
-    // Add some random jitter.
-    let max_jitter = if cfg!(feature = "fault_injection") {
-        10
-    } else {
-        1000
-    };
-
-    let jitter = Duration::from_millis(fastrand::u64(0..max_jitter));
-
-    base + jitter
 }
 
 /// A parsed URL.

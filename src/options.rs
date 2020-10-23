@@ -1,3 +1,5 @@
+use std::cmp;
+use std::convert::TryInto;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,12 +18,13 @@ pub struct Options {
     pub(crate) no_echo: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
+    pub(crate) tls_required: bool,
+    pub(crate) certificates: Vec<PathBuf>,
+
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
-    pub(crate) tls_required: bool,
-    pub(crate) certificates: Vec<PathBuf>,
 }
 
 impl fmt::Debug for Options {
@@ -32,12 +35,12 @@ impl fmt::Debug for Options {
             .entry(&"no_echo", &self.no_echo)
             .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
             .entry(&"max_reconnects", &self.max_reconnects)
+            .entry(&"tls_required", &self.tls_required)
+            .entry(&"certificates", &self.certificates)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
-            .entry(&"tls_required", &self.tls_required)
-            .entry(&"certificates", &self.certificates)
             .finish()
     }
 }
@@ -50,16 +53,43 @@ impl Default for Options {
             no_echo: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
-            disconnect_callback: Callback(None),
-            reconnect_callback: Callback(None),
-            reconnect_delay_callback: ReconnectDelayCallback(Box::new(
-                crate::asynk::connector::backoff,
-            )),
-            close_callback: Callback(None),
             tls_required: false,
             certificates: Vec::new(),
+            disconnect_callback: Callback(None),
+            reconnect_callback: Callback(None),
+            reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
+            close_callback: Callback(None),
         }
     }
+}
+
+/// Calculates how long to sleep for before connecting to a server.
+pub(crate) fn backoff(reconnects: usize) -> Duration {
+    // Exponential backoff: 0ms, 1ms, 2ms, 4ms, 8ms, 16ms, ..., 4sec
+    let base = if reconnects == 0 {
+        Duration::from_millis(0)
+    } else {
+        let exp: u32 = (reconnects - 1).try_into().unwrap_or(std::u32::MAX);
+
+        let max = if cfg!(feature = "fault_injection") {
+            Duration::from_millis(20)
+        } else {
+            Duration::from_secs(4)
+        };
+
+        cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+    };
+
+    // Add some random jitter.
+    let max_jitter = if cfg!(feature = "fault_injection") {
+        10
+    } else {
+        1000
+    };
+
+    let jitter = Duration::from_millis(fastrand::u64(0..max_jitter));
+
+    base + jitter
 }
 
 impl Options {
@@ -208,19 +238,22 @@ impl Options {
 
     /// Set the maximum number of reconnect attempts.
     /// If no servers remain that are under this threshold,
-    /// all servers will still be attempted.
+    /// then no further reconnect shall be attempted.
+    /// The reconnect attempt for a server is reset upon
+    /// successfull connection.
+    /// If None then there is no maximum number of attempts.
     ///
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
-    ///     .max_reconnects(Some(3))
+    ///     .max_reconnects(3)
     ///     .connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn max_reconnects(mut self, max_reconnects: Option<usize>) -> Options {
-        self.max_reconnects = max_reconnects;
+    pub fn max_reconnects<T: Into<Option<usize>>>(mut self, max_reconnects: T) -> Options {
+        self.max_reconnects = max_reconnects.into();
         self
     }
 
@@ -303,6 +336,20 @@ impl Options {
 
     /// Set a callback to be executed when connectivity to
     /// a server has been lost.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .disconnect_callback(|| println!("connection has been lost"))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn disconnect_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
@@ -312,7 +359,21 @@ impl Options {
     }
 
     /// Set a callback to be executed when connectivity to a
-    /// server has been established.
+    /// server has been reestablished.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .reconnect_callback(|| println!("connection has been reestablished"))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn reconnect_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
@@ -324,6 +385,21 @@ impl Options {
     /// Set a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .close_callback(|| println!("connection has been closed"))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// nc.drain().await.unwrap();
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn close_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,
@@ -341,6 +417,21 @@ impl Options {
     ///
     /// It is recommended that some random jitter is added to
     /// your returned `Duration`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # use std::time::Duration;
+    /// # smol::block_on(async {
+    /// let nc = nats::Options::new()
+    ///     .reconnect_delay_callback(|c| Duration::from_millis(std::cmp::min((c * 100) as u64, 8000)))
+    ///     .connect_async("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # })
+    /// # }
+    /// ```
     pub fn reconnect_delay_callback<F>(mut self, cb: F) -> Self
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
@@ -440,6 +531,13 @@ impl Default for AuthStyle {
 
 #[derive(Default)]
 pub(crate) struct Callback(Option<Box<dyn Fn() + Send + Sync + 'static>>);
+impl Callback {
+    pub fn call(&self) {
+        if let Some(callback) = self.0.as_ref() {
+            callback();
+        }
+    }
+}
 
 impl fmt::Debug for Callback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -453,3 +551,8 @@ impl fmt::Debug for Callback {
 }
 
 pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
+impl ReconnectDelayCallback {
+    pub fn call(&self, reconnects: usize) -> Duration {
+        self.0(reconnects)
+    }
+}
