@@ -37,3 +37,19 @@ fn async_drop_flushes() -> io::Result<()> {
         Ok(())
     })
 }
+
+#[test]
+fn two_connections() -> io::Result<()> {
+    smol::block_on(async {
+        let nc1 = nats::asynk::connect("demo.nats.io").await?;
+        let nc2 = nc1.clone();
+
+        nc1.publish("foo", b"bar").await?;
+        nc2.publish("foo", b"bar").await?;
+
+        drop(nc1);
+        nc2.publish("foo", b"bar").await?;
+
+        Ok(())
+    })
+}

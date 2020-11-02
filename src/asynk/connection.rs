@@ -1,5 +1,6 @@
 use std::io::{self, Error, ErrorKind};
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::asynk::client::Client;
@@ -10,11 +11,20 @@ use crate::{Headers, Options};
 
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A NATS client connection.
 #[derive(Clone, Debug)]
-pub struct Connection {
+struct Inner {
     client: Client,
 }
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.client.shutdown();
+    }
+}
+
+/// A NATS client connection.
+#[derive(Clone, Debug)]
+pub struct Connection(Arc<Inner>);
 
 impl Connection {
     /// Connects on a URL with the given options.
@@ -24,7 +34,7 @@ impl Connection {
     ) -> io::Result<Connection> {
         let client = Client::connect(url, options).await?;
         client.flush().await?;
-        Ok(Connection { client })
+        Ok(Connection(Arc::new(Inner { client })))
     }
 
     /// Publishes a message.
@@ -40,7 +50,8 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.client
+        self.0
+            .client
             .publish(subject, Some(reply), None, msg.as_ref())
             .await
     }
@@ -97,7 +108,8 @@ impl Connection {
 
     /// Flushes by performing a round trip to the server or times out after a duration of time.
     pub async fn flush_timeout(&self, timeout: Duration) -> io::Result<()> {
-        self.client
+        self.0
+            .client
             .flush()
             .or(async {
                 Timer::after(timeout).await;
@@ -118,6 +130,7 @@ impl Connection {
     /// Supported as of server version 2.1.6.
     pub fn client_ip(&self) -> io::Result<IpAddr> {
         let info = self
+            .0
             .client
             .server_info()
             .expect("INFO should've been received at connection");
@@ -148,7 +161,8 @@ impl Connection {
 
     /// Returns the client ID as known by the most recently connected server.
     pub fn client_id(&self) -> u64 {
-        self.client
+        self.0
+            .client
             .server_info()
             .expect("INFO should've been received at connection")
             .client_id
@@ -163,8 +177,8 @@ impl Connection {
 
     /// Closes the connection.
     pub async fn close(&self) -> io::Result<()> {
-        self.client.flush().await?;
-        self.client.close().await
+        self.0.client.flush().await?;
+        self.0.client.close().await
     }
 
     /// Publish a message which may have a reply subject or headers set.
@@ -175,24 +189,19 @@ impl Connection {
         headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.client
+        self.0
+            .client
             .publish(subject, reply, headers, msg.as_ref())
             .await
     }
 
     async fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
-        let (sid, receiver) = self.client.subscribe(subject, queue).await?;
+        let (sid, receiver) = self.0.client.subscribe(subject, queue).await?;
         Ok(Subscription::new(
             sid,
             subject.to_string(),
             receiver,
-            self.client.clone(),
+            self.0.client.clone(),
         ))
-    }
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        self.client.shutdown();
     }
 }
