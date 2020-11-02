@@ -1,3 +1,11 @@
+# 0.8.2
+
+## Bug Fixes
+
+- Flush outstanding messages when `Connection` is dropped.
+- Call callbacks configured by `Options`.
+- Shutdown only when the last `Connection` is dropped.
+
 # 0.8.1
 
 ## Improvements
