@@ -3,9 +3,12 @@ use std::io::{Error, ErrorKind};
 use std::pin::Pin;
 use std::sync::Arc;
 
-use async_rustls::{rustls::ClientConfig, webpki::DNSNameRef, TlsConnector};
+use async_rustls::rustls::ClientConfig;
+use async_rustls::webpki::DNSNameRef;
+use async_rustls::TlsConnector;
 
 use crate::asynk::proto::{self, ClientOp, ServerOp};
+use crate::auth_utils;
 use crate::secure_wipe::SecureString;
 use crate::smol::io::{self, BufReader};
 use crate::smol::{net, prelude::*, Timer};
@@ -24,7 +27,7 @@ pub(crate) struct Connector {
     options: Arc<Options>,
 
     /// TLS connector.
-    tls: TlsConnector,
+    tls_connector: TlsConnector,
 }
 
 impl Connector {
@@ -32,10 +35,13 @@ impl Connector {
     pub(crate) fn new(url: &str, options: Arc<Options>) -> io::Result<Connector> {
         let mut tls_config = ClientConfig::new();
 
-        // Include webpki root certificates.
-        tls_config
-            .root_store
-            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        // Include system root certificates.
+        for root in rustls_native_certs::load_native_certs()
+            .expect("could not load system certs")
+            .roots
+        {
+            tls_config.root_store.roots.push(root);
+        }
 
         // Include user-provided certificates.
         for path in &options.certificates {
@@ -50,10 +56,26 @@ impl Connector {
                 })?;
         }
 
+        if let Some(cert) = &options.client_cert {
+            if let Some(key) = &options.client_key {
+                tls_config
+                    .set_single_client_cert(
+                        auth_utils::load_certs(cert)?,
+                        auth_utils::load_key(key)?,
+                    )
+                    .map_err(|err| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("invalid client certificate and key pair: {}", err),
+                        )
+                    })?;
+            }
+        }
+
         let mut connector = Connector {
             attempts: HashMap::new(),
             options,
-            tls: TlsConnector::from(Arc::new(tls_config)),
+            tls_connector: TlsConnector::from(Arc::new(tls_config)),
         };
 
         // Add all URLs in the comma-separated list.
@@ -230,7 +252,7 @@ impl Connector {
             let name = res.map_err(|_| {
                 io::Error::new(io::ErrorKind::InvalidInput, "the server name is not ASCII")
             })?;
-            let stream = self.tls.connect(name, stream).await?;
+            let stream = self.tls_connector.connect(name, stream).await?;
 
             // Split the TLS stream into a reader and a writer.
             let (r, w) = io::split(stream);

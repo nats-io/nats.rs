@@ -20,6 +20,8 @@ pub struct Options {
     pub(crate) reconnect_buffer_size: usize,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
+    pub(crate) client_cert: Option<PathBuf>,
+    pub(crate) client_key: Option<PathBuf>,
 
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
@@ -37,6 +39,8 @@ impl fmt::Debug for Options {
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"tls_required", &self.tls_required)
             .entry(&"certificates", &self.certificates)
+            .entry(&"client_cert", &self.client_cert)
+            .entry(&"client_key", &self.client_key)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
@@ -55,6 +59,8 @@ impl Default for Options {
             max_reconnects: Some(60),
             tls_required: false,
             certificates: Vec::new(),
+            client_cert: None,
+            client_key: None,
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
@@ -202,6 +208,23 @@ impl Options {
             },
             ..Default::default()
         }
+    }
+
+    /// Set client certificate and private key files.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .client_cert("client-cert.pem", "client-key.pem")
+    ///     .connect("nats://localhost:4443")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn client_cert(mut self, cert: impl AsRef<Path>, key: impl AsRef<Path>) -> Options {
+        self.client_cert = Some(cert.as_ref().to_owned());
+        self.client_key = Some(key.as_ref().to_owned());
+        self
     }
 
     /// Add a name option to this configuration.
