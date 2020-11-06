@@ -1,3 +1,9 @@
+# 0.8.3
+
+## New Features
+
+- Add `Options::client_cert()`.
+
 # 0.8.2
 
 ## Bug Fixes
