@@ -179,27 +179,56 @@ impl Options {
         }
     }
 
+    /// Authenticate with a function that loads user JWT and a signature function.
+    ///
+    /// # Example
+    /// ```no_run
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let kp = nkeys::KeyPair::from_seed(seed).unwrap();
+    ///
+    /// fn load_jwt() -> std::io::Result<String> {
+    ///     todo!()
+    /// }
+    ///
+    /// let nc = nats::Options::with_jwt(load_jwt, move |nonce| kp.sign(nonce).unwrap())
+    ///     .connect("localhost")?;
+    /// # std::io::Result::Ok(())
+    /// ```
+    pub fn with_jwt<J, S>(jwt_cb: J, sig_cb: S) -> Options
+    where
+        J: Fn() -> io::Result<String> + Send + Sync + 'static,
+        S: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+    {
+        Options {
+            auth: AuthStyle::Credentials {
+                jwt_cb: Arc::new(move || jwt_cb().map(|s| s.into())),
+                sig_cb: Arc::new(move |nonce| Ok(base64_url::encode(&sig_cb(nonce)).into())),
+            },
+            ..Default::default()
+        }
+    }
+
     /// Authenticate with NATS using a public key and a signature function.
     ///
     /// # Example
     /// ```no_run
-    /// let public_key = "UAMMBNV2EYR65NYZZ7IAK5SIR5ODNTTERJOBOF4KJLMWI45YOXOSWULM";
-    /// let private_key = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
-    /// let kp = nkeys::KeyPair::from_seed(private_key).unwrap();
+    /// let nkey = "UAMMBNV2EYR65NYZZ7IAK5SIR5ODNTTERJOBOF4KJLMWI45YOXOSWULM";
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let kp = nkeys::KeyPair::from_seed(seed).unwrap();
     ///
-    /// let nc = nats::Options::with_nkey(public_key, move |nonce| kp.sign(nonce).unwrap())
+    /// let nc = nats::Options::with_nkey(nkey, move |nonce| kp.sign(nonce).unwrap())
     ///     .connect("localhost")?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn with_nkey<F>(public_key: &str, sig_cb: F) -> Options
+    pub fn with_nkey<F>(nkey: &str, sig_cb: F) -> Options
     where
         F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     {
         Options {
             auth: AuthStyle::NKey {
                 nkey_cb: {
-                    let public_key = SecureString::from(public_key.to_owned());
-                    Arc::new(move || Ok(public_key.clone()))
+                    let nkey = SecureString::from(nkey.to_owned());
+                    Arc::new(move || Ok(nkey.clone()))
                 },
                 sig_cb: Arc::new(move |nonce| {
                     let sig = sig_cb(nonce);
