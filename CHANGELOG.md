@@ -1,3 +1,10 @@
+# 0.8.5
+
+## Improvements
+
+- #125 Remove Sync requirement for the handler function
+  passed to Subscription::with_handler.
+
 # 0.8.4
 
 ## Bug Fixes
