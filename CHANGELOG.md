@@ -1,3 +1,10 @@
+# 0.8.4
+
+## Bug Fixes
+
+- #123 Fix regex error when parsing creds due to missing
+  the `unicode-perl` feature flag on the regex crate.
+
 # 0.8.3
 
 ## New Features
