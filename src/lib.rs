@@ -241,7 +241,7 @@ struct ServerInfo {
     /// The host specified in the cluster parameter/options.
     pub host: String,
     /// The port number specified in the cluster parameter/options.
-    pub port: i16,
+    pub port: u16,
     /// The version of the NATS server.
     pub version: String,
     /// If this is set, then the server should try to authenticate upon connect.
@@ -271,7 +271,7 @@ impl ServerInfo {
             server_id: obj["server_id"].take_string()?,
             server_name: obj["server_name"].take_string().unwrap_or_default(),
             host: obj["host"].take_string()?,
-            port: obj["port"].as_i16()?,
+            port: obj["port"].as_u16()?,
             version: obj["version"].take_string()?,
             auth_required: obj["auth_required"].as_bool().unwrap_or(false),
             tls_required: obj["tls_required"].as_bool().unwrap_or(false),
