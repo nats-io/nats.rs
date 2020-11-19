@@ -286,12 +286,12 @@ pub fn nats_test_server(
                         continue;
                     }
 
-                    for sub in subs.get(subject).unwrap_or(&HashSet::new()) {
+                    for sub_id in subject_matches(subject, &subs) {
                         let out = if let Some(group) = reply {
                             format!(
                                 "MSG {} {} {} {}\r\n{}\r\n",
                                 subject,
-                                sub,
+                                sub_id,
                                 group,
                                 next_line.len(),
                                 next_line
@@ -300,7 +300,7 @@ pub fn nats_test_server(
                             format!(
                                 "MSG {} {} {}\r\n{}\r\n",
                                 subject,
-                                sub,
+                                sub_id,
                                 next_line.len(),
                                 next_line
                             )
@@ -332,4 +332,47 @@ pub fn nats_test_server(
             clients.remove(&client_id);
         }
     }
+}
+
+fn subject_matches<'s>(
+    subject: &str,
+    subscriptions: &'s HashMap<String, HashSet<String>>,
+) -> HashSet<&'s String> {
+    let mut matches = HashSet::new();
+    for (sub_pattern, ids) in subscriptions.iter() {
+        if subject_match(subject, sub_pattern) {
+            matches.extend(ids);
+        }
+    }
+    matches
+}
+
+fn subject_match(subject: &str, subject_pattern: &str) -> bool {
+    let mut pattern_parts = subject_pattern.split('.');
+    for subject_part in subject.split('.') {
+        if let Some(pattern_part) = pattern_parts.next() {
+            if pattern_part == ">" {
+                return true;
+            } else if pattern_part == subject_part || pattern_part == "*" {
+                continue;
+            }
+        }
+        return false;
+    }
+    return true;
+}
+
+#[test]
+fn testsubject_match() {
+    assert!(subject_match("sub", "sub"));
+    assert!(subject_match("sub", "*"));
+    assert!(subject_match("sub", ">"));
+    assert!(!subject_match("pub", "sub"));
+    assert!(subject_match("sub.pub", "sub.pub"));
+    assert!(subject_match("sub.pub", "sub.*"));
+    assert!(subject_match("sub.pub", "*.pub"));
+    assert!(subject_match("sub.pub", "*.*"));
+    assert!(subject_match("sub.pub", ">"));
+    assert!(!subject_match("sub.pub", "sub"));
+    assert!(!subject_match("sub.pub", "pub"));
 }
