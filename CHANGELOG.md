@@ -1,3 +1,10 @@
+# 0.8.6
+
+## Bug Fixes
+
+- #126 Fix port signedness issue on ServerInfo which
+  prevented connecting to servers on ports over i16::MAX.
+
 # 0.8.5
 
 ## Improvements
