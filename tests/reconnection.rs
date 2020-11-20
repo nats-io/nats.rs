@@ -29,7 +29,7 @@ fn reconnect_test() {
         }
     });
 
-    let server = NatsTestServer::build().bugginess(200).spawn();
+    let server = NatsTestServer::build().address("localhost:22222").bugginess(200).spawn();
 
     let nc = loop {
         if let Ok(nc) = nats::Options::new()
