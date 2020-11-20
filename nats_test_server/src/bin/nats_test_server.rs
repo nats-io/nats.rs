@@ -11,7 +11,7 @@ Options:
 #[derive(Clone, Debug)]
 struct Args {
     port: u16,
-    host: String,
+    host: std::net::IpAddr,
     bugginess: u32,
     hop_ports: bool,
 }
@@ -20,7 +20,7 @@ impl Default for Args {
     fn default() -> Args {
         Args {
             port: 4222,
-            host: "0.0.0.0".into(),
+            host: "0.0.0.0".parse().unwrap(),
             bugginess: 200,
             hop_ports: false,
         }
@@ -54,24 +54,16 @@ impl Args {
 }
 
 fn main() {
-    use std::sync::{atomic::AtomicBool, Arc, Barrier};
-
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
     let args = Args::parse();
     log::info!("starting test server with args {:?}", &args);
 
-    let barrier = Arc::new(Barrier::new(1));
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let restart = Arc::new(AtomicBool::new(false));
-
-    nats_test_server::nats_test_server(
-        &args.host,
-        args.port,
-        barrier,
-        shutdown,
-        restart,
-        args.bugginess,
-        args.hop_ports,
-    )
+    nats_test_server::NatsTestServer::build()
+        .address::<std::net::SocketAddr>((args.host, args.port).into())
+        .bugginess(args.bugginess)
+        .hop_ports(args.hop_ports)
+        .spawn()
+        .join()
+        .unwrap();
 }

@@ -1,11 +1,17 @@
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
+    fmt::Display,
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    mem::ManuallyDrop,
+    net::SocketAddr,
+    net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Barrier,
+        Arc,
     },
+    thread,
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
 
@@ -115,225 +121,324 @@ fn read_line(stream: &mut TcpStream) -> Option<String> {
 
 /// A test server for NATS-based systems that can inject
 /// failures.
-pub fn nats_test_server(
-    host: &str,
-    mut port: u16,
-    barrier: Arc<Barrier>,
+pub struct NatsTestServer {
+    address: SocketAddr,
     shutdown: Arc<AtomicBool>,
-    restart: Arc<AtomicBool>,
-    bugginess: u32,
+    handle: Option<JoinHandle<()>>,
+}
+
+pub struct NatsTestServerBuilder<A> {
+    baddr: A,
     hop_ports: bool,
-) {
-    let mut max_client_id = 0;
-    let server_info = |client_id, port| {
-        format!(
-            "INFO {{  \
-             \"server_id\": \"test\", \
-             \"server_name\": \"test\", \
-             \"host\": \"{}\", \
-             \"port\": {}, \
-             \"version\": \"bad\", \
-             \"go\": \"bad\", \
-             \"max_payload\": 4096, \
-             \"proto\": 0, \
-             \"client_id\": {}, \
-             \"connect_urls\": [\"{}:{}\"] \
-             }}\r\n",
-            host,
-            port,
-            client_id,
-            host,
-            if hop_ports { port + 1 } else { port }
-        )
-    };
+    bugginess: Option<u32>,
+}
 
-    let baddr = format!("{}:{}", host, port);
-    let mut listener = TcpListener::bind(baddr).unwrap();
-    log::info!("nats test server started on {}:{}", host, port);
-
-    barrier.wait();
-
-    let mut clients: HashMap<usize, Client> = HashMap::new();
-    let mut subs = HashMap::new();
-
-    loop {
-        if shutdown.load(Ordering::Acquire) {
-            return;
+/// A NATS test server, will be stopped on drop
+impl NatsTestServer {
+    pub fn build() -> NatsTestServerBuilder<&'static str> {
+        NatsTestServerBuilder {
+            baddr: "localhost:0",
+            hop_ports: false,
+            bugginess: None,
         }
+    }
 
-        // this makes it nice and bad
-        if !clients.is_empty() && thread_rng().gen_bool(1. / bugginess as f64)
-            || restart.load(Ordering::Acquire)
-        {
-            drop(listener);
-            log::debug!("evicting all connected clients");
-            clients.clear();
-            subs.clear();
-            let baddr = format!("{}:{}", host, port);
-            log::debug!("nats test server restarted on {}:{}", host, port);
-            listener = TcpListener::bind(baddr).unwrap();
-            listener.set_nonblocking(true).unwrap();
+    /// Get the socket address on which the test server is listening
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    /// Consume and stop this server, start building a new one on the same port, the return value is a builder and so you'll need to call `.spawn()` on it.
+    pub fn restart(self) -> NatsTestServerBuilder<SocketAddr> {
+        NatsTestServerBuilder {
+            baddr: self.address,
+            hop_ports: false,
+            bugginess: None,
         }
+    }
 
-        // maybe accept a new client
-        if clients.is_empty() {
-            listener.set_nonblocking(false).unwrap();
-        } else {
-            listener.set_nonblocking(true).unwrap();
-        }
+    /// Leave the server running and join
+    pub fn join(self) -> Result<(), Box<dyn Any + Send>> {
+        let mut server = ManuallyDrop::new(self);
+        server.handle.take().unwrap().join()
+    }
+}
 
-        if let Ok((mut next, _addr)) = listener.accept() {
-            log::debug!("new client connected");
-            max_client_id += 1;
-            let client_id = max_client_id;
-            next.write_all(server_info(client_id, port).as_bytes())
-                .unwrap();
-            let _unchecked = next.set_read_timeout(Some(Duration::from_millis(1)));
-            clients.insert(
-                client_id,
-                Client {
-                    socket: next,
-                    has_sent_ping: false,
-                    last_ping: Instant::now(),
-                    outstanding_pings: 0,
-                },
-            );
-        }
-
-        let mut to_evict = vec![];
-        let mut outbound = vec![];
-
-        for (client_id, client) in &mut clients {
-            if client.outstanding_pings > 3 {
-                to_evict.push(*client_id);
-                continue;
+impl Drop for NatsTestServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            if let Err(_err) = handle.join() {
+                log::warn!("Error joining TestNats server thread for shutdown");
             }
-
-            if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_micros(50) {
-                if client.socket.write_all(b"PING\r\n").is_err() {
-                    to_evict.push(*client_id);
-                    continue;
-                }
-                client.last_ping = Instant::now();
-                client.outstanding_pings += 1;
-            }
-
-            let command = if let Some(command) = read_line(&mut client.socket) {
-                command
-            } else {
-                continue;
-            };
-
-            log::trace!("got command {}", command);
-
-            let mut parts = command.split(' ');
-
-            match parts.next().unwrap() {
-                "PONG" => {
-                    assert!(client.outstanding_pings > 0);
-                    client.outstanding_pings -= 1;
-                    assert_eq!(parts.next(), None);
-                }
-                "PING" => {
-                    assert_eq!(parts.next(), None);
-                    if client.socket.write_all(b"PONG\r\n").is_err() {
-                        to_evict.push(*client_id);
-                        continue;
-                    }
-                    client.has_sent_ping = true;
-                    if hop_ports {
-                        // we hop to a new port because we have sent the client the new
-                        // server information.
-                        port += 1;
-                    }
-                }
-                "CONNECT" => {
-                    let _: ConnectInfo = serde_json::from_str(parts.next().unwrap()).unwrap();
-                    assert_eq!(parts.next(), None);
-                }
-                "SUB" => {
-                    let subject = parts.next().unwrap();
-                    let sid = parts.next().unwrap();
-                    assert_eq!(parts.next(), None);
-                    let entry = subs.entry(subject.to_string()).or_insert(HashSet::new());
-                    entry.insert(sid.to_string());
-                }
-                "PUB" => {
-                    let (subject, reply, len) = match (parts.next(), parts.next(), parts.next()) {
-                        (Some(subject), Some(reply), Some(len)) => (subject, Some(reply), len),
-                        (Some(subject), Some(len), None) => (subject, None, len),
-                        other => panic!("unknown args: {:?}", other),
-                    };
-
-                    assert_eq!(parts.next(), None);
-
-                    let next_line = if let Some(next_line) = read_line(&mut client.socket) {
-                        next_line
-                    } else {
-                        to_evict.push(*client_id);
-                        continue;
-                    };
-
-                    let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
-                        parsed_len
-                    } else {
-                        to_evict.push(*client_id);
-                        continue;
-                    };
-
-                    if parsed_len != next_line.len() {
-                        to_evict.push(*client_id);
-                        continue;
-                    }
-
-                    for sub_id in subject_matches(subject, &subs) {
-                        let out = if let Some(group) = reply {
-                            format!(
-                                "MSG {} {} {} {}\r\n{}\r\n",
-                                subject,
-                                sub_id,
-                                group,
-                                next_line.len(),
-                                next_line
-                            )
-                        } else {
-                            format!(
-                                "MSG {} {} {}\r\n{}\r\n",
-                                subject,
-                                sub_id,
-                                next_line.len(),
-                                next_line
-                            )
-                        };
-
-                        outbound.push(out.into_bytes());
-                    }
-                }
-                "UNSUB" => {
-                    let sid = parts.next().unwrap();
-                    assert_eq!(parts.next(), None);
-                    subs.remove(sid);
-                }
-                other => panic!("unknown command {}", other),
-            }
-        }
-
-        for out in outbound {
-            for (client_id, client) in clients.iter_mut() {
-                if client.socket.write_all(&out).is_err() {
-                    to_evict.push(*client_id);
-                    continue;
-                }
-            }
-        }
-
-        while let Some(client_id) = to_evict.pop() {
-            log::debug!("client {} evicted", client_id);
-            clients.remove(&client_id);
+            log::debug!("Stopped server");
         }
     }
 }
 
+impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
+    ///  Address for server to listen for NATS connections
+    pub fn address<B>(self, baddr: B) -> NatsTestServerBuilder<B> {
+        NatsTestServerBuilder {
+            baddr,
+            hop_ports: self.hop_ports,
+            bugginess: self.bugginess,
+        }
+    }
+
+    /// Set the denominator of the probablity of a bug
+    pub fn bugginess(self, bugginess: u32) -> Self {
+        Self {
+            bugginess: Some(bugginess),
+            ..self
+        }
+    }
+
+    /// Whether to hop ports on connection
+    pub fn hop_ports(self, hop_ports: bool) -> Self {
+        Self { hop_ports, ..self }
+    }
+
+    /// Spawn the server on a thread, returns controller struct which will stop the server on drop
+    pub fn spawn(self) -> NatsTestServer {
+        let listener = TcpListener::bind(&self.baddr).unwrap();
+        let listen_addr = listener.local_addr().unwrap();
+        log::info!(
+            "nats test server started on {} (requested {})",
+            listen_addr,
+            &self.baddr,
+        );
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let handle = Some({
+            let shutdown = shutdown.clone();
+            thread::spawn(move || self.run(listener, shutdown))
+        });
+
+        NatsTestServer {
+            address: listen_addr,
+            handle,
+            shutdown,
+        }
+    }
+
+    fn run(self, mut listener: TcpListener, shutdown: Arc<AtomicBool>) {
+        let hop_ports = self.hop_ports;
+        let bugginess = self.bugginess;
+
+        let baddr = listener.local_addr().unwrap();
+        let host = baddr.ip();
+        let mut port = baddr.port();
+
+        let mut max_client_id = 0;
+        let server_info = |client_id, port| {
+            format!(
+                "INFO {{  \
+                    \"server_id\": \"test\", \
+                    \"server_name\": \"test\", \
+                    \"host\": \"{}\", \
+                    \"port\": {}, \
+                    \"version\": \"bad\", \
+                    \"go\": \"bad\", \
+                    \"max_payload\": 4096, \
+                    \"proto\": 0, \
+                    \"client_id\": {}, \
+                    \"connect_urls\": [\"{}:{}\"] \
+                    }}\r\n",
+                host,
+                port,
+                client_id,
+                host,
+                if hop_ports { port + 1 } else { port }
+            )
+        };
+
+        let mut clients: HashMap<usize, Client> = HashMap::new();
+        let mut subs = HashMap::new();
+
+        loop {
+            if shutdown.load(Ordering::Acquire) {
+                return;
+            }
+
+            // this makes it nice and bad
+            let simulated_failure = !clients.is_empty()
+                && bugginess.map_or(false, |bugginess| {
+                    thread_rng().gen_bool(1. / bugginess as f64)
+                });
+            if simulated_failure {
+                drop(listener);
+                log::debug!("evicting all connected clients");
+                clients.clear();
+                subs.clear();
+                let baddr = format!("{}:{}", host, port);
+                log::debug!("nats test server restarted on {}:{}", host, port);
+                listener = TcpListener::bind(baddr).unwrap();
+                listener.set_nonblocking(true).unwrap();
+            }
+
+            // maybe accept a new client
+            if clients.is_empty() {
+                listener.set_nonblocking(false).unwrap();
+            } else {
+                listener.set_nonblocking(true).unwrap();
+            }
+
+            if let Ok((mut next, _addr)) = listener.accept() {
+                log::debug!("new client connected");
+                max_client_id += 1;
+                let client_id = max_client_id;
+                next.write_all(server_info(client_id, port).as_bytes())
+                    .unwrap();
+                let _unchecked = next.set_read_timeout(Some(Duration::from_millis(1)));
+                clients.insert(
+                    client_id,
+                    Client {
+                        socket: next,
+                        has_sent_ping: false,
+                        last_ping: Instant::now(),
+                        outstanding_pings: 0,
+                    },
+                );
+            }
+
+            let mut to_evict = vec![];
+            let mut outbound = vec![];
+
+            for (client_id, client) in &mut clients {
+                if client.outstanding_pings > 3 {
+                    to_evict.push(*client_id);
+                    continue;
+                }
+
+                if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_micros(50) {
+                    if client.socket.write_all(b"PING\r\n").is_err() {
+                        to_evict.push(*client_id);
+                        continue;
+                    }
+                    client.last_ping = Instant::now();
+                    client.outstanding_pings += 1;
+                }
+
+                let command = if let Some(command) = read_line(&mut client.socket) {
+                    command
+                } else {
+                    continue;
+                };
+
+                log::trace!("got command {}", command);
+
+                let mut parts = command.split(' ');
+
+                match parts.next().unwrap() {
+                    "PONG" => {
+                        assert!(client.outstanding_pings > 0);
+                        client.outstanding_pings -= 1;
+                        assert_eq!(parts.next(), None);
+                    }
+                    "PING" => {
+                        assert_eq!(parts.next(), None);
+                        if client.socket.write_all(b"PONG\r\n").is_err() {
+                            to_evict.push(*client_id);
+                            continue;
+                        }
+                        client.has_sent_ping = true;
+                        if hop_ports {
+                            // we hop to a new port because we have sent the client the new
+                            // server information.
+                            port += 1;
+                        }
+                    }
+                    "CONNECT" => {
+                        let _: ConnectInfo = serde_json::from_str(parts.next().unwrap()).unwrap();
+                        assert_eq!(parts.next(), None);
+                    }
+                    "SUB" => {
+                        let subject = parts.next().unwrap();
+                        let sid = parts.next().unwrap();
+                        assert_eq!(parts.next(), None);
+                        let entry = subs.entry(subject.to_string()).or_insert_with(HashSet::new);
+                        entry.insert(sid.to_string());
+                    }
+                    "PUB" => {
+                        let (subject, reply, len) = match (parts.next(), parts.next(), parts.next())
+                        {
+                            (Some(subject), Some(reply), Some(len)) => (subject, Some(reply), len),
+                            (Some(subject), Some(len), None) => (subject, None, len),
+                            other => panic!("unknown args: {:?}", other),
+                        };
+
+                        assert_eq!(parts.next(), None);
+
+                        let next_line = if let Some(next_line) = read_line(&mut client.socket) {
+                            next_line
+                        } else {
+                            to_evict.push(*client_id);
+                            continue;
+                        };
+
+                        let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
+                            parsed_len
+                        } else {
+                            to_evict.push(*client_id);
+                            continue;
+                        };
+
+                        if parsed_len != next_line.len() {
+                            to_evict.push(*client_id);
+                            continue;
+                        }
+
+                        for sub_id in subject_matches(subject, &subs) {
+                            let out = if let Some(group) = reply {
+                                format!(
+                                    "MSG {} {} {} {}\r\n{}\r\n",
+                                    subject,
+                                    sub_id,
+                                    group,
+                                    next_line.len(),
+                                    next_line
+                                )
+                            } else {
+                                format!(
+                                    "MSG {} {} {}\r\n{}\r\n",
+                                    subject,
+                                    sub_id,
+                                    next_line.len(),
+                                    next_line
+                                )
+                            };
+
+                            outbound.push(out.into_bytes());
+                        }
+                    }
+                    "UNSUB" => {
+                        let sid = parts.next().unwrap();
+                        assert_eq!(parts.next(), None);
+                        subs.remove(sid);
+                    }
+                    other => panic!("unknown command {}", other),
+                }
+            }
+
+            for out in outbound {
+                for (client_id, client) in clients.iter_mut() {
+                    if client.socket.write_all(&out).is_err() {
+                        to_evict.push(*client_id);
+                        continue;
+                    }
+                }
+            }
+
+            while let Some(client_id) = to_evict.pop() {
+                log::debug!("client {} evicted", client_id);
+                clients.remove(&client_id);
+            }
+        }
+    }
+}
+
+/// Find any subscriptions which match the subject
 fn subject_matches<'s>(
     subject: &str,
     subscriptions: &'s HashMap<String, HashSet<String>>,
@@ -347,6 +452,7 @@ fn subject_matches<'s>(
     matches
 }
 
+/// Does the subject match the pattern
 fn subject_match(subject: &str, subject_pattern: &str) -> bool {
     let mut pattern_parts = subject_pattern.split('.');
     for subject_part in subject.split('.') {
@@ -359,7 +465,7 @@ fn subject_match(subject: &str, subject_pattern: &str) -> bool {
         }
         return false;
     }
-    return true;
+    true
 }
 
 #[test]
