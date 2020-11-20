@@ -54,7 +54,7 @@ jobs:
     - name: fault injection test
       run: |
         rustup update
-        cargo test reconnect_test --features=fault_injection -- --ignored
+        RUST_LOG=debug cargo test reconnect_test --features=fault_injection -- --ignored
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
