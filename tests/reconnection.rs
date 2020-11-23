@@ -1,13 +1,13 @@
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Barrier,
+        Arc,
     },
     thread,
     time::Duration,
 };
 
-use nats_test_server::nats_test_server;
+use nats_test_server::NatsTestServer;
 
 #[test]
 #[ignore]
@@ -15,7 +15,6 @@ fn reconnect_test() {
     env_logger::init();
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    let restart = Arc::new(AtomicBool::new(false));
     let success = Arc::new(AtomicBool::new(false));
 
     // kill process if we take longer than 15 minutes to run the test
@@ -30,31 +29,12 @@ fn reconnect_test() {
         }
     });
 
-    let barrier = Arc::new(Barrier::new(2));
-    let server = thread::spawn({
-        let barrier = barrier.clone();
-        let shutdown = shutdown.clone();
-        let hop_ports = false;
-        let bugginess = 200;
-        move || {
-            nats_test_server(
-                "localhost",
-                22222,
-                barrier,
-                shutdown,
-                restart,
-                bugginess,
-                hop_ports,
-            )
-        }
-    });
-
-    barrier.wait();
+    let server = NatsTestServer::build().bugginess(200).spawn();
 
     let nc = loop {
         if let Ok(nc) = nats::Options::new()
             .max_reconnects(None)
-            .connect("localhost:22222")
+            .connect(&server.address().to_string())
         {
             break Arc::new(nc);
         }
@@ -104,5 +84,4 @@ fn reconnect_test() {
     shutdown.store(true, Ordering::Release);
 
     tx.join().unwrap();
-    server.join().unwrap();
 }
