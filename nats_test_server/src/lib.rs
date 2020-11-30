@@ -278,11 +278,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
             }
 
             // maybe accept a new client
-            if clients.is_empty() {
-                listener.set_nonblocking(false).unwrap();
-            } else {
-                listener.set_nonblocking(true).unwrap();
-            }
+            listener.set_nonblocking(true).unwrap();
 
             if let Ok((mut next, _addr)) = listener.accept() {
                 log::debug!("new client connected");
@@ -469,7 +465,7 @@ fn subject_match(subject: &str, subject_pattern: &str) -> bool {
 }
 
 #[test]
-fn testsubject_match() {
+fn test_subject_match() {
     assert!(subject_match("sub", "sub"));
     assert!(subject_match("sub", "*"));
     assert!(subject_match("sub", ">"));
@@ -481,4 +477,20 @@ fn testsubject_match() {
     assert!(subject_match("sub.pub", ">"));
     assert!(!subject_match("sub.pub", "sub"));
     assert!(!subject_match("sub.pub", "pub"));
+}
+
+#[test]
+fn test_unused_server_cleanup() {
+    let success = Arc::new(AtomicBool::new(false));
+    {
+        let success = success.clone();
+        std::thread::spawn(move || {
+            let server = NatsTestServer::build().spawn();
+            std::thread::sleep_ms(1);
+            std::mem::drop(server);
+            success.store(true, Ordering::Release);
+        });
+    }
+    std::thread::sleep_ms(2);
+    assert!(success.load(Ordering::Acquire));
 }
