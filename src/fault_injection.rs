@@ -3,12 +3,10 @@
 use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
-use crate::smol::Timer;
-
 /// This function is useful for inducing random jitter into our operations that trigger
 /// cross-thread communication, shaking out more possible interleavings quickly. It gets fully
 /// eliminated by the compiler in non-test code.
-pub async fn inject_delay() {
+pub fn inject_delay() {
     use std::thread;
     use std::time::Duration;
 
@@ -37,7 +35,7 @@ pub async fn inject_delay() {
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
-        Timer::after(Duration::from_millis(duration)).await;
+        thread::sleep(Duration::from_millis(duration));
     }
 
     if fastrand::i32(..2) == 0 {

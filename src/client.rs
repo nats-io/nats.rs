@@ -1,17 +1,18 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::io::{self, Error, ErrorKind, Write};
+use std::io::prelude::*;
+use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
 use std::mem;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::asynk::connector::Connector;
-use crate::asynk::message::Message;
-use crate::asynk::proto::{self, ClientOp, ServerOp};
-use crate::smol::io::{AssertAsync, BufReader, BufWriter};
-use crate::smol::{self, channel, future, lock, prelude::*, stream, Executor, Timer};
+use crossbeam_channel as channel;
+use parking_lot::Mutex;
+
+use crate::connector::{Connector, NatsStream};
+use crate::message::Message;
+use crate::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
 /// Client state.
@@ -19,7 +20,7 @@ struct State {
     /// Buffered writer with an active connection.
     ///
     /// When `None`, the client is either reconnecting or closed.
-    writer: Option<Pin<Box<dyn AsyncWrite + Send>>>,
+    writer: Option<BufWriter<NatsStream>>,
 
     /// Signals to the client thread that the writer needs a flush.
     flush_kicker: channel::Sender<()>,
@@ -48,42 +49,32 @@ struct Subscription {
 }
 
 /// A NATS client.
+///
 #[derive(Clone)]
 pub(crate) struct Client {
     /// Shared client state.
-    state: Arc<lock::Mutex<State>>,
+    state: Arc<Mutex<State>>,
 
     /// Server info provided by the last INFO message.
     server_info: Arc<Mutex<Option<ServerInfo>>>,
 
-    /// Subscriptions that have logically unsubscribed but haven't sent UNSUB yet.
-    unsubscribed: Arc<Mutex<HashSet<u64>>>,
-
-    /// A channel for coordinating shutdown.
-    ///
-    /// When `None`, that means the client is closed or in the process of closing.
-    ///
-    /// To initiate shutdown, we create a channel and send its sender. The client thread receives
-    /// this sender and sends `()` when it stops.
-    shutdown: Arc<Mutex<Option<channel::Sender<channel::Sender<()>>>>>,
+    /// Set to `true` if shutdown has been requested.
+    shutdown: Arc<Mutex<bool>>,
 }
 
 impl Client {
     /// Creates a new client that will begin connecting in the background.
-    pub(crate) async fn connect(url: &str, options: Options) -> io::Result<Client> {
-        // A channel for coordinating shutdown.
-        let (shutdown, stop) = channel::bounded(1);
-
+    pub(crate) fn connect(url: &str, options: Options) -> io::Result<Client> {
         // A channel for coordinating flushes.
         let (flush_kicker, dirty) = channel::bounded(1);
 
         // Channels for coordinating initial connect.
         let (run_sender, run_receiver) = channel::bounded(1);
-        let (pong_sender, pong_receiver) = channel::bounded(1);
+        let (pong_sender, pong_receiver) = channel::bounded::<()>(1);
 
         // The client state.
         let client = Client {
-            state: Arc::new(lock::Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 writer: None,
                 flush_kicker,
                 buffer: Buffer::new(options.reconnect_buffer_size),
@@ -92,8 +83,7 @@ impl Client {
                 pongs: VecDeque::from(vec![pong_sender]),
             })),
             server_info: Arc::new(Mutex::new(None)),
-            unsubscribed: Arc::new(Mutex::new(HashSet::new())),
-            shutdown: Arc::new(Mutex::new(Some(shutdown))),
+            shutdown: Arc::new(Mutex::new(false)),
         };
 
         let options = Arc::new(options);
@@ -107,92 +97,74 @@ impl Client {
         thread::spawn({
             let client = client.clone();
             move || {
-                let ex = &Executor::new();
-                smol::block_on(ex.run(async move {
-                    // Spawn a task that periodically flushes buffered messages.
-                    let flusher = ex.spawn({
-                        let client = client.clone();
-                        async move {
-                            // Wait until at least one message is buffered.
-                            while dirty.recv().await.is_ok() {
-                                {
-                                    // Flush the writer.
-                                    let mut state = client.state.lock().await;
-                                    if let Some(writer) = state.writer.as_mut() {
-                                        writer.flush().await.ok();
-                                    }
-                                }
-                                // Wait a little bit before flushing again.
-                                Timer::after(Duration::from_millis(1)).await;
-                            }
-                        }
-                    });
+                let res = client.run(connector);
+                run_sender.send(res).ok();
 
-                    // Spawn the main task that processes messages from the server.
-                    let runner = ex.spawn({
-                        let client = client.clone();
-                        async move {
-                            let res = client.run(connector).await;
-                            run_sender.try_send(res).ok();
-                        }
-                    });
-
-                    // Wait until the client is closed.
-                    let res = stop.recv().await;
-
-                    // One final flush before shutting down.
-                    // This way we make sure buffered published messages reach the server.
-                    {
-                        let mut state = client.state.lock().await;
-                        if let Some(writer) = state.writer.as_mut() {
-                            writer.flush().await.ok();
-                        }
+                // One final flush before shutting down.
+                // This way we make sure buffered published messages reach the server.
+                {
+                    let mut state = client.state.lock();
+                    if let Some(writer) = state.writer.as_mut() {
+                        writer.flush().ok();
                     }
+                }
 
-                    // Cancel spawned tasks.
-                    flusher.cancel().await;
-                    runner.cancel().await;
-
-                    options.close_callback.call();
-
-                    // Signal to the shutdown initiator that it is now complete.
-                    if let Ok(s) = res {
-                        s.try_send(()).ok();
-                    }
-                }));
+                options.close_callback.call();
             }
         });
 
-        future::race(
-            async {
-                // Wait for `run()` to error.
-                run_receiver.recv().await.expect("client has panicked")?;
-                panic!("client has stopped unexpectedly");
-            },
-            async {
-                // Wait for the connection to get established.
-                pong_receiver.recv().await.ok();
-                Ok(client)
-            },
-        )
-        .await
+        channel::select! {
+            recv(run_receiver) -> res => {
+                res.expect("client thread has panicked")?;
+                unreachable!()
+            }
+            recv(pong_receiver) -> _ => {}
+        }
+
+        // Spawn a thread that periodically flushes buffered messages.
+        thread::spawn({
+            let client = client.clone();
+            move || {
+                // Wait until at least one message is buffered.
+                while dirty.recv().is_ok() {
+                    let start = Instant::now();
+                    {
+                        // Flush the writer.
+                        let mut state = client.state.lock();
+                        if let Some(writer) = state.writer.as_mut() {
+                            let res = writer.flush();
+
+                            // If flushing fails, disconnect.
+                            if res.is_err() {
+                                state.writer = None;
+                                state.pongs.clear();
+                            }
+                        }
+                    }
+                    // Wait a little bit before flushing again.
+                    thread::sleep(start.elapsed() * 9);
+                }
+            }
+        });
+
+        Ok(client)
     }
 
     /// Retrieves server info as received by the most recent connection.
     pub(crate) fn server_info(&self) -> Option<ServerInfo> {
-        self.server_info.lock().unwrap().clone()
+        self.server_info.lock().clone()
     }
 
     /// Makes a round trip to the server to ensure buffered messages reach it.
-    pub(crate) async fn flush(&self) -> io::Result<()> {
+    pub(crate) fn flush(&self, timeout: Duration) -> io::Result<()> {
         let pong = {
             // Inject random delays when testing.
-            inject_delay().await;
+            inject_delay();
 
-            let mut state = self.state.lock().await;
+            let mut state = self.state.lock();
 
             // Check if the client is closed.
-            if self.shutdown.lock().unwrap().is_none() {
+            if *self.shutdown.lock() {
                 return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
             }
 
@@ -202,8 +174,12 @@ impl Client {
             match state.writer.as_mut() {
                 None => {}
                 Some(mut writer) => {
-                    proto::encode(&mut writer, ClientOp::Ping).await?;
-                    writer.flush().await?;
+                    // TODO(stjepang): We probably want to set the deadline rather than the timeout
+                    // because right now the timeout applies to each write syscall individually.
+                    writer.get_ref().set_write_timeout(Some(timeout))?;
+                    proto::encode(&mut writer, ClientOp::Ping)?;
+                    writer.flush()?;
+                    writer.get_ref().set_write_timeout(None)?;
                 }
             }
 
@@ -213,41 +189,41 @@ impl Client {
         };
 
         // Wait until the PONG operation is received.
-        match pong.recv().await {
+        match pong.recv() {
             Ok(()) => Ok(()),
             Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
         }
     }
 
     /// Closes the client.
-    pub(crate) async fn close(&self) -> io::Result<()> {
+    pub(crate) fn close(&self) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay().await;
+        inject_delay();
 
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock();
 
         // Initiate shutdown process.
-        if let Some(shutdown) = self.shutdown.lock().unwrap().take() {
-            // Unsubscribe all subscriptions.
-            for sid in state.subscriptions.keys() {
-                self.unsubscribe(*sid);
+        if !mem::replace(&mut *self.shutdown.lock(), true) {
+            // Clear all subscriptions.
+            let old_subscriptions = mem::replace(&mut state.subscriptions, HashMap::new());
+            for (sid, _) in old_subscriptions {
+                // Send an UNSUB message and ignore errors.
+                if let Some(writer) = state.writer.as_mut() {
+                    let max_msgs = None;
+                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).ok();
+                    state.flush_kicker.try_send(()).ok();
+                }
             }
-            self.cleanup_subscriptions(&mut state).await;
+            state.subscriptions.clear();
 
             // Flush the writer in case there are buffered messages.
             if let Some(writer) = state.writer.as_mut() {
-                writer.flush().await.ok();
+                writer.flush().ok();
             }
 
             // Wake up all pending flushes.
             state.pongs.clear();
             drop(state);
-
-            let (s, r) = channel::bounded(1);
-            // Signal the thread to stop.
-            shutdown.try_send(s).ok();
-            // Wait for the thread to stop.
-            r.recv().await.ok();
         }
 
         Ok(())
@@ -255,27 +231,24 @@ impl Client {
 
     /// Kicks off the shutdown process, but doesn't wait for its completion.
     pub(crate) fn shutdown(&self) {
-        self.shutdown.lock().unwrap().take();
+        *self.shutdown.lock() = true;
     }
 
     /// Subscribes to a subject.
-    pub(crate) async fn subscribe(
+    pub(crate) fn subscribe(
         &self,
         subject: &str,
         queue_group: Option<&str>,
     ) -> io::Result<(u64, channel::Receiver<Message>)> {
         // Inject random delays when testing.
-        inject_delay().await;
+        inject_delay();
 
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock();
 
         // Check if the client is closed.
-        if self.shutdown.lock().unwrap().is_none() {
+        if *self.shutdown.lock() {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
-
-        // Clean up dead subscriptions.
-        self.cleanup_subscriptions(&mut state).await;
 
         // Generate a subject ID.
         let sid = state.next_sid;
@@ -288,7 +261,7 @@ impl Client {
                 queue_group,
                 sid,
             };
-            proto::encode(writer, op).await.ok();
+            proto::encode(writer, op).ok();
             state.flush_kicker.try_send(()).ok();
         }
 
@@ -306,12 +279,27 @@ impl Client {
     }
 
     /// Unsubscribes from a subject.
-    pub(crate) fn unsubscribe(&self, sid: u64) {
-        self.unsubscribed.lock().unwrap().insert(sid);
+    pub(crate) fn unsubscribe(&self, sid: u64) -> io::Result<()> {
+        // Inject random delays when testing.
+        inject_delay();
+
+        let mut state = self.state.lock();
+
+        // Remove the subscription from the map.
+        state.subscriptions.remove(&sid);
+
+        // Send an UNSUB message.
+        if let Some(writer) = state.writer.as_mut() {
+            let max_msgs = None;
+            proto::encode(writer, ClientOp::Unsub { sid, max_msgs })?;
+            state.flush_kicker.try_send(()).ok();
+        }
+
+        Ok(())
     }
 
     /// Publishes a message with optional reply subject and headers.
-    pub(crate) async fn publish(
+    pub(crate) fn publish(
         &self,
         subject: &str,
         reply_to: Option<&str>,
@@ -319,12 +307,12 @@ impl Client {
         msg: &[u8],
     ) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay().await;
+        inject_delay();
 
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock();
 
         // Check if the client is closed.
-        if self.shutdown.lock().unwrap().is_none() {
+        if *self.shutdown.lock() {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
@@ -346,13 +334,13 @@ impl Client {
         match state.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                proto::encode(AssertAsync::new(&mut state.buffer), op).await?;
+                proto::encode(&mut state.buffer, op)?;
                 state.buffer.flush()?;
                 Ok(())
             }
             Some(mut writer) => {
                 // If connected, write into the writer.
-                let res = proto::encode(&mut writer, op).await;
+                let res = proto::encode(&mut writer, op);
                 state.flush_kicker.try_send(()).ok();
 
                 // If writing fails, disconnect.
@@ -366,35 +354,25 @@ impl Client {
     }
 
     /// Runs the loop that connects and reconnects the client.
-    async fn run(&self, mut connector: Connector) -> io::Result<()> {
+    fn run(&self, mut connector: Connector) -> io::Result<()> {
         let mut first_connect = true;
 
         loop {
             // Don't use backoff on first connect.
             let use_backoff = !first_connect;
             // Make a connection to the server.
-            let (server_info, reader, writer) = connector.connect(use_backoff).await?;
+            let (server_info, stream) = connector.connect(use_backoff)?;
 
-            let reader = BufReader::with_capacity(128 * 1024, reader);
-            let writer = BufWriter::with_capacity(128 * 1024, writer);
-
-            // Create an endless stream parsing operations from the server.
-            let server_ops = stream::try_unfold(reader, |mut stream| async {
-                // Decode a single operation.
-                match proto::decode(&mut stream).await? {
-                    None => io::Result::Ok(None),
-                    Some(op) => io::Result::Ok(Some((op, stream))),
-                }
-            })
-            .boxed();
+            let reader = BufReader::with_capacity(128 * 1024, stream.clone());
+            let writer = BufWriter::with_capacity(128 * 1024, stream);
 
             // Set up the new connection for this client.
-            if self.reconnect(server_info, writer).await.is_ok() {
+            if self.reconnect(server_info, writer).is_ok() {
                 // Connected! Now dispatch MSG operations.
                 if !first_connect {
                     connector.get_options().reconnect_callback.call();
                 }
-                if self.dispatch(server_ops, &mut connector).await.is_ok() {
+                if self.dispatch(reader, &mut connector).is_ok() {
                     // If the client stopped gracefully, return.
                     return Ok(());
                 } else {
@@ -403,10 +381,10 @@ impl Client {
             }
 
             // Inject random delays when testing.
-            inject_delay().await;
+            inject_delay();
 
             // Check if the client is closed.
-            if self.shutdown.lock().unwrap().is_none() {
+            if *self.shutdown.lock() {
                 return Ok(());
             }
             first_connect = false;
@@ -414,32 +392,26 @@ impl Client {
     }
 
     /// Puts the client back into connected state with the given writer.
-    async fn reconnect(
+    fn reconnect(
         &self,
         server_info: ServerInfo,
-        writer: impl AsyncWrite + Send + 'static,
+        mut writer: BufWriter<NatsStream>,
     ) -> io::Result<()> {
         // Inject random delays when testing.
-        inject_delay().await;
+        inject_delay();
 
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock();
 
         // Check if the client is closed.
-        if self.shutdown.lock().unwrap().is_none() {
+        if *self.shutdown.lock() {
             return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
         }
 
         // Drop the current writer, if there is one.
         state.writer = None;
 
-        // Pin the new writer on the heap.
-        let mut writer = Box::pin(writer);
-
         // Inject random I/O failures when testing.
         inject_io_failure()?;
-
-        // Clean up dead subscriptions.
-        self.cleanup_subscriptions(&mut state).await;
 
         // Restart subscriptions that existed before the last reconnect.
         for (sid, subscription) in &state.subscriptions {
@@ -451,8 +423,7 @@ impl Client {
                     queue_group: subscription.queue_group.as_deref(),
                     sid: *sid,
                 },
-            )
-            .await?;
+            )?;
         }
 
         // Take out expected PONGs.
@@ -462,11 +433,11 @@ impl Client {
         let buffered = state.buffer.clear();
 
         // Write buffered PUB operations into the new writer.
-        writer.write_all(buffered).await?;
-        writer.flush().await?;
+        writer.write_all(buffered)?;
+        writer.flush()?;
 
         // All good, continue with this connection.
-        *self.server_info.lock().unwrap() = Some(server_info);
+        *self.server_info.lock() = Some(server_info);
         state.writer = Some(writer);
 
         // Complete PONGs because the connection is healthy.
@@ -478,32 +449,30 @@ impl Client {
     }
 
     /// Reads messages from the server and dispatches them to subscribers.
-    async fn dispatch(
-        &self,
-        mut server_ops: impl Stream<Item = io::Result<ServerOp>> + Unpin,
-        connector: &mut Connector,
-    ) -> io::Result<()> {
+    fn dispatch(&self, mut reader: impl BufRead, connector: &mut Connector) -> io::Result<()> {
         // Handle operations received from the server.
-        while let Some(op) = server_ops.next().await {
-            let op = op?;
-
+        while let Some(op) = proto::decode(&mut reader)? {
             // Inject random delays when testing.
-            inject_delay().await;
+            inject_delay();
 
-            let mut state = self.state.lock().await;
+            if *self.shutdown.lock() {
+                break;
+            }
+
+            let mut state = self.state.lock();
 
             match op {
                 ServerOp::Info(server_info) => {
                     for url in &server_info.connect_urls {
                         connector.add_url(url).ok();
                     }
-                    *self.server_info.lock().unwrap() = Some(server_info);
+                    *self.server_info.lock() = Some(server_info);
                 }
 
                 ServerOp::Ping => {
                     // Respond with a PONG if connected.
                     if let Some(w) = state.writer.as_mut() {
-                        proto::encode(w, ClientOp::Pong).await?;
+                        proto::encode(w, ClientOp::Pong)?;
                         state.flush_kicker.try_send(()).ok();
                     }
                 }
@@ -537,9 +506,6 @@ impl Client {
 
                         // Send a message or drop it if the channel is disconnected or full.
                         subscription.messages.try_send(msg).ok();
-                    } else {
-                        // If there is no matching subscription, clean up.
-                        self.cleanup_subscriptions(&mut state).await;
                     }
                 }
 
@@ -562,9 +528,6 @@ impl Client {
 
                         // Send a message or drop it if the channel is disconnected or full.
                         subscription.messages.try_send(msg).ok();
-                    } else {
-                        // If there is no matching subscription, clean up.
-                        self.cleanup_subscriptions(&mut state).await;
                     }
                 }
 
@@ -576,26 +539,6 @@ impl Client {
 
         // The stream of operation is broken, meaning the connection was lost.
         Err(ErrorKind::ConnectionReset.into())
-    }
-
-    /// Sends UNSUB for dead subscriptions.
-    async fn cleanup_subscriptions(&self, state: &mut lock::MutexGuard<'_, State>) {
-        // Keep unsubscribed list in separate variable so it won't be captured by for loop context.
-        let unsubscribed = mem::replace(&mut *self.unsubscribed.lock().unwrap(), HashSet::new());
-
-        for sid in unsubscribed {
-            // Remove the subscription from the map.
-            state.subscriptions.remove(&sid);
-
-            // Send an UNSUB message and ignore errors.
-            if let Some(writer) = state.writer.as_mut() {
-                let max_msgs = None;
-                proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
-                    .await
-                    .ok();
-                state.flush_kicker.try_send(()).ok();
-            }
-        }
     }
 }
 
