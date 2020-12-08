@@ -7,62 +7,110 @@ on:
   pull_request:
 
 jobs:
+
   clippy_check:
     runs-on: ubuntu-latest
     steps:
+      - name: Cache Rust
+        uses: actions/cache@v1
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
-            components: clippy
-            override: true
+          toolchain: nightly
+          components: clippy
+          override: true
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1.0.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
+
   default:
     name: Cargo Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # TODO(stjepang): There's an issue with rustup installation on windows-latest.
-        # Re-enable windows-latest when it gets fixed.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-go@v2
-      with:
-        go-version: '1.14'
-    - name: install nats-server
-      run: go get github.com/nats-io/nats-server
-    - name: cargo test
-      run: |
-        rustup update
-        cargo test
+      - name: Cache Rust
+        uses: actions/cache@v1
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+      - name: Cache Go
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/go/pkg/mod              # Module download cache
+            ~/.cache/go-build         # Build cache (Linux)
+            ~/Library/Caches/go-build # Build cache (Mac)
+            '%LocalAppData%\go-build' # Build cache (Windows)
+          key: ${{ runner.os }}-go-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '1.14'
+      - name: install nats-server
+        run: go get github.com/nats-io/nats-server
+      - name: cargo test
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          rustup update
+          cargo test
+
   fault-injection:
     name: Fault Injection
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-go@v2
-      with:
-        go-version: '1.14'
-    - name: install nats-server
-      run: go get github.com/nats-io/nats-server
-    - name: fault injection test
-      run: |
-        rustup update
-        cargo test reconnect_test --features=fault_injection -- --ignored
+      - name: Cache Rust
+        uses: actions/cache@v1
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+      - uses: actions/checkout@v2
+      - name: fault injection test
+        env:
+          RUST_LOG: trace
+        run: |
+          rustup update
+          cargo test reconnect_test --features=fault_injection -- --ignored
+
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: MSRV check
-      run: |
-        set -eo pipefail
-        echo "msrv check"
-        rustup install 1.41.0
-        cargo +1.41.0 check
+      - name: Cache Rust
+        uses: actions/cache@v1
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+      - uses: actions/checkout@v1
+      - name: MSRV check
+        run: |
+          set -eo pipefail
+          echo "msrv check"
+          rustup install 1.41.0
+          cargo +1.41.0 check

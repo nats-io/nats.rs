@@ -2,10 +2,10 @@ use std::fs;
 use std::io::{self, prelude::*};
 use std::path::Path;
 
-use async_rustls::rustls::{Certificate, PrivateKey};
 use nkeys::KeyPair;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use rustls::{Certificate, PrivateKey};
 
 use crate::SecureString;
 

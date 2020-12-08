@@ -97,7 +97,7 @@ fn main() -> std::io::Result<()> {
     }
 
     println!(
-        "Starting benchmark [msgs={}, msgsize={}, pubs={}, subs={}",
+        "Starting benchmark [msgs={}, msgsize={}, pubs={}, subs={}]",
         messages,
         args.message_size,
         args.publishers.get(),

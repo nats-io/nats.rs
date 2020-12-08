@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::asynk;
 use crate::auth_utils;
 use crate::secure_wipe::SecureString;
-use crate::smol::future;
+use crate::Connection;
 
 /// Connect options.
 pub struct Options {
@@ -358,32 +357,8 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn connect(self, nats_url: &str) -> io::Result<crate::Connection> {
-        Ok(crate::Connection(future::block_on(
-            self.connect_async(nats_url),
-        )?))
-    }
-
-    /// Establish a `Connection` with a NATS server asynchronously.
-    ///
-    /// Multiple servers may be specified by separating
-    /// them with commas.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// # smol::block_on(async {
-    /// let options = nats::Options::new();
-    /// let nc = options
-    ///     .connect_async("nats://demo.nats.io:4222,tls://demo.nats.io:4443")
-    ///     .await?;
-    /// # Ok(())
-    /// # })
-    /// # }
-    /// ```
-    pub async fn connect_async(self, nats_url: &str) -> io::Result<asynk::Connection> {
-        asynk::Connection::connect_with_options(nats_url, self).await
+    pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
+        Connection::connect_with_options(nats_url, self)
     }
 
     /// Set a callback to be executed when connectivity to
@@ -393,13 +368,10 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// # smol::block_on(async {
     /// let nc = nats::Options::new()
     ///     .disconnect_callback(|| println!("connection has been lost"))
-    ///     .connect_async("demo.nats.io")
-    ///     .await?;
+    ///     .connect("demo.nats.io")?;
     /// # Ok(())
-    /// # })
     /// # }
     /// ```
     pub fn disconnect_callback<F>(mut self, cb: F) -> Self
@@ -417,13 +389,10 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// # smol::block_on(async {
     /// let nc = nats::Options::new()
     ///     .reconnect_callback(|| println!("connection has been reestablished"))
-    ///     .connect_async("demo.nats.io")
-    ///     .await?;
+    ///     .connect("demo.nats.io")?;
     /// # Ok(())
-    /// # })
     /// # }
     /// ```
     pub fn reconnect_callback<F>(mut self, cb: F) -> Self
@@ -442,14 +411,11 @@ impl Options {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// # smol::block_on(async {
     /// let nc = nats::Options::new()
     ///     .close_callback(|| println!("connection has been closed"))
-    ///     .connect_async("demo.nats.io")
-    ///     .await?;
-    /// nc.drain().await.unwrap();
+    ///     .connect("demo.nats.io")?;
+    /// nc.drain().unwrap();
     /// # Ok(())
-    /// # })
     /// # }
     /// ```
     pub fn close_callback<F>(mut self, cb: F) -> Self
@@ -475,13 +441,10 @@ impl Options {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # use std::time::Duration;
-    /// # smol::block_on(async {
     /// let nc = nats::Options::new()
     ///     .reconnect_delay_callback(|c| Duration::from_millis(std::cmp::min((c * 100) as u64, 8000)))
-    ///     .connect_async("demo.nats.io")
-    ///     .await?;
+    ///     .connect("demo.nats.io")?;
     /// # Ok(())
-    /// # })
     /// # }
     /// ```
     pub fn reconnect_delay_callback<F>(mut self, cb: F) -> Self

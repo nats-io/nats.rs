@@ -1,17 +1,18 @@
 use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
-use std::pin::Pin;
+use std::io::prelude::*;
+use std::io::{self, BufReader, Error, ErrorKind};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
-use async_rustls::rustls::ClientConfig;
-use async_rustls::webpki::DNSNameRef;
-use async_rustls::TlsConnector;
+use parking_lot::{Mutex, MutexGuard};
+use rustls::{ClientConfig, ClientSession, Session};
+use webpki::DNSNameRef;
 
-use crate::asynk::proto::{self, ClientOp, ServerOp};
 use crate::auth_utils;
+use crate::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
-use crate::smol::io::{self, BufReader};
-use crate::smol::{net, prelude::*, Timer};
 use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
 
 /// Maintains a list of servers and establishes connections.
@@ -26,8 +27,8 @@ pub(crate) struct Connector {
     /// Configured options for establishing connections.
     options: Arc<Options>,
 
-    /// TLS connector.
-    tls_connector: TlsConnector,
+    /// TLS config.
+    tls_config: Arc<ClientConfig>,
 }
 
 impl Connector {
@@ -75,7 +76,7 @@ impl Connector {
         let mut connector = Connector {
             attempts: HashMap::new(),
             options,
-            tls_connector: TlsConnector::from(Arc::new(tls_config)),
+            tls_config: Arc::new(tls_config),
         };
 
         // Add all URLs in the comma-separated list.
@@ -126,14 +127,7 @@ impl Connector {
     ///
     /// If `use_backoff` is `true`, this method will try connecting in a loop and will back off
     /// after failed connect attempts.
-    pub(crate) async fn connect(
-        &mut self,
-        use_backoff: bool,
-    ) -> io::Result<(
-        ServerInfo,
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
-    )> {
+    pub(crate) fn connect(&mut self, use_backoff: bool) -> io::Result<(ServerInfo, NatsStream)> {
         // The last seen error, which gets returned if all connect attempts fail.
         let mut last_err = Error::new(ErrorKind::AddrNotAvailable, "no socket addresses");
 
@@ -152,8 +146,8 @@ impl Connector {
                 // Resolve the server URL to socket addresses.
                 let host = server.host.clone();
                 let port = server.port;
-                let mut addrs = match net::resolve((host.as_str(), port)).await {
-                    Ok(addrs) => addrs,
+                let mut addrs = match (host.as_str(), port).to_socket_addrs() {
+                    Ok(addrs) => addrs.collect::<Vec<_>>(),
                     Err(err) => {
                         last_err = err;
                         continue;
@@ -166,13 +160,13 @@ impl Connector {
                 for addr in addrs {
                     // Sleep for some time if this is not the first connection attempt for this
                     // server.
-                    Timer::after(sleep_duration).await;
+                    thread::sleep(sleep_duration);
 
                     // Try connecting to this address.
-                    let res = self.connect_addr(addr, server).await;
+                    let res = self.connect_addr(addr, server);
 
                     // Check if connecting worked out.
-                    let (server_info, reader, writer) = match res {
+                    let (server_info, stream) = match res {
                         Ok(val) => val,
                         Err(err) => {
                             last_err = err;
@@ -186,7 +180,7 @@ impl Connector {
                     }
 
                     *self.attempts.get_mut(server).unwrap() = 0;
-                    return Ok((server_info, reader, writer));
+                    return Ok((server_info, stream));
                 }
             }
 
@@ -198,29 +192,25 @@ impl Connector {
     }
 
     /// Attempts to establish a connection to a single socket address.
-    async fn connect_addr(
+    fn connect_addr(
         &self,
-        addr: net::SocketAddr,
+        addr: SocketAddr,
         server: &Server,
-    ) -> io::Result<(
-        ServerInfo,
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
-    )> {
+    ) -> io::Result<(ServerInfo, NatsStream)> {
         // Inject random I/O failures when testing.
         inject_io_failure()?;
 
         // Connect to the remote socket.
-        let mut stream = net::TcpStream::connect(addr).await?;
+        let mut stream = TcpStream::connect(addr)?;
 
         // Expect an INFO message.
         let mut line = crate::SecureVec::with_capacity(512);
         while !line.ends_with(b"\r\n") {
             let byte = &mut [0];
-            stream.read_exact(byte).await?;
+            stream.read_exact(byte)?;
             line.push(byte[0]);
         }
-        let server_info = match proto::decode(&line[..]).await? {
+        let server_info = match proto::decode(&line[..])? {
             Some(ServerOp::Info(server_info)) => server_info,
             Some(op) => {
                 return Err(Error::new(
@@ -239,29 +229,24 @@ impl Connector {
             self.options.tls_required || server.tls_required || server_info.tls_required;
 
         // Upgrade to TLS if required.
-        #[allow(clippy::type_complexity)]
-        let (reader, mut writer): (
-            Pin<Box<dyn AsyncRead + Send>>,
-            Pin<Box<dyn AsyncWrite + Send>>,
-        ) = if tls_required {
+        let session = if tls_required {
             // Inject random I/O failures when testing.
             inject_io_failure()?;
 
             // Connect using TLS.
-            let res = DNSNameRef::try_from_ascii_str(server.host.as_str());
-            let name = res.map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "the server name is not ASCII")
-            })?;
-            let stream = self.tls_connector.connect(name, stream).await?;
-
-            // Split the TLS stream into a reader and a writer.
-            let (r, w) = io::split(stream);
-            (r.boxed_reader(), w.boxed_writer())
+            let dns_name = DNSNameRef::try_from_ascii_str(&server_info.host)
+                .or_else(|_| DNSNameRef::try_from_ascii_str(server.host.as_str()))
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "cannot determine hostname for TLS connection",
+                    )
+                })?;
+            Some(ClientSession::new(&self.tls_config, dns_name))
         } else {
-            // Split the TCP stream into a reader and a writer.
-            let (r, w) = io::split(stream);
-            (r.boxed_reader(), w.boxed_writer())
+            None
         };
+        let mut stream = NatsStream::new(stream, session)?;
 
         // Data that will be formatted as a CONNECT message.
         let mut connect_info = ConnectInfo {
@@ -305,23 +290,23 @@ impl Connector {
             }
         }
 
-        // Send CONNECT and INFO messages.
-        proto::encode(&mut writer, ClientOp::Connect(connect_info)).await?;
-        proto::encode(&mut writer, ClientOp::Ping).await?;
-        writer.flush().await?;
+        // Send CONNECT and PING messages.
+        proto::encode(&mut stream, ClientOp::Connect(&connect_info))?;
+        proto::encode(&mut stream, ClientOp::Ping)?;
+        stream.flush()?;
 
-        let mut reader = BufReader::new(reader);
+        let mut reader = BufReader::new(stream.clone());
 
         // Wait for a PONG.
         loop {
-            match proto::decode(&mut reader).await? {
+            match proto::decode(&mut reader)? {
                 // If we get PONG, the server is happy and we're done connecting.
                 Some(ServerOp::Pong) => break,
 
                 // Respond to a PING with a PONG.
                 Some(ServerOp::Ping) => {
-                    proto::encode(&mut writer, ClientOp::Pong).await?;
-                    writer.flush().await?;
+                    proto::encode(&mut stream, ClientOp::Pong)?;
+                    stream.flush()?;
                 }
 
                 // No other operations should arrive at this time.
@@ -342,7 +327,7 @@ impl Connector {
             }
         }
 
-        Ok((server_info, reader.into_inner(), writer))
+        Ok((server_info, stream))
     }
 }
 
@@ -405,4 +390,182 @@ impl Server {
             tls_required,
         })
     }
+}
+
+/// A raw NATS stream of bytes.
+///
+/// The stream uses the TCP protocol, optionally secured by TLS.
+#[derive(Clone)]
+pub(crate) struct NatsStream {
+    flavor: Arc<Flavor>,
+}
+
+enum Flavor {
+    Tcp(TcpStream),
+    Tls(Box<Mutex<TlsStream>>),
+}
+
+struct TlsStream {
+    tcp: TcpStream,
+    session: ClientSession,
+}
+
+impl NatsStream {
+    /// Creates a NATS stream from a TCP stream and an optional TLS session.
+    fn new(tcp: TcpStream, session: Option<ClientSession>) -> io::Result<NatsStream> {
+        let flavor = match session {
+            None => Flavor::Tcp(tcp),
+            Some(session) => {
+                tcp.set_nonblocking(true)?;
+                Flavor::Tls(Box::new(Mutex::new(TlsStream { tcp, session })))
+            }
+        };
+        let flavor = Arc::new(flavor);
+        Ok(NatsStream { flavor })
+    }
+
+    pub(crate) fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        match &*self.flavor {
+            Flavor::Tcp(tcp) => tcp.set_write_timeout(timeout),
+            Flavor::Tls(tls) => tls.lock().tcp.set_write_timeout(timeout),
+        }
+    }
+}
+
+impl Read for NatsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        <&NatsStream as Read>::read(&mut &*self, buf)
+    }
+}
+
+impl Read for &NatsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match &*self.flavor {
+            Flavor::Tcp(tcp) => (&*tcp).read(buf),
+            Flavor::Tls(tls) => tls_op(tls, |session, eof| match session.read(buf) {
+                Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
+                res => res,
+            }),
+        }
+    }
+}
+
+impl Write for NatsStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        <&NatsStream as Write>::write(&mut &*self, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        <&NatsStream as Write>::flush(&mut &*self)
+    }
+}
+
+impl Write for &NatsStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match &*self.flavor {
+            Flavor::Tcp(tcp) => (&*tcp).write(buf),
+            Flavor::Tls(tls) => tls_op(tls, |session, _| session.write(buf)),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match &*self.flavor {
+            Flavor::Tcp(tcp) => (&*tcp).flush(),
+            Flavor::Tls(tls) => tls_op(tls, |session, _| session.flush()),
+        }
+    }
+}
+
+/// Performs a blocking operation on a TLS stream.
+///
+/// However, note that the inner TCP stream is in non-blocking mode.
+fn tls_op<T: std::fmt::Debug>(
+    tls: &Mutex<TlsStream>,
+    mut op: impl FnMut(&mut ClientSession, bool) -> io::Result<T>,
+) -> io::Result<T> {
+    loop {
+        let mut tls = tls.lock();
+        let TlsStream { tcp, session } = &mut *tls;
+        let mut eof = false;
+
+        // If necessary, read TLS messages.
+        if session.wants_read() {
+            match session.read_tls(tcp) {
+                Ok(0) => eof = true,
+                Ok(_) => session
+                    .process_new_packets()
+                    .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {}", err)))?,
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        // If necessary, write TLS messages.
+        if session.wants_write() {
+            match session.write_tls(tcp) {
+                Ok(_) => {}
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        // Try the non-blocking read/write/flush operation.
+        match op(session, eof) {
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {}
+            res => return res,
+        }
+
+        tls_wait(tls)?;
+    }
+}
+
+/// Waits until the TLS stream becomes ready.
+fn tls_wait(mut tls: MutexGuard<'_, TlsStream>) -> io::Result<()> {
+    #[cfg(unix)]
+    use {
+        libc::{self as sys, poll, pollfd},
+        std::os::unix::io::AsRawFd,
+    };
+    #[cfg(windows)]
+    use {
+        std::os::windows::io::AsRawSocket,
+        winapi::um::winsock2::{self as sys, WSAPoll as poll, WSAPOLLFD as pollfd},
+    };
+
+    let TlsStream { tcp, session } = &mut *tls;
+
+    // Initialize a pollfd object with readiness events we're looking for.
+    #[allow(trivial_numeric_casts)]
+    let mut pollfd = pollfd {
+        #[cfg(unix)]
+        fd: tcp.as_raw_fd() as _,
+        #[cfg(windows)]
+        fd: tcp.as_raw_socket() as _,
+        #[cfg(unix)]
+        events: sys::POLLERR,
+        #[cfg(windows)]
+        events: 0,
+        revents: 0,
+    };
+    if session.wants_read() {
+        pollfd.events |= sys::POLLIN;
+    }
+    if session.wants_write() {
+        pollfd.events |= sys::POLLOUT;
+    }
+
+    // Make sure to drop the lock before blocking on `poll()`!
+    // This way concurrent operations on the TLS stream won't block each other.
+    drop(tls);
+
+    // Wait until the TCP stream becomes ready.
+    #[allow(unsafe_code)]
+    while unsafe { poll(&mut pollfd, 1, -1) } == -1 {
+        let err = Error::last_os_error();
+        if err.kind() != io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
+
+    Ok(())
 }

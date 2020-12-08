@@ -165,31 +165,22 @@
     clippy::wildcard_enum_match_arm,
     clippy::wrong_pub_self_convention,
 )]
-#![allow(clippy::match_like_matches_macro, clippy::await_holding_lock)]
+#![allow(
+    clippy::match_like_matches_macro,
+    clippy::await_holding_lock,
+    clippy::shadow_reuse,
+    clippy::wildcard_enum_match_arm
+)]
 
-use crate::asynk::client::Client;
-use crate::smol::{future, prelude::*, Timer};
-
-pub mod asynk;
 mod auth_utils;
+mod client;
 mod connect;
+mod connector;
 mod headers;
+mod message;
 mod options;
+mod proto;
 mod secure_wipe;
-
-/// A subset of the smol runtime.
-///
-/// We're only using a subset because async-process requires Rust 1.45, but our minimum required
-/// Rust version is older than that.
-pub(crate) mod smol {
-    pub use async_executor::*;
-    pub use async_io::*;
-    pub use futures_lite::*;
-
-    pub use async_channel as channel;
-    pub use async_lock as lock;
-    pub use async_net as net;
-}
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -198,7 +189,7 @@ mod fault_injection;
 use fault_injection::{inject_delay, inject_io_failure};
 
 #[cfg(not(feature = "fault_injection"))]
-async fn inject_delay() {}
+fn inject_delay() {}
 
 #[cfg(not(feature = "fault_injection"))]
 fn inject_io_failure() -> io::Result<()> {
@@ -214,21 +205,26 @@ pub mod subscription;
 pub type ConnectionOptions = Options;
 
 use std::{
-    fmt,
     io::{self, Error, ErrorKind},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-pub use {headers::Headers, options::Options, subscription::Subscription};
+pub use headers::Headers;
+pub use message::Message;
+pub use options::Options;
+pub use subscription::Subscription;
 
 #[doc(hidden)]
 pub use connect::ConnectInfo;
 
+use client::Client;
+use options::AuthStyle;
 use secure_wipe::{SecureString, SecureVec};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
+const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -289,11 +285,20 @@ impl ServerInfo {
     }
 }
 
-use options::AuthStyle;
-
 /// A NATS connection.
-#[derive(Debug, Clone)]
-pub struct Connection(asynk::Connection);
+#[derive(Clone, Debug)]
+pub struct Connection(Arc<Inner>);
+
+#[derive(Clone, Debug)]
+struct Inner {
+    client: Client,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.client.shutdown();
+    }
+}
 
 /// Connect to a NATS server at the given url.
 ///
@@ -308,79 +313,14 @@ pub fn connect(nats_url: &str) -> io::Result<Connection> {
     Options::new().connect(nats_url)
 }
 
-/// A `Message` that has been published to a NATS `Subject`.
-#[derive(Debug, Clone)]
-pub struct Message {
-    /// The NATS `Subject` that this `Message` has been published to.
-    pub subject: String,
-    /// The optional reply `Subject` that may be used for sending
-    /// responses when using the request/reply pattern.
-    pub reply: Option<String>,
-    /// The `Message` contents.
-    pub data: Vec<u8>,
-    /// Client for publishing on the reply subject.
-    pub(crate) client: Client,
-    /// Optional headers associated with this `Message`.
-    pub headers: Option<Headers>,
-}
-
-impl Message {
-    pub(crate) fn from_async(msg: asynk::Message) -> Message {
-        Message {
-            subject: msg.subject,
-            reply: msg.reply,
-            data: msg.data,
-            client: msg.client,
-            headers: msg.headers,
-        }
-    }
-
-    /// Respond to a request message.
-    ///
-    /// # Example
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// # let nc = nats::connect("demo.nats.io")?;
-    /// nc.subscribe("help.request")?.with_handler(move |m| {
-    ///     m.respond("ans=42")?; Ok(())
-    /// });
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match self.reply.as_ref() {
-            None => Err(Error::new(
-                ErrorKind::InvalidInput,
-                "no reply subject available",
-            )),
-            Some(reply) => future::block_on(self.client.publish(reply, None, None, msg.as_ref())),
-        }
-    }
-}
-
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut body = format!("[{} bytes]", self.data.len());
-        if let Ok(str) = std::str::from_utf8(&self.data) {
-            body = str.to_string();
-        }
-        if let Some(reply) = &self.reply {
-            write!(
-                f,
-                "Message {{\n  subject: \"{}\",\n  reply: \"{}\",\n  data: \"{}\"\n}}",
-                self.subject, reply, body
-            )
-        } else {
-            write!(
-                f,
-                "Message {{\n  subject: \"{}\",\n  data: \"{}\"\n}}",
-                self.subject, body
-            )
-        }
-    }
-}
-
 impl Connection {
+    /// Connects on a URL with the given options.
+    pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
+        let client = Client::connect(url, options)?;
+        client.flush(DEFAULT_FLUSH_TIMEOUT)?;
+        Ok(Connection(Arc::new(Inner { client })))
+    }
+
     /// Create a subscription for the given NATS connection.
     ///
     /// # Example
@@ -392,7 +332,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
-        future::block_on(self.0.subscribe(subject)).map(|s| Subscription(Arc::new(s)))
+        self.do_subscribe(subject, None)
     }
 
     /// Create a queue subscription for the given NATS connection.
@@ -406,7 +346,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        future::block_on(self.0.queue_subscribe(subject, queue)).map(|s| Subscription(Arc::new(s)))
+        self.do_subscribe(subject, Some(queue))
     }
 
     /// Publish a message on the given subject.
@@ -420,7 +360,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        future::block_on(self.0.publish(subject, msg))
+        self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
     /// Publish a message on the given subject with a reply subject for responses.
@@ -441,7 +381,9 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        future::block_on(self.0.publish_request(subject, reply, msg))
+        self.0
+            .client
+            .publish(subject, Some(reply), None, msg.as_ref())
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -456,7 +398,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        self.0.new_inbox()
+        format!("_INBOX.{}", nuid::next())
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -471,7 +413,13 @@ impl Connection {
     /// # }
     /// ```
     pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        future::block_on(self.0.request(subject, msg)).map(Message::from_async)
+        // Publish a request.
+        let reply = self.new_inbox();
+        let sub = self.subscribe(&reply)?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+
+        // Wait for the response.
+        sub.next().ok_or_else(|| ErrorKind::ConnectionReset.into())
     }
 
     /// Publish a message on the given subject as a request and receive the response.
@@ -492,16 +440,13 @@ impl Connection {
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        future::block_on(async {
-            self.0
-                .request(subject, msg)
-                .or(async {
-                    Timer::after(timeout).await;
-                    Err(ErrorKind::TimedOut.into())
-                })
-                .await
-                .map(Message::from_async)
-        })
+        // Publish a request.
+        let reply = self.new_inbox();
+        let sub = self.subscribe(&reply)?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+
+        // Wait for the response.
+        sub.next_timeout(timeout)
     }
 
     /// Publish a message on the given subject as a request and allow multiple responses.
@@ -516,7 +461,13 @@ impl Connection {
     /// # }
     /// ```
     pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
-        future::block_on(self.0.request_multi(subject, msg)).map(|s| Subscription(Arc::new(s)))
+        // Publish a request.
+        let reply = self.new_inbox();
+        let sub = self.subscribe(&reply)?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+
+        // Return the subscription.
+        Ok(sub)
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -533,7 +484,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush(&self) -> io::Result<()> {
-        future::block_on(self.0.flush())
+        self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)
     }
 
     /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
@@ -550,7 +501,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
-        future::block_on(self.0.flush_timeout(duration))
+        self.0.client.flush(duration)
     }
 
     /// Close a NATS connection. All clones of
@@ -571,7 +522,8 @@ impl Connection {
     /// # }
     /// ```
     pub fn close(self) {
-        future::block_on(self.0.close()).ok();
+        self.0.client.flush(DEFAULT_FLUSH_TIMEOUT).ok();
+        self.0.client.close().ok();
     }
 
     /// Calculates the round trip time between this client and the server,
@@ -587,7 +539,9 @@ impl Connection {
     /// # }
     /// ```
     pub fn rtt(&self) -> io::Result<Duration> {
-        future::block_on(self.0.rtt())
+        let start = Instant::now();
+        self.flush()?;
+        Ok(start.elapsed())
     }
 
     /// Returns the client IP as known by the server.
@@ -601,7 +555,34 @@ impl Connection {
     /// # }
     /// ```
     pub fn client_ip(&self) -> io::Result<std::net::IpAddr> {
-        self.0.client_ip()
+        let info = self
+            .0
+            .client
+            .server_info()
+            .expect("INFO should've been received at connection");
+
+        match info.client_ip.as_str() {
+            "" => Err(Error::new(
+                ErrorKind::Other,
+                &*format!(
+                    "client_ip was not provided by the server. \
+                    It is supported on servers above version 2.1.6. \
+                    The server version is {}",
+                    info.version
+                ),
+            )),
+            ip => match ip.parse() {
+                Ok(addr) => Ok(addr),
+                Err(_) => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    &*format!(
+                        "client_ip provided by the server cannot be parsed. \
+                        The server provided IP: {}",
+                        info.client_ip
+                    ),
+                )),
+            },
+        }
     }
 
     /// Returns the client ID as known by the most recently connected server.
@@ -615,7 +596,11 @@ impl Connection {
     /// # }
     /// ```
     pub fn client_id(&self) -> u64 {
-        self.0.client_id()
+        self.0
+            .client
+            .server_info()
+            .expect("INFO should've been received at connection")
+            .client_id
     }
 
     /// Send an unsubscription for all subs then flush the connection, allowing any unprocessed
@@ -652,7 +637,9 @@ impl Connection {
     /// # }
     /// ```
     pub fn drain(&self) -> io::Result<()> {
-        future::block_on(self.0.drain())
+        self.0.client.flush(DEFAULT_FLUSH_TIMEOUT)?;
+        self.0.client.close()?;
+        Ok(())
     }
 
     /// Publish a message which may have a reply subject or headers set.
@@ -679,18 +666,16 @@ impl Connection {
         headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        future::block_on(self.0.publish_with_reply_or_headers(
-            subject,
-            reply,
-            headers,
-            msg.as_ref(),
-        ))
+        self.0.client.publish(subject, reply, headers, msg.as_ref())
     }
-}
 
-impl Drop for Connection {
-    fn drop(&mut self) {
-        // Flush to make sure buffered published messages reach the server.
-        future::block_on(self.0.flush()).ok();
+    fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
+        let (sid, receiver) = self.0.client.subscribe(subject, queue)?;
+        Ok(Subscription::new(
+            sid,
+            subject.to_string(),
+            receiver,
+            self.0.client.clone(),
+        ))
     }
 }

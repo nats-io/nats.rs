@@ -1,14 +1,54 @@
 use std::io;
-use std::{sync::Arc, thread, time::Duration};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
-use crate::smol::{future, prelude::*, Timer};
-use crate::{asynk, Message};
+use crossbeam_channel as channel;
+
+use crate::client::Client;
+use crate::message::Message;
+
+#[derive(Debug)]
+struct Inner {
+    /// Subscription ID.
+    pub(crate) sid: u64,
+
+    /// Subject.
+    pub(crate) subject: String,
+
+    /// MSG operations received from the server.
+    pub(crate) messages: channel::Receiver<Message>,
+
+    /// Client associated with subscription.
+    pub(crate) client: Client,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.client.unsubscribe(self.sid).ok();
+    }
+}
 
 /// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
-pub struct Subscription(pub(crate) Arc<asynk::Subscription>);
+pub struct Subscription(Arc<Inner>);
 
 impl Subscription {
+    /// Creates a subscription.
+    pub(crate) fn new(
+        sid: u64,
+        subject: String,
+        messages: channel::Receiver<Message>,
+        client: Client,
+    ) -> Subscription {
+        Subscription(Arc::new(Inner {
+            sid,
+            subject,
+            messages,
+            client,
+        }))
+    }
+
     /// Get the next message, or None if the subscription
     /// has been unsubscribed or the connection closed.
     ///
@@ -23,7 +63,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next(&self) -> Option<Message> {
-        future::block_on(async { self.0.messages.recv().await.ok() }).map(Message::from_async)
+        self.0.messages.recv().ok()
     }
 
     /// Try to get the next message, or None if no messages
@@ -42,7 +82,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn try_next(&self) -> Option<Message> {
-        self.0.try_next().map(Message::from_async)
+        self.0.messages.try_recv().ok()
     }
 
     /// Get the next message, or a timeout error if no messages are available for timout.
@@ -57,24 +97,17 @@ impl Subscription {
     /// # }
     /// ```
     pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
-        future::block_on(
-            async {
-                match self.0.messages.recv().await {
-                    Ok(msg) => Ok(Message::from_async(msg)),
-                    Err(_) => Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "next_timeout: unsubscribed",
-                    )),
-                }
-            }
-            .or(async {
-                Timer::after(timeout).await;
-                Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "next_timeout: timed out",
-                ))
-            }),
-        )
+        match self.0.messages.recv_timeout(timeout) {
+            Ok(msg) => Ok(msg),
+            Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "next_timeout: timed out",
+            )),
+            Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                "next_timeout: unsubscribed",
+            )),
+        }
     }
 
     /// Returns a blocking message iterator. Same as calling `iter()`.
@@ -192,7 +225,10 @@ impl Subscription {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        future::block_on(self.0.unsubscribe())
+        self.drain()?;
+        // Discard all queued messages.
+        while self.0.messages.try_recv().is_ok() {}
+        Ok(())
     }
 
     /// Close a subscription. Same as `unsubscribe`
@@ -252,7 +288,9 @@ impl Subscription {
     /// # }
     /// ```
     pub fn drain(&self) -> io::Result<()> {
-        future::block_on(async { self.0.drain().await })
+        self.0.client.flush(crate::DEFAULT_FLUSH_TIMEOUT)?;
+        self.0.client.unsubscribe(self.0.sid)?;
+        Ok(())
     }
 }
 

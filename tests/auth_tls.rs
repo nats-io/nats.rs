@@ -34,11 +34,11 @@ fn server() -> Server {
 }
 
 #[test]
-fn user_pass() -> io::Result<()> {
+fn smoke() -> io::Result<()> {
     let _s = server();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    assert!(nats::connect("nats://localhost:4443").is_err());
+    assert!(nats::connect("nats://127.0.0.1:4443").is_err());
 
     nats::Options::with_user_pass("derek", "porkchop")
         .add_root_certificate(path.join("tests/configs/certs/rootCA.pem"))
@@ -46,7 +46,7 @@ fn user_pass() -> io::Result<()> {
             path.join("tests/configs/certs/client-cert.pem"),
             path.join("tests/configs/certs/client-key.pem"),
         )
-        .connect("tls://localhost:4443")?;
+        .connect("tls://127.0.0.1:4443")?;
 
     Ok(())
 }

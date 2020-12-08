@@ -59,19 +59,19 @@ fn main() -> CliResult {
             let sub = nc.subscribe(&subject)?;
             println!("Listening on '{}'", subject);
             for msg in sub.messages() {
-                println!("Received a {}", msg);
+                println!("Received a {:?}", msg);
             }
         }
         Command::Request { subject, msg } => {
             println!("Waiting on response for '{}'", subject);
             let resp = nc.request(&subject, &msg)?;
-            println!("Response is {}", resp);
+            println!("Response is {:?}", resp);
         }
         Command::Reply { subject, resp } => {
             let sub = nc.queue_subscribe(&subject, "rust-box")?;
             println!("Listening for requests on '{}'", subject);
             for msg in sub.messages() {
-                println!("Received a request {}", msg);
+                println!("Received a request {:?}", msg);
                 msg.respond(&resp)?;
             }
         }
