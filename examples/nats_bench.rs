@@ -5,8 +5,13 @@ use std::{
     time::Instant,
 };
 
+use historian::Histo;
 use nats;
 use structopt::StructOpt;
+
+lazy_static::lazy_static! {
+    static ref HISTOGRAM: Histo = Default::default();
+}
 
 /// Simple NATS bench tool
 #[derive(Debug, StructOpt)]
@@ -70,15 +75,18 @@ fn main() -> std::io::Result<()> {
 
     let mut threads = vec![];
 
-    for _ in 0..args.publishers.get() {
+    let pubs = args.publishers.get();
+    for _ in 0..pubs {
         let barrier = barrier.clone();
         let nc = nc.clone();
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
             let msg: String = (0..message_size).map(|_| 'a').collect();
             barrier.wait();
-            for _ in 0..messages {
+            for _ in 0..messages / pubs {
+                let before = Instant::now();
                 nc.publish(&subject, &msg).unwrap();
+                HISTOGRAM.measure(before.elapsed().as_nanos() as f64);
             }
         }));
     }
@@ -121,6 +129,20 @@ fn main() -> std::io::Result<()> {
     println!(
         "duration: {:?} frequency: {} mbps: {}",
         end, frequency, mbps
+    );
+
+    println!("publish latency breakdown in microseconds:");
+    println!("                min: {:10.0} ns", HISTOGRAM.percentile(0.0));
+    for pctl in &[50., 75., 90., 95., 97.5, 99.0, 99.99, 99.999] {
+        println!(
+            "{:6.}th percentile: {:10.0} ns",
+            pctl,
+            HISTOGRAM.percentile(*pctl)
+        );
+    }
+    println!(
+        "                max: {:10.0} ns",
+        HISTOGRAM.percentile(100.0)
     );
 
     Ok(())
