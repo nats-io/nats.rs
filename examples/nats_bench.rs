@@ -131,7 +131,7 @@ fn main() -> std::io::Result<()> {
         end, frequency, mbps
     );
 
-    println!("publish latency breakdown in microseconds:");
+    println!("publish latency breakdown in nanoseconds:");
     println!("                min: {:10.0} ns", HISTOGRAM.percentile(0.0));
     for pctl in &[50., 75., 90., 95., 97.5, 99.0, 99.99, 99.999] {
         println!(
