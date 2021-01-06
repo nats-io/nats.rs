@@ -64,3 +64,9 @@ path = "examples/nats-box/main.rs"
 [[example]]
 name = "serde-json"
 path = "examples/serde-json/main.rs"
+
+[workspace]
+members = [
+    ".",
+    "async-nats",
+]

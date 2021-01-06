@@ -678,4 +678,16 @@ impl Connection {
             self.0.client.clone(),
         ))
     }
+
+    /// Attempts to publish a message without blocking.
+    #[doc(hidden)]
+    pub fn try_publish_with_reply_or_headers(
+        &self,
+        subject: &str,
+        reply: Option<&str>,
+        headers: Option<&Headers>,
+        msg: impl AsRef<[u8]>,
+    ) -> Option<io::Result<()>> {
+        self.0.client.try_publish(subject, reply, headers, msg.as_ref())
+    }
 }
