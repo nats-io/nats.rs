@@ -39,7 +39,7 @@ impl Connector {
         // Include system root certificates.
         //
         // On Windows, some certificates cannot be loaded by rustls for whatever reason,
-        // so we simply skip them.
+        // so we simply skip them. See https://github.com/ctz/rustls-native-certs/issues/5
         let roots = match rustls_native_certs::load_native_certs() {
             Ok(store) | Err((Some(store), _)) => store.roots,
             Err((None, _)) => Vec::new(),
