@@ -1,3 +1,91 @@
+//! An async Rust client for the NATS.io ecosystem.
+//!
+//! `git clone https://github.com/nats-io/nats.rs`
+//!
+//! NATS.io is a simple, secure and high performance open source messaging system for cloud native
+//! applications, `IoT` messaging, and microservices architectures.
+//!
+//! For more information see [https://nats.io/].
+//!
+//! [https://nats.io/]: https://nats.io/
+//!
+//! ## Examples
+//!
+//! Basic connections, and those with options. The compiler will force these to be correct.
+//!
+//! ```no_run
+//! # smol::block_on(async {
+//! let nc = async_nats::connect("demo.nats.io").await?;
+//!
+//! let nc2 = async_nats::Options::with_user_pass("derek", "s3cr3t!")
+//!     .with_name("My Rust NATS App")
+//!     .connect("127.0.0.1")
+//!     .await?;
+//!
+//! let nc3 = async_nats::Options::with_credentials("path/to/my.creds")
+//!     .connect("connect.ngs.global")
+//!     .await?;
+//!
+//! let nc4 = async_nats::Options::new()
+//!     .add_root_certificate("my-certs.pem")
+//!     .connect("tls://demo.nats.io:4443")
+//!     .await?;
+//! # std::io::Result::Ok(()) });
+//! ```
+//!
+//! ### Publish
+//!
+//! ```
+//! # smol::block_on(async {
+//! let nc = async_nats::connect("demo.nats.io").await?;
+//! nc.publish("my.subject", "Hello World!").await?;
+//!
+//! nc.publish("my.subject", "my message").await?;
+//!
+//! // Publish a request manually.
+//! let reply = nc.new_inbox();
+//! let rsub = nc.subscribe(&reply).await?;
+//! nc.publish_request("my.subject", &reply, "Help me!").await?;
+//! # std::io::Result::Ok(()) });
+//! ```
+//!
+//! ### Subscribe
+//!
+//! ```no_run
+//! # smol::block_on(async {
+//! # use std::time::Duration;
+//! let nc = async_nats::connect("demo.nats.io").await?;
+//! let sub = nc.subscribe("foo").await?;
+//!
+//! // Receive a message.
+//! if let Some(msg) = sub.next().await {}
+//!
+//! // Queue subscription.
+//! let qsub = nc.queue_subscribe("foo", "my_group").await?;
+//! # std::io::Result::Ok(()) });
+//! ```
+//!
+//! ### Request/Response
+//!
+//! ```no_run
+//! # use std::time::Duration;
+//! # smol::block_on(async {
+//! let nc = async_nats::connect("demo.nats.io").await?;
+//! let resp = nc.request("foo", "Help me?").await?;
+//!
+//! // With multiple responses.
+//! let rsub = nc.request_multi("foo", "Help").await?;
+//! if let Some(msg) = rsub.next().await {}
+//! if let Some(msg) = rsub.next().await {}
+//!
+//! // Publish a request manually.
+//! let reply = nc.new_inbox();
+//! let rsub = nc.subscribe(&reply).await?;
+//! nc.publish_request("foo", &reply, "Help me!").await?;
+//! let response = rsub.next().await;
+//! # std::io::Result::Ok(()) });
+//! ```
+
 use std::fmt;
 use std::io;
 use std::mem;
