@@ -15,6 +15,8 @@ use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
+const BUF_CAPACITY: usize = 128 * 1024;
+
 /// Client state.
 struct State {
     /// Buffered writer with an active connection.
@@ -51,7 +53,7 @@ struct Subscription {
 /// A NATS client.
 ///
 #[derive(Clone)]
-pub(crate) struct Client {
+pub struct Client {
     /// Shared client state.
     state: Arc<Mutex<State>>,
 
@@ -299,7 +301,7 @@ impl Client {
     }
 
     /// Publishes a message with optional reply subject and headers.
-    pub(crate) fn publish(
+    pub fn publish(
         &self,
         subject: &str,
         reply_to: Option<&str>,
@@ -353,6 +355,72 @@ impl Client {
         }
     }
 
+    /// Attempts to publish a message without blocking.
+    ///
+    /// This only works when the write buffer has enough space to encode the whole message.
+    pub fn try_publish(
+        &self,
+        subject: &str,
+        reply_to: Option<&str>,
+        headers: Option<&Headers>,
+        msg: &[u8],
+    ) -> Option<io::Result<()>> {
+        let mut state = self.state.try_lock()?;
+
+        // Check if the client is closed.
+        if *self.shutdown.lock() {
+            return Some(Err(Error::new(ErrorKind::NotConnected, "the client is closed")));
+        }
+
+        // Estimate how many bytes the message will consume when written into the stream.
+        // We must make a conservative guess: it's okay to overestimate but not to underestimate.
+        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
+        if let Some(headers) = headers {
+            estimate += headers.iter().map(|(k, v)| k.len() + v.len() + 3).sum::<usize>();
+        }
+
+        let op = if let Some(headers) = headers {
+            ClientOp::Hpub {
+                subject,
+                reply_to,
+                payload: msg,
+                headers,
+            }
+        } else {
+            ClientOp::Pub {
+                subject,
+                reply_to,
+                payload: msg,
+            }
+        };
+
+        match state.writer.as_mut() {
+            None => {
+                // If reconnecting, write into the buffer.
+                let res = proto::encode(&mut state.buffer, op).and_then(|_| state.buffer.flush());
+                Some(res)
+            }
+            Some(mut writer) => {
+                // Check if there's enough space in the buffer to encode the whole message.
+                if BUF_CAPACITY - writer.buffer().len() < estimate {
+                    return None;
+                }
+
+                // If connected, write into the writer.
+                // This is not going to block because there's enough space in the buffer.
+                let res = proto::encode(&mut writer, op);
+                state.flush_kicker.try_send(()).ok();
+
+                // If writing fails, disconnect.
+                if res.is_err() {
+                    state.writer = None;
+                    state.pongs.clear();
+                }
+                Some(res)
+            }
+        }
+    }
+
     /// Runs the loop that connects and reconnects the client.
     fn run(&self, mut connector: Connector) -> io::Result<()> {
         let mut first_connect = true;
@@ -363,8 +431,8 @@ impl Client {
             // Make a connection to the server.
             let (server_info, stream) = connector.connect(use_backoff)?;
 
-            let reader = BufReader::with_capacity(128 * 1024, stream.clone());
-            let writer = BufWriter::with_capacity(128 * 1024, stream);
+            let reader = BufReader::with_capacity(BUF_CAPACITY, stream.clone());
+            let writer = BufWriter::with_capacity(BUF_CAPACITY, stream);
 
             // Set up the new connection for this client.
             if self.reconnect(server_info, writer).is_ok() {

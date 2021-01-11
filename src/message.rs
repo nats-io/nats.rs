@@ -18,7 +18,8 @@ pub struct Message {
     pub headers: Option<Headers>,
 
     /// Client for publishing on the reply subject.
-    pub(crate) client: Client,
+    #[doc(hidden)]
+    pub client: Client,
 }
 
 impl Message {

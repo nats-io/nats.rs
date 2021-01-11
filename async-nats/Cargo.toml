@@ -1,0 +1,25 @@
+[package]
+name = "async-nats"
+version = "0.0.0"
+description = "An async Rust NATS client"
+authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
+edition = "2018"
+license = "Apache-2.0"
+documentation = "https://docs.rs/async-nats"
+homepage = "https://github.com/nats-io/nats.rs"
+repository = "https://github.com/nats-io/nats.rs"
+readme = "README.md"
+keywords = ["nats", "client", "messaging", "api", "async"]
+categories = ["network-programming", "api-bindings"]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+blocking = "1.0.2"
+nats = { path = ".." }
+
+[dev-dependencies]
+smol = "1.2.5"
+structopt = "0.3.21"
+nkeys = "0.0.11"
