@@ -5,9 +5,12 @@
 //! NATS.io is a simple, secure and high performance open source messaging system for cloud native
 //! applications, `IoT` messaging, and microservices architectures.
 //!
+//! For async API refer to the [`async-nats`] crate.
+//!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
+//! [`async-nats`]: https://docs.rs/async-nats
 //!
 //! ## Examples
 //!

@@ -17,7 +17,7 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 blocking = "1.0.2"
-nats = { path = ".." }
+nats = { path = "..", version = "0.9" }
 
 [dev-dependencies]
 smol = "1.2.5"
