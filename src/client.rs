@@ -15,6 +15,8 @@ use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
+const BUF_CAPACITY: usize = 128 * 1024;
+
 /// Client state.
 struct State {
     /// Buffered writer with an active connection.
@@ -400,7 +402,7 @@ impl Client {
             }
             Some(mut writer) => {
                 // Check if there's enough space in the buffer to encode the whole message.
-                if writer.capacity() - writer.buffer().len() < estimate {
+                if BUF_CAPACITY - writer.buffer().len() < estimate {
                     return None;
                 }
 
@@ -429,8 +431,8 @@ impl Client {
             // Make a connection to the server.
             let (server_info, stream) = connector.connect(use_backoff)?;
 
-            let reader = BufReader::with_capacity(128 * 1024, stream.clone());
-            let writer = BufWriter::with_capacity(128 * 1024, stream);
+            let reader = BufReader::with_capacity(BUF_CAPACITY, stream.clone());
+            let writer = BufWriter::with_capacity(BUF_CAPACITY, stream);
 
             // Set up the new connection for this client.
             if self.reconnect(server_info, writer).is_ok() {
