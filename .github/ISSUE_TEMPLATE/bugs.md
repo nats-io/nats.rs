@@ -11,7 +11,7 @@ Make sure that these boxes are checked before submitting your issue -- thank you
 
 #### NATS version (`grep 'name = "nats"' Cargo.lock -A 1`)
 
-#### rustc version (`rustc --version` - we support Rust 1.37 and up)
+#### rustc version (`rustc --version` - we support Rust 1.41 and up)
 
 #### OS/Container environment:
 
