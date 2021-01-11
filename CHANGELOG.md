@@ -1,3 +1,9 @@
+# 0.9.0
+
+## Breaking Changes
+
+- #130, #132 the async client has been split into its own crate, async-nats
+
 # 0.8.6
 
 ## Bug Fixes
