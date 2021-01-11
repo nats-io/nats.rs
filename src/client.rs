@@ -372,7 +372,7 @@ impl Client {
 
         // Estimate how many bytes the message will consume when written into the stream.
         // We must make a conservative guess: it's okay to overestimate but not to underestimate.
-        let mut estimate = 1024 + subject.len() + reply_to.map(str::len).unwrap_or(0) + msg.len();
+        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
         if let Some(headers) = headers {
             estimate += headers.iter().map(|(k, v)| k.len() + v.len() + 3).sum::<usize>();
         }
