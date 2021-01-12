@@ -1,3 +1,9 @@
+# 0.9.1
+
+## Bug Fixes
+
+- #136 Workaround: skip native certificates that can't be loaded.
+
 # 0.9.0
 
 ## Breaking Changes
