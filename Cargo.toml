@@ -14,6 +14,7 @@ categories = ["network-programming", "api-bindings"]
 
 [features]
 fault_injection = []
+jetstream = ["serde", "humantime_serde"]
 
 [badges]
 maintenance = { status = "actively-developed" }
@@ -37,6 +38,8 @@ regex = { version = "1.3.9", default-features = false, features = ["std", "unico
 rustls = "0.18.1"
 rustls-native-certs = "0.4.0"
 webpki = "0.21.3"
+humantime-serde = { version = "1.0.1", optional = true }
+serde = { version = "1.0.119", optional = true, features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.80"

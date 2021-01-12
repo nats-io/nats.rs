@@ -180,6 +180,8 @@ mod client;
 mod connect;
 mod connector;
 mod headers;
+#[cfg(feature = "jetstream")]
+pub mod jetstream;
 mod message;
 mod options;
 mod proto;
@@ -691,6 +693,8 @@ impl Connection {
         headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> Option<io::Result<()>> {
-        self.0.client.try_publish(subject, reply, headers, msg.as_ref())
+        self.0
+            .client
+            .try_publish(subject, reply, headers, msg.as_ref())
     }
 }
