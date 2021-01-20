@@ -1,7 +1,13 @@
 //! Jetstream support
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH, io};
 
 use serde::{Deserialize, Serialize};
+
+use crate::Client as NatsClient;
+
+pub struct JetstreamClient {
+    inner: NatsClient,
+}
 
 fn skip_unix_epoch(time: &SystemTime) -> bool {
     *time == UNIX_EPOCH
@@ -237,6 +243,60 @@ struct JSApiStreamNamesResponse {
     api_paged: APIPaged,
     streams: Vec<String>, // `json:"streams"`
 }
+
+struct  SubOpts  {
+    // For attaching.
+    stream: String,
+    consumer: String,
+    // For pull based consumers, batch size for pull
+    pull: usize,
+    // For manual ack
+    mack : bool,
+    // For creating or updating.
+    cfg:  ConsumerConfig,
+}
+
+struct PubOpts {
+    ctx context.Context
+    ttl : Duration,
+    id:  String,
+    // Expected last msgId
+    lid: String,
+    // Expected stream name
+    str: String,
+    // Expected last sequence
+    seq: u64,
+}
+
+impl JetstreamClient {
+    // Publishing messages to JetStream.
+    fn publish(&self, subject: &str, data: &[u8], opts: Option<PubOpts>) -> io::Result<PubAck> {}
+
+    // Publishing messages to JetStream.
+    fn publish_msg(&self, msg: Msg, opts: Option<PubOpts>) -> io::Result<PubAck> {}
+
+    // Subscribing to messages in JetStream.
+    fn subscribe(subj string, cb MsgHandler, opts: Option<SubOpts>) -> io::Result<Subscription> {}
+
+    // Subscribing to messages in JetStream.
+    fn subscribe_sync(subj string, opts: Option<SubOpts>) -> io::Result<Subscription> {}
+
+    // Channel versions.
+    fn chan_subscribe(subj string, ch chan *Msg, opts : Option<SubOpts>) -> io::Result<Subscription> {}
+
+    // QueueSubscribe.
+    fn queue_subscribe(subj, queue string, cb MsgHandler, opts: Option<SubOpts>) -> io::Result<Subscription> {}
+
+    // Create a stream.
+    fn add_stream(cfg: StreamConfig) -> io::Result<StreamInfo> {}
+
+    // Create a consumer.
+    fn add_consumer(stream string, cfg *ConsumerConfig) -> io::Result<ConsumerInfo> {}
+
+    // Stream information.
+    fn stream_info(stream string) io::Result<StreamInfo> {}
+}
+
 /*
 // Copyright 2020 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -267,28 +327,6 @@ import (
 
 // JetStream is the public interface for JetStream.
 type JetStream interface {
-    // Publishing messages to JetStream.
-    Publish(subj string, data []byte, opts ...PubOpt) (*PubAck, error)
-    PublishMsg(m *Msg, opts ...PubOpt) (*PubAck, error)
-
-    // Subscribing to messages in JetStream.
-    Subscribe(subj string, cb MsgHandler, opts ...SubOpt) (*Subscription, error)
-    SubscribeSync(subj string, opts ...SubOpt) (*Subscription, error)
-
-    // Channel versions.
-    ChanSubscribe(subj string, ch chan *Msg, opts ...SubOpt) (*Subscription, error)
-    // QueueSubscribe.
-    QueueSubscribe(subj, queue string, cb MsgHandler, opts ...SubOpt) (*Subscription, error)
-}
-
-// JetStreamManager is the public interface for managing JetStream streams & consumers.
-type JetStreamManager interface {
-    // Create a stream.
-    AddStream(cfg *StreamConfig) (*StreamInfo, error)
-    // Create a consumer.
-    AddConsumer(stream string, cfg *ConsumerConfig) (*ConsumerInfo, error)
-    // Stream information.
-    StreamInfo(stream string) (*StreamInfo, error)
 }
 
 // JetStream is the public interface for the JetStream context.
@@ -417,15 +455,6 @@ type pubOptFn func(opts *pubOpts) error
 
 func (opt pubOptFn) configurePublish(opts *pubOpts) error {
     return opt(opts)
-}
-
-type pubOpts struct {
-    ctx context.Context
-    ttl time.Duration
-    id  string
-    lid string // Expected last msgId
-    str string // Expected stream name
-    seq u64 // Expected last sequence
 }
 
 type PubAckResponse struct {
@@ -774,17 +803,6 @@ func (js *js) lookupStreamBySubject(subj string) (string, error) {
         return _EMPTY_, ErrNoMatchingStream
     }
     return slr.Streams[0], nil
-}
-
-type subOpts struct {
-    // For attaching.
-    stream, consumer string
-    // For pull based consumers, batch size for pull
-    pull int
-    // For manual ack
-    mack bool
-    // For creating or updating.
-    cfg *ConsumerConfig
 }
 
 func Durable(name string) SubOpt {
