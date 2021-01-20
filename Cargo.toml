@@ -14,7 +14,7 @@ categories = ["network-programming", "api-bindings"]
 
 [features]
 fault_injection = []
-jetstream = ["serde", "humantime_serde"]
+jetstream = ["serde", "humantime-serde"]
 
 [badges]
 maintenance = { status = "actively-developed" }
