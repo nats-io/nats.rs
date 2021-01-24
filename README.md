@@ -115,7 +115,7 @@ The minimum supported Rust version is 1.41.0.
 
 The Rust ecosystem has a diverse set of options for async programming. This client library can be used with any async runtime out of the box, such as async-std and tokio.
 
-The sync interface provided by this library is implemented as just a thin wrapper around its async interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
+The async interface provided by this library is implemented as just a thin wrapper around its sync interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
 
 ## Features
 The following is a list of features currently supported and planned for the near future.
