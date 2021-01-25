@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 use std::io::prelude::*;
 use std::io::{self, Error, ErrorKind};
-use std::str::FromStr;
+use std::str::{self, FromStr};
 
 use crate::connect::ConnectInfo;
 use crate::{inject_io_failure, Headers, ServerInfo};
@@ -58,7 +58,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     }
 
     // Convert into a UTF8 string for simpler parsing.
-    let line = String::from_utf8(line).map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
+    let line = str::from_utf8(&line).map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
     let op = line
         .split_ascii_whitespace()
         .next()
@@ -236,7 +236,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         return Ok(Some(ServerOp::Err(msg)));
     }
 
-    Ok(Some(ServerOp::Unknown(line)))
+    Ok(Some(ServerOp::Unknown(line.to_owned())))
 }
 
 /// A protocol operation sent by the client.
