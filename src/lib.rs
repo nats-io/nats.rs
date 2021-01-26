@@ -2,8 +2,9 @@
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
 //!
-//! NATS.io is a simple, secure and high performance open source messaging system for cloud native
-//! applications, `IoT` messaging, and microservices architectures.
+//! NATS.io is a simple, secure and high performance open source messaging
+//! system for cloud native applications, `IoT` messaging, and microservices
+//! architectures.
 //!
 //! For async API refer to the [`async-nats`] crate.
 //!
@@ -16,7 +17,8 @@
 //!
 //! `> cargo run --example nats-box -- -h`
 //!
-//! Basic connections, and those with options. The compiler will force these to be correct.
+//! Basic connections, and those with options. The compiler will force these to
+//! be correct.
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -243,7 +245,8 @@ struct ServerInfo {
     pub port: u16,
     /// The version of the NATS server.
     pub version: String,
-    /// If this is set, then the server should try to authenticate upon connect.
+    /// If this is set, then the server should try to authenticate upon
+    /// connect.
     pub auth_required: bool,
     /// If this is set, then the server must authenticate using TLS.
     pub tls_required: bool,
@@ -318,7 +321,10 @@ pub fn connect(nats_url: &str) -> io::Result<Connection> {
 
 impl Connection {
     /// Connects on a URL with the given options.
-    pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
+    pub(crate) fn connect_with_options(
+        url: &str,
+        options: Options,
+    ) -> io::Result<Connection> {
         let client = Client::connect(url, options)?;
         client.flush(DEFAULT_FLUSH_TIMEOUT)?;
         Ok(Connection(Arc::new(Inner { client })))
@@ -348,7 +354,11 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
+    pub fn queue_subscribe(
+        &self,
+        subject: &str,
+        queue: &str,
+    ) -> io::Result<Subscription> {
         self.do_subscribe(subject, Some(queue))
     }
 
@@ -362,11 +372,16 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
+    pub fn publish(
+        &self,
+        subject: &str,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
-    /// Publish a message on the given subject with a reply subject for responses.
+    /// Publish a message on the given subject with a reply subject for
+    /// responses.
     ///
     /// # Example
     /// ```
@@ -404,7 +419,8 @@ impl Connection {
         format!("_INBOX.{}", nuid::next())
     }
 
-    /// Publish a message on the given subject as a request and receive the response.
+    /// Publish a message on the given subject as a request and receive the
+    /// response.
     ///
     /// # Example
     /// ```
@@ -415,18 +431,28 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+    pub fn request(
+        &self,
+        subject: &str,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<Message> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+        self.publish_with_reply_or_headers(
+            subject,
+            Some(reply.as_str()),
+            None,
+            msg,
+        )?;
 
         // Wait for the response.
         sub.next().ok_or_else(|| ErrorKind::ConnectionReset.into())
     }
 
-    /// Publish a message on the given subject as a request and receive the response.
-    /// This call will return after the timeout duration if no response is received.
+    /// Publish a message on the given subject as a request and receive the
+    /// response. This call will return after the timeout duration if no
+    /// response is received.
     ///
     /// # Example
     /// ```
@@ -446,13 +472,19 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+        self.publish_with_reply_or_headers(
+            subject,
+            Some(reply.as_str()),
+            None,
+            msg,
+        )?;
 
         // Wait for the response.
         sub.next_timeout(timeout)
     }
 
-    /// Publish a message on the given subject as a request and allow multiple responses.
+    /// Publish a message on the given subject as a request and allow multiple
+    /// responses.
     ///
     /// # Example
     /// ```
@@ -463,20 +495,30 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
+    pub fn request_multi(
+        &self,
+        subject: &str,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<Subscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+        self.publish_with_reply_or_headers(
+            subject,
+            Some(reply.as_str()),
+            None,
+            msg,
+        )?;
 
         // Return the subscription.
         Ok(sub)
     }
 
-    /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
-    /// Will fail with `TimedOut` if the server does not respond with in 10 seconds.
-    /// Will fail with `NotConnected` if the server is not currently connected.
-    /// Will fail with `BrokenPipe` if the connection to the server is lost.
+    /// Flush a NATS connection by sending a `PING` protocol and waiting for the
+    /// responding `PONG`. Will fail with `TimedOut` if the server does not
+    /// respond with in 10 seconds. Will fail with `NotConnected` if the
+    /// server is not currently connected. Will fail with `BrokenPipe` if
+    /// the connection to the server is lost.
     ///
     /// # Example
     /// ```
@@ -490,10 +532,11 @@ impl Connection {
         self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)
     }
 
-    /// Flush a NATS connection by sending a `PING` protocol and waiting for the responding `PONG`.
-    /// Will fail with `TimedOut` if the server takes longer than this duration to respond.
-    /// Will fail with `NotConnected` if the server is not currently connected.
-    /// Will fail with `BrokenPipe` if the connection to the server is lost.
+    /// Flush a NATS connection by sending a `PING` protocol and waiting for the
+    /// responding `PONG`. Will fail with `TimedOut` if the server takes
+    /// longer than this duration to respond. Will fail with `NotConnected`
+    /// if the server is not currently connected. Will fail with
+    /// `BrokenPipe` if the connection to the server is lost.
     ///
     /// # Example
     /// ```
@@ -568,9 +611,9 @@ impl Connection {
             "" => Err(Error::new(
                 ErrorKind::Other,
                 &*format!(
-                    "client_ip was not provided by the server. \
-                    It is supported on servers above version 2.1.6. \
-                    The server version is {}",
+                    "client_ip was not provided by the server. It is \
+                     supported on servers above version 2.1.6. The server \
+                     version is {}",
                     info.version
                 ),
             )),
@@ -580,7 +623,7 @@ impl Connection {
                     ErrorKind::InvalidData,
                     &*format!(
                         "client_ip provided by the server cannot be parsed. \
-                        The server provided IP: {}",
+                         The server provided IP: {}",
                         info.client_ip
                     ),
                 )),
@@ -606,11 +649,13 @@ impl Connection {
             .client_id
     }
 
-    /// Send an unsubscription for all subs then flush the connection, allowing any unprocessed
-    /// messages to be handled by a handler function if one is configured.
+    /// Send an unsubscription for all subs then flush the connection, allowing
+    /// any unprocessed messages to be handled by a handler function if one
+    /// is configured.
     ///
-    /// After the flush returns, we know that a round-trip to the server has happened after it
-    /// received our unsubscription, so we shut down the subscriber afterwards.
+    /// After the flush returns, we know that a round-trip to the server has
+    /// happened after it received our unsubscription, so we shut down the
+    /// subscriber afterwards.
     ///
     /// A similar method exists for the `Subscription` struct which will drain
     /// a single `Subscription` without shutting down the entire connection
@@ -672,7 +717,11 @@ impl Connection {
         self.0.client.publish(subject, reply, headers, msg.as_ref())
     }
 
-    fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
+    fn do_subscribe(
+        &self,
+        subject: &str,
+        queue: Option<&str>,
+    ) -> io::Result<Subscription> {
         let (sid, receiver) = self.0.client.subscribe(subject, queue)?;
         Ok(Subscription::new(
             sid,
@@ -691,6 +740,8 @@ impl Connection {
         headers: Option<&Headers>,
         msg: impl AsRef<[u8]>,
     ) -> Option<io::Result<()>> {
-        self.0.client.try_publish(subject, reply, headers, msg.as_ref())
+        self.0
+            .client
+            .try_publish(subject, reply, headers, msg.as_ref())
     }
 }

@@ -8,7 +8,8 @@ pub struct Message {
     /// The subject this message came from.
     pub subject: String,
 
-    /// Optional reply subject that may be used for sending a response to this message.
+    /// Optional reply subject that may be used for sending a response to this
+    /// message.
     pub reply: Option<String>,
 
     /// The message contents.
@@ -55,7 +56,8 @@ impl fmt::Display for Message {
         if let Some(reply) = &self.reply {
             write!(
                 f,
-                "Message {{\n  subject: \"{}\",\n  reply: \"{}\",\n  data: \"{}\"\n}}",
+                "Message {{\n  subject: \"{}\",\n  reply: \"{}\",\n  data: \
+                 \"{}\"\n}}",
                 self.subject, reply, body
             )
         } else {
