@@ -89,10 +89,12 @@ pub struct ConnectInfo {
 }
 
 struct Client {
+    client_id: usize,
     socket: TcpStream,
     has_sent_ping: bool,
     last_ping: Instant,
     outstanding_pings: usize,
+    subs: HashMap<String, HashSet<String>>,
 }
 
 fn read_line(stream: &mut TcpStream) -> Option<String> {
@@ -254,7 +256,6 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
         };
 
         let mut clients: HashMap<usize, Client> = HashMap::new();
-        let mut subs = HashMap::new();
 
         loop {
             if shutdown.load(Ordering::Acquire) {
@@ -270,7 +271,6 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 drop(listener);
                 log::debug!("evicting all connected clients");
                 clients.clear();
-                subs.clear();
                 let baddr = format!("{}:{}", host, port);
                 log::debug!("nats test server restarted on {}:{}", host, port);
                 listener = TcpListener::bind(baddr).unwrap();
@@ -290,25 +290,34 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 clients.insert(
                     client_id,
                     Client {
+                        client_id,
                         socket: next,
                         has_sent_ping: false,
                         last_ping: Instant::now(),
                         outstanding_pings: 0,
+                        subs: HashMap::new(),
                     },
                 );
             }
 
             let mut to_evict = vec![];
-            let mut outbound = vec![];
+            let mut in_flight = vec![];
 
             for (client_id, client) in &mut clients {
                 if client.outstanding_pings > 3 {
+                    log::debug!(
+                        "{}: outstanding pings {} caused eviction",
+                        client_id,
+                        client.outstanding_pings
+                    );
                     to_evict.push(*client_id);
                     continue;
                 }
 
-                if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_micros(50) {
-                    if client.socket.write_all(b"PING\r\n").is_err() {
+                if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_millis(1) {
+                    log::trace!("{}: sending ping", client_id);
+                    if let Err(err) = client.socket.write_all(b"PING\r\n") {
+                        log::debug!("{}: socket error {} caused eviction", client_id, err);
                         to_evict.push(*client_id);
                         continue;
                     }
@@ -316,112 +325,54 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                     client.outstanding_pings += 1;
                 }
 
-                let command = if let Some(command) = read_line(&mut client.socket) {
-                    command
-                } else {
-                    continue;
-                };
+                if let Some(command) = read_line(&mut client.socket) {
+                    log::trace!("{}: got command {}", client.client_id, &command);
 
-                log::trace!("got command {}", command);
+                    let action = client.handle_command(command, hop_ports);
+                    log::trace!("{}: causes action {:?}", client.client_id, &action);
 
-                let mut parts = command.split(' ');
-
-                match parts.next().unwrap() {
-                    "PONG" => {
-                        assert!(client.outstanding_pings > 0);
-                        client.outstanding_pings -= 1;
-                        assert_eq!(parts.next(), None);
-                    }
-                    "PING" => {
-                        assert_eq!(parts.next(), None);
-                        if client.socket.write_all(b"PONG\r\n").is_err() {
+                    match action {
+                        ClientAction::None => {}
+                        ClientAction::Evict => {
                             to_evict.push(*client_id);
-                            continue;
                         }
-                        client.has_sent_ping = true;
-                        if hop_ports {
-                            // we hop to a new port because we have sent the client the new
-                            // server information.
+                        ClientAction::HopPorts => {
                             port += 1;
                         }
-                    }
-                    "CONNECT" => {
-                        let _: ConnectInfo = serde_json::from_str(parts.next().unwrap()).unwrap();
-                        assert_eq!(parts.next(), None);
-                    }
-                    "SUB" => {
-                        let subject = parts.next().unwrap();
-                        let sid = parts.next().unwrap();
-                        assert_eq!(parts.next(), None);
-                        let entry = subs.entry(subject.to_string()).or_insert_with(HashSet::new);
-                        entry.insert(sid.to_string());
-                    }
-                    "PUB" => {
-                        let (subject, reply, len) = match (parts.next(), parts.next(), parts.next())
-                        {
-                            (Some(subject), Some(reply), Some(len)) => (subject, Some(reply), len),
-                            (Some(subject), Some(len), None) => (subject, None, len),
-                            other => panic!("unknown args: {:?}", other),
-                        };
-
-                        assert_eq!(parts.next(), None);
-
-                        let next_line = if let Some(next_line) = read_line(&mut client.socket) {
-                            next_line
-                        } else {
-                            to_evict.push(*client_id);
-                            continue;
-                        };
-
-                        let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
-                            parsed_len
-                        } else {
-                            to_evict.push(*client_id);
-                            continue;
-                        };
-
-                        if parsed_len != next_line.len() {
-                            to_evict.push(*client_id);
-                            continue;
-                        }
-
-                        for sub_id in subject_matches(subject, &subs) {
-                            let out = if let Some(group) = reply {
-                                format!(
-                                    "MSG {} {} {} {}\r\n{}\r\n",
-                                    subject,
-                                    sub_id,
-                                    group,
-                                    next_line.len(),
-                                    next_line
-                                )
-                            } else {
-                                format!(
-                                    "MSG {} {} {}\r\n{}\r\n",
-                                    subject,
-                                    sub_id,
-                                    next_line.len(),
-                                    next_line
-                                )
-                            };
-
-                            outbound.push(out.into_bytes());
+                        ClientAction::Publish {
+                            subject,
+                            msg,
+                            reply,
+                        } => {
+                            in_flight.push((subject, msg, reply));
                         }
                     }
-                    "UNSUB" => {
-                        let sid = parts.next().unwrap();
-                        assert_eq!(parts.next(), None);
-                        subs.remove(sid);
-                    }
-                    other => panic!("unknown command {}", other),
                 }
             }
 
-            for out in outbound {
+            for (subject, msg, reply) in in_flight {
+                log::trace!("emitting msg [{:?}]", (&subject, &msg, &reply));
                 for (client_id, client) in clients.iter_mut() {
-                    if client.socket.write_all(&out).is_err() {
-                        to_evict.push(*client_id);
-                        continue;
+                    for sub_id in subject_matches(&subject, &client.subs) {
+                        let out = if let Some(group) = &reply {
+                            format!(
+                                "MSG {} {} {} {}\r\n{}\r\n",
+                                subject,
+                                sub_id,
+                                group,
+                                msg.len(),
+                                msg
+                            )
+                        } else {
+                            format!("MSG {} {} {}\r\n{}\r\n", subject, sub_id, msg.len(), msg)
+                        };
+                        log::trace!("{}: sending [{}]", client_id, out);
+
+                        if let Err(err) = client.socket.write_all(&out.as_bytes()) {
+                            log::debug!("{}: socket error {} caused eviction", client_id, err);
+                            to_evict.push(*client_id);
+                            continue;
+                        }
                     }
                 }
             }
@@ -430,6 +381,100 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 log::debug!("client {} evicted", client_id);
                 clients.remove(&client_id);
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ClientAction {
+    None,
+    Evict,
+    HopPorts,
+    Publish {
+        subject: String,
+        msg: String,
+        reply: Option<String>,
+    },
+}
+
+impl Client {
+    fn handle_command(&mut self, command: String, hop_ports: bool) -> ClientAction {
+        let mut parts = command.split(' ');
+
+        match parts.next().unwrap() {
+            "PONG" => {
+                assert!(self.outstanding_pings > 0);
+                self.outstanding_pings -= 1;
+                assert_eq!(parts.next(), None);
+                ClientAction::None
+            }
+            "PING" => {
+                assert_eq!(parts.next(), None);
+                if self.socket.write_all(b"PONG\r\n").is_err() {
+                    return ClientAction::Evict;
+                }
+                self.has_sent_ping = true;
+                if hop_ports {
+                    // we hop to a new port because we have sent the client the new
+                    // server information.
+                    return ClientAction::HopPorts;
+                }
+                ClientAction::None
+            }
+            "CONNECT" => {
+                let _: ConnectInfo = serde_json::from_str(parts.next().unwrap()).unwrap();
+                assert_eq!(parts.next(), None);
+                ClientAction::None
+            }
+            "SUB" => {
+                let subject = parts.next().unwrap();
+                let sid = parts.next().unwrap();
+                assert_eq!(parts.next(), None);
+                let entry = self
+                    .subs
+                    .entry(subject.to_string())
+                    .or_insert_with(HashSet::new);
+                entry.insert(sid.to_string());
+                ClientAction::None
+            }
+            "PUB" => {
+                let (subject, reply, len) = match (parts.next(), parts.next(), parts.next()) {
+                    (Some(subject), Some(reply), Some(len)) => (subject, Some(reply), len),
+                    (Some(subject), Some(len), None) => (subject, None, len),
+                    other => panic!("unknown args: {:?}", other),
+                };
+
+                assert_eq!(parts.next(), None);
+
+                let next_line = if let Some(next_line) = read_line(&mut self.socket) {
+                    next_line
+                } else {
+                    return ClientAction::Evict;
+                };
+
+                let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
+                    parsed_len
+                } else {
+                    return ClientAction::Evict;
+                };
+
+                if parsed_len != next_line.len() {
+                    return ClientAction::Evict;
+                }
+
+                ClientAction::Publish {
+                    subject: subject.to_owned(),
+                    msg: next_line,
+                    reply: reply.map(|r| r.to_owned()),
+                }
+            }
+            "UNSUB" => {
+                let sid = parts.next().unwrap();
+                assert_eq!(parts.next(), None);
+                self.subs.remove(sid);
+                ClientAction::None
+            }
+            other => panic!("unknown command {}", other),
         }
     }
 }
@@ -486,11 +531,25 @@ fn test_unused_server_cleanup() {
         let success = success.clone();
         std::thread::spawn(move || {
             let server = NatsTestServer::build().spawn();
-            std::thread::sleep_ms(1);
+            std::thread::sleep(Duration::from_millis(1));
             std::mem::drop(server);
             success.store(true, Ordering::Release);
         });
     }
-    std::thread::sleep_ms(2);
+    std::thread::sleep(Duration::from_millis(2));
     assert!(success.load(Ordering::Acquire));
+}
+
+#[test]
+fn test_pub_sub_2_clients() {
+    env_logger::init();
+    let server = NatsTestServer::build().spawn();
+
+    let conn1 = nats::connect(&server.address().to_string()).unwrap();
+    let conn2 = nats::connect(&server.address().to_string()).unwrap();
+
+    let sub = conn1.subscribe("*").unwrap();
+    conn2.publish("subject", "message").unwrap();
+
+    sub.next_timeout(Duration::from_millis(100)).unwrap();
 }
