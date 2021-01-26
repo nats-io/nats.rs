@@ -63,6 +63,9 @@ impl ConnectInfo {
         if let Some(s) = &self.user_jwt {
             obj.insert("jwt", s.to_string()).ok()?;
         }
+        if let Some(s) = &self.nkey {
+            obj.insert("nkey", s.to_string()).ok()?;
+        }
         if let Some(s) = &self.signature {
             obj.insert("sig", s.to_string()).ok()?;
         }
