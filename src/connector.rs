@@ -150,7 +150,14 @@ impl Connector {
                 // Resolve the server URL to socket addresses.
                 let host = server.host.clone();
                 let port = server.port;
-                let mut addrs = match (host.as_str(), port).to_socket_addrs() {
+
+                // Inject random I/O failures when testing.
+                let fault_injection = inject_io_failure();
+
+                let lookup_res = fault_injection
+                    .and_then(|_| (host.as_str(), port).to_socket_addrs());
+
+                let mut addrs = match lookup_res {
                     Ok(addrs) => addrs.collect::<Vec<_>>(),
                     Err(err) => {
                         last_err = err;
