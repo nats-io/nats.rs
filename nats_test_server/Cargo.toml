@@ -15,3 +15,6 @@ serde_json = "1.0.59"
 serde = "1.0.117"
 serde_derive = "1.0.117"
 env_logger = "0.8.1"
+
+[dev-dependencies]
+nats = { path = ".." }
