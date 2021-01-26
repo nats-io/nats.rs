@@ -1,13 +1,36 @@
 //! Jetstream support
-use std::time::{Duration, SystemTime, UNIX_EPOCH, io};
+use std::{
+    io,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Deserialize, Serialize};
 
 use crate::Client as NatsClient;
 
+///
 pub struct JetstreamClient {
     inner: NatsClient,
 }
+
+///
+#[derive(Debug, Clone, Copy)]
+pub struct Subscription;
+
+///
+#[derive(Debug, Clone, Copy)]
+pub struct Msg;
+
+///
+#[derive(Debug, Clone, Copy)]
+pub struct MsgHandler;
+
+///
+#[derive(Debug, Clone, Copy)]
+pub struct Context;
+
+///
+pub struct Chan<A>(A);
 
 fn skip_unix_epoch(time: &SystemTime) -> bool {
     *time == UNIX_EPOCH
@@ -244,22 +267,22 @@ struct JSApiStreamNamesResponse {
     streams: Vec<String>, // `json:"streams"`
 }
 
-struct  SubOpts  {
+struct SubOpts {
     // For attaching.
     stream: String,
     consumer: String,
     // For pull based consumers, batch size for pull
     pull: usize,
     // For manual ack
-    mack : bool,
+    mack: bool,
     // For creating or updating.
-    cfg:  ConsumerConfig,
+    cfg: ConsumerConfig,
 }
 
 struct PubOpts {
-    ctx context.Context
-    ttl : Duration,
-    id:  String,
+    ctx: Context,
+    ttl: Duration,
+    id: String,
     // Expected last msgId
     lid: String,
     // Expected stream name
@@ -269,32 +292,66 @@ struct PubOpts {
 }
 
 impl JetstreamClient {
-    // Publishing messages to JetStream.
-    fn publish(&self, subject: &str, data: &[u8], opts: Option<PubOpts>) -> io::Result<PubAck> {}
+    /// Publishing messages to JetStream.
+    pub fn publish(&self, subject: &str, data: &[u8], opts: Option<PubOpts>) -> io::Result<PubAck> {
+        todo!()
+    }
 
-    // Publishing messages to JetStream.
-    fn publish_msg(&self, msg: Msg, opts: Option<PubOpts>) -> io::Result<PubAck> {}
+    /// Publishing messages to JetStream.
+    pub fn publish_msg(&self, msg: Msg, opts: Option<PubOpts>) -> io::Result<PubAck> {
+        todo!()
+    }
 
-    // Subscribing to messages in JetStream.
-    fn subscribe(subj string, cb MsgHandler, opts: Option<SubOpts>) -> io::Result<Subscription> {}
+    /// Subscribing to messages in JetStream.
+    pub fn subscribe(
+        &self,
+        subj: String,
+        cb: MsgHandler,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
 
-    // Subscribing to messages in JetStream.
-    fn subscribe_sync(subj string, opts: Option<SubOpts>) -> io::Result<Subscription> {}
+    /// Subscribing to messages in JetStream.
+    pub fn subscribe_sync(&self, subj: String, opts: Option<SubOpts>) -> io::Result<Subscription> {
+        todo!()
+    }
 
-    // Channel versions.
-    fn chan_subscribe(subj string, ch chan *Msg, opts : Option<SubOpts>) -> io::Result<Subscription> {}
+    /// Channel versions.
+    pub fn chan_subscribe(
+        &self,
+        subj: String,
+        ch: Chan<Msg>,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
 
-    // QueueSubscribe.
-    fn queue_subscribe(subj, queue string, cb MsgHandler, opts: Option<SubOpts>) -> io::Result<Subscription> {}
+    /// QueueSubscribe.
+    pub fn queue_subscribe(
+        &self,
+        subj: String,
+        queue: String,
+        cb: MsgHandler,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
 
-    // Create a stream.
-    fn add_stream(cfg: StreamConfig) -> io::Result<StreamInfo> {}
+    /// Create a stream.
+    pub fn add_stream(&self, cfg: StreamConfig) -> io::Result<StreamInfo> {
+        todo!()
+    }
 
-    // Create a consumer.
-    fn add_consumer(stream string, cfg *ConsumerConfig) -> io::Result<ConsumerInfo> {}
+    /// Create a consumer.
+    pub fn add_consumer(&self, stream: String, cfg: &ConsumerConfig) -> io::Result<ConsumerInfo> {
+        todo!()
+    }
 
-    // Stream information.
-    fn stream_info(stream string) io::Result<StreamInfo> {}
+    /// Stream information.
+    pub fn stream_info(&self, stream: String) -> io::Result<StreamInfo> {
+        todo!()
+    }
 }
 
 /*
