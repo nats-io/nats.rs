@@ -314,7 +314,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                     continue;
                 }
 
-                if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_millis(1) {
+                if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_millis(50) {
                     log::trace!("{}: sending ping", client_id);
                     if let Err(err) = client.socket.write_all(b"PING\r\n") {
                         log::debug!("{}: socket error {} caused eviction", client_id, err);
