@@ -41,9 +41,7 @@ fn smoke() {
     //   Options.
     // assert!(nats::connect("nats://derek:foo@127.0.0.1:8232").is_ok());
 
-    assert!(
-        nats::Options::with_user_pass("derek", "foo")
-            .connect("nats://127.0.0.1:8232")
-            .is_ok()
-    );
+    assert!(nats::Options::with_user_pass("derek", "foo")
+        .connect("nats://127.0.0.1:8232")
+        .is_ok());
 }
