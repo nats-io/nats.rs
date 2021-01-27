@@ -240,8 +240,8 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
         let mut port = baddr.port();
 
         let mut max_client_id = 0;
+        #[rustfmt::skip]
         let server_info = |client_id, port| {
-            #[rustfmt_skip]
             format!(
                 "INFO {{  \
                     \"server_id\": \"test\", \
