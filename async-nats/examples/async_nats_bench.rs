@@ -10,7 +10,8 @@ use structopt::StructOpt;
 /// Simple NATS bench tool
 #[derive(Debug, StructOpt)]
 struct Args {
-    /// The nats server URLs (separated by comma) (default "nats://127.0.0.1:4222")
+    /// The nats server URLs (separated by comma) (default
+    /// "nats://127.0.0.1:4222")
     #[structopt(long, short, default_value = "nats://127.0.0.1:4222")]
     url: String,
 
@@ -58,16 +59,20 @@ fn main() -> std::io::Result<()> {
             .connect(&args.url)
             .await?;
 
-        let messages = if args.number_of_messages.get() % args.publishers.get() != 0 {
-            let bumped_idx = (args.number_of_messages.get() / args.publishers.get()) + 1;
-            bumped_idx * args.publishers.get()
-        } else {
-            args.number_of_messages.get()
-        };
+        let messages =
+            if args.number_of_messages.get() % args.publishers.get() != 0 {
+                let bumped_idx =
+                    (args.number_of_messages.get() / args.publishers.get()) + 1;
+                bumped_idx * args.publishers.get()
+            } else {
+                args.number_of_messages.get()
+            };
 
         let message_size = args.message_size;
 
-        let barrier = Arc::new(Barrier::new(1 + args.publishers.get() + args.subscribers));
+        let barrier = Arc::new(Barrier::new(
+            1 + args.publishers.get() + args.subscribers,
+        ));
 
         let mut threads = vec![];
 

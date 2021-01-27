@@ -29,7 +29,8 @@ impl Drop for Inner {
     }
 }
 
-/// A `Subscription` receives `Message`s published to specific NATS `Subject`s.
+/// A `Subscription` receives `Message`s published
+/// to specific NATS `Subject`s.
 #[derive(Clone, Debug)]
 pub struct Subscription(Arc<Inner>);
 
@@ -85,7 +86,8 @@ impl Subscription {
         self.0.messages.try_recv().ok()
     }
 
-    /// Get the next message, or a timeout error if no messages are available for timout.
+    /// Get the next message, or a timeout error
+    /// if no messages are available for timout.
     ///
     /// # Example
     /// ```
@@ -103,14 +105,17 @@ impl Subscription {
                 io::ErrorKind::TimedOut,
                 "next_timeout: timed out",
             )),
-            Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "next_timeout: unsubscribed",
-            )),
+            Err(channel::RecvTimeoutError::Disconnected) => {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "next_timeout: unsubscribed",
+                ))
+            }
         }
     }
 
-    /// Returns a blocking message iterator. Same as calling `iter()`.
+    /// Returns a blocking message iterator.
+    /// Same as calling `iter()`.
     ///
     /// # Example
     /// ```no_run
@@ -155,7 +160,8 @@ impl Subscription {
         TryIter { subscription: self }
     }
 
-    /// Returns a blocking message iterator with a time deadline for blocking.
+    /// Returns a blocking message iterator with a time
+    /// deadline for blocking.
     ///
     /// # Example
     /// ```
@@ -173,11 +179,11 @@ impl Subscription {
         }
     }
 
-    /// Attach a closure to handle messages.
-    /// This closure will execute in a separate thread.
-    /// The result of this call is a `Handler` which can not be
-    /// iterated and must be unsubscribed or closed directly to unregister interest.
-    /// A `Handler` will not unregister interest with the server when `drop(&mut self)` is called.
+    /// Attach a closure to handle messages. This closure will execute in a
+    /// separate thread. The result of this call is a `Handler` which can
+    /// not be iterated and must be unsubscribed or closed directly to
+    /// unregister interest. A `Handler` will not unregister interest with
+    /// the server when `drop(&mut self)` is called.
     ///
     /// # Example
     /// ```
@@ -194,8 +200,8 @@ impl Subscription {
     where
         F: Fn(Message) -> io::Result<()> + Send + 'static,
     {
-        // This will allow us to not have to capture the return. When it is dropped it
-        // will not unsubscribe from the server.
+        // This will allow us to not have to capture the return. When it is
+        // dropped it will not unsubscribe from the server.
         let sub = self.clone();
         thread::Builder::new()
             .name(format!("nats_subscriber_{}_{}", self.0.sid, self.0.subject))

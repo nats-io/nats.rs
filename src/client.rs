@@ -29,8 +29,9 @@ struct State {
 
     /// The reconnect buffer.
     ///
-    /// When the client is reconnecting, PUB messages get buffered here. When the connection is
-    /// re-established, contents of the buffer are flushed to the server.
+    /// When the client is reconnecting, PUB messages get buffered here. When
+    /// the connection is re-established, contents of the buffer are
+    /// flushed to the server.
     buffer: Buffer,
 
     /// Next subscription ID.
@@ -51,7 +52,6 @@ struct Subscription {
 }
 
 /// A NATS client.
-///
 #[derive(Clone)]
 pub struct Client {
     /// Shared client state.
@@ -89,11 +89,13 @@ impl Client {
         };
 
         let options = Arc::new(options);
-        // Connector for creating the initial connection and reconnecting when it is broken.
+        // Connector for creating the initial connection and reconnecting when
+        // it is broken.
         let connector = Connector::new(url, options.clone())?;
 
         // Spawn the client thread responsible for:
-        // - Maintaining a connection to the server and reconnecting when it is broken.
+        // - Maintaining a connection to the server and reconnecting when it is
+        //   broken.
         // - Reading messages from the server and processing them.
         // - Forwarding MSG operations to subscribers.
         thread::spawn({
@@ -103,7 +105,8 @@ impl Client {
                 run_sender.send(res).ok();
 
                 // One final flush before shutting down.
-                // This way we make sure buffered published messages reach the server.
+                // This way we make sure buffered published messages reach the
+                // server.
                 {
                     let mut state = client.state.lock();
                     if let Some(writer) = state.writer.as_mut() {
@@ -167,7 +170,10 @@ impl Client {
 
             // Check if the client is closed.
             if *self.shutdown.lock() {
-                return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+                return Err(Error::new(
+                    ErrorKind::NotConnected,
+                    "the client is closed",
+                ));
             }
 
             let (sender, receiver) = channel::bounded(1);
@@ -176,8 +182,9 @@ impl Client {
             match state.writer.as_mut() {
                 None => {}
                 Some(mut writer) => {
-                    // TODO(stjepang): We probably want to set the deadline rather than the timeout
-                    // because right now the timeout applies to each write syscall individually.
+                    // TODO(stjepang): We probably want to set the deadline
+                    // rather than the timeout because right now the timeout
+                    // applies to each write syscall individually.
                     writer.get_ref().set_write_timeout(Some(timeout))?;
                     proto::encode(&mut writer, ClientOp::Ping)?;
                     writer.flush()?;
@@ -193,7 +200,9 @@ impl Client {
         // Wait until the PONG operation is received.
         match pong.recv() {
             Ok(()) => Ok(()),
-            Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
+            Err(_) => {
+                Err(Error::new(ErrorKind::ConnectionReset, "flush failed"))
+            }
         }
     }
 
@@ -207,12 +216,14 @@ impl Client {
         // Initiate shutdown process.
         if !mem::replace(&mut *self.shutdown.lock(), true) {
             // Clear all subscriptions.
-            let old_subscriptions = mem::replace(&mut state.subscriptions, HashMap::new());
+            let old_subscriptions =
+                mem::replace(&mut state.subscriptions, HashMap::new());
             for (sid, _) in old_subscriptions {
                 // Send an UNSUB message and ignore errors.
                 if let Some(writer) = state.writer.as_mut() {
                     let max_msgs = None;
-                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).ok();
+                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
+                        .ok();
                     state.flush_kicker.try_send(()).ok();
                 }
             }
@@ -249,7 +260,10 @@ impl Client {
 
         // Check if the client is closed.
         if *self.shutdown.lock() {
-            return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "the client is closed",
+            ));
         }
 
         // Generate a subject ID.
@@ -315,7 +329,10 @@ impl Client {
 
         // Check if the client is closed.
         if *self.shutdown.lock() {
-            return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "the client is closed",
+            ));
         }
 
         let op = if let Some(headers) = headers {
@@ -357,7 +374,8 @@ impl Client {
 
     /// Attempts to publish a message without blocking.
     ///
-    /// This only works when the write buffer has enough space to encode the whole message.
+    /// This only works when the write buffer has enough space to encode the
+    /// whole message.
     pub fn try_publish(
         &self,
         subject: &str,
@@ -369,14 +387,22 @@ impl Client {
 
         // Check if the client is closed.
         if *self.shutdown.lock() {
-            return Some(Err(Error::new(ErrorKind::NotConnected, "the client is closed")));
+            return Some(Err(Error::new(
+                ErrorKind::NotConnected,
+                "the client is closed",
+            )));
         }
 
-        // Estimate how many bytes the message will consume when written into the stream.
-        // We must make a conservative guess: it's okay to overestimate but not to underestimate.
-        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
+        // Estimate how many bytes the message will consume when written into
+        // the stream. We must make a conservative guess: it's okay to
+        // overestimate but not to underestimate.
+        let mut estimate =
+            1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
         if let Some(headers) = headers {
-            estimate += headers.iter().map(|(k, v)| k.len() + v.len() + 3).sum::<usize>();
+            estimate += headers
+                .iter()
+                .map(|(k, v)| k.len() + v.len() + 3)
+                .sum::<usize>();
         }
 
         let op = if let Some(headers) = headers {
@@ -397,17 +423,19 @@ impl Client {
         match state.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                let res = proto::encode(&mut state.buffer, op).and_then(|_| state.buffer.flush());
+                let res = proto::encode(&mut state.buffer, op)
+                    .and_then(|_| state.buffer.flush());
                 Some(res)
             }
             Some(mut writer) => {
-                // Check if there's enough space in the buffer to encode the whole message.
+                // Check if there's enough space in the buffer to encode the
+                // whole message.
                 if BUF_CAPACITY - writer.buffer().len() < estimate {
                     return None;
                 }
 
-                // If connected, write into the writer.
-                // This is not going to block because there's enough space in the buffer.
+                // If connected, write into the writer. This is not going to
+                // block because there's enough space in the buffer.
                 let res = proto::encode(&mut writer, op);
                 state.flush_kicker.try_send(()).ok();
 
@@ -472,7 +500,10 @@ impl Client {
 
         // Check if the client is closed.
         if *self.shutdown.lock() {
-            return Err(Error::new(ErrorKind::NotConnected, "the client is closed"));
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "the client is closed",
+            ));
         }
 
         // Drop the current writer, if there is one.
@@ -517,7 +548,11 @@ impl Client {
     }
 
     /// Reads messages from the server and dispatches them to subscribers.
-    fn dispatch(&self, mut reader: impl BufRead, connector: &mut Connector) -> io::Result<()> {
+    fn dispatch(
+        &self,
+        mut reader: impl BufRead,
+        connector: &mut Connector,
+    ) -> io::Result<()> {
         // Handle operations received from the server.
         while let Some(op) = proto::decode(&mut reader)? {
             // Inject random delays when testing.
@@ -546,10 +581,12 @@ impl Client {
                 }
 
                 ServerOp::Pong => {
-                    // If a PONG is received while disconnected, it came from a connection that isn't
-                    // alive anymore and therefore doesn't correspond to the next expected PONG.
+                    // If a PONG is received while disconnected, it came from a
+                    // connection that isn't alive anymore and therefore doesn't
+                    // correspond to the next expected PONG.
                     if state.writer.is_some() {
-                        // Take the next expected PONG and complete it by sending a message.
+                        // Take the next expected PONG and complete it by
+                        // sending a message.
                         if let Some(pong) = state.pongs.pop_front() {
                             pong.try_send(()).ok();
                         }
@@ -572,7 +609,8 @@ impl Client {
                             client: self.clone(),
                         };
 
-                        // Send a message or drop it if the channel is disconnected or full.
+                        // Send a message or drop it if the channel is
+                        // disconnected or full.
                         subscription.messages.try_send(msg).ok();
                     }
                 }
@@ -594,12 +632,15 @@ impl Client {
                             client: self.clone(),
                         };
 
-                        // Send a message or drop it if the channel is disconnected or full.
+                        // Send a message or drop it if the channel is
+                        // disconnected or full.
                         subscription.messages.try_send(msg).ok();
                     }
                 }
 
-                ServerOp::Err(msg) => return Err(Error::new(ErrorKind::Other, msg)),
+                ServerOp::Err(msg) => {
+                    return Err(Error::new(ErrorKind::Other, msg));
+                }
 
                 ServerOp::Unknown(line) => log::warn!("unknown op: {}", line),
             }
@@ -618,9 +659,10 @@ impl fmt::Debug for Client {
 
 /// Reconnect buffer.
 ///
-/// If the connection was broken and the client is currently reconnecting, PUB messages get stored
-/// in this buffer of limited size. As soon as the connection is then re-established, buffered
-/// messages will be sent to the server.
+/// If the connection was broken and the client is currently reconnecting, PUB
+/// messages get stored in this buffer of limited size. As soon as the
+/// connection is then re-established, buffered messages will be sent to the
+/// server.
 struct Buffer {
     /// Bytes in the buffer.
     ///
