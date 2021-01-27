@@ -241,6 +241,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
 
         let mut max_client_id = 0;
         let server_info = |client_id, port| {
+            #[rustfmt_skip]
             format!(
                 "INFO {{  \
                     \"server_id\": \"test\", \
