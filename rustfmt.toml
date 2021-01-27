@@ -1,7 +1,0 @@
-version = 'Two'
-edition = "2018"
-unstable_features = true
-max_width = 80
-comment_width = 80
-wrap_comments = true
-format_strings = true

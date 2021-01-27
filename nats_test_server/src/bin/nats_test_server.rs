@@ -1,5 +1,6 @@
 const USAGE: &str = "
-Usage: nats_test_server [--host=<s>] [--port=<#>] [--hop-ports] [--bugginess=<s>]
+Usage: nats_test_server [--host=<s>] [--port=<#>] [--hop-ports] \
+                     [--bugginess=<s>]
 
 Options:
     --host=<s>      Host to listen on [default: 0.0.0.0].
@@ -54,7 +55,10 @@ impl Args {
 }
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("debug"),
+    )
+    .init();
 
     let args = Args::parse();
     log::info!("starting test server with args {:?}", &args);

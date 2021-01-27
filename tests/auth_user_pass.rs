@@ -37,10 +37,13 @@ fn smoke() {
     assert!(nats::connect("nats://127.0.0.1:8232").is_err());
 
     // TODO(stjepang): Make it possible to specify user and pass in the URL.
-    // - Also make sure to test that credentials in the URL take precedence over Options.
+    // - Also make sure to test that credentials in the URL take precedence over
+    //   Options.
     // assert!(nats::connect("nats://derek:foo@127.0.0.1:8232").is_ok());
 
-    assert!(nats::Options::with_user_pass("derek", "foo")
-        .connect("nats://127.0.0.1:8232")
-        .is_ok());
+    assert!(
+        nats::Options::with_user_pass("derek", "foo")
+            .connect("nats://127.0.0.1:8232")
+            .is_ok()
+    );
 }

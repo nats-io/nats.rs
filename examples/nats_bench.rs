@@ -16,7 +16,8 @@ lazy_static::lazy_static! {
 /// Simple NATS bench tool
 #[derive(Debug, StructOpt)]
 struct Args {
-    /// The nats server URLs (separated by comma) (default "nats://127.0.0.1:4222")
+    /// The nats server URLs (separated by comma) (default
+    /// "nats://127.0.0.1:4222")
     #[structopt(long, short, default_value = "nats://127.0.0.1:4222")]
     url: String,
 
@@ -62,8 +63,10 @@ fn main() -> std::io::Result<()> {
         .tls_required(args.tls)
         .connect(&args.url)?;
 
-    let messages = if args.number_of_messages.get() % args.publishers.get() != 0 {
-        let bumped_idx = (args.number_of_messages.get() / args.publishers.get()) + 1;
+    let messages = if args.number_of_messages.get() % args.publishers.get() != 0
+    {
+        let bumped_idx =
+            (args.number_of_messages.get() / args.publishers.get()) + 1;
         bumped_idx * args.publishers.get()
     } else {
         args.number_of_messages.get()
@@ -71,7 +74,8 @@ fn main() -> std::io::Result<()> {
 
     let message_size = args.message_size;
 
-    let barrier = Arc::new(Barrier::new(1 + args.publishers.get() + args.subscribers));
+    let barrier =
+        Arc::new(Barrier::new(1 + args.publishers.get() + args.subscribers));
 
     let mut threads = vec![];
 

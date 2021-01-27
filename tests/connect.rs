@@ -8,9 +8,11 @@ fn success() -> io::Result<()> {
 
 #[test]
 fn failure() {
-    assert!(nats::Options::with_credentials("non-existent-file")
-        .connect("demo.nats.io")
-        .is_err());
+    assert!(
+        nats::Options::with_credentials("non-existent-file")
+            .connect("demo.nats.io")
+            .is_err()
+    );
 }
 
 #[test]
