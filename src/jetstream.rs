@@ -12,28 +12,28 @@ use crate::Connection as NatsClient;
 // Request API subjects for JetStream.
 const JS_DEFAULT_API_PREFIX: &str = "$JS.API.";
 
-// JSApiAccountInfo is for obtaining general information about JetStream.
+// JSAPIAccountInfo is for obtaining general information about JetStream.
 const JS_API_ACCOUNT_INFO: &str = "INFO";
 
-// JSApiStreams can lookup a stream by subject.
+// JSAPIStreams can lookup a stream by subject.
 const JS_API_STREAMS: &str = "STREAM.NAMES";
 
-// JSApiConsumerCreateT is used to create consumers.
+// JSAPIConsumerCreateT is used to create consumers.
 const JS_API_CONSUMER_CREATE_T: &str = "CONSUMER.CREATE.%s";
 
-// JSApiDurableCreateT is used to create durable consumers.
+// JSAPIDurableCreateT is used to create durable consumers.
 const JS_API_DURABLE_CREATE_T: &str = "CONSUMER.DURABLE.CREATE.%s.%s";
 
-// JSApiConsumerInfoT is used to create consumers.
+// JSAPIConsumerInfoT is used to create consumers.
 const JS_API_CONSUMER_INFO_T: &str = "CONSUMER.INFO.%s.%s";
 
-// JSApiRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
+// JSAPIRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
 const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
 
-// JSApiStreamCreateT is the endpoint to create new streams.
+// JSAPIStreamCreateT is the endpoint to create new streams.
 const JS_API_STREAM_CREATE_T: &str = "STREAM.CREATE.%s";
 
-// JSApiStreamInfoT is the endpoint to get information on a stream.
+// JSAPIStreamInfoT is the endpoint to get information on a stream.
 const JS_API_STREAM_INFO_T: &str = "STREAM.INFO.%s";
 
 ///
@@ -214,18 +214,18 @@ enum StorageType {
     MemoryStorage = 1,
 }
 
-// APIError is included in all API responses if there was an error.
+// ApiError is included in all Api responses if there was an error.
 #[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-struct APIError {
+struct ApiError {
     code: usize,                 // `json:"code"`
     description: Option<String>, // `json:"description,omitempty"`
 }
 
-// ApiResponse is a standard response from the JetStream JSON API
+// ApiResponse is a standard response from the JetStream JSON Api
 #[derive(Serialize, Deserialize)]
 struct ApiResponse {
     r#type: String,          // `json:"type"`
-    error: Option<APIError>, // `json:"error,omitempty"`
+    error: Option<ApiError>, // `json:"error,omitempty"`
 }
 
 // AccountLimits is for the information about
@@ -292,9 +292,9 @@ struct NextRequest {
     no_wait: Option<bool>, //`json:"no_wait,omitempty"`
 }
 
-// APIPaged includes variables used to create paged responses from the JSON API
+// ApiPaged includes variables used to create paged responses from the JSON Api
 #[derive(Serialize, Deserialize)]
-struct APIPaged {
+struct ApiPaged {
     total: usize,  // `json:"total"`
     offset: usize, // `json:"offset"`
     limit: usize,  // `json:"limit"`
@@ -308,7 +308,7 @@ struct StreamRequest {
 #[derive(Serialize, Deserialize)]
 struct JSApiStreamNamesResponse {
     api_response: ApiResponse,
-    api_paged: APIPaged,
+    api_paged: ApiPaged,
     streams: Vec<String>, // `json:"streams"`
 }
 
@@ -401,19 +401,23 @@ impl Client {
 
 impl Manager {
     /// Create a stream.
-    pub fn add_stream(&self, cfg: StreamConfig) -> io::Result<StreamInfo> {
+    pub fn add_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
         if cfg.name.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "the stream name must not be empty",
             ));
         }
-
         let req: Vec<u8> = serde_json::ser::to_vec(&cfg)?;
         let subject: String = format!("STREAM.CREATE.{}", cfg.name);
         let res_msg = self.nc.request(&subject, req)?;
         let res: JsApiStreamCreateResponse =
             serde_json::de::from_slice(&res_msg.data)?;
+        if let Some(ApiError { code, description }) = res.api_response.error {
+            if let Some(description) = description {
+                return Err(Error::new(ErrorKind::Other, description));
+            }
+        }
         Ok(res.stream_info)
     }
 
@@ -423,6 +427,40 @@ impl Manager {
         stream: String,
         cfg: &ConsumerConfig,
     ) -> io::Result<ConsumerInfo> {
+        // // AddConsumer will add a JetStream consumer.
+        // func (js *js) AddConsumer(stream string, cfg *ConsumerConfig) (*ConsumerInfo, error) {
+        //     if stream == _EMPTY_ {
+        //         return nil, ErrStreamNameRequired
+        //     }
+        //     req, err := json.Marshal(&JSApiCreateConsumerRequest{Stream: stream, Config: cfg})
+        //     if err != nil {
+        //         return nil, err
+        //     }
+        //
+        //     var ccSubj string
+        //     if cfg.Durable != _EMPTY_ {
+        //         ccSubj = fmt.Sprintf(JSApiDurableCreateT, stream, cfg.Durable)
+        //     } else {
+        //         ccSubj = fmt.Sprintf(JSApiConsumerCreateT, stream)
+        //     }
+        //
+        //     resp, err := js.nc.Request(js.apiSubj(ccSubj), req, js.wait)
+        //     if err != nil {
+        //         if err == ErrNoResponders {
+        //             err = ErrJetStreamNotEnabled
+        //         }
+        //         return nil, err
+        //     }
+        //     var info JSApiConsumerResponse
+        //     err = json.Unmarshal(resp.Data, &info)
+        //     if err != nil {
+        //         return nil, err
+        //     }
+        //     if info.Error != nil {
+        //         return nil, errors.New(info.Error.Description)
+        //     }
+        //     return info.ConsumerInfo, nil
+        // }
         todo!()
     }
 
@@ -481,15 +519,15 @@ type js struct {
     nc *Conn
     // For importing JetStream from other accounts.
     pre string
-    // Amount of time to wait for API requests.
+    // Amount of time to wait for Api requests.
     wait time.Duration
-    // Signals only direct access and no API access.
+    // Signals only direct access and no Api access.
     direct bool
 }
 
-// Request API subjects for JetStream.
+// Request Api subjects for JetStream.
 const (
-    JSDefaultAPIPrefix = "$JS.API."
+    JSDefaultApiPrefix = "$JS.Api."
     // JSApiAccountInfo is for obtaining general information about JetStream.
     JSApiAccountInfo = "INFO"
     // JSApiStreams can lookup a stream by subject.
@@ -512,7 +550,7 @@ const (
 func (nc *Conn) JetStream(opts ...JSOpt) (JetStreamContext, error) {
     const defaultRequestWait = 5 * time.Second
 
-    js := &js{nc: nc, pre: JSDefaultAPIPrefix, wait: defaultRequestWait}
+    js := &js{nc: nc, pre: JSDefaultApiPrefix, wait: defaultRequestWait}
 
     for _, opt := range opts {
         if err := opt.configureJSContext(js); err != nil {
@@ -553,7 +591,7 @@ func (opt jsOptFn) configureJSContext(opts *js) error {
     return opt(opts)
 }
 
-func APIPrefix(pre string) JSOpt {
+func ApiPrefix(pre string) JSOpt {
     return jsOptFn(func(js *js) error {
         js.pre = pre
         if !strings.HasSuffix(js.pre, ".") {
@@ -1339,44 +1377,6 @@ func (p DeliverPolicy) MarshalJSON() ([]byte, error) {
     default:
         return nil, fmt.Errorf("unknown deliver policy %v", p)
     }
-}
-
-// Management for JetStream
-// TODO(dlc) - Fill this out.
-
-// AddConsumer will add a JetStream consumer.
-func (js *js) AddConsumer(stream string, cfg *ConsumerConfig) (*ConsumerInfo, error) {
-    if stream == _EMPTY_ {
-        return nil, ErrStreamNameRequired
-    }
-    req, err := json.Marshal(&JSApiCreateConsumerRequest{Stream: stream, Config: cfg})
-    if err != nil {
-        return nil, err
-    }
-
-    var ccSubj string
-    if cfg.Durable != _EMPTY_ {
-        ccSubj = fmt.Sprintf(JSApiDurableCreateT, stream, cfg.Durable)
-    } else {
-        ccSubj = fmt.Sprintf(JSApiConsumerCreateT, stream)
-    }
-
-    resp, err := js.nc.Request(js.apiSubj(ccSubj), req, js.wait)
-    if err != nil {
-        if err == ErrNoResponders {
-            err = ErrJetStreamNotEnabled
-        }
-        return nil, err
-    }
-    var info JSApiConsumerResponse
-    err = json.Unmarshal(resp.Data, &info)
-    if err != nil {
-        return nil, err
-    }
-    if info.Error != nil {
-        return nil, errors.New(info.Error.Description)
-    }
-    return info.ConsumerInfo, nil
 }
 
 // JSApiStreamCreateResponse stream creation.
