@@ -8,7 +8,8 @@ pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgements.
     pub verbose: bool,
 
-    /// Turns on additional strict format checking, e.g. for properly formed subjects.
+    /// Turns on additional strict format checking, e.g. for properly formed
+    /// subjects.
     pub pedantic: bool,
 
     /// User's JWT.
@@ -23,9 +24,10 @@ pub struct ConnectInfo {
     /// Optional client name.
     pub name: Option<SecureString>,
 
-    /// If set to `true`, the server (version 1.2.0+) will not send originating messages from this
-    /// connection to its own subscriptions. Clients should set this to `true` only for server
-    /// supporting this feature, which is when proto in the INFO protocol is set to at least 1.
+    /// If set to `true`, the server (version 1.2.0+) will not send originating
+    /// messages from this connection to its own subscriptions. Clients should
+    /// set this to `true` only for server supporting this feature, which is
+    /// when proto in the INFO protocol is set to at least 1.
     pub echo: bool,
 
     /// The implementation language of the client.

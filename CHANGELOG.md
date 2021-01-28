@@ -1,3 +1,13 @@
+# 0.9.2
+
+## Bug Fixes
+
+- #143 Fix a bug preventing nkey authentication.
+
+## Improvements
+
+- #140 Optimize NATS protocol parsing.
+
 # 0.9.1
 
 ## Bug Fixes

@@ -3,9 +3,9 @@
 use std::io::{self, Error, ErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
-/// This function is useful for inducing random jitter into our operations that trigger
-/// cross-thread communication, shaking out more possible interleavings quickly. It gets fully
-/// eliminated by the compiler in non-test code.
+/// This function is useful for inducing random jitter into our operations that
+/// trigger cross-thread communication, shaking out more possible interleavings
+/// quickly. It gets fully eliminated by the compiler in non-test code.
 pub fn inject_delay() {
     use std::thread;
     use std::time::Duration;

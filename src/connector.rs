@@ -13,13 +13,15 @@ use webpki::DNSNameRef;
 use crate::auth_utils;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::secure_wipe::SecureString;
-use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
+use crate::{
+    connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo,
+};
 
 /// Maintains a list of servers and establishes connections.
 ///
-/// Clients use this helper to hold a list of known servers discovered through INFO messages,
-/// reconnect when the connection is lost, and do exponential backoff after failed connect
-/// attempts.
+/// Clients use this helper to hold a list of known servers discovered through
+/// INFO messages, reconnect when the connection is lost, and do exponential
+/// backoff after failed connect attempts.
 pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     attempts: HashMap<Server, usize>,
@@ -33,13 +35,17 @@ pub(crate) struct Connector {
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
-    pub(crate) fn new(url: &str, options: Arc<Options>) -> io::Result<Connector> {
+    pub(crate) fn new(
+        url: &str,
+        options: Arc<Options>,
+    ) -> io::Result<Connector> {
         let mut tls_config = ClientConfig::new();
 
         // Include system root certificates.
         //
-        // On Windows, some certificates cannot be loaded by rustls for whatever reason,
-        // so we simply skip them. See https://github.com/ctz/rustls-native-certs/issues/5
+        // On Windows, some certificates cannot be loaded by rustls
+        // for whatever reason, so we simply skip them.
+        // See https://github.com/ctz/rustls-native-certs/issues/5
         let roots = match rustls_native_certs::load_native_certs() {
             Ok(store) | Err((Some(store), _)) => store.roots,
             Err((None, _)) => Vec::new(),
@@ -57,7 +63,10 @@ impl Connector {
                 .root_store
                 .add_pem_file(&mut cursor)
                 .map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid certificate file")
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid certificate file",
+                    )
                 })?;
         }
 
@@ -71,7 +80,10 @@ impl Connector {
                     .map_err(|err| {
                         io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!("invalid client certificate and key pair: {}", err),
+                            format!(
+                                "invalid client certificate and key pair: {}",
+                                err
+                            ),
                         )
                     })?;
             }
@@ -129,11 +141,16 @@ impl Connector {
 
     /// Creates a new connection to one of the known URLs.
     ///
-    /// If `use_backoff` is `true`, this method will try connecting in a loop and will back off
-    /// after failed connect attempts.
-    pub(crate) fn connect(&mut self, use_backoff: bool) -> io::Result<(ServerInfo, NatsStream)> {
-        // The last seen error, which gets returned if all connect attempts fail.
-        let mut last_err = Error::new(ErrorKind::AddrNotAvailable, "no socket addresses");
+    /// If `use_backoff` is `true`, this method will try connecting in a loop
+    /// and will back off after failed connect attempts.
+    pub(crate) fn connect(
+        &mut self,
+        use_backoff: bool,
+    ) -> io::Result<(ServerInfo, NatsStream)> {
+        // The last seen error, which gets returned if all connect attempts
+        // fail.
+        let mut last_err =
+            Error::new(ErrorKind::AddrNotAvailable, "no socket addresses");
 
         loop {
             // Shuffle the list of servers.
@@ -142,15 +159,24 @@ impl Connector {
 
             // Iterate over the server list in random order.
             for server in &servers {
-                // Calculate sleep duration for exponential backoff and bump the reconnect counter.
+                // Calculate sleep duration for exponential backoff and bump the
+                // reconnect counter.
                 let reconnects = self.attempts.get_mut(server).unwrap();
-                let sleep_duration = self.options.reconnect_delay_callback.call(*reconnects);
+                let sleep_duration =
+                    self.options.reconnect_delay_callback.call(*reconnects);
                 *reconnects += 1;
 
                 // Resolve the server URL to socket addresses.
                 let host = server.host.clone();
                 let port = server.port;
-                let mut addrs = match (host.as_str(), port).to_socket_addrs() {
+
+                // Inject random I/O failures when testing.
+                let fault_injection = inject_io_failure();
+
+                let lookup_res = fault_injection
+                    .and_then(|_| (host.as_str(), port).to_socket_addrs());
+
+                let mut addrs = match lookup_res {
                     Ok(addrs) => addrs.collect::<Vec<_>>(),
                     Err(err) => {
                         last_err = err;
@@ -162,8 +188,8 @@ impl Connector {
                 fastrand::shuffle(&mut addrs);
 
                 for addr in addrs {
-                    // Sleep for some time if this is not the first connection attempt for this
-                    // server.
+                    // Sleep for some time if this is not the first connection
+                    // attempt for this server.
                     thread::sleep(sleep_duration);
 
                     // Try connecting to this address.
@@ -222,15 +248,21 @@ impl Connector {
                     format!("expected INFO, received: {:?}", op),
                 ));
             }
-            None => return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed")),
+            None => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "connection closed",
+                ));
+            }
         };
 
         // Check if TLS authentication is required:
         // - Has `self.options.tls_required(true)` been set?
         // - Was the server address prefixed with `tls://`?
         // - Does the INFO line contain `tls_required: true`?
-        let tls_required =
-            self.options.tls_required || server.tls_required || server_info.tls_required;
+        let tls_required = self.options.tls_required
+            || server.tls_required
+            || server_info.tls_required;
 
         // Upgrade to TLS if required.
         let session = if tls_required {
@@ -239,7 +271,9 @@ impl Connector {
 
             // Connect using TLS.
             let dns_name = DNSNameRef::try_from_ascii_str(&server_info.host)
-                .or_else(|_| DNSNameRef::try_from_ascii_str(server.host.as_str()))
+                .or_else(|_| {
+                    DNSNameRef::try_from_ascii_str(server.host.as_str())
+                })
                 .map_err(|_| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -304,7 +338,8 @@ impl Connector {
         // Wait for a PONG.
         loop {
             match proto::decode(&mut reader)? {
-                // If we get PONG, the server is happy and we're done connecting.
+                // If we get PONG, the server is happy and we're done
+                // connecting.
                 Some(ServerOp::Pong) => break,
 
                 // Respond to a PING with a PONG.
@@ -416,7 +451,10 @@ struct TlsStream {
 
 impl NatsStream {
     /// Creates a NATS stream from a TCP stream and an optional TLS session.
-    fn new(tcp: TcpStream, session: Option<ClientSession>) -> io::Result<NatsStream> {
+    fn new(
+        tcp: TcpStream,
+        session: Option<ClientSession>,
+    ) -> io::Result<NatsStream> {
         let flavor = match session {
             None => Flavor::Tcp(tcp),
             Some(session) => {
@@ -428,7 +466,10 @@ impl NatsStream {
         Ok(NatsStream { flavor })
     }
 
-    pub(crate) fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    pub(crate) fn set_write_timeout(
+        &self,
+        timeout: Option<Duration>,
+    ) -> io::Result<()> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => tcp.set_write_timeout(timeout),
             Flavor::Tls(tls) => tls.lock().tcp.set_write_timeout(timeout),
@@ -446,10 +487,12 @@ impl Read for &NatsStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => (&*tcp).read(buf),
-            Flavor::Tls(tls) => tls_op(tls, |session, eof| match session.read(buf) {
-                Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
-                res => res,
-            }),
+            Flavor::Tls(tls) => {
+                tls_op(tls, |session, eof| match session.read(buf) {
+                    Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
+                    res => res,
+                })
+            }
         }
     }
 }
@@ -496,9 +539,9 @@ fn tls_op<T: std::fmt::Debug>(
         if session.wants_read() {
             match session.read_tls(tcp) {
                 Ok(0) => eof = true,
-                Ok(_) => session
-                    .process_new_packets()
-                    .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {}", err)))?,
+                Ok(_) => session.process_new_packets().map_err(|err| {
+                    Error::new(ErrorKind::Other, format!("TLS error: {}", err))
+                })?,
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {}
                 Err(err) => return Err(err),
             }
@@ -533,7 +576,9 @@ fn tls_wait(mut tls: MutexGuard<'_, TlsStream>) -> io::Result<()> {
     #[cfg(windows)]
     use {
         std::os::windows::io::AsRawSocket,
-        winapi::um::winsock2::{self as sys, WSAPoll as poll, WSAPOLLFD as pollfd},
+        winapi::um::winsock2::{
+            self as sys, WSAPoll as poll, WSAPOLLFD as pollfd,
+        },
     };
 
     let TlsStream { tcp, session } = &mut *tls;

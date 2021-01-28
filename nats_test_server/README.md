@@ -29,6 +29,4 @@ fn test_use_buggy_nats() {
 
 ## Limitations
 
-The test server currently expects being used to test a single connection - so with multiple connections you will get some unexpected results:
-* subscriptions of one client will be seen by all the others
 * `hop_ports` doesn't make any sense for multiple clients
