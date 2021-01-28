@@ -1,16 +1,49 @@
+#![allow(unused)]
 //! Jetstream support
 use std::{
-    io,
+    io::{self, Error, ErrorKind},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
 
-use crate::Client as NatsClient;
+use crate::Connection as NatsClient;
+
+// Request API subjects for JetStream.
+const JS_DEFAULT_API_PREFIX: &str = "$JS.API.";
+
+// JSApiAccountInfo is for obtaining general information about JetStream.
+const JS_API_ACCOUNT_INFO: &str = "INFO";
+
+// JSApiStreams can lookup a stream by subject.
+const JS_API_STREAMS: &str = "STREAM.NAMES";
+
+// JSApiConsumerCreateT is used to create consumers.
+const JS_API_CONSUMER_CREATE_T: &str = "CONSUMER.CREATE.%s";
+
+// JSApiDurableCreateT is used to create durable consumers.
+const JS_API_DURABLE_CREATE_T: &str = "CONSUMER.DURABLE.CREATE.%s.%s";
+
+// JSApiConsumerInfoT is used to create consumers.
+const JS_API_CONSUMER_INFO_T: &str = "CONSUMER.INFO.%s.%s";
+
+// JSApiRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
+const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
+
+// JSApiStreamCreateT is the endpoint to create new streams.
+const JS_API_STREAM_CREATE_T: &str = "STREAM.CREATE.%s";
+
+// JSApiStreamInfoT is the endpoint to get information on a stream.
+const JS_API_STREAM_INFO_T: &str = "STREAM.INFO.%s";
 
 ///
-pub struct JetstreamClient {
-    inner: NatsClient,
+pub struct Client {
+    nc: NatsClient,
+}
+
+///
+pub struct Manager {
+    nc: NatsClient,
 }
 
 ///
@@ -36,10 +69,18 @@ fn skip_unix_epoch(time: &SystemTime) -> bool {
     *time == UNIX_EPOCH
 }
 
+///
 #[derive(Serialize, Deserialize)]
-struct JSApiCreateConsumerRequest {
+pub struct JSApiCreateConsumerRequest {
     stream_name: String,
     config: ConsumerConfig,
+}
+
+/// JsApiStreamCreateResponse stream creation.
+#[derive(Serialize, Deserialize)]
+pub struct JsApiStreamCreateResponse {
+    api_response: ApiResponse,
+    stream_info: StreamInfo,
 }
 
 // DeliverPolicy determines how the consumer should select the first message to deliver.
@@ -76,48 +117,49 @@ enum ReplayPolicy {
     ReplayOriginal = 1,
 }
 
+///
 #[derive(Serialize, Deserialize)]
-struct ConsumerConfig {
-    durable_name: Option<String>,       // `json:"durable_name,omitempty"`
-    deliver_subject: Option<String>,    // `json:"deliver_subject,omitempty"`
-    deliver_policy: DeliverPolicy,      // `json:"deliver_policy"`
-    opt_start_seq: Option<u64>,         // `json:"opt_start_seq,omitempty"`
+pub struct ConsumerConfig {
+    durable_name: Option<String>, // `json:"durable_name,omitempty"`
+    deliver_subject: Option<String>, // `json:"deliver_subject,omitempty"`
+    deliver_policy: DeliverPolicy, // `json:"deliver_policy"`
+    opt_start_seq: Option<u64>,   // `json:"opt_start_seq,omitempty"`
     opt_start_time: Option<SystemTime>, // `json:"opt_start_time,omitempty"`
-    ack_policy: AckPolicy,              // `json:"ack_policy"`
-    ack_wait: Option<Duration>,         // `json:"ack_wait,omitempty"`
-    max_deliver: Option<u64>,           // `json:"max_deliver,omitempty"`
-    filter_subject: Option<String>,     // `json:"filter_subject,omitempty"`
-    replay_policy: ReplayPolicy,        // `json:"replay_policy"`
-    rate_limit: Option<u64>,            // `json:"rate_limit_bps,omitempty"` // Bits per sec
-    sample_frequency: Option<String>,   // `json:"sample_freq,omitempty"`
-    max_waiting: Option<u64>,           // `json:"max_waiting,omitempty"`
-    max_ack_pending: Option<u64>,       // `json:"max_ack_pending,omitempty"`
+    ack_policy: AckPolicy,        // `json:"ack_policy"`
+    ack_wait: Option<Duration>,   // `json:"ack_wait,omitempty"`
+    max_deliver: Option<u64>,     // `json:"max_deliver,omitempty"`
+    filter_subject: Option<String>, // `json:"filter_subject,omitempty"`
+    replay_policy: ReplayPolicy,  // `json:"replay_policy"`
+    rate_limit: Option<u64>, // `json:"rate_limit_bps,omitempty"` // Bits per sec
+    sample_frequency: Option<String>, // `json:"sample_freq,omitempty"`
+    max_waiting: Option<u64>, // `json:"max_waiting,omitempty"`
+    max_ack_pending: Option<u64>, // `json:"max_ack_pending,omitempty"`
 }
 
-// StreamConfig will determine the properties for a stream.
-// There are sensible defaults for most. If no subjects are
-// given the name will be used as the only subject.
+/// StreamConfig will determine the properties for a stream.
+/// There are sensible defaults for most. If no subjects are
+/// given the name will be used as the only subject.
 #[derive(Serialize, Deserialize)]
-struct StreamConfig {
-    subjects: Option<Vec<String>>,      // `json:"subjects,omitempty"`
-    name: String,                       // `json:"name"`
-    retention: RetentionPolicy,         // `json:"retention"`
-    max_consumers: usize,               // `json:"max_consumers"`
-    max_msgs: u64,                      // `json:"max_msgs"`
-    max_bytes: u64,                     // `json:"max_bytes"`
-    discard: DiscardPolicy,             // `json:"discard"`
-    max_age: Duration,                  // `json:"max_age"`
-    max_msg_size: Option<u32>,          // `json:"max_msg_size,omitempty"`
-    storage: StorageType,               // `json:"storage"`
-    num_replicas: usize,                // `json:"num_replicas"`
-    no_ack: Option<bool>,               // `json:"no_ack,omitempty"`
-    template_owner: Option<String>,     // `json:"template_owner,omitempty"`
+pub struct StreamConfig {
+    subjects: Option<Vec<String>>, // `json:"subjects,omitempty"`
+    name: String,                  // `json:"name"`
+    retention: RetentionPolicy,    // `json:"retention"`
+    max_consumers: usize,          // `json:"max_consumers"`
+    max_msgs: u64,                 // `json:"max_msgs"`
+    max_bytes: u64,                // `json:"max_bytes"`
+    discard: DiscardPolicy,        // `json:"discard"`
+    max_age: Duration,             // `json:"max_age"`
+    max_msg_size: Option<u32>,     // `json:"max_msg_size,omitempty"`
+    storage: StorageType,          // `json:"storage"`
+    num_replicas: usize,           // `json:"num_replicas"`
+    no_ack: Option<bool>,          // `json:"no_ack,omitempty"`
+    template_owner: Option<String>, // `json:"template_owner,omitempty"`
     duplicate_window: Option<Duration>, // `json:"duplicate_window,omitempty"`
 }
 
-// StreamInfo shows config and current state for this stream.
+/// StreamInfo shows config and current state for this stream.
 #[derive(Serialize, Deserialize)]
-struct StreamInfo {
+pub struct StreamInfo {
     config: StreamConfig, //`json:"config"`
     #[serde(with = "humantime_serde")]
     created: SystemTime, //`json:"created"`
@@ -179,9 +221,9 @@ struct APIError {
     description: Option<String>, // `json:"description,omitempty"`
 }
 
-// APIResponse is a standard response from the JetStream JSON API
+// ApiResponse is a standard response from the JetStream JSON API
 #[derive(Serialize, Deserialize)]
-struct APIResponse {
+struct ApiResponse {
     r#type: String,          // `json:"type"`
     error: Option<APIError>, // `json:"error,omitempty"`
 }
@@ -204,21 +246,24 @@ struct AccountStats {
     limits: AccountLimits, // `json:"limits"`
 }
 
+///
 #[derive(Serialize, Deserialize)]
-struct PubAck {
+pub struct PubAck {
     stream: String,          // `json:"stream"`
     seq: u64,                // `json:"seq"`
     duplicate: Option<bool>, // `json:"duplicate,omitempty"`
 }
 
+///
 #[derive(Serialize, Deserialize)]
 struct JSApiConsumerResponse {
-    api_response: APIResponse,
+    api_response: ApiResponse,
     consumer_info: ConsumerInfo,
 }
 
+///
 #[derive(Serialize, Deserialize)]
-struct ConsumerInfo {
+pub struct ConsumerInfo {
     stream_name: String, // `json:"stream_name"`
     name: String,        // `json:"name"`
     #[serde(with = "humantime_serde")]
@@ -262,12 +307,13 @@ struct StreamRequest {
 
 #[derive(Serialize, Deserialize)]
 struct JSApiStreamNamesResponse {
-    api_response: APIResponse,
+    api_response: ApiResponse,
     api_paged: APIPaged,
     streams: Vec<String>, // `json:"streams"`
 }
 
-struct SubOpts {
+///
+pub struct SubOpts {
     // For attaching.
     stream: String,
     consumer: String,
@@ -279,7 +325,8 @@ struct SubOpts {
     cfg: ConsumerConfig,
 }
 
-struct PubOpts {
+///
+pub struct PubOpts {
     ctx: Context,
     ttl: Duration,
     id: String,
@@ -291,14 +338,23 @@ struct PubOpts {
     seq: u64,
 }
 
-impl JetstreamClient {
+impl Client {
     /// Publishing messages to JetStream.
-    pub fn publish(&self, subject: &str, data: &[u8], opts: Option<PubOpts>) -> io::Result<PubAck> {
+    pub fn publish(
+        &self,
+        subject: &str,
+        data: &[u8],
+        opts: Option<PubOpts>,
+    ) -> io::Result<PubAck> {
         todo!()
     }
 
     /// Publishing messages to JetStream.
-    pub fn publish_msg(&self, msg: Msg, opts: Option<PubOpts>) -> io::Result<PubAck> {
+    pub fn publish_msg(
+        &self,
+        msg: Msg,
+        opts: Option<PubOpts>,
+    ) -> io::Result<PubAck> {
         todo!()
     }
 
@@ -313,7 +369,11 @@ impl JetstreamClient {
     }
 
     /// Subscribing to messages in JetStream.
-    pub fn subscribe_sync(&self, subj: String, opts: Option<SubOpts>) -> io::Result<Subscription> {
+    pub fn subscribe_sync(
+        &self,
+        subj: String,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
         todo!()
     }
 
@@ -337,14 +397,32 @@ impl JetstreamClient {
     ) -> io::Result<Subscription> {
         todo!()
     }
+}
 
+impl Manager {
     /// Create a stream.
     pub fn add_stream(&self, cfg: StreamConfig) -> io::Result<StreamInfo> {
-        todo!()
+        if cfg.name.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+
+        let req: Vec<u8> = serde_json::ser::to_vec(&cfg)?;
+        let subject: String = format!("STREAM.CREATE.{}", cfg.name);
+        let res_msg = self.nc.request(&subject, req)?;
+        let res: JsApiStreamCreateResponse =
+            serde_json::de::from_slice(&res_msg.data)?;
+        Ok(res.stream_info)
     }
 
     /// Create a consumer.
-    pub fn add_consumer(&self, stream: String, cfg: &ConsumerConfig) -> io::Result<ConsumerInfo> {
+    pub fn add_consumer(
+        &self,
+        stream: String,
+        cfg: &ConsumerConfig,
+    ) -> io::Result<ConsumerInfo> {
         todo!()
     }
 
@@ -394,7 +472,7 @@ type JetStreamContext interface {
 
 
 type AccountInfoResponse struct {
-    APIResponse
+    ApiResponse
     *AccountStats
 }
 
@@ -515,7 +593,7 @@ func (opt pubOptFn) configurePublish(opts *pubOpts) error {
 }
 
 type PubAckResponse struct {
-    APIResponse
+    ApiResponse
     *PubAck
 }
 // Headers for published messages.
@@ -1303,34 +1381,10 @@ func (js *js) AddConsumer(stream string, cfg *ConsumerConfig) (*ConsumerInfo, er
 
 // JSApiStreamCreateResponse stream creation.
 type JSApiStreamCreateResponse struct {
-    APIResponse
+    ApiResponse
     *StreamInfo
 }
 
-func (js *js) AddStream(cfg *StreamConfig) (*StreamInfo, error) {
-    if cfg == nil || cfg.Name == _EMPTY_ {
-        return nil, ErrStreamNameRequired
-    }
-
-    req, err := json.Marshal(cfg)
-    if err != nil {
-        return nil, err
-    }
-
-    csSubj := js.apiSubj(fmt.Sprintf(JSApiStreamCreateT, cfg.Name))
-    r, err := js.nc.Request(csSubj, req, js.wait)
-    if err != nil {
-        return nil, err
-    }
-    var resp JSApiStreamCreateResponse
-    if err := json.Unmarshal(r.Data, &resp); err != nil {
-        return nil, err
-    }
-    if resp.Error != nil {
-        return nil, errors.New(resp.Error.Description)
-    }
-    return resp.StreamInfo, nil
-}
 
 type JSApiStreamInfoResponse = JSApiStreamCreateResponse
 
