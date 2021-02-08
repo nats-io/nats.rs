@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(unused)]
 // Copyright 2020 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +12,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(unused)]
-//! Jetstream support
+
+//! Experimental Jetstream support enabled via the `jetstream` feature.
+
 use std::{
     io::{self, Error, ErrorKind},
     time::UNIX_EPOCH,
@@ -44,8 +46,8 @@ enum ApiResponse<T> {
 // ApiError is included in all Api responses if there was an error.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
 struct ApiError {
-    code: usize,                 // `json:"code"`
-    description: Option<String>, // `json:"description,omitempty"`
+    code: usize,
+    description: Option<String>,
 }
 
 impl Default for DateTime {
@@ -55,8 +57,15 @@ impl Default for DateTime {
 }
 
 ///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Subscription;
+#[derive(Debug, Default, Clone)]
+pub struct Subscription {
+    consumer: String,
+    stream: String,
+    deliver: String,
+    pull: i64,
+    durable: bool,
+    attached: bool,
+}
 
 ///
 #[derive(Debug, Default, Clone, Copy)]
@@ -145,20 +154,20 @@ impl Default for ReplayPolicy {
 ///
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerConfig {
-    pub durable_name: Option<String>, // `json:"durable_name,omitempty"`
-    pub deliver_subject: Option<String>, // `json:"deliver_subject,omitempty"`
-    pub deliver_policy: DeliverPolicy, // `json:"deliver_policy"`
-    pub opt_start_seq: Option<i64>,   // `json:"opt_start_seq,omitempty"`
-    pub opt_start_time: Option<DateTime>, // `json:"opt_start_time,omitempty"`
-    pub ack_policy: AckPolicy,        // `json:"ack_policy"`
-    pub ack_wait: Option<isize>,      // `json:"ack_wait,omitempty"`
-    pub max_deliver: Option<i64>,     // `json:"max_deliver,omitempty"`
-    pub filter_subject: Option<String>, // `json:"filter_subject,omitempty"`
-    pub replay_policy: ReplayPolicy,  // `json:"replay_policy"`
-    pub rate_limit: Option<i64>, // `json:"rate_limit_bps,omitempty"` // Bits per sec
-    pub sample_frequency: Option<String>, // `json:"sample_freq,omitempty"`
-    pub max_waiting: Option<i64>, // `json:"max_waiting,omitempty"`
-    pub max_ack_pending: Option<i64>, // `json:"max_ack_pending,omitempty"`
+    pub durable_name: Option<String>,
+    pub deliver_subject: Option<String>,
+    pub deliver_policy: DeliverPolicy,
+    pub opt_start_seq: Option<i64>,
+    pub opt_start_time: Option<DateTime>,
+    pub ack_policy: AckPolicy,
+    pub ack_wait: Option<isize>,
+    pub max_deliver: Option<i64>,
+    pub filter_subject: Option<String>,
+    pub replay_policy: ReplayPolicy,
+    pub rate_limit: Option<i64>,
+    pub sample_frequency: Option<String>,
+    pub max_waiting: Option<i64>,
+    pub max_ack_pending: Option<i64>,
 }
 
 impl From<&str> for ConsumerConfig {
@@ -175,20 +184,20 @@ impl From<&str> for ConsumerConfig {
 /// given the name will be used as the only subject.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamConfig {
-    pub subjects: Option<Vec<String>>, // `json:"subjects,omitempty"`
-    pub name: String,                  // `json:"name"`
-    pub retention: RetentionPolicy,    // `json:"retention"`
-    pub max_consumers: isize,          // `json:"max_consumers"`
-    pub max_msgs: i64,                 // `json:"max_msgs"`
-    pub max_bytes: i64,                // `json:"max_bytes"`
-    pub discard: DiscardPolicy,        // `json:"discard"`
-    pub max_age: isize,                // `json:"max_age"`
-    pub max_msg_size: Option<i32>,     // `json:"max_msg_size,omitempty"`
-    pub storage: StorageType,          // `json:"storage"`
-    pub num_replicas: usize,           // `json:"num_replicas"`
-    pub no_ack: Option<bool>,          // `json:"no_ack,omitempty"`
-    pub template_owner: Option<String>, // `json:"template_owner,omitempty"`
-    pub duplicate_window: Option<isize>, // `json:"duplicate_window,omitempty"`
+    pub subjects: Option<Vec<String>>,
+    pub name: String,
+    pub retention: RetentionPolicy,
+    pub max_consumers: isize,
+    pub max_msgs: i64,
+    pub max_bytes: i64,
+    pub discard: DiscardPolicy,
+    pub max_age: isize,
+    pub max_msg_size: Option<i32>,
+    pub storage: StorageType,
+    pub num_replicas: usize,
+    pub no_ack: Option<bool>,
+    pub template_owner: Option<String>,
+    pub duplicate_window: Option<isize>,
 }
 
 impl From<&str> for StreamConfig {
@@ -204,22 +213,22 @@ impl From<&str> for StreamConfig {
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
     pub r#type: String,
-    pub config: StreamConfig, //`json:"config"`
-    pub created: DateTime,    //`json:"created"`
-    pub state: StreamState,   //`json:"state"`
+    pub config: StreamConfig,
+    pub created: DateTime,
+    pub state: StreamState,
 }
 
 // StreamStats is information about the given stream.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamState {
     #[serde(default)]
-    pub msgs: u64, // `json:"messages"`
-    pub bytes: u64,            // `json:"bytes"`
-    pub first_seq: u64,        // `json:"first_seq"`
-    pub first_ts: String,      // `json:"first_ts"`
-    pub last_seq: u64,         // `json:"last_seq"`
-    pub last_ts: DateTime,     // `json:"last_ts"`
-    pub consumer_count: usize, // `json:"consumer_count"`
+    pub msgs: u64,
+    pub bytes: u64,
+    pub first_seq: u64,
+    pub first_ts: String,
+    pub last_seq: u64,
+    pub last_ts: DateTime,
+    pub consumer_count: usize,
 }
 
 // RetentionPolicy determines how messages in a set are retained.
@@ -284,43 +293,43 @@ impl Default for StorageType {
 // AccountLimits is for the information about
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountLimits {
-    pub max_memory: i64,    // `json:"max_memory"`
-    pub max_storage: i64,   // `json:"max_storage"`
-    pub max_streams: i64,   // `json:"max_streams"`
-    pub max_consumers: i64, // `json:"max_consumers"`
+    pub max_memory: i64,
+    pub max_storage: i64,
+    pub max_streams: i64,
+    pub max_consumers: i64,
 }
 
 // AccountStats returns current statistics about the account's JetStream usage.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountStats {
-    pub memory: u64,           // `json:"memory"`
-    pub storage: u64,          // `json:"storage"`
-    pub streams: usize,        // `json:"streams"`
-    pub limits: AccountLimits, // `json:"limits"`
+    pub memory: u64,
+    pub storage: u64,
+    pub streams: usize,
+    pub limits: AccountLimits,
 }
 
 ///
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PubAck {
-    pub stream: String,          // `json:"stream"`
-    pub seq: u64,                // `json:"seq"`
-    pub duplicate: Option<bool>, // `json:"duplicate,omitempty"`
+    pub stream: String,
+    pub seq: u64,
+    pub duplicate: Option<bool>,
 }
 
 ///
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerInfo {
     pub r#type: String,
-    pub stream_name: String,     // `json:"stream_name"`
-    pub name: String,            // `json:"name"`
-    pub created: DateTime,       // `json:"created"`
-    pub config: ConsumerConfig,  // `json:"config"`
-    pub delivered: SequencePair, // `json:"delivered"`
-    pub ack_floor: SequencePair, // `json:"ack_floor"`
-    pub num_ack_pending: usize,  // `json:"num_ack_pending"`
-    pub num_redelivered: usize,  // `json:"num_redelivered"`
-    pub num_waiting: usize,      // `json:"num_waiting"`
-    pub num_pending: u64,        // `json:"num_pending"`
+    pub stream_name: String,
+    pub name: String,
+    pub created: DateTime,
+    pub config: ConsumerConfig,
+    pub delivered: SequencePair,
+    pub ack_floor: SequencePair,
+    pub num_ack_pending: usize,
+    pub num_redelivered: usize,
+    pub num_waiting: usize,
+    pub num_pending: u64,
     pub cluster: ClusterInfo,
 }
 
@@ -331,16 +340,16 @@ pub struct ClusterInfo {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct SequencePair {
-    pub consumer_seq: u64, // `json:"consumer_seq"`
-    pub stream_seq: u64,   // `json:"stream_seq"`
+    pub consumer_seq: u64,
+    pub stream_seq: u64,
 }
 
 // NextRequest is for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct NextRequest {
-    pub expires: DateTime,     // `json:"expires,omitempty"`
-    pub batch: Option<usize>,  // `json:"batch,omitempty"`
-    pub no_wait: Option<bool>, //`json:"no_wait,omitempty"`
+    pub expires: DateTime,
+    pub batch: Option<usize>,
+    pub no_wait: Option<bool>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -349,14 +358,14 @@ pub struct StreamNamesResponse {
     pub streams: Vec<String>,
 
     // related to paging
-    pub total: usize,  // `json:"total"`
-    pub offset: usize, // `json:"offset"`
-    pub limit: usize,  // `json:"limit"`
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamRequest {
-    pub subject: Option<String>, // `json:"subject,omitempty"`
+    pub subject: Option<String>,
 }
 
 ///
@@ -1386,11 +1395,11 @@ mod test {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
-        dbg!(manager.account_info());
         dbg!(manager.add_stream("test2"));
         dbg!(manager.stream_info("test2"));
         dbg!(manager.add_consumer("test2", "consumer1"));
         dbg!(manager.consumer_info("test2", "consumer1"));
         dbg!(manager.stream_names());
+        dbg!(manager.account_info());
     }
 }
