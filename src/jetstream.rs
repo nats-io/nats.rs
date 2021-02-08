@@ -149,72 +149,6 @@ where
     }
 }
 
-/// Jetstream reliable consumption functionality
-pub struct Consumer {
-    nc: NatsClient,
-}
-
-impl Consumer {
-    /// Publishing messages to JetStream.
-    pub fn publish(
-        &self,
-        subject: &str,
-        data: &[u8],
-        opts: Option<PubOpts>,
-    ) -> io::Result<PubAck> {
-        todo!()
-    }
-
-    /// Publishing messages to JetStream.
-    pub fn publish_msg(
-        &self,
-        msg: Msg,
-        opts: Option<PubOpts>,
-    ) -> io::Result<PubAck> {
-        todo!()
-    }
-
-    /// Subscribing to messages in JetStream.
-    pub fn subscribe(
-        &self,
-        subj: String,
-        cb: MsgHandler,
-        opts: Option<SubOpts>,
-    ) -> io::Result<Subscription> {
-        todo!()
-    }
-
-    /// Subscribing to messages in JetStream.
-    pub fn subscribe_sync(
-        &self,
-        subj: String,
-        opts: Option<SubOpts>,
-    ) -> io::Result<Subscription> {
-        todo!()
-    }
-
-    /// Channel versions.
-    pub fn chan_subscribe(
-        &self,
-        subj: String,
-        ch: Chan<Msg>,
-        opts: Option<SubOpts>,
-    ) -> io::Result<Subscription> {
-        todo!()
-    }
-
-    /// QueueSubscribe.
-    pub fn queue_subscribe(
-        &self,
-        subj: String,
-        queue: String,
-        cb: MsgHandler,
-        opts: Option<SubOpts>,
-    ) -> io::Result<Subscription> {
-        todo!()
-    }
-}
-
 /// Jetstream management functionality
 #[derive(Debug)]
 pub struct Manager {
@@ -477,12 +411,79 @@ impl Manager {
     }
 }
 
+/// Jetstream reliable consumption functionality
+pub struct Consumer {
+    nc: NatsClient,
+}
+
+impl Consumer {
+    /// Publishing messages to JetStream.
+    pub fn publish(
+        &self,
+        subject: &str,
+        data: &[u8],
+        opts: Option<PubOpts>,
+    ) -> io::Result<PubAck> {
+        todo!()
+    }
+
+    /// Publishing messages to JetStream.
+    pub fn publish_msg(
+        &self,
+        msg: Msg,
+        opts: Option<PubOpts>,
+    ) -> io::Result<PubAck> {
+        todo!()
+    }
+
+    /// Subscribing to messages in JetStream.
+    pub fn subscribe(
+        &self,
+        subj: String,
+        cb: MsgHandler,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
+
+    /// Subscribing to messages in JetStream.
+    pub fn subscribe_sync(
+        &self,
+        subj: String,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
+
+    /// Channel versions.
+    pub fn chan_subscribe(
+        &self,
+        subj: String,
+        ch: Chan<Msg>,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
+
+    /// QueueSubscribe.
+    pub fn queue_subscribe(
+        &self,
+        subj: String,
+        queue: String,
+        cb: MsgHandler,
+        opts: Option<SubOpts>,
+    ) -> io::Result<Subscription> {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
-    fn round_trip() {
+    #[ignore]
+    fn local_round_trip() {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
