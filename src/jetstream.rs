@@ -98,6 +98,11 @@ pub struct PagedIterator<'a, T> {
     done: bool,
 }
 
+impl<'a, T> std::iter::FusedIterator for PagedIterator<'a, T> where
+    T: DeserializeOwned + Debug
+{
+}
+
 impl<'a, T> Iterator for PagedIterator<'a, T>
 where
     T: DeserializeOwned + Debug,
@@ -138,6 +143,7 @@ where
         if !self.items.is_empty() {
             Some(Ok(self.items.pop_front().unwrap()))
         } else {
+            self.done = true;
             None
         }
     }
