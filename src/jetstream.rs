@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Copyright 2020 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -10,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #![allow(unused)]
 //! Jetstream support
 use std::{
@@ -41,8 +41,9 @@ const JS_API_DURABLE_CREATE_T: &str = "CONSUMER.DURABLE.CREATE.%s.%s";
 // JSAPIRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
 const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
 
-#[derive(Debug, Serialize, Deserialize)]
-struct DateTime(ChronoDateTime<Utc>);
+///
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct DateTime(ChronoDateTime<Utc>);
 
 // ApiResponse is a standard response from the JetStream JSON Api
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,7 +54,7 @@ enum ApiResponse<T> {
 }
 
 // ApiError is included in all Api responses if there was an error.
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
 struct ApiError {
     code: usize,                 // `json:"code"`
     description: Option<String>, // `json:"description,omitempty"`
@@ -102,7 +103,7 @@ pub struct JSApiCreateConsumerRequest {
 }
 
 // DeliverPolicy determines how the consumer should select the first message to deliver.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum DeliverPolicy {
     // DeliverAllPolicy will be the default so can be omitted from the request.
@@ -129,7 +130,7 @@ impl Default for DeliverPolicy {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum AckPolicy {
     #[serde(rename = "none")]
@@ -148,7 +149,7 @@ impl Default for AckPolicy {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum ReplayPolicy {
     #[serde(rename = "instant")]
@@ -164,7 +165,7 @@ impl Default for ReplayPolicy {
 }
 
 ///
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerConfig {
     pub durable_name: Option<String>, // `json:"durable_name,omitempty"`
     pub deliver_subject: Option<String>, // `json:"deliver_subject,omitempty"`
@@ -194,7 +195,7 @@ impl From<&str> for ConsumerConfig {
 /// StreamConfig will determine the properties for a stream.
 /// There are sensible defaults for most. If no subjects are
 /// given the name will be used as the only subject.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamConfig {
     pub subjects: Option<Vec<String>>, // `json:"subjects,omitempty"`
     pub name: String,                  // `json:"name"`
@@ -222,7 +223,7 @@ impl From<&str> for StreamConfig {
 }
 
 /// StreamInfo shows config and current state for this stream.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
     pub r#type: String,
     pub config: StreamConfig, //`json:"config"`
@@ -231,8 +232,8 @@ pub struct StreamInfo {
 }
 
 // StreamStats is information about the given stream.
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct StreamState {
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct StreamState {
     #[serde(default)]
     pub msgs: u64, // `json:"messages"`
     pub bytes: u64,            // `json:"bytes"`
@@ -244,7 +245,7 @@ struct StreamState {
 }
 
 // RetentionPolicy determines how messages in a set are retained.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum RetentionPolicy {
     // LimitsPolicy (default) means that messages are retained until any given limit is reached.
@@ -267,7 +268,7 @@ impl Default for RetentionPolicy {
 
 // Discard Policy determines how we proceed when limits of messages or bytes are hit. The default, DicscardOld will
 // remove older messages. DiscardNew will fail to store the new message.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum DiscardPolicy {
     // DiscardOld will remove older messages to return to the limits.
@@ -285,7 +286,7 @@ impl Default for DiscardPolicy {
 }
 
 // StorageType determines how messages are stored for retention.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum StorageType {
     // FileStorage specifies on disk storage. It's the default.
@@ -303,7 +304,7 @@ impl Default for StorageType {
 }
 
 // AccountLimits is for the information about
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountLimits {
     pub max_memory: u64,      // `json:"max_memory"`
     pub max_storage: u64,     // `json:"max_storage"`
@@ -312,7 +313,7 @@ pub struct AccountLimits {
 }
 
 // AccountStats returns current statistics about the account's JetStream usage.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountStats {
     pub memory: u64,           // `json:"memory"`
     pub storage: u64,          // `json:"storage"`
@@ -321,7 +322,7 @@ pub struct AccountStats {
 }
 
 ///
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PubAck {
     pub stream: String,          // `json:"stream"`
     pub seq: u64,                // `json:"seq"`
@@ -329,7 +330,7 @@ pub struct PubAck {
 }
 
 ///
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerInfo {
     pub r#type: String,
     pub stream_name: String,     // `json:"stream_name"`
@@ -345,19 +346,19 @@ pub struct ConsumerInfo {
     pub cluster: ClusterInfo,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ClusterInfo {
     pub leader: String,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct SequencePair {
     pub consumer_seq: u64, // `json:"consumer_seq"`
     pub stream_seq: u64,   // `json:"stream_seq"`
 }
 
 // NextRequest is for getting next messages for pull based consumers.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct NextRequest {
     pub expires: DateTime,     // `json:"expires,omitempty"`
     pub batch: Option<usize>,  // `json:"batch,omitempty"`
@@ -365,19 +366,20 @@ pub struct NextRequest {
 }
 
 // ApiPaged includes variables used to create paged responses from the JSON Api
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct ApiPaged {
     pub total: usize,  // `json:"total"`
     pub offset: usize, // `json:"offset"`
     pub limit: usize,  // `json:"limit"`
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamRequest {
     pub subject: Option<String>, // `json:"subject,omitempty"`
 }
 
 ///
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct SubOpts {
     // For attaching.
     pub stream: String,
@@ -391,8 +393,8 @@ pub struct SubOpts {
 }
 
 ///
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PubOpts {
-    pub ctx: Context,
     pub ttl: isize,
     pub id: String,
     // Expected last msgId
