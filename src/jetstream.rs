@@ -610,7 +610,7 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let consumer = stream.as_ref();
+        let consumer = consumer.as_ref();
         if consumer.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
