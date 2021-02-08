@@ -573,6 +573,19 @@ impl Manager {
     }
 
     /// Query stream information.
+    pub fn purge_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<()> {
+        let stream: &str = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+        let subject = format!("STREAM.PURGE.{}", stream);
+        self.request(&subject, b"")
+    }
+
+    /// Query stream information.
     pub fn consumer_info<S1, S2>(
         &self,
         stream: S1,
