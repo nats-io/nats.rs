@@ -13,11 +13,9 @@
 
 #![allow(unused)]
 //! Jetstream support
-use std::{
-    io::{self, Error, ErrorKind},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::io::{self, Error, ErrorKind};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::Connection as NatsClient;
@@ -46,9 +44,6 @@ const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
 // JSAPIStreamCreateT is the endpoint to create new streams.
 const JS_API_STREAM_CREATE_T: &str = "STREAM.CREATE.%s";
 
-// JSAPIStreamInfoT is the endpoint to get information on a stream.
-const JS_API_STREAM_INFO_T: &str = "STREAM.INFO.%s";
-
 ///
 pub struct Client {
     nc: NatsClient,
@@ -60,44 +55,40 @@ pub struct Manager {
 }
 
 ///
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Subscription;
 
 ///
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Msg;
 
 ///
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct MsgHandler;
 
 ///
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Context;
 
 ///
 pub struct Chan<A>(A);
 
-fn skip_unix_epoch(time: &SystemTime) -> bool {
-    *time == UNIX_EPOCH
-}
-
 ///
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JSApiCreateConsumerRequest {
     stream_name: String,
     config: ConsumerConfig,
 }
 
 /// JsApiStreamCreateResponse stream creation.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JsApiStreamCreateResponse {
     api_response: ApiResponse,
     stream_info: StreamInfo,
 }
 
 // DeliverPolicy determines how the consumer should select the first message to deliver.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum DeliverPolicy {
     // DeliverAllPolicy will be the default so can be omitted from the request.
@@ -113,7 +104,13 @@ enum DeliverPolicy {
     DeliverByStartTimePolicy = 4,
 }
 
-#[derive(Serialize, Deserialize)]
+impl Default for DeliverPolicy {
+    fn default() -> DeliverPolicy {
+        DeliverPolicy::DeliverAllPolicy
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum AckPolicy {
     AckNone = 0,
@@ -123,23 +120,35 @@ enum AckPolicy {
     AckPolicyNotSet = 99,
 }
 
-#[derive(Serialize, Deserialize)]
+impl Default for AckPolicy {
+    fn default() -> AckPolicy {
+        AckPolicy::AckExplicit
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum ReplayPolicy {
     ReplayInstant = 0,
     ReplayOriginal = 1,
 }
 
+impl Default for ReplayPolicy {
+    fn default() -> ReplayPolicy {
+        ReplayPolicy::ReplayInstant
+    }
+}
+
 ///
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ConsumerConfig {
     durable_name: Option<String>, // `json:"durable_name,omitempty"`
     deliver_subject: Option<String>, // `json:"deliver_subject,omitempty"`
     deliver_policy: DeliverPolicy, // `json:"deliver_policy"`
     opt_start_seq: Option<u64>,   // `json:"opt_start_seq,omitempty"`
-    opt_start_time: Option<SystemTime>, // `json:"opt_start_time,omitempty"`
+    opt_start_time: Option<DateTime<Utc>>, // `json:"opt_start_time,omitempty"`
     ack_policy: AckPolicy,        // `json:"ack_policy"`
-    ack_wait: Option<Duration>,   // `json:"ack_wait,omitempty"`
+    ack_wait: Option<isize>,      // `json:"ack_wait,omitempty"`
     max_deliver: Option<u64>,     // `json:"max_deliver,omitempty"`
     filter_subject: Option<String>, // `json:"filter_subject,omitempty"`
     replay_policy: ReplayPolicy,  // `json:"replay_policy"`
@@ -152,97 +161,124 @@ pub struct ConsumerConfig {
 /// StreamConfig will determine the properties for a stream.
 /// There are sensible defaults for most. If no subjects are
 /// given the name will be used as the only subject.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct StreamConfig {
     subjects: Option<Vec<String>>, // `json:"subjects,omitempty"`
     name: String,                  // `json:"name"`
     retention: RetentionPolicy,    // `json:"retention"`
-    max_consumers: usize,          // `json:"max_consumers"`
-    max_msgs: u64,                 // `json:"max_msgs"`
-    max_bytes: u64,                // `json:"max_bytes"`
+    max_consumers: isize,          // `json:"max_consumers"`
+    max_msgs: i64,                 // `json:"max_msgs"`
+    max_bytes: i64,                // `json:"max_bytes"`
     discard: DiscardPolicy,        // `json:"discard"`
-    max_age: Duration,             // `json:"max_age"`
-    max_msg_size: Option<u32>,     // `json:"max_msg_size,omitempty"`
+    max_age: isize,                // `json:"max_age"`
+    max_msg_size: Option<i32>,     // `json:"max_msg_size,omitempty"`
     storage: StorageType,          // `json:"storage"`
     num_replicas: usize,           // `json:"num_replicas"`
     no_ack: Option<bool>,          // `json:"no_ack,omitempty"`
     template_owner: Option<String>, // `json:"template_owner,omitempty"`
-    duplicate_window: Option<Duration>, // `json:"duplicate_window,omitempty"`
+    duplicate_window: Option<isize>, // `json:"duplicate_window,omitempty"`
 }
 
 /// StreamInfo shows config and current state for this stream.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct StreamInfo {
+    r#type: String,
+    #[serde(default)]
+    error: String,
+    #[serde(default)]
     config: StreamConfig, //`json:"config"`
-    #[serde(with = "humantime_serde")]
-    created: SystemTime, //`json:"created"`
-    state: StreamState,   //`json:"state"`
+    created: DateTime<Utc>, //`json:"created"`
+    state: StreamState,     //`json:"state"`
 }
 
 // StreamStats is information about the given stream.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct StreamState {
-    msgs: u64,      // `json:"messages"`
-    bytes: u64,     // `json:"bytes"`
-    first_seq: u64, // `json:"first_seq"`
-    #[serde(with = "humantime_serde")]
-    first_ts: SystemTime, // `json:"first_ts"`
-    last_seq: u64,  // `json:"last_seq"`
-    #[serde(with = "humantime_serde")]
-    last_ts: SystemTime, // `json:"last_ts"`
-    consumer_count: usize, // `json:"consumer_count"`
+    #[serde(default)]
+    msgs: u64, // `json:"messages"`
+    bytes: u64,             // `json:"bytes"`
+    first_seq: u64,         // `json:"first_seq"`
+    first_ts: String,       // `json:"first_ts"`
+    last_seq: u64,          // `json:"last_seq"`
+    last_ts: DateTime<Utc>, // `json:"last_ts"`
+    consumer_count: usize,  // `json:"consumer_count"`
 }
 
 // RetentionPolicy determines how messages in a set are retained.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum RetentionPolicy {
     // LimitsPolicy (default) means that messages are retained until any given limit is reached.
     // This could be one of MaxMsgs, MaxBytes, or MaxAge.
+    #[serde(rename = "limits")]
     LimitsPolicy = 0,
     // InterestPolicy specifies that when all known observables have acknowledged a message it can be removed.
+    #[serde(rename = "interest")]
     InterestPolicy = 1,
     // WorkQueuePolicy specifies that when the first worker or subscriber acknowledges the message it can be removed.
+    #[serde(rename = "workqueue")]
     WorkQueuePolicy = 2,
+}
+
+impl Default for RetentionPolicy {
+    fn default() -> RetentionPolicy {
+        RetentionPolicy::LimitsPolicy
+    }
 }
 
 // Discard Policy determines how we proceed when limits of messages or bytes are hit. The default, DicscardOld will
 // remove older messages. DiscardNew will fail to store the new message.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum DiscardPolicy {
     // DiscardOld will remove older messages to return to the limits.
+    #[serde(rename = "old")]
     DiscardOld = 0,
     //DiscardNew will error on a StoreMsg call
+    #[serde(rename = "new")]
     DiscardNew = 1,
 }
 
+impl Default for DiscardPolicy {
+    fn default() -> DiscardPolicy {
+        DiscardPolicy::DiscardOld
+    }
+}
+
 // StorageType determines how messages are stored for retention.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum StorageType {
     // FileStorage specifies on disk storage. It's the default.
+    #[serde(rename = "file")]
     FileStorage = 0,
     // MemoryStorage specifies in memory only.
+    #[serde(rename = "memory")]
     MemoryStorage = 1,
 }
 
+impl Default for StorageType {
+    fn default() -> StorageType {
+        StorageType::FileStorage
+    }
+}
+
 // ApiError is included in all Api responses if there was an error.
-#[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct ApiError {
     code: usize,                 // `json:"code"`
     description: Option<String>, // `json:"description,omitempty"`
 }
 
 // ApiResponse is a standard response from the JetStream JSON Api
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct ApiResponse {
     r#type: String,          // `json:"type"`
     error: Option<ApiError>, // `json:"error,omitempty"`
 }
 
 // AccountLimits is for the information about
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct AccountLimits {
     max_memory: u64,      // `json:"max_memory"`
     max_storage: u64,     // `json:"max_storage"`
@@ -251,7 +287,7 @@ struct AccountLimits {
 }
 
 // AccountStats returns current statistics about the account's JetStream usage.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct AccountStats {
     memory: u64,           // `json:"memory"`
     storage: u64,          // `json:"storage"`
@@ -260,7 +296,7 @@ struct AccountStats {
 }
 
 ///
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PubAck {
     stream: String,          // `json:"stream"`
     seq: u64,                // `json:"seq"`
@@ -268,57 +304,55 @@ pub struct PubAck {
 }
 
 ///
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct JSApiConsumerResponse {
     api_response: ApiResponse,
     consumer_info: ConsumerInfo,
 }
 
 ///
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ConsumerInfo {
-    stream_name: String, // `json:"stream_name"`
-    name: String,        // `json:"name"`
-    #[serde(with = "humantime_serde")]
-    created: SystemTime, // `json:"created"`
-    config: ConsumerConfig, // `json:"config"`
+    stream_name: String,     // `json:"stream_name"`
+    name: String,            // `json:"name"`
+    created: DateTime<Utc>,  // `json:"created"`
+    config: ConsumerConfig,  // `json:"config"`
     delivered: SequencePair, // `json:"delivered"`
     ack_floor: SequencePair, // `json:"ack_floor"`
-    num_ack_pending: usize, // `json:"num_ack_pending"`
-    num_redelivered: usize, // `json:"num_redelivered"`
-    num_waiting: usize,  // `json:"num_waiting"`
-    num_pending: u64,    // `json:"num_pending"`
+    num_ack_pending: usize,  // `json:"num_ack_pending"`
+    num_redelivered: usize,  // `json:"num_redelivered"`
+    num_waiting: usize,      // `json:"num_waiting"`
+    num_pending: u64,        // `json:"num_pending"`
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct SequencePair {
     consumer_seq: u64, // `json:"consumer_seq"`
     stream_seq: u64,   // `json:"stream_seq"`
 }
 
 // NextRequest is for getting next messages for pull based consumers.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct NextRequest {
-    #[serde(with = "humantime_serde", skip_serializing_if = "skip_unix_epoch")]
-    expires: SystemTime, // `json:"expires,omitempty"`
-    batch: Option<usize>,  // `json:"batch,omitempty"`
-    no_wait: Option<bool>, //`json:"no_wait,omitempty"`
+    expires: DateTime<Utc>, // `json:"expires,omitempty"`
+    batch: Option<usize>,   // `json:"batch,omitempty"`
+    no_wait: Option<bool>,  //`json:"no_wait,omitempty"`
 }
 
 // ApiPaged includes variables used to create paged responses from the JSON Api
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct ApiPaged {
     total: usize,  // `json:"total"`
     offset: usize, // `json:"offset"`
     limit: usize,  // `json:"limit"`
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct StreamRequest {
     subject: Option<String>, // `json:"subject,omitempty"`
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct JSApiStreamNamesResponse {
     api_response: ApiResponse,
     api_paged: ApiPaged,
@@ -341,7 +375,7 @@ pub struct SubOpts {
 ///
 pub struct PubOpts {
     ctx: Context,
-    ttl: Duration,
+    ttl: isize,
     id: String,
     // Expected last msgId
     lid: String,
@@ -495,7 +529,19 @@ impl Manager {
         //     return resp.StreamInfo, nil
         // }
 
-        todo!()
+        let subject: String = format!("$JS.API.STREAM.INFO.{}", stream);
+        let res_msg = self.nc.request(&subject, "YOOO")?;
+        println!("got response: {:?}", std::str::from_utf8(&res_msg.data));
+        let res: StreamInfo = serde_json::de::from_slice(&res_msg.data)?;
+        /*
+        if let Some(ApiError { code, description }) = res.api_response.error {
+            if let Some(description) = description {
+                return Err(Error::new(ErrorKind::Other, description));
+            }
+        }
+        Ok(res.stream_info)
+        */
+        Ok(res)
     }
 }
 
@@ -1526,3 +1572,18 @@ func (st *StorageType) UnmarshalJSON(data []byte) error {
 }
 
 */
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn round_trip() {
+        let nc = crate::connect("localhost:4222").unwrap();
+        let manager = Manager { nc };
+
+        println!("src/jetstream.rs:1548");
+        dbg!(manager.stream_info("test".into()));
+        println!("src/jetstream.rs:1550");
+    }
+}
