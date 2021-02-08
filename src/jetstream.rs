@@ -568,6 +568,14 @@ impl Manager {
         self.request(&subject, &req)
     }
 
+    /// Update a stream.
+    pub fn update_stream(
+        &self,
+        stream_config: StreamConfig,
+    ) -> io::Result<StreamInfo> {
+        self.add_stream(stream_config)
+    }
+
     /// Query all stream names.
     pub fn stream_names<'a>(&'a self) -> PagedIterator<'a, String> {
         PagedIterator {
@@ -617,6 +625,24 @@ impl Manager {
         }
         let subject = format!("$JS.API.STREAM.PURGE.{}", stream);
         self.request(&subject, b"")
+    }
+
+    /// Delete message in a stream.
+    pub fn delete_message<S: AsRef<str>>(
+        &self,
+        stream: S,
+        sequence_number: u64,
+    ) -> io::Result<()> {
+        let stream: &str = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+        let subject = format!("$JS.API.STREAM.MSG.DELETE.{}", stream);
+        let req = format!("{{ seq: {} }}", sequence_number);
+        self.request(&subject, req.as_bytes())
     }
 
     /// Delete stream.
