@@ -503,54 +503,6 @@ impl Manager {
         self.request(&subject, &req)
     }
 
-    /// Create a consumer.
-    pub fn add_consumer<S, C>(
-        &self,
-        stream: S,
-        cfg: C,
-    ) -> io::Result<ConsumerInfo>
-    where
-        S: AsRef<str>,
-        ConsumerConfig: From<C>,
-    {
-        let mut config = ConsumerConfig::from(cfg);
-        let stream = stream.as_ref();
-        if stream.is_empty() {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "the stream name must not be empty",
-            ));
-        }
-
-        let subject = if let Some(durable_name) = &config.durable_name {
-            if durable_name.is_empty() {
-                config.durable_name = None;
-                format!("$JS.API.CONSUMER.CREATE.{}", stream)
-            } else {
-                format!(
-                    "$JS.API.CONSUMER.DURABLE.CREATE.{}.{}",
-                    stream, durable_name
-                )
-            }
-        } else {
-            format!("$JS.API.CONSUMER.CREATE.{}", stream)
-        };
-
-        let req = JSApiCreateConsumerRequest {
-            stream_name: stream.into(),
-            config,
-        };
-
-        let ser_req = serde_json::ser::to_vec(&req)?;
-
-        self.request(&subject, &ser_req)
-    }
-
-    /// Query stream information.
-    pub fn account_info(&self) -> io::Result<AccountInfo> {
-        self.request("$JS.API.INFO", b"")
-    }
-
     /// Query all stream names.
     pub fn stream_names(&self) -> io::Result<StreamNamesResponse> {
         self.request("$JS.API.STREAM.NAMES", b"")
@@ -598,7 +550,81 @@ impl Manager {
         self.request(&subject, b"")
     }
 
-    /// Query stream information.
+    /// Create a consumer.
+    pub fn add_consumer<S, C>(
+        &self,
+        stream: S,
+        cfg: C,
+    ) -> io::Result<ConsumerInfo>
+    where
+        S: AsRef<str>,
+        ConsumerConfig: From<C>,
+    {
+        let mut config = ConsumerConfig::from(cfg);
+        let stream = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+
+        let subject = if let Some(durable_name) = &config.durable_name {
+            if durable_name.is_empty() {
+                config.durable_name = None;
+                format!("$JS.API.CONSUMER.CREATE.{}", stream)
+            } else {
+                format!(
+                    "$JS.API.CONSUMER.DURABLE.CREATE.{}.{}",
+                    stream, durable_name
+                )
+            }
+        } else {
+            format!("$JS.API.CONSUMER.CREATE.{}", stream)
+        };
+
+        let req = JSApiCreateConsumerRequest {
+            stream_name: stream.into(),
+            config,
+        };
+
+        let ser_req = serde_json::ser::to_vec(&req)?;
+
+        self.request(&subject, &ser_req)
+    }
+
+    /// Delete a consumer.
+    pub fn delete_consumer<S, C>(
+        &self,
+        stream: S,
+        consumer: C,
+    ) -> io::Result<ConsumerInfo>
+    where
+        S: AsRef<str>,
+        C: AsRef<str>,
+    {
+        let stream = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+        let consumer = stream.as_ref();
+        if consumer.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the consumer name must not be empty",
+            ));
+        }
+
+        let subject =
+            format!("$JS.API.CONSUMER.DELETE.{}.{}", stream, consumer);
+
+        self.request(&subject, b"")
+    }
+
+    /// Query consumer information.
     pub fn consumer_info<S1, S2>(
         &self,
         stream: S1,
@@ -619,6 +645,11 @@ impl Manager {
         let subject: String =
             format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
         self.request(&subject, b"")
+    }
+
+    /// Query account information.
+    pub fn account_info(&self) -> io::Result<AccountInfo> {
+        self.request("$JS.API.INFO", b"")
     }
 
     fn request<Res>(&self, subject: &str, req: &[u8]) -> io::Result<Res>
