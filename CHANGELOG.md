@@ -1,3 +1,10 @@
+# 0.9.3
+
+## Improvements
+
+- #141 use TCP_NODELAY on the connection to the server.
+- #144 support multiple clients in the test server.
+
 # 0.9.2
 
 ## Bug Fixes
