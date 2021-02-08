@@ -13,9 +13,12 @@
 
 #![allow(unused)]
 //! Jetstream support
-use std::io::{self, Error, ErrorKind};
+use std::{
+    io::{self, Error, ErrorKind},
+    time::UNIX_EPOCH,
+};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime as ChronoDateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::Connection as NatsClient;
@@ -43,6 +46,30 @@ const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
 
 // JSAPIStreamCreateT is the endpoint to create new streams.
 const JS_API_STREAM_CREATE_T: &str = "STREAM.CREATE.%s";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DateTime(ChronoDateTime<Utc>);
+
+// ApiResponse is a standard response from the JetStream JSON Api
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum ApiResponse<T> {
+    Ok(T),
+    Err { r#type: String, error: ApiError },
+}
+
+// ApiError is included in all Api responses if there was an error.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ApiError {
+    code: usize,                 // `json:"code"`
+    description: Option<String>, // `json:"description,omitempty"`
+}
+
+impl Default for DateTime {
+    fn default() -> DateTime {
+        DateTime(UNIX_EPOCH.into())
+    }
+}
 
 ///
 pub struct Client {
@@ -78,13 +105,6 @@ pub struct Chan<A>(A);
 pub struct JSApiCreateConsumerRequest {
     stream_name: String,
     config: ConsumerConfig,
-}
-
-/// JsApiStreamCreateResponse stream creation.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct JsApiStreamCreateResponse {
-    api_response: ApiResponse,
-    stream_info: StreamInfo,
 }
 
 // DeliverPolicy determines how the consumer should select the first message to deliver.
@@ -146,7 +166,7 @@ pub struct ConsumerConfig {
     deliver_subject: Option<String>, // `json:"deliver_subject,omitempty"`
     deliver_policy: DeliverPolicy, // `json:"deliver_policy"`
     opt_start_seq: Option<u64>,   // `json:"opt_start_seq,omitempty"`
-    opt_start_time: Option<DateTime<Utc>>, // `json:"opt_start_time,omitempty"`
+    opt_start_time: Option<DateTime>, // `json:"opt_start_time,omitempty"`
     ack_policy: AckPolicy,        // `json:"ack_policy"`
     ack_wait: Option<isize>,      // `json:"ack_wait,omitempty"`
     max_deliver: Option<u64>,     // `json:"max_deliver,omitempty"`
@@ -187,8 +207,8 @@ pub struct StreamInfo {
     error: String,
     #[serde(default)]
     config: StreamConfig, //`json:"config"`
-    created: DateTime<Utc>, //`json:"created"`
-    state: StreamState,     //`json:"state"`
+    created: DateTime,  //`json:"created"`
+    state: StreamState, //`json:"state"`
 }
 
 // StreamStats is information about the given stream.
@@ -196,12 +216,12 @@ pub struct StreamInfo {
 struct StreamState {
     #[serde(default)]
     msgs: u64, // `json:"messages"`
-    bytes: u64,             // `json:"bytes"`
-    first_seq: u64,         // `json:"first_seq"`
-    first_ts: String,       // `json:"first_ts"`
-    last_seq: u64,          // `json:"last_seq"`
-    last_ts: DateTime<Utc>, // `json:"last_ts"`
-    consumer_count: usize,  // `json:"consumer_count"`
+    bytes: u64,            // `json:"bytes"`
+    first_seq: u64,        // `json:"first_seq"`
+    first_ts: String,      // `json:"first_ts"`
+    last_seq: u64,         // `json:"last_seq"`
+    last_ts: DateTime,     // `json:"last_ts"`
+    consumer_count: usize, // `json:"consumer_count"`
 }
 
 // RetentionPolicy determines how messages in a set are retained.
@@ -263,20 +283,6 @@ impl Default for StorageType {
     }
 }
 
-// ApiError is included in all Api responses if there was an error.
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-struct ApiError {
-    code: usize,                 // `json:"code"`
-    description: Option<String>, // `json:"description,omitempty"`
-}
-
-// ApiResponse is a standard response from the JetStream JSON Api
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct ApiResponse {
-    r#type: String,          // `json:"type"`
-    error: Option<ApiError>, // `json:"error,omitempty"`
-}
-
 // AccountLimits is for the information about
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct AccountLimits {
@@ -306,7 +312,6 @@ pub struct PubAck {
 ///
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct JSApiConsumerResponse {
-    api_response: ApiResponse,
     consumer_info: ConsumerInfo,
 }
 
@@ -315,7 +320,7 @@ struct JSApiConsumerResponse {
 pub struct ConsumerInfo {
     stream_name: String,     // `json:"stream_name"`
     name: String,            // `json:"name"`
-    created: DateTime<Utc>,  // `json:"created"`
+    created: DateTime,       // `json:"created"`
     config: ConsumerConfig,  // `json:"config"`
     delivered: SequencePair, // `json:"delivered"`
     ack_floor: SequencePair, // `json:"ack_floor"`
@@ -334,9 +339,9 @@ struct SequencePair {
 // NextRequest is for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct NextRequest {
-    expires: DateTime<Utc>, // `json:"expires,omitempty"`
-    batch: Option<usize>,   // `json:"batch,omitempty"`
-    no_wait: Option<bool>,  //`json:"no_wait,omitempty"`
+    expires: DateTime,     // `json:"expires,omitempty"`
+    batch: Option<usize>,  // `json:"batch,omitempty"`
+    no_wait: Option<bool>, //`json:"no_wait,omitempty"`
 }
 
 // ApiPaged includes variables used to create paged responses from the JSON Api
@@ -352,12 +357,14 @@ struct StreamRequest {
     subject: Option<String>, // `json:"subject,omitempty"`
 }
 
+/*
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct JSApiStreamNamesResponse {
     api_response: ApiResponse,
     api_paged: ApiPaged,
     streams: Vec<String>, // `json:"streams"`
 }
+*/
 
 ///
 pub struct SubOpts {
@@ -458,14 +465,18 @@ impl Manager {
         let req: Vec<u8> = serde_json::ser::to_vec(&cfg)?;
         let subject: String = format!("STREAM.CREATE.{}", cfg.name);
         let res_msg = self.nc.request(&subject, req)?;
-        let res: JsApiStreamCreateResponse =
+        let res: ApiResponse<StreamInfo> =
             serde_json::de::from_slice(&res_msg.data)?;
-        if let Some(ApiError { code, description }) = res.api_response.error {
-            if let Some(description) = description {
-                return Err(Error::new(ErrorKind::Other, description));
+        match res {
+            ApiResponse::Ok(stream_info) => Ok(stream_info),
+            ApiResponse::Err { error, .. } => {
+                if let Some(desc) = error.description {
+                    Err(Error::new(ErrorKind::Other, desc))
+                } else {
+                    Err(Error::new(ErrorKind::Other, "unknown"))
+                }
             }
         }
-        Ok(res.stream_info)
     }
 
     /// Create a consumer.
@@ -530,9 +541,10 @@ impl Manager {
         // }
 
         let subject: String = format!("$JS.API.STREAM.INFO.{}", stream);
-        let res_msg = self.nc.request(&subject, "YOOO")?;
+        let res_msg = self.nc.request(&subject, "")?;
         println!("got response: {:?}", std::str::from_utf8(&res_msg.data));
-        let res: StreamInfo = serde_json::de::from_slice(&res_msg.data)?;
+        let res: ApiResponse<StreamInfo> =
+            serde_json::de::from_slice(&res_msg.data)?;
         /*
         if let Some(ApiError { code, description }) = res.api_response.error {
             if let Some(description) = description {
@@ -541,7 +553,16 @@ impl Manager {
         }
         Ok(res.stream_info)
         */
-        Ok(res)
+        match res {
+            ApiResponse::Ok(stream_info) => Ok(stream_info),
+            ApiResponse::Err { error, .. } => {
+                if let Some(desc) = error.description {
+                    Err(Error::new(ErrorKind::Other, desc))
+                } else {
+                    Err(Error::new(ErrorKind::Other, "unknown"))
+                }
+            }
+        }
     }
 }
 
