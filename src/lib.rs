@@ -184,6 +184,8 @@ mod connector;
 mod headers;
 #[cfg(feature = "jetstream")]
 pub mod jetstream;
+#[cfg(feature = "jetstream")]
+pub mod jetstream_types;
 mod message;
 mod options;
 mod proto;
