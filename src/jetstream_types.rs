@@ -51,7 +51,7 @@ impl From<&str> for ConsumerConfig {
     }
 }
 
-/// StreamConfig will determine the properties for a stream.
+/// `StreamConfig` determines the properties for a stream.
 /// There are sensible defaults for most. If no subjects are
 /// given the name will be used as the only subject.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -81,7 +81,7 @@ impl From<&str> for StreamConfig {
     }
 }
 
-/// StreamInfo shows config and current state for this stream.
+/// Shows config and current state for this stream.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
     pub r#type: String,
@@ -90,7 +90,7 @@ pub struct StreamInfo {
     pub state: StreamState,
 }
 
-// StreamStats is information about the given stream.
+/// information about the given stream.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamState {
     #[serde(default)]
@@ -107,27 +107,27 @@ pub struct StreamState {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum DeliverPolicy {
-    // DeliverAllPolicy will be the default so can be omitted from the request.
+    // All will be the default so can be omitted from the request.
     #[serde(rename = "all")]
-    DeliverAllPolicy = 0,
-    // DeliverLastPolicy will start the consumer with the last sequence received.
+    All = 0,
+    // Last will start the consumer with the last sequence received.
     #[serde(rename = "last")]
-    DeliverLastPolicy = 1,
-    // DeliverNewPolicy will only deliver new messages that are sent
+    Last = 1,
+    // New will only deliver new messages that are sent
     // after the consumer is created.
     #[serde(rename = "new")]
-    DeliverNewPolicy = 2,
-    // DeliverByStartSequencePolicy will look for a defined starting sequence to start.
+    New = 2,
+    // ByStartSequence will look for a defined starting sequence to start.
     #[serde(rename = "by_start_sequence")]
-    DeliverByStartSequencePolicy = 3,
+    ByStartSequence = 3,
     // StartTime will select the first messsage with a timestamp >= to StartTime.
     #[serde(rename = "by_start_time")]
-    DeliverByStartTimePolicy = 4,
+    ByStartTime = 4,
 }
 
 impl Default for DeliverPolicy {
     fn default() -> DeliverPolicy {
-        DeliverPolicy::DeliverAllPolicy
+        DeliverPolicy::All
     }
 }
 
@@ -135,18 +135,18 @@ impl Default for DeliverPolicy {
 #[repr(u8)]
 pub enum AckPolicy {
     #[serde(rename = "none")]
-    AckNone = 0,
+    None = 0,
     #[serde(rename = "all")]
-    AckAll = 1,
+    All = 1,
     #[serde(rename = "explicit")]
-    AckExplicit = 2,
+    Explicit = 2,
     // For setting
-    AckPolicyNotSet = 99,
+    PolicyNotSet = 99,
 }
 
 impl Default for AckPolicy {
     fn default() -> AckPolicy {
-        AckPolicy::AckExplicit
+        AckPolicy::Explicit
     }
 }
 
@@ -169,21 +169,21 @@ impl Default for ReplayPolicy {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum RetentionPolicy {
-    // LimitsPolicy (default) means that messages are retained until any given limit is reached.
+    // Limits (default) means that messages are retained until any given limit is reached.
     // This could be one of MaxMsgs, MaxBytes, or MaxAge.
     #[serde(rename = "limits")]
-    LimitsPolicy = 0,
-    // InterestPolicy specifies that when all known observables have acknowledged a message it can be removed.
+    Limits = 0,
+    // Interest specifies that when all known observables have acknowledged a message it can be removed.
     #[serde(rename = "interest")]
-    InterestPolicy = 1,
-    // WorkQueuePolicy specifies that when the first worker or subscriber acknowledges the message it can be removed.
+    Interest = 1,
+    // WorkQueue specifies that when the first worker or subscriber acknowledges the message it can be removed.
     #[serde(rename = "workqueue")]
-    WorkQueuePolicy = 2,
+    WorkQueue = 2,
 }
 
 impl Default for RetentionPolicy {
     fn default() -> RetentionPolicy {
-        RetentionPolicy::LimitsPolicy
+        RetentionPolicy::Limits
     }
 }
 
@@ -206,7 +206,7 @@ impl Default for DiscardPolicy {
     }
 }
 
-// StorageType determines how messages are stored for retention.
+/// determines how messages are stored for retention.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum StorageType {
@@ -224,7 +224,6 @@ impl Default for StorageType {
     }
 }
 
-// AccountLimits is for the information about
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountLimits {
     pub max_memory: i64,
@@ -233,7 +232,7 @@ pub struct AccountLimits {
     pub max_consumers: i64,
 }
 
-// AccountStats returns current statistics about the account's JetStream usage.
+/// returns current statistics about the account's `JetStream` usage.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountStats {
     pub memory: u64,
@@ -242,7 +241,6 @@ pub struct AccountStats {
     pub limits: AccountLimits,
 }
 
-///
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PubAck {
     pub stream: String,
@@ -250,7 +248,6 @@ pub struct PubAck {
     pub duplicate: Option<bool>,
 }
 
-///
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerInfo {
     pub r#type: String,
@@ -278,7 +275,7 @@ pub struct SequencePair {
     pub stream_seq: u64,
 }
 
-// NextRequest is for getting next messages for pull based consumers.
+/// for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct NextRequest {
     pub expires: DateTime,
@@ -287,11 +284,11 @@ pub struct NextRequest {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct StreamRequest {
+pub(crate) struct StreamRequest {
     pub subject: Option<String>,
 }
 
-///
+/// options for subscription
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct SubOpts {
     // For attaching.
@@ -305,7 +302,7 @@ pub struct SubOpts {
     pub cfg: ConsumerConfig,
 }
 
-///
+/// Options for publishing
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PubOpts {
     pub ttl: isize,
@@ -318,7 +315,7 @@ pub struct PubOpts {
     pub seq: u64,
 }
 
-/// AccountInfo contains info about the JetStream usage from the current account.
+/// contains info about the `JetStream` usage from the current account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct AccountInfo {
     pub r#type: String,
@@ -330,7 +327,7 @@ pub struct AccountInfo {
     pub limits: AccountLimits,
 }
 
-/// ApiStats reports on API calls to JetStream for this account.
+/// reports on API calls to `JetStream` for this account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct ApiStats {
     pub total: u64,

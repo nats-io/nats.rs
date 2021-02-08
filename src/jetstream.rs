@@ -111,11 +111,11 @@ where
         self.offset += i64::try_from(items.len()).unwrap();
         self.items = items;
 
-        if !self.items.is_empty() {
-            Some(Ok(self.items.pop_front().unwrap()))
-        } else {
+        if self.items.is_empty() {
             self.done = true;
             None
+        } else {
+            Some(Ok(self.items.pop_front().unwrap()))
         }
     }
 }
