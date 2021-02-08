@@ -26,18 +26,6 @@ use crate::Connection as NatsClient;
 // Request API subjects for JetStream.
 const JS_DEFAULT_API_PREFIX: &str = "$JS.API.";
 
-// JSAPIAccountInfo is for obtaining general information about JetStream.
-const JS_API_ACCOUNT_INFO: &str = "INFO";
-
-// JSAPIStreams can lookup a stream by subject.
-const JS_API_STREAMS: &str = "STREAM.NAMES";
-
-// JSAPIConsumerCreateT is used to create consumers.
-const JS_API_CONSUMER_CREATE_T: &str = "CONSUMER.CREATE.%s";
-
-// JSAPIDurableCreateT is used to create durable consumers.
-const JS_API_DURABLE_CREATE_T: &str = "CONSUMER.DURABLE.CREATE.%s.%s";
-
 // JSAPIRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
 const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
 
@@ -355,9 +343,12 @@ pub struct NextRequest {
     pub no_wait: Option<bool>, //`json:"no_wait,omitempty"`
 }
 
-// ApiPaged includes variables used to create paged responses from the JSON Api
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
-pub struct ApiPaged {
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct StreamNamesResponse {
+    pub r#type: String,
+    pub streams: Vec<String>,
+
+    // related to paging
     pub total: usize,  // `json:"total"`
     pub offset: usize, // `json:"offset"`
     pub limit: usize,  // `json:"limit"`
@@ -549,6 +540,11 @@ impl Manager {
     /// Query stream information.
     pub fn account_info(&self) -> io::Result<AccountInfo> {
         self.request("$JS.API.INFO", b"")
+    }
+
+    /// Query all stream names.
+    pub fn stream_names(&self) -> io::Result<StreamNamesResponse> {
+        self.request("$JS.API.STREAM.NAMES", b"")
     }
 
     /// Query stream information.
@@ -1395,5 +1391,6 @@ mod test {
         dbg!(manager.stream_info("test2"));
         dbg!(manager.add_consumer("test2", "consumer1"));
         dbg!(manager.consumer_info("test2", "consumer1"));
+        dbg!(manager.stream_names());
     }
 }
