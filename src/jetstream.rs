@@ -27,35 +27,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{jetstream_types::*, Connection as NatsClient};
 
-// JSAPIRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
-const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
-
-///
-#[derive(Debug, Default, Clone)]
-pub struct Subscription {
-    consumer: String,
-    stream: String,
-    deliver: String,
-    pull: i64,
-    durable: bool,
-    attached: bool,
-}
-
-///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Msg;
-
-///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct MsgHandler;
-
-///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Context;
-
-///
-pub struct Chan<A>(A);
-
 // ApiResponse is a standard response from the JetStream JSON Api
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -476,6 +447,32 @@ impl Consumer {
         todo!()
     }
 }
+
+///
+#[derive(Debug, Default, Clone)]
+pub struct Subscription {
+    consumer: String,
+    stream: String,
+    deliver: String,
+    pull: i64,
+    durable: bool,
+    attached: bool,
+}
+
+///
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Msg;
+
+///
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MsgHandler;
+
+///
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Context;
+
+///
+pub struct Chan<A>(A);
 
 #[cfg(test)]
 mod test {
