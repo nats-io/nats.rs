@@ -581,7 +581,7 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let subject = format!("STREAM.PURGE.{}", stream);
+        let subject = format!("$JS.API.STREAM.PURGE.{}", stream);
         self.request(&subject, b"")
     }
 
