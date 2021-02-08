@@ -112,15 +112,20 @@ pub struct JSApiCreateConsumerRequest {
 #[repr(u8)]
 enum DeliverPolicy {
     // DeliverAllPolicy will be the default so can be omitted from the request.
+    #[serde(rename = "all")]
     DeliverAllPolicy = 0,
     // DeliverLastPolicy will start the consumer with the last sequence received.
+    #[serde(rename = "last")]
     DeliverLastPolicy = 1,
     // DeliverNewPolicy will only deliver new messages that are sent
     // after the consumer is created.
+    #[serde(rename = "new")]
     DeliverNewPolicy = 2,
     // DeliverByStartSequencePolicy will look for a defined starting sequence to start.
+    #[serde(rename = "by_start_sequence")]
     DeliverByStartSequencePolicy = 3,
     // StartTime will select the first messsage with a timestamp >= to StartTime.
+    #[serde(rename = "by_start_time")]
     DeliverByStartTimePolicy = 4,
 }
 
@@ -133,8 +138,11 @@ impl Default for DeliverPolicy {
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum AckPolicy {
+    #[serde(rename = "none")]
     AckNone = 0,
+    #[serde(rename = "all")]
     AckAll = 1,
+    #[serde(rename = "explicit")]
     AckExplicit = 2,
     // For setting
     AckPolicyNotSet = 99,
@@ -149,7 +157,9 @@ impl Default for AckPolicy {
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 enum ReplayPolicy {
+    #[serde(rename = "instant")]
     ReplayInstant = 0,
+    #[serde(rename = "original")]
     ReplayOriginal = 1,
 }
 
@@ -165,17 +175,26 @@ pub struct ConsumerConfig {
     durable_name: Option<String>, // `json:"durable_name,omitempty"`
     deliver_subject: Option<String>, // `json:"deliver_subject,omitempty"`
     deliver_policy: DeliverPolicy, // `json:"deliver_policy"`
-    opt_start_seq: Option<u64>,   // `json:"opt_start_seq,omitempty"`
+    opt_start_seq: Option<i64>,   // `json:"opt_start_seq,omitempty"`
     opt_start_time: Option<DateTime>, // `json:"opt_start_time,omitempty"`
     ack_policy: AckPolicy,        // `json:"ack_policy"`
     ack_wait: Option<isize>,      // `json:"ack_wait,omitempty"`
-    max_deliver: Option<u64>,     // `json:"max_deliver,omitempty"`
+    max_deliver: Option<i64>,     // `json:"max_deliver,omitempty"`
     filter_subject: Option<String>, // `json:"filter_subject,omitempty"`
     replay_policy: ReplayPolicy,  // `json:"replay_policy"`
-    rate_limit: Option<u64>, // `json:"rate_limit_bps,omitempty"` // Bits per sec
+    rate_limit: Option<i64>, // `json:"rate_limit_bps,omitempty"` // Bits per sec
     sample_frequency: Option<String>, // `json:"sample_freq,omitempty"`
-    max_waiting: Option<u64>, // `json:"max_waiting,omitempty"`
-    max_ack_pending: Option<u64>, // `json:"max_ack_pending,omitempty"`
+    max_waiting: Option<i64>, // `json:"max_waiting,omitempty"`
+    max_ack_pending: Option<i64>, // `json:"max_ack_pending,omitempty"`
+}
+
+impl From<&str> for ConsumerConfig {
+    fn from(s: &str) -> ConsumerConfig {
+        ConsumerConfig {
+            durable_name: Some(s.to_string()),
+            ..Default::default()
+        }
+    }
 }
 
 /// StreamConfig will determine the properties for a stream.
@@ -212,12 +231,9 @@ impl From<&str> for StreamConfig {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct StreamInfo {
     r#type: String,
-    #[serde(default)]
-    error: String,
-    #[serde(default)]
     config: StreamConfig, //`json:"config"`
-    created: DateTime,  //`json:"created"`
-    state: StreamState, //`json:"state"`
+    created: DateTime,    //`json:"created"`
+    state: StreamState,   //`json:"state"`
 }
 
 // StreamStats is information about the given stream.
@@ -320,13 +336,8 @@ pub struct PubAck {
 
 ///
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct JSApiConsumerResponse {
-    consumer_info: ConsumerInfo,
-}
-
-///
-#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ConsumerInfo {
+    r#type: String,
     stream_name: String,     // `json:"stream_name"`
     name: String,            // `json:"name"`
     created: DateTime,       // `json:"created"`
@@ -337,6 +348,12 @@ pub struct ConsumerInfo {
     num_redelivered: usize,  // `json:"num_redelivered"`
     num_waiting: usize,      // `json:"num_waiting"`
     num_pending: u64,        // `json:"num_pending"`
+    cluster: ClusterInfo,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ClusterInfo {
+    leader: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -481,11 +498,14 @@ impl Manager {
     }
 
     /// Create a consumer.
-    pub fn add_consumer(
+    pub fn add_consumer<C>(
         &self,
         stream: String,
-        cfg: &ConsumerConfig,
-    ) -> io::Result<ConsumerInfo> {
+        cfg: C,
+    ) -> io::Result<ConsumerInfo>
+    where
+        ConsumerConfig: From<C>,
+    {
         // // AddConsumer will add a JetStream consumer.
         // func (js *js) AddConsumer(stream string, cfg *ConsumerConfig) (*ConsumerInfo, error) {
         //     if stream == _EMPTY_ {
@@ -523,9 +543,30 @@ impl Manager {
         todo!()
     }
 
-    /// Stream information.
-    pub fn stream_info(&self, stream: String) -> io::Result<StreamInfo> {
+    /// Query stream information.
+    pub fn stream_info<S: AsRef<str>>(
+        &self,
+        stream_ref: S,
+    ) -> io::Result<StreamInfo> {
+        let stream: &str = stream_ref.as_ref();
         let subject: String = format!("$JS.API.STREAM.INFO.{}", stream);
+        self.request(&subject, b"")
+    }
+
+    /// Query stream information.
+    pub fn consumer_info<S1, S2>(
+        &self,
+        stream_ref: S1,
+        consumer_ref: S2,
+    ) -> io::Result<ConsumerInfo>
+    where
+        S1: AsRef<str>,
+        S2: AsRef<str>,
+    {
+        let stream: &str = stream_ref.as_ref();
+        let consumer: &str = consumer_ref.as_ref();
+        let subject: String =
+            format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
         self.request(&subject, b"")
     }
 
@@ -1586,9 +1627,8 @@ mod test {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
-        println!("src/jetstream.rs:1548");
         dbg!(manager.add_stream("test1"));
-        dbg!(manager.stream_info("test1".into()));
-        println!("src/jetstream.rs:1550");
+        dbg!(manager.stream_info("test1"));
+        dbg!(manager.consumer_info("test1", "conboi1"));
     }
 }
