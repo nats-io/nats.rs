@@ -199,6 +199,15 @@ pub struct StreamConfig {
     duplicate_window: Option<isize>, // `json:"duplicate_window,omitempty"`
 }
 
+impl From<&str> for StreamConfig {
+    fn from(s: &str) -> StreamConfig {
+        StreamConfig {
+            name: s.to_string(),
+            ..Default::default()
+        }
+    }
+}
+
 /// StreamInfo shows config and current state for this stream.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct StreamInfo {
@@ -455,15 +464,19 @@ impl Client {
 
 impl Manager {
     /// Create a stream.
-    pub fn add_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
+    pub fn add_stream<S>(&self, cfg_raw: S) -> io::Result<StreamInfo>
+    where
+        StreamConfig: From<S>,
+    {
+        let cfg: StreamConfig = cfg_raw.into();
         if cfg.name.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("STREAM.CREATE.{}", cfg.name);
-        let req = dbg!(serde_json::ser::to_vec(&cfg)?);
+        let subject: String = format!("$JS.API.STREAM.CREATE.{}", cfg.name);
+        let req = serde_json::ser::to_vec(&cfg)?;
         self.request(&subject, &req)
     }
 
@@ -1574,7 +1587,8 @@ mod test {
         let manager = Manager { nc };
 
         println!("src/jetstream.rs:1548");
-        dbg!(manager.stream_info("test".into()));
+        dbg!(manager.add_stream("test1"));
+        dbg!(manager.stream_info("test1".into()));
         println!("src/jetstream.rs:1550");
     }
 }
