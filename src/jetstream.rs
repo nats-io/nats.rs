@@ -19,7 +19,7 @@ use std::{
 };
 
 use chrono::{DateTime as ChronoDateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::Connection as NatsClient;
 
@@ -462,21 +462,9 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let req: Vec<u8> = serde_json::ser::to_vec(&cfg)?;
         let subject: String = format!("STREAM.CREATE.{}", cfg.name);
-        let res_msg = self.nc.request(&subject, req)?;
-        let res: ApiResponse<StreamInfo> =
-            serde_json::de::from_slice(&res_msg.data)?;
-        match res {
-            ApiResponse::Ok(stream_info) => Ok(stream_info),
-            ApiResponse::Err { error, .. } => {
-                if let Some(desc) = error.description {
-                    Err(Error::new(ErrorKind::Other, desc))
-                } else {
-                    Err(Error::new(ErrorKind::Other, "unknown"))
-                }
-            }
-        }
+        let req = dbg!(serde_json::ser::to_vec(&cfg)?);
+        self.request(&subject, &req)
     }
 
     /// Create a consumer.
@@ -524,35 +512,17 @@ impl Manager {
 
     /// Stream information.
     pub fn stream_info(&self, stream: String) -> io::Result<StreamInfo> {
-        // func (js *js) StreamInfo(stream string) (*StreamInfo, error) {
-        //     csSubj := js.apiSubj(fmt.Sprintf(JSApiStreamInfoT, stream))
-        //     r, err := js.nc.Request(csSubj, nil, js.wait)
-        //     if err != nil {
-        //         return nil, err
-        //     }
-        //     var resp JSApiStreamInfoResponse
-        //     if err := json.Unmarshal(r.Data, &resp); err != nil {
-        //         return nil, err
-        //     }
-        //     if resp.Error != nil {
-        //         return nil, errors.New(resp.Error.Description)
-        //     }
-        //     return resp.StreamInfo, nil
-        // }
-
         let subject: String = format!("$JS.API.STREAM.INFO.{}", stream);
-        let res_msg = self.nc.request(&subject, "")?;
+        self.request(&subject, b"")
+    }
+
+    fn request<Res>(&self, subject: &str, req: &[u8]) -> io::Result<Res>
+    where
+        Res: DeserializeOwned,
+    {
+        let res_msg = self.nc.request(subject, req)?;
         println!("got response: {:?}", std::str::from_utf8(&res_msg.data));
-        let res: ApiResponse<StreamInfo> =
-            serde_json::de::from_slice(&res_msg.data)?;
-        /*
-        if let Some(ApiError { code, description }) = res.api_response.error {
-            if let Some(description) = description {
-                return Err(Error::new(ErrorKind::Other, description));
-            }
-        }
-        Ok(res.stream_info)
-        */
+        let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
             ApiResponse::Err { error, .. } => {
