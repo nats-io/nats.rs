@@ -16,6 +16,9 @@
 //! Experimental Jetstream support enabled via the `jetstream` feature.
 
 use std::{
+    collections::VecDeque,
+    convert::TryFrom,
+    fmt::Debug,
     io::{self, Error, ErrorKind},
     time::UNIX_EPOCH,
 };
@@ -353,14 +356,75 @@ pub struct NextRequest {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct StreamNamesResponse {
+struct PagedRequest {
+    offset: i64,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct PagedResponse<T> {
     pub r#type: String,
-    pub streams: Vec<String>,
+
+    #[serde(alias = "streams", alias = "consumers")]
+    pub items: Option<VecDeque<T>>,
 
     // related to paging
     pub total: usize,
     pub offset: usize,
     pub limit: usize,
+}
+
+#[derive(Debug)]
+pub struct PagedIterator<'a, T> {
+    manager: &'a Manager,
+    subject: String,
+    offset: i64,
+    items: VecDeque<T>,
+    done: bool,
+}
+
+impl<'a, T> Iterator for PagedIterator<'a, T>
+where
+    T: DeserializeOwned + Debug,
+{
+    type Item = io::Result<T>;
+    fn next(&mut self) -> Option<io::Result<T>> {
+        if self.done {
+            return None;
+        }
+        if !self.items.is_empty() {
+            return Some(Ok(self.items.pop_front().unwrap()));
+        }
+        let req = serde_json::ser::to_vec(&PagedRequest {
+            offset: self.offset,
+        })
+        .unwrap();
+
+        let res: io::Result<PagedResponse<T>> =
+            self.manager.request(&self.subject, &req);
+
+        if res.is_err() {
+            self.done = true;
+            return Some(Err(res.unwrap_err()));
+        }
+
+        let mut page = res.unwrap();
+
+        if page.items.is_none() {
+            self.done = true;
+            return None;
+        }
+
+        let items = page.items.take().unwrap();
+
+        self.offset += i64::try_from(items.len()).unwrap();
+        self.items = items;
+
+        if !self.items.is_empty() {
+            Some(Ok(self.items.pop_front().unwrap()))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -481,6 +545,7 @@ impl Consumer {
 }
 
 ///
+#[derive(Debug)]
 pub struct Manager {
     nc: NatsClient,
 }
@@ -504,8 +569,25 @@ impl Manager {
     }
 
     /// Query all stream names.
-    pub fn stream_names(&self) -> io::Result<StreamNamesResponse> {
-        self.request("$JS.API.STREAM.NAMES", b"")
+    pub fn stream_names<'a>(&'a self) -> PagedIterator<'a, String> {
+        PagedIterator {
+            subject: "$JS.API.STREAM.NAMES".into(),
+            manager: self,
+            offset: 0,
+            items: Default::default(),
+            done: false,
+        }
+    }
+
+    /// List all stream names.
+    pub fn list_streams<'a>(&'a self) -> PagedIterator<'a, StreamInfo> {
+        PagedIterator {
+            subject: "$JS.API.STREAM.LIST".into(),
+            manager: self,
+            offset: 0,
+            items: Default::default(),
+            done: false,
+        }
     }
 
     /// Query stream information.
@@ -625,14 +707,14 @@ impl Manager {
     }
 
     /// Query consumer information.
-    pub fn consumer_info<S1, S2>(
+    pub fn consumer_info<S, C>(
         &self,
-        stream: S1,
-        consumer: S2,
+        stream: S,
+        consumer: C,
     ) -> io::Result<ConsumerInfo>
     where
-        S1: AsRef<str>,
-        S2: AsRef<str>,
+        S: AsRef<str>,
+        C: AsRef<str>,
     {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
@@ -645,6 +727,32 @@ impl Manager {
         let subject: String =
             format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
         self.request(&subject, b"")
+    }
+
+    /// List consumers for a stream.
+    pub fn list_consumers<'a, S>(
+        &'a self,
+        stream: S,
+    ) -> io::Result<PagedIterator<'a, ConsumerInfo>>
+    where
+        S: AsRef<str>,
+    {
+        let stream: &str = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+        let subject: String = format!("$JS.API.CONSUMER.LIST.{}", stream);
+
+        Ok(PagedIterator {
+            subject,
+            manager: self,
+            offset: 0,
+            items: Default::default(),
+            done: false,
+        })
     }
 
     /// Query account information.
@@ -1456,7 +1564,10 @@ mod test {
         dbg!(manager.stream_info("test2"));
         dbg!(manager.add_consumer("test2", "consumer1"));
         dbg!(manager.consumer_info("test2", "consumer1"));
-        dbg!(manager.stream_names());
+
+        for name in manager.stream_names() {
+            dbg!(name);
+        }
         dbg!(manager.account_info());
     }
 }
