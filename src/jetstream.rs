@@ -296,10 +296,10 @@ impl Default for StorageType {
 // AccountLimits is for the information about
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountLimits {
-    pub max_memory: u64,      // `json:"max_memory"`
-    pub max_storage: u64,     // `json:"max_storage"`
-    pub max_streams: usize,   // `json:"max_streams"`
-    pub max_consumers: usize, // `json:"max_consumers"`
+    pub max_memory: i64,    // `json:"max_memory"`
+    pub max_storage: i64,   // `json:"max_storage"`
+    pub max_streams: i64,   // `json:"max_streams"`
+    pub max_consumers: i64, // `json:"max_consumers"`
 }
 
 // AccountStats returns current statistics about the account's JetStream usage.
@@ -395,6 +395,25 @@ pub struct PubOpts {
     pub seq: u64,
 }
 
+/// AccountInfo contains info about the JetStream usage from the current account.
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct AccountInfo {
+    pub r#type: String,
+    pub memory: i64,
+    pub storage: i64,
+    pub streams: i64,
+    pub consumers: i64,
+    pub api: ApiStats,
+    pub limits: AccountLimits,
+}
+
+/// ApiStats reports on API calls to JetStream for this account.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
+pub struct ApiStats {
+    pub total: u64,
+    pub errors: u64,
+}
+
 ///
 pub struct Consumer {
     nc: NatsClient,
@@ -468,11 +487,11 @@ pub struct Manager {
 
 impl Manager {
     /// Create a stream.
-    pub fn add_stream<S>(&self, cfg_raw: S) -> io::Result<StreamInfo>
+    pub fn add_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,
     {
-        let cfg: StreamConfig = cfg_raw.into();
+        let cfg: StreamConfig = stream_config.into();
         if cfg.name.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -487,7 +506,7 @@ impl Manager {
     /// Create a consumer.
     pub fn add_consumer<S, C>(
         &self,
-        stream_ref: S,
+        stream: S,
         cfg: C,
     ) -> io::Result<ConsumerInfo>
     where
@@ -495,7 +514,7 @@ impl Manager {
         ConsumerConfig: From<C>,
     {
         let mut config = ConsumerConfig::from(cfg);
-        let stream = stream_ref.as_ref();
+        let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -528,11 +547,16 @@ impl Manager {
     }
 
     /// Query stream information.
+    pub fn account_info(&self) -> io::Result<AccountInfo> {
+        self.request("$JS.API.INFO", b"")
+    }
+
+    /// Query stream information.
     pub fn stream_info<S: AsRef<str>>(
         &self,
-        stream_ref: S,
+        stream: S,
     ) -> io::Result<StreamInfo> {
-        let stream: &str = stream_ref.as_ref();
+        let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -546,21 +570,21 @@ impl Manager {
     /// Query stream information.
     pub fn consumer_info<S1, S2>(
         &self,
-        stream_ref: S1,
-        consumer_ref: S2,
+        stream: S1,
+        consumer: S2,
     ) -> io::Result<ConsumerInfo>
     where
         S1: AsRef<str>,
         S2: AsRef<str>,
     {
-        let stream: &str = stream_ref.as_ref();
+        let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "the stream name must not be empty",
             ));
         }
-        let consumer: &str = consumer_ref.as_ref();
+        let consumer: &str = consumer.as_ref();
         let subject: String =
             format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
         self.request(&subject, b"")
@@ -1212,26 +1236,6 @@ func (sub *Subscription) Poll() error {
     return nc.PublishRequest(reqNext, reply, req)
 }
 
-func (js *js) getConsumerInfo(stream, consumer string) (*ConsumerInfo, error) {
-    // FIXME(dlc) - prefix
-    ccInfoSubj := fmt.Sprintf(JSApiConsumerInfoT, stream, consumer)
-    resp, err := js.nc.Request(js.apiSubj(ccInfoSubj), nil, js.wait)
-    if err != nil {
-        if err == ErrNoResponders {
-            err = ErrJetStreamNotEnabled
-        }
-        return nil, err
-    }
-
-    var info JSApiConsumerResponse
-    if err := json.Unmarshal(resp.Data, &info); err != nil {
-        return nil, err
-    }
-    if info.Error != nil {
-        return nil, errors.New(info.Error.Description)
-    }
-    return info.ConsumerInfo, nil
-}
 
 func (m *Msg) checkReply() (*js, bool, error) {
     if m.Reply == "" {
@@ -1366,80 +1370,6 @@ func parseNum(d string) (n int64) {
     return n
 }
 
-// Additional jetstream structures.
-
-func jsonString(s string) string {
-    return "\"" + s + "\""
-}
-
-func (p *AckPolicy) UnmarshalJSON(data []byte) error {
-    switch string(data) {
-    case jsonString("none"):
-        *p = AckNone
-    case jsonString("all"):
-        *p = AckAll
-    case jsonString("explicit"):
-        *p = AckExplicit
-    default:
-        return fmt.Errorf("can not unmarshal %q", data)
-    }
-
-    return nil
-}
-
-func (p AckPolicy) MarshalJSON() ([]byte, error) {
-    switch p {
-    case AckNone:
-        return json.Marshal("none")
-    case AckAll:
-        return json.Marshal("all")
-    case AckExplicit:
-        return json.Marshal("explicit")
-    default:
-        return nil, fmt.Errorf("unknown acknowlegement policy %v", p)
-    }
-}
-
-func (p AckPolicy) String() string {
-    switch p {
-    case AckNone:
-        return "AckNone"
-    case AckAll:
-        return "AckAll"
-    case AckExplicit:
-        return "AckExplicit"
-    case ackPolicyNotSet:
-        return "Not Initialized"
-    default:
-        return "Unknown AckPolicy"
-    }
-}
-
-
-func (p *ReplayPolicy) UnmarshalJSON(data []byte) error {
-    switch string(data) {
-    case jsonString("instant"):
-        *p = ReplayInstant
-    case jsonString("original"):
-        *p = ReplayOriginal
-    default:
-        return fmt.Errorf("can not unmarshal %q", data)
-    }
-
-    return nil
-}
-
-func (p ReplayPolicy) MarshalJSON() ([]byte, error) {
-    switch p {
-    case ReplayOriginal:
-        return json.Marshal("original")
-    case ReplayInstant:
-        return json.Marshal("instant")
-    default:
-        return nil, fmt.Errorf("unknown replay policy %v", p)
-    }
-}
-
 var (
     AckAck      = []byte("+ACK")
     AckNak      = []byte("-NAK")
@@ -1448,169 +1378,6 @@ var (
     AckTerm     = []byte("+TERM")
 )
 
-
-func (p *DeliverPolicy) UnmarshalJSON(data []byte) error {
-    switch string(data) {
-    case jsonString("all"), jsonString("undefined"):
-        *p = DeliverAllPolicy
-    case jsonString("last"):
-        *p = DeliverLastPolicy
-    case jsonString("new"):
-        *p = DeliverNewPolicy
-    case jsonString("by_start_sequence"):
-        *p = DeliverByStartSequencePolicy
-    case jsonString("by_start_time"):
-        *p = DeliverByStartTimePolicy
-    }
-
-    return nil
-}
-
-func (p DeliverPolicy) MarshalJSON() ([]byte, error) {
-    switch p {
-    case DeliverAllPolicy:
-        return json.Marshal("all")
-    case DeliverLastPolicy:
-        return json.Marshal("last")
-    case DeliverNewPolicy:
-        return json.Marshal("new")
-    case DeliverByStartSequencePolicy:
-        return json.Marshal("by_start_sequence")
-    case DeliverByStartTimePolicy:
-        return json.Marshal("by_start_time")
-    default:
-        return nil, fmt.Errorf("unknown deliver policy %v", p)
-    }
-}
-
-// JSApiStreamCreateResponse stream creation.
-type JSApiStreamCreateResponse struct {
-    ApiResponse
-    *StreamInfo
-}
-
-
-type JSApiStreamInfoResponse = JSApiStreamCreateResponse
-
-
-const (
-    limitsPolicyString    = "limits"
-    interestPolicyString  = "interest"
-    workQueuePolicyString = "workqueue"
-)
-
-func (rp RetentionPolicy) String() string {
-    switch rp {
-    case LimitsPolicy:
-        return "Limits"
-    case InterestPolicy:
-        return "Interest"
-    case WorkQueuePolicy:
-        return "WorkQueue"
-    default:
-        return "Unknown Retention Policy"
-    }
-}
-
-func (rp RetentionPolicy) MarshalJSON() ([]byte, error) {
-    switch rp {
-    case LimitsPolicy:
-        return json.Marshal(limitsPolicyString)
-    case InterestPolicy:
-        return json.Marshal(interestPolicyString)
-    case WorkQueuePolicy:
-        return json.Marshal(workQueuePolicyString)
-    default:
-        return nil, fmt.Errorf("can not marshal %v", rp)
-    }
-}
-
-func (rp *RetentionPolicy) UnmarshalJSON(data []byte) error {
-    switch string(data) {
-    case jsonString(limitsPolicyString):
-        *rp = LimitsPolicy
-    case jsonString(interestPolicyString):
-        *rp = InterestPolicy
-    case jsonString(workQueuePolicyString):
-        *rp = WorkQueuePolicy
-    default:
-        return fmt.Errorf("can not unmarshal %q", data)
-    }
-    return nil
-}
-
-func (dp DiscardPolicy) String() string {
-    switch dp {
-    case DiscardOld:
-        return "DiscardOld"
-    case DiscardNew:
-        return "DiscardNew"
-    default:
-        return "Unknown Discard Policy"
-    }
-}
-
-func (dp DiscardPolicy) MarshalJSON() ([]byte, error) {
-    switch dp {
-    case DiscardOld:
-        return json.Marshal("old")
-    case DiscardNew:
-        return json.Marshal("new")
-    default:
-        return nil, fmt.Errorf("can not marshal %v", dp)
-    }
-}
-
-func (dp *DiscardPolicy) UnmarshalJSON(data []byte) error {
-    switch strings.ToLower(string(data)) {
-    case jsonString("old"):
-        *dp = DiscardOld
-    case jsonString("new"):
-        *dp = DiscardNew
-    default:
-        return fmt.Errorf("can not unmarshal %q", data)
-    }
-    return nil
-}
-
-const (
-    memoryStorageString = "memory"
-    fileStorageString   = "file"
-)
-
-func (st StorageType) String() string {
-    switch st {
-    case MemoryStorage:
-        return strings.Title(memoryStorageString)
-    case FileStorage:
-        return strings.Title(fileStorageString)
-    default:
-        return "Unknown Storage Type"
-    }
-}
-
-func (st StorageType) MarshalJSON() ([]byte, error) {
-    switch st {
-    case MemoryStorage:
-        return json.Marshal(memoryStorageString)
-    case FileStorage:
-        return json.Marshal(fileStorageString)
-    default:
-        return nil, fmt.Errorf("can not marshal %v", st)
-    }
-}
-
-func (st *StorageType) UnmarshalJSON(data []byte) error {
-    switch string(data) {
-    case jsonString(memoryStorageString):
-        *st = MemoryStorage
-    case jsonString(fileStorageString):
-        *st = FileStorage
-    default:
-        return fmt.Errorf("can not unmarshal %q", data)
-    }
-    return nil
-}
 
 */
 
@@ -1623,6 +1390,7 @@ mod test {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
+        dbg!(manager.account_info());
         dbg!(manager.add_stream("test2"));
         dbg!(manager.stream_info("test2"));
         dbg!(manager.add_consumer("test2", "consumer1"));
