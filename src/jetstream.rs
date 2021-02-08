@@ -67,16 +67,6 @@ impl Default for DateTime {
 }
 
 ///
-pub struct Client {
-    nc: NatsClient,
-}
-
-///
-pub struct Manager {
-    nc: NatsClient,
-}
-
-///
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Subscription;
 
@@ -405,7 +395,12 @@ pub struct PubOpts {
     pub seq: u64,
 }
 
-impl Client {
+///
+pub struct Consumer {
+    nc: NatsClient,
+}
+
+impl Consumer {
     /// Publishing messages to JetStream.
     pub fn publish(
         &self,
@@ -464,6 +459,11 @@ impl Client {
     ) -> io::Result<Subscription> {
         todo!()
     }
+}
+
+///
+pub struct Manager {
+    nc: NatsClient,
 }
 
 impl Manager {
