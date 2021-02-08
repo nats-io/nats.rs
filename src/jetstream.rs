@@ -38,14 +38,8 @@ const JS_API_CONSUMER_CREATE_T: &str = "CONSUMER.CREATE.%s";
 // JSAPIDurableCreateT is used to create durable consumers.
 const JS_API_DURABLE_CREATE_T: &str = "CONSUMER.DURABLE.CREATE.%s.%s";
 
-// JSAPIConsumerInfoT is used to create consumers.
-const JS_API_CONSUMER_INFO_T: &str = "CONSUMER.INFO.%s.%s";
-
 // JSAPIRequestNextT is the prefix for the request next message(s) for a consumer in worker/pull mode.
 const JS_API_REQUEST_NEXT_T: &str = "CONSUMER.MSG.NEXT.%s.%s";
-
-// JSAPIStreamCreateT is the endpoint to create new streams.
-const JS_API_STREAM_CREATE_T: &str = "STREAM.CREATE.%s";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct DateTime(ChronoDateTime<Utc>);
@@ -498,49 +492,46 @@ impl Manager {
     }
 
     /// Create a consumer.
-    pub fn add_consumer<C>(
+    pub fn add_consumer<S, C>(
         &self,
-        stream: String,
+        stream_ref: S,
         cfg: C,
     ) -> io::Result<ConsumerInfo>
     where
+        S: AsRef<str>,
         ConsumerConfig: From<C>,
     {
-        // // AddConsumer will add a JetStream consumer.
-        // func (js *js) AddConsumer(stream string, cfg *ConsumerConfig) (*ConsumerInfo, error) {
-        //     if stream == _EMPTY_ {
-        //         return nil, ErrStreamNameRequired
-        //     }
-        //     req, err := json.Marshal(&JSApiCreateConsumerRequest{Stream: stream, Config: cfg})
-        //     if err != nil {
-        //         return nil, err
-        //     }
-        //
-        //     var ccSubj string
-        //     if cfg.Durable != _EMPTY_ {
-        //         ccSubj = fmt.Sprintf(JSApiDurableCreateT, stream, cfg.Durable)
-        //     } else {
-        //         ccSubj = fmt.Sprintf(JSApiConsumerCreateT, stream)
-        //     }
-        //
-        //     resp, err := js.nc.Request(js.apiSubj(ccSubj), req, js.wait)
-        //     if err != nil {
-        //         if err == ErrNoResponders {
-        //             err = ErrJetStreamNotEnabled
-        //         }
-        //         return nil, err
-        //     }
-        //     var info JSApiConsumerResponse
-        //     err = json.Unmarshal(resp.Data, &info)
-        //     if err != nil {
-        //         return nil, err
-        //     }
-        //     if info.Error != nil {
-        //         return nil, errors.New(info.Error.Description)
-        //     }
-        //     return info.ConsumerInfo, nil
-        // }
-        todo!()
+        let mut config = ConsumerConfig::from(cfg);
+        let stream = stream_ref.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+
+        let subject = if let Some(durable_name) = &config.durable_name {
+            if durable_name.is_empty() {
+                config.durable_name = None;
+                format!("$JS.API.CONSUMER.CREATE.{}", stream)
+            } else {
+                format!(
+                    "$JS.API.CONSUMER.DURABLE.CREATE.{}.{}",
+                    stream, durable_name
+                )
+            }
+        } else {
+            format!("$JS.API.CONSUMER.CREATE.{}", stream)
+        };
+
+        let req = JSApiCreateConsumerRequest {
+            stream_name: stream.into(),
+            config,
+        };
+
+        let ser_req = serde_json::ser::to_vec(&req)?;
+
+        self.request(&subject, &ser_req)
     }
 
     /// Query stream information.
@@ -549,6 +540,12 @@ impl Manager {
         stream_ref: S,
     ) -> io::Result<StreamInfo> {
         let stream: &str = stream_ref.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
         let subject: String = format!("$JS.API.STREAM.INFO.{}", stream);
         self.request(&subject, b"")
     }
@@ -564,6 +561,12 @@ impl Manager {
         S2: AsRef<str>,
     {
         let stream: &str = stream_ref.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
         let consumer: &str = consumer_ref.as_ref();
         let subject: String =
             format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
@@ -1627,8 +1630,9 @@ mod test {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
-        dbg!(manager.add_stream("test1"));
-        dbg!(manager.stream_info("test1"));
-        dbg!(manager.consumer_info("test1", "conboi1"));
+        dbg!(manager.add_stream("test2"));
+        dbg!(manager.stream_info("test2"));
+        dbg!(manager.add_consumer("test2", "consumer1"));
+        dbg!(manager.consumer_info("test2", "consumer1"));
     }
 }
