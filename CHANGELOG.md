@@ -1,3 +1,9 @@
+# 0.9.4
+
+## Bug Fixes
+
+- #150 fixed a bug with no_echo.
+
 # 0.9.3
 
 ## Improvements
