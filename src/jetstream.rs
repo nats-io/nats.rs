@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Experimental Jetstream support enabled via the `jetstream` feature.
+//! Experimental `JetStream` support enabled via the `jetstream` feature.
 
 use std::{
     collections::VecDeque,
@@ -27,7 +27,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{jetstream_types::*, Connection as NatsClient};
 
-// ApiResponse is a standard response from the JetStream JSON Api
+/// `ApiResponse` is a standard response from the JetStream JSON Api
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 enum ApiResponse<T> {
@@ -35,7 +35,7 @@ enum ApiResponse<T> {
     Err { r#type: String, error: ApiError },
 }
 
-// ApiError is included in all Api responses if there was an error.
+/// `ApiError` is included in all Api responses if there was an error.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
 struct ApiError {
     code: usize,
@@ -48,7 +48,7 @@ struct PagedRequest {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct PagedResponse<T> {
+struct PagedResponse<T> {
     pub r#type: String,
 
     #[serde(alias = "streams", alias = "consumers")]
@@ -60,6 +60,7 @@ pub struct PagedResponse<T> {
     pub limit: usize,
 }
 
+/// An iterator over paged `JetStream` API operations.
 #[derive(Debug)]
 pub struct PagedIterator<'a, T> {
     manager: &'a Manager,
@@ -121,7 +122,7 @@ where
     }
 }
 
-/// Jetstream management functionality
+/// `JetStream` management functionality
 #[derive(Debug)]
 pub struct Manager {
     pub nc: NatsClient,
@@ -235,11 +236,6 @@ impl Manager {
             ));
         }
 
-        #[derive(Deserialize)]
-        struct DeleteResponse {
-            success: bool,
-        }
-
         let subject = format!("$JS.API.STREAM.DELETE.{}", stream);
         self.request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
@@ -311,11 +307,6 @@ impl Manager {
                 ErrorKind::InvalidData,
                 "the consumer name must not be empty",
             ));
-        }
-
-        #[derive(Deserialize)]
-        struct DeleteResponse {
-            success: bool,
         }
 
         let subject =
@@ -399,13 +390,13 @@ impl Manager {
     }
 }
 
-/// Jetstream reliable consumption functionality
+/// `JetStream` reliable consumption functionality
 pub struct Consumer {
     nc: NatsClient,
 }
 
 impl Consumer {
-    /// Publishing messages to JetStream.
+    /// Publishing messages to `JetStream`.
     pub fn publish(
         &self,
         subject: &str,
@@ -415,7 +406,7 @@ impl Consumer {
         todo!()
     }
 
-    /// Publishing messages to JetStream.
+    /// Publishing messages to `JetStream`.
     pub fn publish_msg(
         &self,
         msg: Msg,
@@ -424,7 +415,7 @@ impl Consumer {
         todo!()
     }
 
-    /// Subscribing to messages in JetStream.
+    /// Subscribing to messages in `JetStream`.
     pub fn subscribe(
         &self,
         subj: String,
@@ -434,7 +425,7 @@ impl Consumer {
         todo!()
     }
 
-    /// Subscribing to messages in JetStream.
+    /// Subscribing to messages in `JetStream`.
     pub fn subscribe_sync(
         &self,
         subj: String,

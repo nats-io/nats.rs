@@ -17,6 +17,11 @@ impl Default for DateTime {
     }
 }
 
+#[derive(Deserialize)]
+pub(crate) struct DeleteResponse {
+    pub success: bool,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CreateConsumerRequest {
     pub stream_name: String,
