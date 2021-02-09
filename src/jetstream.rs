@@ -25,7 +25,7 @@ use std::{
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{jetstream_types::*, Connection as NatsClient};
+use crate::{jetstream_types::*, Connection as NatsClient, Message};
 
 /// `ApiResponse` is a standard response from the `JetStream` JSON Api
 #[derive(Debug, Serialize, Deserialize)]
@@ -405,10 +405,100 @@ impl Manager {
 
 /// `JetStream` reliable consumption functionality
 pub struct Consumer {
-    nc: NatsClient,
+    pub nc: NatsClient,
+    pub stream: String,
+    pub cfg: ConsumerConfig,
 }
 
 impl Consumer {
+    /// Instantiate a new `Consumer`
+    pub fn new<S, C>(nc: NatsClient, stream: S, cfg: C) -> Consumer
+    where
+        S: AsRef<str>,
+        ConsumerConfig: From<C>,
+    {
+        let stream = stream.as_ref().to_string();
+        Consumer {
+            nc,
+            stream,
+            cfg: cfg.into(),
+        }
+    }
+
+    /// Process a single message for a pull-based consumer.
+    pub fn process_batch<R, F: FnMut(&Message) -> R>(
+        &self,
+        batch_size: usize,
+        mut f: F,
+    ) -> io::Result<Vec<R>> {
+        if self.cfg.durable_name.is_none() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "process and process_batch are only usable from \
+                Pull-based Consumers with a durable_name set",
+            ));
+        }
+
+        let subject = format!(
+            "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+            self.stream,
+            self.cfg.durable_name.as_ref().unwrap()
+        );
+
+        let responses =
+            self.nc.request_multi(&subject, batch_size.to_string())?;
+        let mut rets = Vec::with_capacity(batch_size);
+        let mut last = None;
+
+        let mut received = 0;
+        while let Ok(msg) =
+            responses.next_timeout(std::time::Duration::from_millis(100))
+        {
+            let ret = f(&msg);
+
+            if self.cfg.ack_policy == AckPolicy::Explicit {
+                msg.respond(b"")?;
+            }
+
+            rets.push(ret);
+            last = Some(msg);
+            received += 1;
+            if received == batch_size {
+                break;
+            }
+        }
+
+        if let Some(msg) = last {
+            if self.cfg.ack_policy == AckPolicy::All {
+                msg.respond(b"")?
+            }
+        }
+
+        Ok(rets)
+    }
+
+    /// Process a single message for a pull-based consumer.
+    pub fn process<R, F: Fn(&Message) -> R>(&self, f: F) -> io::Result<R> {
+        if self.cfg.durable_name.is_none() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "process and process_batch are only usable from \
+                Pull-based Consumers with a durable_name set",
+            ));
+        }
+
+        let subject = format!(
+            "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+            self.stream,
+            self.cfg.durable_name.as_ref().unwrap()
+        );
+
+        let next = self.nc.request(&subject, b"")?;
+        let ret = f(&next);
+        next.respond(b"")?;
+        Ok(ret)
+    }
+
     /// Publishing messages to `JetStream`.
     pub fn publish(
         &self,
@@ -517,6 +607,13 @@ mod test {
         manager.add_stream("test2")?;
         manager.stream_info("test2")?;
         manager.add_consumer("test2", "consumer1")?;
+
+        let consumer2_cfg = ConsumerConfig {
+            durable_name: Some("consumer2".into()),
+            ack_policy: AckPolicy::Explicit,
+            ..Default::default()
+        };
+        manager.add_consumer("test2", &consumer2_cfg)?;
         manager.consumer_info("test2", "consumer1")?;
 
         for i in 1..=1000 {
@@ -524,6 +621,21 @@ mod test {
         }
 
         assert_eq!(manager.stream_info("test2")?.state.messages, 1000);
+
+        let consumer1 = Consumer::new(manager.nc.clone(), "test2", "consumer1");
+
+        for i in 1..=1000 {
+            consumer1.process(|_msg| {})?;
+        }
+
+        let consumer2 =
+            Consumer::new(manager.nc.clone(), "test2", consumer2_cfg);
+
+        let mut count = 0;
+        consumer2.process_batch(1000, |_msg| {
+            count += 1;
+        })?;
+        assert_eq!(count, 1000);
 
         // sequence numbers start with 1
         for i in 1..=500 {
@@ -555,6 +667,7 @@ mod test {
 
             manager.delete_stream(&stream.config.name)?;
         }
+
         Ok(())
     }
 }

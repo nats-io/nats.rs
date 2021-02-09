@@ -47,6 +47,12 @@ pub struct ConsumerConfig {
     pub max_ack_pending: Option<i64>,
 }
 
+impl From<&ConsumerConfig> for ConsumerConfig {
+    fn from(cc: &ConsumerConfig) -> ConsumerConfig {
+        cc.clone()
+    }
+}
+
 impl From<&str> for ConsumerConfig {
     fn from(s: &str) -> ConsumerConfig {
         ConsumerConfig {
@@ -75,6 +81,12 @@ pub struct StreamConfig {
     pub no_ack: Option<bool>,
     pub template_owner: Option<String>,
     pub duplicate_window: Option<isize>,
+}
+
+impl From<&StreamConfig> for StreamConfig {
+    fn from(sc: &StreamConfig) -> StreamConfig {
+        sc.clone()
+    }
 }
 
 impl From<&str> for StreamConfig {
@@ -134,7 +146,7 @@ impl Default for DeliverPolicy {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum AckPolicy {
     #[serde(rename = "none")]
