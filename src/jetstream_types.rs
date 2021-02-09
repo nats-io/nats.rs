@@ -145,7 +145,7 @@ pub enum AckPolicy {
     #[serde(rename = "explicit")]
     Explicit = 2,
     // For setting
-    PolicyNotSet = 99,
+    NotSet = 99,
 }
 
 impl Default for AckPolicy {
@@ -158,14 +158,14 @@ impl Default for AckPolicy {
 #[repr(u8)]
 pub enum ReplayPolicy {
     #[serde(rename = "instant")]
-    ReplayInstant = 0,
+    Instant = 0,
     #[serde(rename = "original")]
-    ReplayOriginal = 1,
+    Original = 1,
 }
 
 impl Default for ReplayPolicy {
     fn default() -> ReplayPolicy {
-        ReplayPolicy::ReplayInstant
+        ReplayPolicy::Instant
     }
 }
 
@@ -221,17 +221,17 @@ impl Default for DiscardPolicy {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum StorageType {
-    // FileStorage specifies on disk storage. It's the default.
+    // File specifies on disk storage. It's the default.
     #[serde(rename = "file")]
-    FileStorage = 0,
+    File = 0,
     // MemoryStorage specifies in memory only.
     #[serde(rename = "memory")]
-    MemoryStorage = 1,
+    Memory = 1,
 }
 
 impl Default for StorageType {
     fn default() -> StorageType {
-        StorageType::FileStorage
+        StorageType::File
     }
 }
 
