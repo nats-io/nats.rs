@@ -428,7 +428,7 @@ impl Consumer {
         }
     }
 
-    /// Process a single message for a pull-based consumer.
+    /// Process a batch of messages.
     pub fn process_batch<R, F: FnMut(&Message) -> R>(
         &self,
         batch_size: usize,
@@ -484,7 +484,7 @@ impl Consumer {
         Ok(rets)
     }
 
-    /// Process a single message for a pull-based consumer.
+    /// Process a single message.
     pub fn process<R, F: Fn(&Message) -> R>(&self, f: F) -> io::Result<R> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
