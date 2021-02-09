@@ -214,7 +214,7 @@ impl Manager {
         &self,
         stream: S,
         sequence_number: u64,
-    ) -> io::Result<()> {
+    ) -> io::Result<bool> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
@@ -222,9 +222,21 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
+
+        #[derive(Serialize)]
+        struct DeleteRequest {
+            seq: u64,
+        }
+
+        let req = serde_json::ser::to_vec(&DeleteRequest {
+            seq: sequence_number,
+        })
+        .unwrap();
+
         let subject = format!("$JS.API.STREAM.MSG.DELETE.{}", stream);
-        let req = format!("{{ seq: {} }}", sequence_number);
-        self.request(&subject, req.as_bytes())
+
+        self.request::<DeleteResponse>(&subject, &req)
+            .map(|dr| dr.success)
     }
 
     /// Delete stream.
@@ -493,6 +505,9 @@ mod test {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
+        manager.delete_stream("test1");
+        manager.delete_stream("test2");
+
         manager.add_stream(StreamConfig {
             name: "test1".to_string(),
             retention: RetentionPolicy::WorkQueue,
@@ -504,6 +519,22 @@ mod test {
         manager.add_consumer("test2", "consumer1")?;
         manager.consumer_info("test2", "consumer1")?;
 
+        for i in 1..=1000 {
+            manager.nc.publish("test2", format!("{}", i))?;
+        }
+
+        assert_eq!(manager.stream_info("test2")?.state.messages, 1000);
+
+        // sequence numbers start with 1
+        for i in 1..=500 {
+            manager.delete_message("test2", i)?;
+        }
+
+        assert_eq!(manager.stream_info("test2")?.state.messages, 500);
+
+        dbg!(manager.account_info());
+
+        // cleanup
         let streams: io::Result<Vec<StreamInfo>> =
             manager.list_streams().collect();
 
@@ -516,9 +547,14 @@ mod test {
             }
 
             manager.purge_stream(&stream.config.name)?;
+
+            assert_eq!(
+                manager.stream_info(&stream.config.name)?.state.messages,
+                0
+            );
+
             manager.delete_stream(&stream.config.name)?;
         }
-        dbg!(manager.account_info());
         Ok(())
     }
 }

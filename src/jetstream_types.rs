@@ -97,8 +97,7 @@ pub struct StreamInfo {
 /// information about the given stream.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamState {
-    #[serde(default)]
-    pub msgs: u64,
+    pub messages: u64,
     pub bytes: u64,
     pub first_seq: u64,
     pub first_ts: String,
