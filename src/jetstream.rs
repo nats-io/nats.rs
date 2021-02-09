@@ -79,6 +79,7 @@ where
     T: DeserializeOwned + Debug,
 {
     type Item = io::Result<T>;
+
     fn next(&mut self) -> Option<io::Result<T>> {
         if self.done {
             return None;
@@ -191,7 +192,10 @@ impl Manager {
     }
 
     /// Purge stream messages.
-    pub fn purge_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<()> {
+    pub fn purge_stream<S: AsRef<str>>(
+        &self,
+        stream: S,
+    ) -> io::Result<PurgeResponse> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
@@ -222,7 +226,7 @@ impl Manager {
     }
 
     /// Delete stream.
-    pub fn delete_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<()> {
+    pub fn delete_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<bool> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
@@ -230,8 +234,15 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
+
+        #[derive(Deserialize)]
+        struct DeleteResponse {
+            success: bool,
+        }
+
         let subject = format!("$JS.API.STREAM.DELETE.{}", stream);
-        self.request(&subject, b"")
+        self.request::<DeleteResponse>(&subject, b"")
+            .map(|dr| dr.success)
     }
 
     /// Create a consumer.
@@ -282,7 +293,7 @@ impl Manager {
         &self,
         stream: S,
         consumer: C,
-    ) -> io::Result<ConsumerInfo>
+    ) -> io::Result<bool>
     where
         S: AsRef<str>,
         C: AsRef<str>,
@@ -302,10 +313,16 @@ impl Manager {
             ));
         }
 
+        #[derive(Deserialize)]
+        struct DeleteResponse {
+            success: bool,
+        }
+
         let subject =
             format!("$JS.API.CONSUMER.DELETE.{}.{}", stream, consumer);
 
-        self.request(&subject, b"")
+        self.request::<DeleteResponse>(&subject, b"")
+            .map(|dr| dr.success)
     }
 
     /// Query consumer information.
@@ -480,18 +497,36 @@ mod test {
 
     #[test]
     #[ignore]
-    fn local_round_trip() {
+    fn local_round_trip() -> io::Result<()> {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
-        dbg!(manager.add_stream("test2"));
-        dbg!(manager.stream_info("test2"));
-        dbg!(manager.add_consumer("test2", "consumer1"));
-        dbg!(manager.consumer_info("test2", "consumer1"));
+        manager.add_stream(StreamConfig {
+            name: "test1".to_string(),
+            retention: RetentionPolicy::WorkQueue,
+            ..Default::default()
+        })?;
 
-        for name in manager.stream_names() {
-            dbg!(name);
+        manager.add_stream("test2")?;
+        manager.stream_info("test2")?;
+        manager.add_consumer("test2", "consumer1")?;
+        manager.consumer_info("test2", "consumer1")?;
+
+        let streams: io::Result<Vec<StreamInfo>> =
+            manager.list_streams().collect();
+
+        for stream in streams? {
+            let consumers: io::Result<Vec<ConsumerInfo>> =
+                manager.list_consumers(&stream.config.name)?.collect();
+
+            for consumer in consumers? {
+                manager.delete_consumer(&stream.config.name, &consumer.name)?;
+            }
+
+            manager.purge_stream(&stream.config.name)?;
+            manager.delete_stream(&stream.config.name)?;
         }
         dbg!(manager.account_info());
+        Ok(())
     }
 }
