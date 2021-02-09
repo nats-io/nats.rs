@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-#![allow(unused)]
 // Copyright 2020 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +18,6 @@ use std::{
     convert::TryFrom,
     fmt::Debug,
     io::{self, Error, ErrorKind},
-    time::UNIX_EPOCH,
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -126,6 +123,7 @@ where
 /// `JetStream` management functionality
 #[derive(Debug)]
 pub struct Manager {
+    /// The underlying NATS client
     pub nc: NatsClient,
 }
 
@@ -405,8 +403,13 @@ impl Manager {
 
 /// `JetStream` reliable consumption functionality
 pub struct Consumer {
+    /// The underlying NATS client
     pub nc: NatsClient,
+
+    /// The stream that this `Consumer` is interested in
     pub stream: String,
+
+    /// The backing configuration for this `Consumer`
     pub cfg: ConsumerConfig,
 }
 
@@ -518,8 +521,8 @@ mod test {
         let nc = crate::connect("localhost:4222").unwrap();
         let manager = Manager { nc };
 
-        manager.delete_stream("test1");
-        manager.delete_stream("test2");
+        let _ = manager.delete_stream("test1");
+        let _ = manager.delete_stream("test2");
 
         manager.add_stream(StreamConfig {
             name: "test1".to_string(),
@@ -548,7 +551,7 @@ mod test {
 
         let consumer1 = Consumer::new(manager.nc.clone(), "test2", "consumer1");
 
-        for i in 1..=1000 {
+        for _ in 1..=1000 {
             consumer1.process(|_msg| {})?;
         }
 
@@ -568,7 +571,7 @@ mod test {
 
         assert_eq!(manager.stream_info("test2")?.state.messages, 500);
 
-        dbg!(manager.account_info());
+        let _ = dbg!(manager.account_info());
 
         // cleanup
         let streams: io::Result<Vec<StreamInfo>> =
