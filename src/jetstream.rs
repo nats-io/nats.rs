@@ -445,8 +445,12 @@ impl Consumer {
             self.cfg.durable_name.as_ref().unwrap()
         );
 
-        let responses =
-            self.nc.request_multi(&subject, batch_size.to_string())?;
+        let responses = if let Some(deliver_subject) = &self.cfg.deliver_subject
+        {
+            self.nc.subscribe(&deliver_subject)?
+        } else {
+            self.nc.request_multi(&subject, batch_size.to_string())?
+        };
         let mut rets = Vec::with_capacity(batch_size);
         let mut last = None;
 
@@ -493,11 +497,17 @@ impl Consumer {
             self.cfg.durable_name.as_ref().unwrap()
         );
 
-        let next = self.nc.request(&subject, b"")?;
+        let next = if let Some(deliver_subject) = &self.cfg.deliver_subject {
+            self.nc.subscribe(&deliver_subject)?.next().unwrap()
+        } else {
+            self.nc.request(&subject, b"")?
+        };
         let ret = f(&next);
         next.respond(b"")?;
         Ok(ret)
     }
+
+    /*
 
     /// Publishing messages to `JetStream`.
     pub fn publish(
@@ -557,6 +567,7 @@ impl Consumer {
     ) -> io::Result<Subscription> {
         todo!()
     }
+    */
 }
 
 ///
@@ -569,21 +580,6 @@ pub struct Subscription {
     durable: bool,
     attached: bool,
 }
-
-///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Msg;
-
-///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct MsgHandler;
-
-///
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Context;
-
-///
-pub struct Chan<A>(A);
 
 #[cfg(test)]
 mod test {
@@ -609,8 +605,9 @@ mod test {
         manager.add_consumer("test2", "consumer1")?;
 
         let consumer2_cfg = ConsumerConfig {
-            durable_name: Some("consumer2".into()),
-            ack_policy: AckPolicy::Explicit,
+            durable_name: Some("consumer2".to_string()),
+            ack_policy: AckPolicy::All,
+            deliver_subject: Some("consumer2_ds".to_string()),
             ..Default::default()
         };
         manager.add_consumer("test2", &consumer2_cfg)?;
