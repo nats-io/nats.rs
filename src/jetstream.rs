@@ -27,7 +27,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{jetstream_types::*, Connection as NatsClient};
 
-/// `ApiResponse` is a standard response from the JetStream JSON Api
+/// `ApiResponse` is a standard response from the `JetStream` JSON Api
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 enum ApiResponse<T> {
@@ -96,12 +96,13 @@ where
         let res: io::Result<PagedResponse<T>> =
             self.manager.request(&self.subject, &req);
 
-        if res.is_err() {
-            self.done = true;
-            return Some(Err(res.unwrap_err()));
-        }
-
-        let mut page = res.unwrap();
+        let mut page = match res {
+            Err(e) => {
+                self.done = true;
+                return Some(Err(e));
+            }
+            Ok(page) => page,
+        };
 
         if page.items.is_none() {
             self.done = true;
@@ -155,7 +156,7 @@ impl Manager {
     }
 
     /// Query all stream names.
-    pub fn stream_names<'a>(&'a self) -> PagedIterator<'a, String> {
+    pub fn stream_names(&self) -> PagedIterator<'_, String> {
         PagedIterator {
             subject: "$JS.API.STREAM.NAMES".into(),
             manager: self,
@@ -166,7 +167,7 @@ impl Manager {
     }
 
     /// List all stream names.
-    pub fn list_streams<'a>(&'a self) -> PagedIterator<'a, StreamInfo> {
+    pub fn list_streams(&self) -> PagedIterator<'_, StreamInfo> {
         PagedIterator {
             subject: "$JS.API.STREAM.LIST".into(),
             manager: self,
@@ -340,10 +341,10 @@ impl Manager {
     }
 
     /// List consumers for a stream.
-    pub fn list_consumers<'a, S>(
-        &'a self,
+    pub fn list_consumers<S>(
+        &self,
         stream: S,
-    ) -> io::Result<PagedIterator<'a, ConsumerInfo>>
+    ) -> io::Result<PagedIterator<'_, ConsumerInfo>>
     where
         S: AsRef<str>,
     {
