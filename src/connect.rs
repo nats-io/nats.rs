@@ -57,6 +57,7 @@ impl ConnectInfo {
         let mut obj = json::object! {
             verbose: self.verbose,
             pedantic: self.pedantic,
+            echo: self.echo,
             lang: self.lang.clone(),
             version: self.version.clone(),
             tls_required: self.tls_required,
@@ -73,9 +74,6 @@ impl ConnectInfo {
         }
         if let Some(s) = &self.name {
             obj.insert("name", s.to_string()).ok()?;
-        }
-        if self.echo {
-            obj.insert("echo", true).ok()?;
         }
         if let Some(s) = &self.user {
             obj.insert("user", s.to_string()).ok()?;
