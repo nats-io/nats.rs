@@ -479,7 +479,7 @@ impl Consumer {
         Ok(Consumer {
             nc,
             stream,
-            cfg: cfg.into(),
+            cfg,
             push_subscriber,
             timeout: std::time::Duration::from_millis(5),
         })
@@ -532,7 +532,7 @@ impl Consumer {
         } else {
             self.timeout
                 .checked_sub(start.elapsed())
-                .unwrap_or(std::time::Duration::default())
+                .unwrap_or_default()
         }) {
             let ret = f(&msg);
 

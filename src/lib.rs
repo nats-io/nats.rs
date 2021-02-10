@@ -188,7 +188,7 @@ mod proto;
 mod secure_wipe;
 
 #[cfg(feature = "jetstream")]
-/// JetStream stream management and consumers.
+/// `JetStream` stream management and consumers.
 pub mod jetstream;
 
 #[cfg(feature = "jetstream")]
