@@ -135,7 +135,7 @@
     clippy::fallible_impl_from,
     clippy::filter_map,
     clippy::filter_map_next,
-    clippy::find_map,
+    clippy::manual_find_map,
     clippy::float_arithmetic,
     clippy::get_unwrap,
     clippy::if_not_else,
