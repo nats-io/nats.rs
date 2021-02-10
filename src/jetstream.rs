@@ -447,7 +447,7 @@ impl Consumer {
 
         let responses = if let Some(deliver_subject) = &self.cfg.deliver_subject
         {
-            self.nc.subscribe(&deliver_subject)?
+            self.nc.subscribe(deliver_subject)?
         } else {
             self.nc.request_multi(&subject, batch_size.to_string())?
         };
@@ -498,7 +498,7 @@ impl Consumer {
         );
 
         let next = if let Some(deliver_subject) = &self.cfg.deliver_subject {
-            self.nc.subscribe(&deliver_subject)?.next().unwrap()
+            self.nc.subscribe(deliver_subject)?.next().unwrap()
         } else {
             self.nc.request(&subject, b"")?
         };
