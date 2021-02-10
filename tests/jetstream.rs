@@ -1,46 +1,53 @@
 #![cfg(feature = "jetstream")]
 use std::io;
 use std::process::{Child, Command};
-use std::sync::{Mutex, MutexGuard};
-
-use once_cell::sync::Lazy;
+use std::sync::atomic::{AtomicU16, Ordering::SeqCst};
 
 struct Server {
     child: Child,
-    _lock: MutexGuard<'static, ()>,
+    port: u16,
+    storage_dir: String,
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+        std::fs::remove_dir_all(&self.storage_dir).unwrap();
     }
 }
 
 /// Starts a local NATS server that gets killed on drop.
 fn server() -> Server {
-    // A lock to make sure there is only one nats-server at a time.
-    static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-    let _lock = LOCK.lock().unwrap();
+    static PORT: AtomicU16 = AtomicU16::new(4333);
+    let port = PORT.fetch_add(1, SeqCst);
+    let storage_dir = format!("jetstream_test_{}", port);
+    let _ = std::fs::remove_dir_all(&storage_dir);
 
     let child = Command::new("nats-server")
-        .args(&["--port", "4446"])
+        .args(&["--port", &port.to_string()])
         .arg("-js")
+        .args(&["-sd", &storage_dir])
         .arg("-V")
         .arg("-D")
         .spawn()
         .unwrap();
 
-    Server { child, _lock }
+    Server {
+        child,
+        port,
+        storage_dir,
+    }
 }
 
 use nats::jetstream::*;
 
 #[test]
 fn jetstream_basics() -> io::Result<()> {
-    let _s = server();
+    let server = server();
 
-    let nc = nats::connect("localhost:4446").unwrap();
+    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
+
     let manager = Manager { nc };
 
     let _ = manager.delete_stream("test1");
