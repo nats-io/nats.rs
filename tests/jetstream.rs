@@ -1,4 +1,4 @@
-//#![cfg(feature = "jetstream")]
+#![cfg(feature = "jetstream")]
 use std::io;
 use std::process::{Child, Command};
 use std::sync::{Mutex, MutexGuard};
