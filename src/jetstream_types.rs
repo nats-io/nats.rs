@@ -410,7 +410,7 @@ pub struct ConsumerInfo {
     pub cluster: ClusterInfo,
 }
 
-/// Information about the consumer's associated JetStream cluster
+/// Information about the consumer's associated `JetStream` cluster
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ClusterInfo {
     /// The leader of the cluster

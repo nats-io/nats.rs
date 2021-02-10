@@ -130,6 +130,11 @@ pub struct Manager {
 }
 
 impl Manager {
+    /// Create a new `Manager`.
+    pub fn new(nc: NatsClient) -> Manager {
+        Manager { nc }
+    }
+
     /// Create a stream.
     pub fn add_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
@@ -408,24 +413,87 @@ pub struct Consumer {
 
     /// The backing configuration for this `Consumer`
     pub cfg: ConsumerConfig,
+
+    /// The backing `Subscription` used if this is a
+    /// push-based consumer.
+    pub push_subscriber: Option<crate::Subscription>,
+
+    /// The amount of time that is waited before erroring
+    /// out during `process` and `process_batch`. Defaults
+    /// to 5ms, which is likely to be far too low for
+    /// workloads spanning distances..
+    pub timeout: std::time::Duration,
 }
 
 impl Consumer {
-    /// Instantiate a new `Consumer`
-    pub fn new<S, C>(nc: NatsClient, stream: S, cfg: C) -> Consumer
+    /// Instantiate a `Consumer`. Performs a check to see if the consumer
+    /// already exists, and creates it if not. If you want to use an existing
+    /// `Consumer` without this check and creation, use the `Consumer::existing`
+    /// method.
+    pub fn new<S, C>(nc: NatsClient, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
     {
         let stream = stream.as_ref().to_string();
-        Consumer {
+        let cfg = ConsumerConfig::from(cfg);
+        let manager = Manager { nc };
+
+        if let Some(durable_name) = &cfg.durable_name {
+            // attempt to create a durable config if it does not yet exist
+            let consumer_info = manager.consumer_info(&stream, durable_name);
+            if let Err(e) = consumer_info {
+                if e.kind() == std::io::ErrorKind::Other {
+                    manager
+                        .add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+                }
+            }
+        } else {
+            // ephemeral consumer
+            manager.add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+        }
+
+        Consumer::existing::<String, ConsumerConfig>(manager.nc, stream, cfg)
+    }
+
+    /// Use an existing `Consumer`
+    pub fn existing<S, C>(
+        nc: NatsClient,
+        stream: S,
+        cfg: C,
+    ) -> io::Result<Consumer>
+    where
+        S: AsRef<str>,
+        ConsumerConfig: From<C>,
+    {
+        let stream = stream.as_ref().to_string();
+        let cfg = ConsumerConfig::from(cfg);
+
+        let push_subscriber =
+            if let Some(deliver_subject) = &cfg.deliver_subject {
+                Some(nc.subscribe(deliver_subject)?)
+            } else {
+                None
+            };
+
+        Ok(Consumer {
             nc,
             stream,
             cfg: cfg.into(),
-        }
+            push_subscriber,
+            timeout: std::time::Duration::from_millis(5),
+        })
     }
 
-    /// Process a batch of messages.
+    /// Process a batch of messages. If `AckPolicy::All` is set,
+    /// this will send a single acknowledgement at the end of
+    /// the batch.
+    ///
+    /// This will wait indefinitely for the first message to arrive,
+    /// but then for subsequent messages it will time out after the
+    /// `Consumer`'s configured `timeout`. If a partial batch is received,
+    /// returning the partial set of processed and acknowledged
+    /// messages.
     pub fn process_batch<R, F: FnMut(&Message) -> R>(
         &self,
         batch_size: usize,
@@ -445,19 +513,27 @@ impl Consumer {
             self.cfg.durable_name.as_ref().unwrap()
         );
 
-        let responses = if let Some(deliver_subject) = &self.cfg.deliver_subject
-        {
-            self.nc.subscribe(deliver_subject)?
+        let mut _sub_opt = None;
+        let responses = if let Some(ps) = self.push_subscriber.as_ref() {
+            ps
         } else {
-            self.nc.request_multi(&subject, batch_size.to_string())?
+            _sub_opt =
+                Some(self.nc.request_multi(&subject, batch_size.to_string())?);
+            _sub_opt.as_ref().unwrap()
         };
+
         let mut rets = Vec::with_capacity(batch_size);
         let mut last = None;
+        let start = std::time::Instant::now();
 
         let mut received = 0;
-        while let Ok(msg) =
-            responses.next_timeout(std::time::Duration::from_millis(100))
-        {
+        while let Ok(msg) = responses.next_timeout(if received == 0 {
+            std::time::Duration::new(std::u64::MAX, 0)
+        } else {
+            self.timeout
+                .checked_sub(start.elapsed())
+                .unwrap_or(std::time::Duration::default())
+        }) {
             let ret = f(&msg);
 
             if self.cfg.ack_policy == AckPolicy::Explicit {
@@ -481,7 +557,7 @@ impl Consumer {
         Ok(rets)
     }
 
-    /// Process a single message.
+    /// Process and acknowledge a single message, waiting indefinitely
     pub fn process<R, F: Fn(&Message) -> R>(&self, f: F) -> io::Result<R> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
@@ -497,13 +573,47 @@ impl Consumer {
             self.cfg.durable_name.as_ref().unwrap()
         );
 
-        let next = if let Some(deliver_subject) = &self.cfg.deliver_subject {
-            self.nc.subscribe(deliver_subject)?.next().unwrap()
+        let next = if let Some(ps) = &self.push_subscriber {
+            ps.next().unwrap()
         } else {
             self.nc.request(&subject, b"")?
         };
         let ret = f(&next);
-        next.respond(b"")?;
+        if self.cfg.ack_policy != AckPolicy::None {
+            next.respond(b"")?;
+        }
+        Ok(ret)
+    }
+
+    /// Process and acknowledge a single message, waiting up to the `Consumer`'s
+    /// configured `timeout` before returning a timeout error.
+    pub fn process_timeout<R, F: Fn(&Message) -> R>(
+        &self,
+        f: F,
+    ) -> io::Result<R> {
+        if self.cfg.durable_name.is_none() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "process and process_batch are only usable from \
+                Pull-based Consumers with a durable_name set",
+            ));
+        }
+
+        let subject = format!(
+            "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+            self.stream,
+            self.cfg.durable_name.as_ref().unwrap()
+        );
+
+        let next = if let Some(ps) = &self.push_subscriber {
+            ps.next_timeout(self.timeout)?
+        } else {
+            self.nc.request(&subject, b"")?
+        };
+        let ret = f(&next);
+        if self.cfg.ack_policy != AckPolicy::None {
+            next.respond(b"")?;
+        }
         Ok(ret)
     }
 }

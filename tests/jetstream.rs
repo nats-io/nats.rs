@@ -43,6 +43,18 @@ fn server() -> Server {
 use nats::jetstream::*;
 
 #[test]
+fn jetstream_create_consumer() -> io::Result<()> {
+    let server = server();
+
+    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
+
+    let manager = Manager::new(nc.clone());
+    manager.add_stream("stream1")?;
+    let consumer = Consumer::new(nc, "stream1", "consumer1")?;
+    Ok(())
+}
+
+#[test]
 fn jetstream_basics() -> io::Result<()> {
     let server = server();
 
@@ -78,13 +90,15 @@ fn jetstream_basics() -> io::Result<()> {
 
     assert_eq!(manager.stream_info("test2")?.state.messages, 1000);
 
-    let consumer1 = Consumer::new(manager.nc.clone(), "test2", "consumer1");
+    let consumer1 =
+        Consumer::existing(manager.nc.clone(), "test2", "consumer1")?;
 
     for _ in 1..=1000 {
         consumer1.process(|_msg| {})?;
     }
 
-    let consumer2 = Consumer::new(manager.nc.clone(), "test2", consumer2_cfg);
+    let consumer2 =
+        Consumer::existing(manager.nc.clone(), "test2", consumer2_cfg)?;
 
     let mut count = 0;
     consumer2.process_batch(1000, |_msg| {
@@ -98,6 +112,11 @@ fn jetstream_basics() -> io::Result<()> {
     }
 
     assert_eq!(manager.stream_info("test2")?.state.messages, 500);
+
+    manager.add_consumer("test2", "consumer3")?;
+
+    let consumer3 =
+        Consumer::existing(manager.nc.clone(), "test2", "consumer3")?;
 
     let _ = dbg!(manager.account_info());
 
