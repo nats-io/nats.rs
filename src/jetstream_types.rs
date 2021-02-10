@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +25,7 @@ pub(crate) struct DeleteResponse {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct CreateConsumerRequest {
+pub(crate) struct CreateConsumerRequest {
     pub stream_name: String,
     pub config: ConsumerConfig,
 }
@@ -85,17 +83,33 @@ pub struct ConsumerConfig {
     /// workloads or workloads where a crashed instance is not required
     /// to recover.
     pub deliver_subject: Option<String>,
+    /// Allows for a variety of options that determine how this consumer will receive messages
     pub deliver_policy: DeliverPolicy,
+    /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
+    /// after this sequence number.
     pub opt_start_seq: Option<i64>,
+    /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
+    /// after this time.
     pub opt_start_time: Option<DateTime>,
+    /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
+    /// How long to allow messages to remain un-acknowledged before attempting redelivery
     pub ack_wait: Option<isize>,
+    /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     pub max_deliver: Option<i64>,
+    /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     pub filter_subject: Option<String>,
+    /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
+    /// The rate of message delivery in bits per second
     pub rate_limit: Option<i64>,
-    pub sample_frequency: Option<String>,
+    /// What percentage of acknowledgements should be samples for observability, 0-100
+    pub sample_frequency: Option<u8>,
+    /// The maximum number of waiting consumers.
     pub max_waiting: Option<i64>,
+    /// The maximum number of unacknowledged messages that may be
+    /// in-flight before pausing sending additional messages to
+    /// this consumer.
     pub max_ack_pending: Option<i64>,
 }
 
@@ -133,7 +147,7 @@ pub struct StreamConfig {
     pub subjects: Option<Vec<String>>,
     /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
     pub retention: RetentionPolicy,
-    // How many Consumers can be defined for a given Stream, -1 for unlimited
+    /// How many Consumers can be defined for a given Stream, -1 for unlimited
     pub max_consumers: isize,
     /// Maximum age of any message in the stream, expressed in microseconds
     pub max_age: isize,
@@ -147,6 +161,7 @@ pub struct StreamConfig {
     pub no_ack: Option<bool>,
     /// The window within which to track duplicate messages.
     pub duplicate_window: Option<isize>,
+    /// The owner of the template associated with this stream.
     pub template_owner: Option<String>,
 }
 
@@ -168,24 +183,34 @@ impl From<&str> for StreamConfig {
 /// Shows config and current state for this stream.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
+    /// The configuration associated with this stream
     pub config: StreamConfig,
+    /// The time that this stream was created
     pub created: DateTime,
+    /// Various metrics associated with this stream
     pub state: StreamState,
 }
 
 /// information about the given stream.
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct StreamState {
+    /// The number of messages contained in this stream
     pub messages: u64,
+    /// The number of bytes of all messages contained in this stream
     pub bytes: u64,
+    /// The lowest sequence number still present in this stream
     pub first_seq: u64,
-    pub first_ts: String,
+    /// The time associated with the oldest message still present in this stream
+    pub first_ts: DateTime,
+    /// The last sequence number assigned to a message in this stream
     pub last_seq: u64,
+    /// The time that the last message was received by this stream
     pub last_ts: DateTime,
+    /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
 }
 
-// DeliverPolicy determines how the consumer should select the first message to deliver.
+/// `DeliverPolicy` determines how the consumer should select the first message to deliver.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum DeliverPolicy {
@@ -193,17 +218,17 @@ pub enum DeliverPolicy {
     /// This is the default.
     #[serde(rename = "all")]
     All = 0,
-    // Last will start the consumer with the last sequence received.
+    /// Last will start the consumer with the last sequence received.
     #[serde(rename = "last")]
     Last = 1,
     /// New will only deliver new messages that are received by the `JetStream` server
     /// after the consumer is created.
     #[serde(rename = "new")]
     New = 2,
-    /// `ByStartSequence` will look for a defined starting sequence to the consumer's configured `opt_start_seq`
+    /// `ByStartSeq` will look for a defined starting sequence to the consumer's configured `opt_start_seq`
     /// parameter.
     #[serde(rename = "by_start_sequence")]
-    ByStartSequence = 3,
+    ByStartSeq = 3,
     /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
@@ -216,17 +241,21 @@ impl Default for DeliverPolicy {
     }
 }
 
+/// Determines whether messages will be acknowledged individually,
+/// in batches, or never.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum AckPolicy {
-    #[serde(rename = "none")]
-    None = 0,
-    #[serde(rename = "all")]
-    All = 1,
+    /// All messages will be individually acknowledged. This is the default.
     #[serde(rename = "explicit")]
     Explicit = 2,
-    // For setting
-    NotSet = 99,
+    /// No messages are acknowledged.
+    #[serde(rename = "none")]
+    None = 0,
+    /// Acknowledges all messages with lower sequence numbers when a later
+    /// message is acknowledged. Useful for "batching" acknowledgement.
+    #[serde(rename = "all")]
+    All = 1,
 }
 
 impl Default for AckPolicy {
@@ -235,11 +264,17 @@ impl Default for AckPolicy {
     }
 }
 
+/// `ReplayPolicy` controls whether messages are sent to a consumer
+/// as quickly as possible or at the rate that they were originally received at.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum ReplayPolicy {
+    /// Sends all messages in a stream to the consumer as quickly as possible. This is the default.
     #[serde(rename = "instant")]
     Instant = 0,
+    /// Sends messages to a consumer in a rate-limited fashion based on the rate of receipt. This
+    /// is useful for replaying traffic in a testing or staging environment based on production
+    /// traffic patterns.
     #[serde(rename = "original")]
     Original = 1,
 }
@@ -253,7 +288,9 @@ impl Default for ReplayPolicy {
 /// The response generated by trying ot purge a stream.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct PurgeResponse {
+    /// Whether the purge request was successful.
     pub success: bool,
+    /// The number of purged messages in a stream.
     pub purged: u64,
 }
 
@@ -261,14 +298,14 @@ pub struct PurgeResponse {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum RetentionPolicy {
-    // Limits (default) means that messages are retained until any given limit is reached.
-    // This could be one of MaxMsgs, MaxBytes, or MaxAge.
+    /// `Limits` (default) means that messages are retained until any given limit is reached.
+    /// This could be one of mesages, bytes, or age.
     #[serde(rename = "limits")]
     Limits = 0,
-    // Interest specifies that when all known observables have acknowledged a message it can be removed.
+    /// `Interest` specifies that when all known observables have acknowledged a message it can be removed.
     #[serde(rename = "interest")]
     Interest = 1,
-    // WorkQueue specifies that when the first worker or subscriber acknowledges the message it can be removed.
+    /// `WorkQueue` specifies that when the first worker or subscriber acknowledges the message it can be removed.
     #[serde(rename = "workqueue")]
     WorkQueue = 2,
 }
@@ -302,10 +339,10 @@ impl Default for DiscardPolicy {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum StorageType {
-    // File specifies on disk storage. It's the default.
+    /// Stream data is kept in files. This is the default.
     #[serde(rename = "file")]
     File = 0,
-    // MemoryStorage specifies in memory only.
+    /// Stream data is kept only in memory.
     #[serde(rename = "memory")]
     Memory = 1,
 }
@@ -316,17 +353,22 @@ impl Default for StorageType {
     }
 }
 
+/// Various limits imposed on a particular account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountLimits {
+    /// Maximum memory for this account (-1 if no limit)
     pub max_memory: i64,
+    /// Maximum storage for this account (-1 if no limit)
     pub max_storage: i64,
+    /// Maximum streams for this account (-1 if no limit)
     pub max_streams: i64,
+    /// Maximum consumers for this account (-1 if no limit)
     pub max_consumers: i64,
 }
 
 /// returns current statistics about the account's `JetStream` usage.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
-pub struct AccountStats {
+pub(crate) struct AccountStats {
     pub memory: u64,
     pub storage: u64,
     pub streams: usize,
@@ -334,41 +376,59 @@ pub struct AccountStats {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct PubAck {
+pub(crate) struct PubAck {
     pub stream: String,
     pub seq: u64,
     pub duplicate: Option<bool>,
 }
 
+/// Information about a consumer
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerInfo {
+    /// The stream being consumed
     pub stream_name: String,
+    /// The consumer's unique name
     pub name: String,
+    /// The time the consumer was created
     pub created: DateTime,
+    /// The consumer's configuration
     pub config: ConsumerConfig,
+    /// Statistics for delivered messages
     pub delivered: SequencePair,
+    /// Statistics for acknowleged messages
     pub ack_floor: SequencePair,
+    /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
+    /// The number of messages re-sent after acknowledgement was not received within the configured
+    /// time threshold
     pub num_redelivered: usize,
+    /// The number of
     pub num_waiting: usize,
+    /// The number of
     pub num_pending: u64,
+    /// Information about the consumer's cluster
     pub cluster: ClusterInfo,
 }
 
+/// Information about the consumer's associated JetStream cluster
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ClusterInfo {
+    /// The leader of the cluster
     pub leader: String,
 }
 
+/// Information about a consumer and the stream it is consuming
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct SequencePair {
+    /// How far along the consumer has progressed
     pub consumer_seq: u64,
+    /// The aggregate for all stream consumers
     pub stream_seq: u64,
 }
 
 /// for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
-pub struct NextRequest {
+pub(crate) struct NextRequest {
     pub expires: DateTime,
     pub batch: Option<usize>,
     pub no_wait: Option<bool>,
@@ -381,7 +441,7 @@ pub(crate) struct StreamRequest {
 
 /// options for subscription
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct SubOpts {
+pub(crate) struct SubOpts {
     // For attaching.
     pub stream: String,
     pub consumer: String,
@@ -395,7 +455,7 @@ pub struct SubOpts {
 
 /// Options for publishing
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct PubOpts {
+pub(crate) struct PubOpts {
     pub ttl: isize,
     pub id: String,
     // Expected last msgId
@@ -409,18 +469,26 @@ pub struct PubOpts {
 /// contains info about the `JetStream` usage from the current account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct AccountInfo {
-    pub r#type: String,
+    pub(crate) r#type: String,
+    /// How much memory is used
     pub memory: i64,
+    /// How much storage is used
     pub storage: i64,
+    /// How many streams exist
     pub streams: i64,
+    /// How many consumers exist
     pub consumers: i64,
+    /// Aggregated API statistics
     pub api: ApiStats,
+    /// Limits placed on the accuont
     pub limits: AccountLimits,
 }
 
 /// reports on API calls to `JetStream` for this account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct ApiStats {
+    /// The total number of API requests
     pub total: u64,
+    /// The total number of API requests resulting in errors
     pub errors: u64,
 }

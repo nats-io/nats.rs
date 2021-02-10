@@ -182,14 +182,17 @@ mod client;
 mod connect;
 mod connector;
 mod headers;
-#[cfg(feature = "jetstream")]
-pub mod jetstream;
-#[cfg(feature = "jetstream")]
-pub mod jetstream_types;
 mod message;
 mod options;
 mod proto;
 mod secure_wipe;
+
+#[cfg(feature = "jetstream")]
+/// JetStream stream management and consumers.
+pub mod jetstream;
+
+#[cfg(feature = "jetstream")]
+mod jetstream_types;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
