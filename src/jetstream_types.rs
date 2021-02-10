@@ -16,6 +16,11 @@ impl Default for DateTime {
     }
 }
 
+#[derive(Serialize)]
+pub(crate) struct DeleteRequest {
+    pub seq: u64,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct DeleteResponse {
     pub success: bool,
@@ -66,20 +71,35 @@ impl From<&str> for ConsumerConfig {
 /// given the name will be used as the only subject.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct StreamConfig {
-    pub subjects: Option<Vec<String>>,
+    /// A name for the Stream. Must not have spaces, tabs or period `.` characters
     pub name: String,
-    pub retention: RetentionPolicy,
-    pub max_consumers: isize,
-    pub max_msgs: i64,
+    /// How large the Stream may become in total bytes before the configured discard policy kicks in
     pub max_bytes: i64,
+    /// How large the Stream may become in total messages before the configured discard policy kicks in
+    pub max_msgs: i64,
+    /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
+    /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
     pub discard: DiscardPolicy,
+    /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
+    /// configured stream `name`.
+    pub subjects: Option<Vec<String>>,
+    /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
+    pub retention: RetentionPolicy,
+    // How many Consumers can be defined for a given Stream, -1 for unlimited
+    pub max_consumers: isize,
+    /// Maximum age of any message in the stream, expressed in microseconds
     pub max_age: isize,
+    /// The largest message that will be accepted by the Stream
     pub max_msg_size: Option<i32>,
+    /// The type of storage backend, `File` (default) and `Memory`
     pub storage: StorageType,
+    /// How many replicas to keep for each message in a clustered JetStream, maximum 5
     pub num_replicas: usize,
+    /// Disables acknowledging messages that are received by the Stream
     pub no_ack: Option<bool>,
-    pub template_owner: Option<String>,
+    /// The window within which to track duplicate messages.
     pub duplicate_window: Option<isize>,
+    pub template_owner: Option<String>,
 }
 
 impl From<&StreamConfig> for StreamConfig {

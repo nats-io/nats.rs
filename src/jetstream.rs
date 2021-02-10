@@ -223,11 +223,6 @@ impl Manager {
             ));
         }
 
-        #[derive(Serialize)]
-        struct DeleteRequest {
-            seq: u64,
-        }
-
         let req = serde_json::ser::to_vec(&DeleteRequest {
             seq: sequence_number,
         })
