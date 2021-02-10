@@ -32,10 +32,58 @@ pub struct CreateConsumerRequest {
     pub config: ConsumerConfig,
 }
 
-/// Configuration for consumers
+/// Configuration for consumers. From a high level, the
+/// `durable_name` and `deliver_subject` fields have a particularly
+/// strong influence on the consumer's overall behavior.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ConsumerConfig {
+    /// Setting `deliver_subject` to `Some(...)` will cause this consumer
+    /// to be "push-based". This is analogous in some ways to a normal
+    /// NATS subscription (rather than a queue subscriber) in that the
+    /// consumer will receive all messages published to the stream that
+    /// the consumer is interested in. Acknowledgement policies such as
+    /// `AckPolicy::None` and `AckPolicy::All` may be enabled for such
+    /// push-based consumers, which reduce the amount of effort spent
+    /// tracking delivery. Combining `AckPolicy::All` with
+    /// `Consumer::process_batch` enables particularly nice throughput
+    /// optimizations.
+    ///
+    /// Setting `deliver_subject` to `None` will cause this consumer to
+    /// be "pull-based", and will require explicit acknowledgement of
+    /// each message. This is analogous in some ways to a normal NATS
+    /// queue subscriber, where a message will be delivered to a single
+    /// subscriber. Pull-based consumers are intended to be used for
+    /// workloads where it is desirable to have a single process receive
+    /// a message. The only valid `ack_policy` for pull-based consumers
+    /// is the default of `AckPolicy::Explicit`, which acknowledges each
+    /// processed message individually. Pull-based consumers may be a
+    /// good choice for work queue-like workloads where you want messages
+    /// to be handled by a single consumer process. Note that it is
+    /// possible to deliver a message to multiple consumers if the
+    /// consumer crashes or is slow to acknowledge the delivered message.
+    /// This is a fundamental behavior present in all distributed systems
+    /// that attempt redelivery when a consumer fails to acknowledge a message.
+    /// This is known as "at least once" message processing. To achieve
+    /// "exactly once" semantics, it is necessary to implement idempotent
+    /// semantics in any system that is written to as a result of processing
+    /// a message.
     pub durable_name: Option<String>,
+
+    /// Setting `durable_name` to `Some(...)` will cause this consumer
+    /// to be "durable". This may be a good choice for workloads that
+    /// benefit from the `JetStream` server or cluster remembering the
+    /// progress of consumers for fault tolerance purposes. If a consumer
+    /// crashes, the `JetStream` server or cluster will remember which
+    /// messages the consumer acknowledged. When the consumer recovers,
+    /// this information will allow the consumer to resume processing
+    /// where it left off. If you're unsure, set this to `Some(...)`.
+    ///
+    /// Setting `durable_name` to `None` will cause this consumer to
+    /// be "ephemeral". This may be a good choice for workloads where
+    /// you don't need the `JetStream` server to remember the consumer's
+    /// progress in the case of a crash, such as certain "high churn"
+    /// workloads or workloads where a crashed instance is not required
+    /// to recover.
     pub deliver_subject: Option<String>,
     pub deliver_policy: DeliverPolicy,
     pub opt_start_seq: Option<i64>,
@@ -141,20 +189,23 @@ pub struct StreamState {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum DeliverPolicy {
-    // All will be the default so can be omitted from the request.
+    /// All causes the consumer to receive the oldest messages still present in the system.
+    /// This is the default.
     #[serde(rename = "all")]
     All = 0,
     // Last will start the consumer with the last sequence received.
     #[serde(rename = "last")]
     Last = 1,
-    // New will only deliver new messages that are sent
-    // after the consumer is created.
+    /// New will only deliver new messages that are received by the `JetStream` server
+    /// after the consumer is created.
     #[serde(rename = "new")]
     New = 2,
-    // ByStartSequence will look for a defined starting sequence to start.
+    /// `ByStartSequence` will look for a defined starting sequence to the consumer's configured `opt_start_seq`
+    /// parameter.
     #[serde(rename = "by_start_sequence")]
     ByStartSequence = 3,
-    // StartTime will select the first messsage with a timestamp >= to StartTime.
+    /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
+    /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime = 4,
 }
