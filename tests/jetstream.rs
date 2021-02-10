@@ -1,5 +1,5 @@
+//#![cfg(feature = "jetstream")]
 use std::io;
-use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::{Mutex, MutexGuard};
 
