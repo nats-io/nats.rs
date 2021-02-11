@@ -12,6 +12,139 @@
 // limitations under the License.
 
 //! Experimental `JetStream` support enabled via the `jetstream` feature.
+//!
+//! # Examples
+//!
+//! Create a new stream with default options:
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use nats::jetstream::Manager;
+//!
+//! let nc = nats::connect("my_server::4222")?;
+//!
+//! let manager = Manager::new(nc);
+//!
+//! // create_stream converts a str into a
+//! // default `StreamConfig`.
+//! manager.create_stream("my_stream")?;
+//!
+//! # Ok(()) }
+//! ```
+//!
+//! Create a new stream with specific options set:
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use nats::jetstream::{Manager, StreamConfig, StorageType};
+//!
+//! let nc = nats::connect("my_server::4222")?;
+//!
+//! let manager = Manager::new(nc);
+//!
+//! manager.create_stream(StreamConfig {
+//!     name: "my_memory_stream".to_string(),
+//!     max_bytes: 5 * 1024 * 1024 * 1024,
+//!     storage: StorageType::Memory,
+//!     ..Default::default()
+//! })?;
+//!
+//! # Ok(()) }
+//! ```
+//!
+//! Create and use a new default consumer (defaults to Pull-based, see the docs for `ConsumerConfig` for how this influences behavior)
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use nats::jetstream::Manager;
+//!
+//! let nc = nats::connect("my_server::4222")?;
+//!
+//! let manager = Manager::new(nc);
+//!
+//! manager.create_stream("my_stream")?;
+//!
+//! manager.create_consumer("my_stream", "my_consumer")?;
+//!
+//! # Ok(()) }
+//! ```
+//!
+//! Create and use a new push-based consumer with batched acknowledgements
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use nats::jetstream::{AckPolicy, ConsumerConfig, Manager};
+//!
+//! let nc = nats::connect("my_server::4222")?;
+//!
+//! let manager = Manager::new(nc);
+//!
+//! manager.create_stream("my_stream")?;
+//!
+//! manager.create_consumer("my_stream", ConsumerConfig {
+//!     durable_name: Some("my_consumer".to_string()),
+//!     deliver_subject: Some("my_push_consumer_subject".to_string()),
+//!     ack_policy: AckPolicy::All,
+//!     ..Default::default()
+//! })?;
+//!
+//! # Ok(()) }
+//! ```
+//!
+//! Consumers can also be created on-the-fly using `Consumer::new`, and later used with
+//! `Consumer::existing` if you do not wish to auto-create them.
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
+//!
+//! let nc = nats::connect("my_server::4222")?;
+//!
+//! let consumer_res = Consumer::existing(nc.clone(), "my_stream", "non-existent_consumer");
+//!
+//! // trying to use this consumer will fail because it hasn't been created yet
+//! assert!(consumer_res.is_err());
+//!
+//! // this will create the consumer if it does not exist already
+//! let consumer = Consumer::new(nc, "my_stream", "existing_or_created_consumer")?;
+//! # Ok(()) }
+//! ```
+//!
+//! Consumers may be used for processing messages individually, with timeouts, or in batches:
+//!
+//! ```no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
+//!
+//! let nc = nats::connect("my_server::4222")?;
+//!
+//! // this will create the consumer if it does not exist already
+//! let consumer = Consumer::new(nc, "my_stream", "existing_or_created_consumer")?;
+//!
+//! // wait indefinitely for the message to arrive
+//! let msg_data_len: usize = consumer.process(|msg| {
+//!     println!("got message {:?}", msg);
+//!     msg.data.len()
+//! })?;
+//!
+//! // wait until the consumer's `timeout` field for the message to arrive.
+//! // This can be set manually, and has a very low default of 5ms.
+//! let msg_data_len: usize = consumer.process_timeout(|msg| {
+//!     println!("got message {:?}", msg);
+//!     msg.data.len()
+//! })?;
+//!
+//! // wait indefinitely for the first message in a batch, then process
+//! // more messages until the configured timeout is expired
+//! let batch_size = 128;
+//! let results: Vec<usize> = consumer.process_batch(batch_size, |msg| {
+//!     println!("got message {:?}", msg);
+//!     msg.data.len()
+//! })?;
+//!
+//! # Ok(()) }
+//! ```
+//!
 
 use std::{
     collections::VecDeque,
@@ -136,7 +269,7 @@ impl Manager {
     }
 
     /// Create a stream.
-    pub fn add_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
+    pub fn create_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,
     {
@@ -157,7 +290,7 @@ impl Manager {
         &self,
         stream_config: StreamConfig,
     ) -> io::Result<StreamInfo> {
-        self.add_stream(stream_config)
+        self.create_stream(stream_config)
     }
 
     /// Query all stream names.
@@ -255,7 +388,7 @@ impl Manager {
     }
 
     /// Create a consumer.
-    pub fn add_consumer<S, C>(
+    pub fn create_consumer<S, C>(
         &self,
         stream: S,
         cfg: C,
@@ -444,13 +577,14 @@ impl Consumer {
             let consumer_info = manager.consumer_info(&stream, durable_name);
             if let Err(e) = consumer_info {
                 if e.kind() == std::io::ErrorKind::Other {
-                    manager
-                        .add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+                    manager.create_consumer::<&str, &ConsumerConfig>(
+                        &stream, &cfg,
+                    )?;
                 }
             }
         } else {
             // ephemeral consumer
-            manager.add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+            manager.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
         }
 
         Consumer::existing::<String, ConsumerConfig>(manager.nc, stream, cfg)

@@ -49,7 +49,7 @@ fn jetstream_create_consumer() -> io::Result<()> {
     let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
 
     let manager = Manager::new(nc.clone());
-    manager.add_stream("stream1")?;
+    manager.create_stream("stream1")?;
     let consumer = Consumer::new(nc, "stream1", "consumer1")?;
     Ok(())
 }
@@ -65,15 +65,15 @@ fn jetstream_basics() -> io::Result<()> {
     let _ = manager.delete_stream("test1");
     let _ = manager.delete_stream("test2");
 
-    manager.add_stream(StreamConfig {
+    manager.create_stream(StreamConfig {
         name: "test1".to_string(),
         retention: RetentionPolicy::WorkQueue,
         ..Default::default()
     })?;
 
-    manager.add_stream("test2")?;
+    manager.create_stream("test2")?;
     manager.stream_info("test2")?;
-    manager.add_consumer("test2", "consumer1")?;
+    manager.create_consumer("test2", "consumer1")?;
 
     let consumer2_cfg = ConsumerConfig {
         durable_name: Some("consumer2".to_string()),
@@ -81,7 +81,7 @@ fn jetstream_basics() -> io::Result<()> {
         deliver_subject: Some("consumer2_ds".to_string()),
         ..Default::default()
     };
-    manager.add_consumer("test2", &consumer2_cfg)?;
+    manager.create_consumer("test2", &consumer2_cfg)?;
     manager.consumer_info("test2", "consumer1")?;
 
     for i in 1..=1000 {
@@ -115,7 +115,7 @@ fn jetstream_basics() -> io::Result<()> {
 
     assert_eq!(manager.stream_info("test2")?.state.messages, 500);
 
-    manager.add_consumer("test2", "consumer3")?;
+    manager.create_consumer("test2", "consumer3")?;
 
     let consumer3 =
         Consumer::existing(manager.nc.clone(), "test2", "consumer3")?;
