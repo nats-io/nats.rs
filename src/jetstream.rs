@@ -528,7 +528,8 @@ impl Consumer {
 
         let mut received = 0;
         while let Ok(msg) = responses.next_timeout(if received == 0 {
-            std::time::Duration::new(std::u64::MAX, 0)
+            // wait "forever" for first message
+            std::time::Duration::new(std::u64::MAX >> 2, 0)
         } else {
             self.timeout
                 .checked_sub(start.elapsed())

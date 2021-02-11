@@ -101,9 +101,11 @@ fn jetstream_basics() -> io::Result<()> {
         Consumer::existing(manager.nc.clone(), "test2", consumer2_cfg)?;
 
     let mut count = 0;
-    consumer2.process_batch(1000, |_msg| {
-        count += 1;
-    })?;
+    while count != 1000 {
+        consumer2.process_batch(128, |_msg| {
+            count += 1;
+        })?;
+    }
     assert_eq!(count, 1000);
 
     // sequence numbers start with 1
