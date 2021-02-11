@@ -290,7 +290,16 @@ impl Manager {
         &self,
         stream_config: StreamConfig,
     ) -> io::Result<StreamInfo> {
-        self.create_stream(stream_config)
+        let cfg: StreamConfig = stream_config.into();
+        if cfg.name.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+        let subject: String = format!("$JS.API.STREAM.UPDATE.{}", cfg.name);
+        let req = serde_json::ser::to_vec(&cfg)?;
+        self.request(&subject, &req)
     }
 
     /// Query all stream names.
@@ -313,6 +322,32 @@ impl Manager {
             items: Default::default(),
             done: false,
         }
+    }
+
+    /// List consumers for a stream.
+    pub fn list_consumers<S>(
+        &self,
+        stream: S,
+    ) -> io::Result<PagedIterator<'_, ConsumerInfo>>
+    where
+        S: AsRef<str>,
+    {
+        let stream: &str = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "the stream name must not be empty",
+            ));
+        }
+        let subject: String = format!("$JS.API.CONSUMER.LIST.{}", stream);
+
+        Ok(PagedIterator {
+            subject,
+            manager: self,
+            offset: 0,
+            items: Default::default(),
+            done: false,
+        })
     }
 
     /// Query stream information.
@@ -483,32 +518,6 @@ impl Manager {
         let subject: String =
             format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
         self.request(&subject, b"")
-    }
-
-    /// List consumers for a stream.
-    pub fn list_consumers<S>(
-        &self,
-        stream: S,
-    ) -> io::Result<PagedIterator<'_, ConsumerInfo>>
-    where
-        S: AsRef<str>,
-    {
-        let stream: &str = stream.as_ref();
-        if stream.is_empty() {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "the stream name must not be empty",
-            ));
-        }
-        let subject: String = format!("$JS.API.CONSUMER.LIST.{}", stream);
-
-        Ok(PagedIterator {
-            subject,
-            manager: self,
-            offset: 0,
-            items: Default::default(),
-            done: false,
-        })
     }
 
     /// Query account information.
