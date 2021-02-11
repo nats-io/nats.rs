@@ -268,7 +268,9 @@ impl Manager {
         Manager { nc }
     }
 
-    /// Create a stream.
+    /// Create a `JetStream` stream.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn create_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,
@@ -280,12 +282,15 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("$JS.API.STREAM.CREATE.{}", cfg.name);
+        let subject: String =
+            format!("{}STREAM.CREATE.{}", self.api_prefix(), cfg.name);
         let req = serde_json::ser::to_vec(&cfg)?;
         self.request(&subject, &req)
     }
 
-    /// Update a stream.
+    /// Update a `JetStream` stream.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn update_stream(
         &self,
         stream_config: StreamConfig,
@@ -297,15 +302,19 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("$JS.API.STREAM.UPDATE.{}", cfg.name);
+        let subject: String =
+            format!("{}STREAM.UPDATE.{}", self.api_prefix(), cfg.name);
         let req = serde_json::ser::to_vec(&cfg)?;
         self.request(&subject, &req)
     }
 
-    /// Query all stream names.
+    /// List all `JetStream` stream names. If you also want stream information,
+    /// use the `list_streams` method instead.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn stream_names(&self) -> PagedIterator<'_, String> {
         PagedIterator {
-            subject: "$JS.API.STREAM.NAMES".into(),
+            subject: format!("{}STREAM.NAMES", self.api_prefix()),
             manager: self,
             offset: 0,
             items: Default::default(),
@@ -313,10 +322,12 @@ impl Manager {
         }
     }
 
-    /// List all stream names.
+    /// List all `JetStream` streams.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn list_streams(&self) -> PagedIterator<'_, StreamInfo> {
         PagedIterator {
-            subject: "$JS.API.STREAM.LIST".into(),
+            subject: format!("{}STREAM.LIST", self.api_prefix()),
             manager: self,
             offset: 0,
             items: Default::default(),
@@ -324,7 +335,9 @@ impl Manager {
         }
     }
 
-    /// List consumers for a stream.
+    /// List `JetStream` consumers for a stream.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn list_consumers<S>(
         &self,
         stream: S,
@@ -339,7 +352,8 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("$JS.API.CONSUMER.LIST.{}", stream);
+        let subject: String =
+            format!("{}CONSUMER.LIST.{}", self.api_prefix(), stream);
 
         Ok(PagedIterator {
             subject,
@@ -350,7 +364,9 @@ impl Manager {
         })
     }
 
-    /// Query stream information.
+    /// Query `JetStream` stream information.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn stream_info<S: AsRef<str>>(
         &self,
         stream: S,
@@ -362,11 +378,14 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("$JS.API.STREAM.INFO.{}", stream);
+        let subject: String =
+            format!("{}STREAM.INFO.{}", self.api_prefix(), stream);
         self.request(&subject, b"")
     }
 
-    /// Purge stream messages.
+    /// Purge `JetStream` stream messages.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn purge_stream<S: AsRef<str>>(
         &self,
         stream: S,
@@ -378,11 +397,13 @@ impl Manager {
                 "the stream name must not be empty",
             ));
         }
-        let subject = format!("$JS.API.STREAM.PURGE.{}", stream);
+        let subject = format!("{}STREAM.PURGE.{}", self.api_prefix(), stream);
         self.request(&subject, b"")
     }
 
-    /// Delete message in a stream.
+    /// Delete message in a `JetStream` stream.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn delete_message<S: AsRef<str>>(
         &self,
         stream: S,
@@ -401,13 +422,16 @@ impl Manager {
         })
         .unwrap();
 
-        let subject = format!("$JS.API.STREAM.MSG.DELETE.{}", stream);
+        let subject =
+            format!("{}STREAM.MSG.DELETE.{}", self.api_prefix(), stream);
 
         self.request::<DeleteResponse>(&subject, &req)
             .map(|dr| dr.success)
     }
 
-    /// Delete stream.
+    /// Delete `JetStream` stream.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn delete_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<bool> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
@@ -417,12 +441,14 @@ impl Manager {
             ));
         }
 
-        let subject = format!("$JS.API.STREAM.DELETE.{}", stream);
+        let subject = format!("{}STREAM.DELETE.{}", self.api_prefix(), stream);
         self.request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
     }
 
-    /// Create a consumer.
+    /// Create a `JetStream` consumer.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn create_consumer<S, C>(
         &self,
         stream: S,
@@ -444,15 +470,17 @@ impl Manager {
         let subject = if let Some(durable_name) = &config.durable_name {
             if durable_name.is_empty() {
                 config.durable_name = None;
-                format!("$JS.API.CONSUMER.CREATE.{}", stream)
+                format!("{}CONSUMER.CREATE.{}", self.api_prefix(), stream)
             } else {
                 format!(
-                    "$JS.API.CONSUMER.DURABLE.CREATE.{}.{}",
-                    stream, durable_name
+                    "{}CONSUMER.DURABLE.CREATE.{}.{}",
+                    self.api_prefix(),
+                    stream,
+                    durable_name
                 )
             }
         } else {
-            format!("$JS.API.CONSUMER.CREATE.{}", stream)
+            format!("{}CONSUMER.CREATE.{}", self.api_prefix(), stream)
         };
 
         let req = CreateConsumerRequest {
@@ -465,7 +493,9 @@ impl Manager {
         self.request(&subject, &ser_req)
     }
 
-    /// Delete a consumer.
+    /// Delete a `JetStream` consumer.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn delete_consumer<S, C>(
         &self,
         stream: S,
@@ -490,14 +520,20 @@ impl Manager {
             ));
         }
 
-        let subject =
-            format!("$JS.API.CONSUMER.DELETE.{}.{}", stream, consumer);
+        let subject = format!(
+            "{}CONSUMER.DELETE.{}.{}",
+            self.api_prefix(),
+            stream,
+            consumer
+        );
 
         self.request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
     }
 
-    /// Query consumer information.
+    /// Query `JetStream` consumer information.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn consumer_info<S, C>(
         &self,
         stream: S,
@@ -515,14 +551,20 @@ impl Manager {
             ));
         }
         let consumer: &str = consumer.as_ref();
-        let subject: String =
-            format!("$JS.API.CONSUMER.INFO.{}.{}", stream, consumer);
+        let subject: String = format!(
+            "{}CONSUMER.INFO.{}.{}",
+            self.api_prefix(),
+            stream,
+            consumer
+        );
         self.request(&subject, b"")
     }
 
-    /// Query account information.
+    /// Query `JetStream` account information.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn account_info(&self) -> io::Result<AccountInfo> {
-        self.request("$JS.API.INFO", b"")
+        self.request(&format!("{}INFO", self.api_prefix()), b"")
     }
 
     fn request<Res>(&self, subject: &str, req: &[u8]) -> io::Result<Res>
@@ -542,6 +584,10 @@ impl Manager {
                 }
             }
         }
+    }
+
+    fn api_prefix(&self) -> &str {
+        &self.nc.0.client.options.jetstream_prefix
     }
 }
 
@@ -651,7 +697,8 @@ impl Consumer {
         }
 
         let subject = format!(
-            "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+            "{}CONSUMER.MSG.NEXT.{}.{}",
+            self.api_prefix(),
             self.stream,
             self.cfg.durable_name.as_ref().unwrap()
         );
@@ -712,7 +759,8 @@ impl Consumer {
         }
 
         let subject = format!(
-            "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+            "{}CONSUMER.MSG.NEXT.{}.{}",
+            self.api_prefix(),
             self.stream,
             self.cfg.durable_name.as_ref().unwrap()
         );
@@ -744,7 +792,8 @@ impl Consumer {
         }
 
         let subject = format!(
-            "$JS.API.CONSUMER.MSG.NEXT.{}.{}",
+            "{}CONSUMER.MSG.NEXT.{}.{}",
+            self.api_prefix(),
             self.stream,
             self.cfg.durable_name.as_ref().unwrap()
         );
@@ -759,5 +808,9 @@ impl Consumer {
             next.respond(b"")?;
         }
         Ok(ret)
+    }
+
+    fn api_prefix(&self) -> &str {
+        &self.nc.0.client.options.jetstream_prefix
     }
 }
