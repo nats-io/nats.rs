@@ -46,7 +46,7 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Create and use a new default consumer (defaults to Pull-based, see the docs for `ConsumerConfig` for how this influences behavior)
+//! Create and use a new default consumer (defaults to Pull-based, see the docs for [`ConsumerConfig`](struct.ConsumerConfig.html) for how this influences behavior)
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
