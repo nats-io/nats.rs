@@ -22,6 +22,9 @@ maintenance = { status = "actively-developed" }
 [profile.dev]
 panic = 'abort'
 
+[package.metadata.docs.rs]
+features = ["jetstream"]
+
 [dependencies]
 base64 = "0.13.0"
 base64-url = "1.4.5"

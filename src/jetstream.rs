@@ -604,10 +604,12 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    /// Instantiate a `Consumer` from an existing
+    /// Instantiate a `JetStream` `Consumer` from an existing
     /// `ConsumerInfo` that may have been returned
     /// from the `nats::Connection::list_consumers`
     /// iterator.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn from_consumer_info(
         ci: ConsumerInfo,
         nc: NatsClient,
@@ -619,10 +621,12 @@ impl Consumer {
         )
     }
 
-    /// Instantiate a `Consumer`. Performs a check to see if the consumer
+    /// Instantiate a `JetStream` `Consumer`. Performs a check to see if the consumer
     /// already exists, and creates it if not. If you want to use an existing
     /// `Consumer` without this check and creation, use the `Consumer::existing`
     /// method.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn create_if_absent<S, C>(
         nc: NatsClient,
         stream: S,
@@ -651,7 +655,9 @@ impl Consumer {
         Consumer::existing::<String, ConsumerConfig>(nc, stream, cfg)
     }
 
-    /// Use an existing `Consumer`
+    /// Use an existing `JetStream` `Consumer`
+    ///
+    /// Requires the `jetstream` feature.
     pub fn existing<S, C>(
         nc: NatsClient,
         stream: S,
@@ -679,6 +685,7 @@ impl Consumer {
             timeout: std::time::Duration::from_millis(5),
         })
     }
+
     /// Process a batch of messages. If `AckPolicy::All` is set,
     /// this will send a single acknowledgement at the end of
     /// the batch.
@@ -688,6 +695,8 @@ impl Consumer {
     /// `Consumer`'s configured `timeout`. If a partial batch is received,
     /// returning the partial set of processed and acknowledged
     /// messages.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn process_batch<R, F: FnMut(&Message) -> R>(
         &self,
         batch_size: usize,
@@ -754,6 +763,8 @@ impl Consumer {
     }
 
     /// Process and acknowledge a single message, waiting indefinitely
+    ///
+    /// Requires the `jetstream` feature.
     pub fn process<R, F: Fn(&Message) -> R>(&self, f: F) -> io::Result<R> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
@@ -784,6 +795,8 @@ impl Consumer {
 
     /// Process and acknowledge a single message, waiting up to the `Consumer`'s
     /// configured `timeout` before returning a timeout error.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn process_timeout<R, F: Fn(&Message) -> R>(
         &self,
         f: F,
