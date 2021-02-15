@@ -402,9 +402,9 @@ pub struct ConsumerInfo {
     /// The number of messages re-sent after acknowledgement was not received within the configured
     /// time threshold
     pub num_redelivered: usize,
-    /// The number of
+    /// The number of waiting
     pub num_waiting: usize,
-    /// The number of
+    /// The number of pending
     pub num_pending: u64,
     /// Information about the consumer's cluster
     pub cluster: ClusterInfo,

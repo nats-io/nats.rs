@@ -48,9 +48,8 @@ fn jetstream_create_consumer() -> io::Result<()> {
 
     let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
 
-    let manager = Manager::new(nc.clone());
-    manager.create_stream("stream1")?;
-    let consumer = Consumer::new(nc, "stream1", "consumer1")?;
+    nc.create_stream("stream1")?;
+    let consumer = nc.create_consumer("stream1", "consumer1")?;
     Ok(())
 }
 
@@ -60,20 +59,18 @@ fn jetstream_basics() -> io::Result<()> {
 
     let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
 
-    let manager = Manager { nc };
+    let _ = nc.delete_stream("test1");
+    let _ = nc.delete_stream("test2");
 
-    let _ = manager.delete_stream("test1");
-    let _ = manager.delete_stream("test2");
-
-    manager.create_stream(StreamConfig {
+    nc.create_stream(StreamConfig {
         name: "test1".to_string(),
         retention: RetentionPolicy::WorkQueue,
         ..Default::default()
     })?;
 
-    manager.create_stream("test2")?;
-    manager.stream_info("test2")?;
-    manager.create_consumer("test2", "consumer1")?;
+    nc.create_stream("test2")?;
+    nc.stream_info("test2")?;
+    nc.create_consumer("test2", "consumer1")?;
 
     let consumer2_cfg = ConsumerConfig {
         durable_name: Some("consumer2".to_string()),
@@ -81,24 +78,22 @@ fn jetstream_basics() -> io::Result<()> {
         deliver_subject: Some("consumer2_ds".to_string()),
         ..Default::default()
     };
-    manager.create_consumer("test2", &consumer2_cfg)?;
-    manager.consumer_info("test2", "consumer1")?;
+    nc.create_consumer("test2", &consumer2_cfg)?;
+    nc.consumer_info("test2", "consumer1")?;
 
     for i in 1..=1000 {
-        manager.nc.publish("test2", format!("{}", i))?;
+        nc.publish("test2", format!("{}", i))?;
     }
 
-    assert_eq!(manager.stream_info("test2")?.state.messages, 1000);
+    assert_eq!(nc.stream_info("test2")?.state.messages, 1000);
 
-    let consumer1 =
-        Consumer::existing(manager.nc.clone(), "test2", "consumer1")?;
+    let consumer1 = Consumer::existing(nc.clone(), "test2", "consumer1")?;
 
     for _ in 1..=1000 {
         consumer1.process(|_msg| {})?;
     }
 
-    let consumer2 =
-        Consumer::existing(manager.nc.clone(), "test2", consumer2_cfg)?;
+    let consumer2 = Consumer::existing(nc.clone(), "test2", consumer2_cfg)?;
 
     let mut count = 0;
     while count != 1000 {
@@ -110,34 +105,33 @@ fn jetstream_basics() -> io::Result<()> {
 
     // sequence numbers start with 1
     for i in 1..=500 {
-        manager.delete_message("test2", i)?;
+        nc.delete_message("test2", i)?;
     }
 
-    assert_eq!(manager.stream_info("test2")?.state.messages, 500);
+    assert_eq!(nc.stream_info("test2")?.state.messages, 500);
 
-    manager.create_consumer("test2", "consumer3")?;
+    nc.create_consumer("test2", "consumer3")?;
 
-    let consumer3 =
-        Consumer::existing(manager.nc.clone(), "test2", "consumer3")?;
+    let consumer3 = Consumer::existing(nc.clone(), "test2", "consumer3")?;
 
-    let _ = dbg!(manager.account_info());
+    let _ = dbg!(nc.account_info());
 
     // cleanup
-    let streams: io::Result<Vec<StreamInfo>> = manager.list_streams().collect();
+    let streams: io::Result<Vec<StreamInfo>> = nc.list_streams().collect();
 
     for stream in streams? {
         let consumers: io::Result<Vec<ConsumerInfo>> =
-            manager.list_consumers(&stream.config.name)?.collect();
+            nc.list_consumers(&stream.config.name)?.collect();
 
         for consumer in consumers? {
-            manager.delete_consumer(&stream.config.name, &consumer.name)?;
+            nc.delete_consumer(&stream.config.name, &consumer.name)?;
         }
 
-        manager.purge_stream(&stream.config.name)?;
+        nc.purge_stream(&stream.config.name)?;
 
-        assert_eq!(manager.stream_info(&stream.config.name)?.state.messages, 0);
+        assert_eq!(nc.stream_info(&stream.config.name)?.state.messages, 0);
 
-        manager.delete_stream(&stream.config.name)?;
+        nc.delete_stream(&stream.config.name)?;
     }
 
     Ok(())

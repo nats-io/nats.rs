@@ -195,7 +195,7 @@ struct PagedResponse<T> {
 /// An iterator over paged `JetStream` API operations.
 #[derive(Debug)]
 pub struct PagedIterator<'a, T> {
-    manager: &'a Manager,
+    manager: &'a NatsClient,
     subject: String,
     offset: i64,
     items: VecDeque<T>,
@@ -226,7 +226,7 @@ where
         .unwrap();
 
         let res: io::Result<PagedResponse<T>> =
-            self.manager.request(&self.subject, &req);
+            self.manager.js_request(&self.subject, &req);
 
         let mut page = match res {
             Err(e) => {
@@ -255,19 +255,7 @@ where
     }
 }
 
-/// `JetStream` management functionality
-#[derive(Debug)]
-pub struct Manager {
-    /// The underlying NATS client
-    pub nc: NatsClient,
-}
-
-impl Manager {
-    /// Create a new `Manager`.
-    pub fn new(nc: NatsClient) -> Manager {
-        Manager { nc }
-    }
-
+impl NatsClient {
     /// Create a `JetStream` stream.
     ///
     /// Requires the `jetstream` feature.
@@ -285,7 +273,7 @@ impl Manager {
         let subject: String =
             format!("{}STREAM.CREATE.{}", self.api_prefix(), cfg.name);
         let req = serde_json::ser::to_vec(&cfg)?;
-        self.request(&subject, &req)
+        self.js_request(&subject, &req)
     }
 
     /// Update a `JetStream` stream.
@@ -305,7 +293,7 @@ impl Manager {
         let subject: String =
             format!("{}STREAM.UPDATE.{}", self.api_prefix(), cfg.name);
         let req = serde_json::ser::to_vec(&cfg)?;
-        self.request(&subject, &req)
+        self.js_request(&subject, &req)
     }
 
     /// List all `JetStream` stream names. If you also want stream information,
@@ -380,7 +368,7 @@ impl Manager {
         }
         let subject: String =
             format!("{}STREAM.INFO.{}", self.api_prefix(), stream);
-        self.request(&subject, b"")
+        self.js_request(&subject, b"")
     }
 
     /// Purge `JetStream` stream messages.
@@ -398,7 +386,7 @@ impl Manager {
             ));
         }
         let subject = format!("{}STREAM.PURGE.{}", self.api_prefix(), stream);
-        self.request(&subject, b"")
+        self.js_request(&subject, b"")
     }
 
     /// Delete message in a `JetStream` stream.
@@ -425,7 +413,7 @@ impl Manager {
         let subject =
             format!("{}STREAM.MSG.DELETE.{}", self.api_prefix(), stream);
 
-        self.request::<DeleteResponse>(&subject, &req)
+        self.js_request::<DeleteResponse>(&subject, &req)
             .map(|dr| dr.success)
     }
 
@@ -442,7 +430,7 @@ impl Manager {
         }
 
         let subject = format!("{}STREAM.DELETE.{}", self.api_prefix(), stream);
-        self.request::<DeleteResponse>(&subject, b"")
+        self.js_request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
     }
 
@@ -453,7 +441,7 @@ impl Manager {
         &self,
         stream: S,
         cfg: C,
-    ) -> io::Result<ConsumerInfo>
+    ) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -485,12 +473,14 @@ impl Manager {
 
         let req = CreateConsumerRequest {
             stream_name: stream.into(),
-            config,
+            config: config.clone(),
         };
 
         let ser_req = serde_json::ser::to_vec(&req)?;
 
-        self.request(&subject, &ser_req)
+        let _info: ConsumerInfo = self.js_request(&subject, &ser_req)?;
+
+        Consumer::existing::<&str, ConsumerConfig>(self.clone(), stream, config)
     }
 
     /// Delete a `JetStream` consumer.
@@ -527,7 +517,7 @@ impl Manager {
             consumer
         );
 
-        self.request::<DeleteResponse>(&subject, b"")
+        self.js_request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
     }
 
@@ -557,21 +547,21 @@ impl Manager {
             stream,
             consumer
         );
-        self.request(&subject, b"")
+        self.js_request(&subject, b"")
     }
 
     /// Query `JetStream` account information.
     ///
     /// Requires the `jetstream` feature.
     pub fn account_info(&self) -> io::Result<AccountInfo> {
-        self.request(&format!("{}INFO", self.api_prefix()), b"")
+        self.js_request(&format!("{}INFO", self.api_prefix()), b"")
     }
 
-    fn request<Res>(&self, subject: &str, req: &[u8]) -> io::Result<Res>
+    fn js_request<Res>(&self, subject: &str, req: &[u8]) -> io::Result<Res>
     where
         Res: DeserializeOwned,
     {
-        let res_msg = self.nc.request(subject, req)?;
+        let res_msg = self.request(subject, req)?;
         println!("got response: {:?}", std::str::from_utf8(&res_msg.data));
         let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
@@ -587,7 +577,7 @@ impl Manager {
     }
 
     fn api_prefix(&self) -> &str {
-        &self.nc.0.client.options.jetstream_prefix
+        &self.0.client.options.jetstream_prefix
     }
 }
 
@@ -614,35 +604,51 @@ pub struct Consumer {
 }
 
 impl Consumer {
+    /// Instantiate a `Consumer` from an existing
+    /// `ConsumerInfo` that may have been returned
+    /// from the `nats::Connection::list_consumers`
+    /// iterator.
+    pub fn from_consumer_info(
+        ci: ConsumerInfo,
+        nc: NatsClient,
+    ) -> io::Result<Consumer> {
+        Consumer::existing::<String, ConsumerConfig>(
+            nc,
+            ci.stream_name,
+            ci.config,
+        )
+    }
+
     /// Instantiate a `Consumer`. Performs a check to see if the consumer
     /// already exists, and creates it if not. If you want to use an existing
     /// `Consumer` without this check and creation, use the `Consumer::existing`
     /// method.
-    pub fn new<S, C>(nc: NatsClient, stream: S, cfg: C) -> io::Result<Consumer>
+    pub fn create_if_absent<S, C>(
+        nc: NatsClient,
+        stream: S,
+        cfg: C,
+    ) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
     {
         let stream = stream.as_ref().to_string();
         let cfg = ConsumerConfig::from(cfg);
-        let manager = Manager { nc };
 
         if let Some(durable_name) = &cfg.durable_name {
             // attempt to create a durable config if it does not yet exist
-            let consumer_info = manager.consumer_info(&stream, durable_name);
+            let consumer_info = nc.consumer_info(&stream, durable_name);
             if let Err(e) = consumer_info {
                 if e.kind() == std::io::ErrorKind::Other {
-                    manager.create_consumer::<&str, &ConsumerConfig>(
-                        &stream, &cfg,
-                    )?;
+                    nc.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
                 }
             }
         } else {
             // ephemeral consumer
-            manager.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+            nc.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
         }
 
-        Consumer::existing::<String, ConsumerConfig>(manager.nc, stream, cfg)
+        Consumer::existing::<String, ConsumerConfig>(nc, stream, cfg)
     }
 
     /// Use an existing `Consumer`
@@ -673,7 +679,6 @@ impl Consumer {
             timeout: std::time::Duration::from_millis(5),
         })
     }
-
     /// Process a batch of messages. If `AckPolicy::All` is set,
     /// this will send a single acknowledgement at the end of
     /// the batch.
