@@ -19,15 +19,11 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::Manager;
-//!
 //! let nc = nats::connect("my_server::4222")?;
-//!
-//! let manager = Manager::new(nc);
 //!
 //! // create_stream converts a str into a
 //! // default `StreamConfig`.
-//! manager.create_stream("my_stream")?;
+//! nc.create_stream("my_stream")?;
 //!
 //! # Ok(()) }
 //! ```
@@ -36,13 +32,11 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::{Manager, StreamConfig, StorageType};
+//! use nats::jetstream::{StreamConfig, StorageType};
 //!
 //! let nc = nats::connect("my_server::4222")?;
 //!
-//! let manager = Manager::new(nc);
-//!
-//! manager.create_stream(StreamConfig {
+//! nc.create_stream(StreamConfig {
 //!     name: "my_memory_stream".to_string(),
 //!     max_bytes: 5 * 1024 * 1024 * 1024,
 //!     storage: StorageType::Memory,
@@ -56,15 +50,11 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::Manager;
-//!
 //! let nc = nats::connect("my_server::4222")?;
 //!
-//! let manager = Manager::new(nc);
+//! nc.create_stream("my_stream")?;
 //!
-//! manager.create_stream("my_stream")?;
-//!
-//! manager.create_consumer("my_stream", "my_consumer")?;
+//! nc.create_consumer("my_stream", "my_consumer")?;
 //!
 //! # Ok(()) }
 //! ```
@@ -73,15 +63,13 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::{AckPolicy, ConsumerConfig, Manager};
+//! use nats::jetstream::{AckPolicy, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
 //!
-//! let manager = Manager::new(nc);
+//! nc.create_stream("my_stream")?;
 //!
-//! manager.create_stream("my_stream")?;
-//!
-//! manager.create_consumer("my_stream", ConsumerConfig {
+//! nc.create_consumer("my_stream", ConsumerConfig {
 //!     durable_name: Some("my_consumer".to_string()),
 //!     deliver_subject: Some("my_push_consumer_subject".to_string()),
 //!     ack_policy: AckPolicy::All,
@@ -91,7 +79,7 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Consumers can also be created on-the-fly using `Consumer::new`, and later used with
+//! Consumers can also be created on-the-fly using `Consumer::create_or_open`, and later used with
 //! `Consumer::existing` if you do not wish to auto-create them.
 //!
 //! ```no_run
@@ -106,7 +94,7 @@
 //! assert!(consumer_res.is_err());
 //!
 //! // this will create the consumer if it does not exist already
-//! let consumer = Consumer::new(nc, "my_stream", "existing_or_created_consumer")?;
+//! let consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //! # Ok(()) }
 //! ```
 //!
@@ -119,7 +107,7 @@
 //! let nc = nats::connect("my_server::4222")?;
 //!
 //! // this will create the consumer if it does not exist already
-//! let consumer = Consumer::new(nc, "my_stream", "existing_or_created_consumer")?;
+//! let consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //!
 //! // wait indefinitely for the message to arrive
 //! let msg_data_len: usize = consumer.process(|msg| {
@@ -627,7 +615,7 @@ impl Consumer {
     /// method.
     ///
     /// Requires the `jetstream` feature.
-    pub fn create_if_absent<S, C>(
+    pub fn create_or_open<S, C>(
         nc: NatsClient,
         stream: S,
         cfg: C,

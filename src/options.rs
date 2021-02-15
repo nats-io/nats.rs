@@ -436,7 +436,10 @@ impl Options {
     /// # }
     /// ```
     #[cfg(feature = "jetstream")]
-    pub fn jetstream_prefix(mut self, mut jetstream_prefix: String) -> Self {
+    pub fn jetstream_api_prefix(
+        mut self,
+        mut jetstream_prefix: String,
+    ) -> Self {
         if !jetstream_prefix.ends_with('.') {
             jetstream_prefix.push('.');
         }
