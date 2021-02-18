@@ -148,7 +148,6 @@
     clippy::maybe_infinite_iter,
     clippy::mem_forget,
     clippy::module_name_repetitions,
-    clippy::multiple_inherent_impl,
     clippy::needless_borrow,
     clippy::needless_continue,
     clippy::needless_pass_by_value,

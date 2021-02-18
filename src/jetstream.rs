@@ -270,11 +270,7 @@ impl NatsClient {
     /// Update a `JetStream` stream.
     ///
     /// Requires the `jetstream` feature.
-    pub fn update_stream(
-        &self,
-        stream_config: StreamConfig,
-    ) -> io::Result<StreamInfo> {
-        let cfg: StreamConfig = stream_config.into();
+    pub fn update_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
         if cfg.name.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -891,7 +887,7 @@ impl RangeTree {
             .next_back()
             .map_or((0, 0), |(s, e)| (*s, *e));
 
-        if (prev_start..=prev_end).contains(&&id) {
+        if (prev_start..=prev_end).contains(&id) {
             // range already includes id
             return false;
         }
