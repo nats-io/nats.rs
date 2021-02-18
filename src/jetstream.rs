@@ -69,7 +69,7 @@
 //!
 //! nc.create_stream("my_stream")?;
 //!
-//! nc.create_consumer("my_stream", ConsumerConfig {
+//! let consumer: Consumer = nc.create_consumer("my_stream", ConsumerConfig {
 //!     durable_name: Some("my_consumer".to_string()),
 //!     deliver_subject: Some("my_push_consumer_subject".to_string()),
 //!     ack_policy: AckPolicy::All,
@@ -587,8 +587,12 @@ pub struct Consumer {
     /// The amount of time that is waited before erroring
     /// out during `process` and `process_batch`. Defaults
     /// to 5ms, which is likely to be far too low for
-    /// workloads spanning distances..
+    /// workloads crossing physical sites.
     pub timeout: std::time::Duration,
+
+    /// Contains ranges of processed messages that will be
+    /// filtered out upon future receipt.
+    pub dedupe_window: RangeTree,
 }
 
 impl Consumer {
@@ -671,6 +675,7 @@ impl Consumer {
             cfg,
             push_subscriber,
             timeout: std::time::Duration::from_millis(5),
+            dedupe_window: Default::default(),
         })
     }
 
@@ -818,5 +823,140 @@ impl Consumer {
 
     fn api_prefix(&self) -> &str {
         &self.nc.0.client.options.jetstream_prefix
+    }
+}
+
+/// Records ranges of acknowledged messages for
+/// low-memory deduplication.
+#[derive(Default)]
+pub struct RangeTree {
+    // stores interval start-end
+    inner: std::collections::BTreeMap<u64, u64>,
+}
+
+impl RangeTree {
+    /// Mark this ID as being processed. Returns `true`
+    /// if this ID was not already marked as processed.
+    pub fn mark_processed(&mut self, id: u64) -> bool {
+        let (prev_start, prev_end) = self
+            .inner
+            .range(..=&id)
+            .next_back()
+            .map_or((0, 0), |(s, e)| (*s, *e));
+
+        if (prev_start..=prev_end).contains(&&id) {
+            // range already includes id
+            return false;
+        }
+
+        // we may have to merge one or two ranges.
+        //
+        // say we're inserting 4:
+        //
+        // case 1, fully disjoint:
+        // [0] [4] [6]
+        //
+        // case 2, left merge
+        // [0, 1, 2, 3, 4] [6]
+        //
+        // case 3, right merge
+        // [0] [4, 5, 6]
+        //
+        // case 4, double merge
+        // [3, 4, 5]
+
+        let left_merge = prev_end + 1 == id;
+        let right_merge = self.inner.contains_key(&(id + 1));
+
+        match (left_merge, right_merge) {
+            (true, true) => {
+                let right_end = self.inner.remove(&(id + 1)).unwrap();
+                assert_eq!(
+                    self.inner.insert(prev_start, right_end),
+                    Some(id - 1)
+                );
+            }
+            (true, false) => {
+                assert_eq!(self.inner.insert(prev_start, id), Some(id - 1));
+            }
+            (false, true) => {
+                let right_end = self.inner.remove(&(id + 1)).unwrap();
+                assert_eq!(self.inner.insert(id, right_end), None);
+            }
+            (false, false) => {
+                // created disjoint range
+                self.inner.insert(id, id);
+            }
+        }
+
+        true
+    }
+
+    /// Returns `true` if this ID has already been processed.
+    pub fn already_processed(&self, id: u64) -> bool {
+        if let Some((prev_start, prev_end)) =
+            self.inner.range(..=&id).next_back()
+        {
+            (prev_start..=prev_end).contains(&&id)
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn range_tree() {
+        let mut rt = RangeTree {
+            inner: vec![(0, 0), (6, 6)].into_iter().collect(),
+        };
+
+        rt.mark_processed(4);
+        assert_eq!(
+            rt.inner,
+            vec![(0, 0), (4, 4), (6, 6)].into_iter().collect()
+        );
+        assert!(rt.already_processed(0));
+        assert!(rt.already_processed(4));
+        assert!(rt.already_processed(6));
+        assert!(!rt.already_processed(7));
+
+        let mut rt = RangeTree {
+            inner: vec![(3, 3), (6, 6)].into_iter().collect(),
+        };
+
+        rt.mark_processed(4);
+        assert_eq!(rt.inner, vec![(3, 4), (6, 6)].into_iter().collect());
+        assert!(!rt.already_processed(0));
+        assert!(rt.already_processed(3));
+        assert!(rt.already_processed(4));
+        assert!(rt.already_processed(6));
+        assert!(!rt.already_processed(7));
+
+        let mut rt = RangeTree {
+            inner: vec![(0, 0), (5, 5)].into_iter().collect(),
+        };
+        rt.mark_processed(4);
+        assert_eq!(rt.inner, vec![(0, 0), (4, 5)].into_iter().collect());
+        assert!(rt.already_processed(0));
+        assert!(rt.already_processed(4));
+        assert!(rt.already_processed(5));
+        assert!(!rt.already_processed(6));
+
+        let mut rt = RangeTree {
+            inner: vec![(2, 3), (5, 6)].into_iter().collect(),
+        };
+        rt.mark_processed(4);
+        assert_eq!(rt.inner, vec![(2, 6)].into_iter().collect());
+        assert!(!rt.already_processed(0));
+        assert!(rt.already_processed(2));
+        assert!(rt.already_processed(3));
+        assert!(rt.already_processed(4));
+        assert!(rt.already_processed(5));
+        assert!(rt.already_processed(6));
+        assert!(!rt.already_processed(7));
     }
 }
