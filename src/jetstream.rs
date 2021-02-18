@@ -702,7 +702,7 @@ impl Consumer {
     /// will be the encountered error.
     ///
     /// Requires the `jetstream` feature.
-    pub fn process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
+    fn _process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
         &self,
         batch_size: usize,
         mut f: F,
@@ -800,7 +800,7 @@ impl Consumer {
     /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
     /// Requires the `jetstream` feature.
-    pub fn process<R, F: Fn(&Message) -> io::Result<R>>(
+    fn _process<R, F: Fn(&Message) -> io::Result<R>>(
         &self,
         f: F,
     ) -> io::Result<R> {
@@ -837,7 +837,7 @@ impl Consumer {
     /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
     /// Requires the `jetstream` feature.
-    pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(
+    fn _process_timeout<R, F: Fn(&Message) -> io::Result<R>>(
         &self,
         f: F,
     ) -> io::Result<R> {
