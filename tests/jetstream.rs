@@ -90,16 +90,20 @@ fn jetstream_basics() -> io::Result<()> {
     let consumer1 = Consumer::existing(nc.clone(), "test2", "consumer1")?;
 
     for _ in 1..=1000 {
-        consumer1.process(|_msg| {})?;
+        consumer1.process(|_msg| Ok(()))?;
     }
 
     let consumer2 = Consumer::existing(nc.clone(), "test2", consumer2_cfg)?;
 
     let mut count = 0;
     while count != 1000 {
-        consumer2.process_batch(128, |_msg| {
-            count += 1;
-        })?;
+        let _: Vec<()> = consumer2
+            .process_batch(128, |_msg| {
+                count += 1;
+                Ok(())
+            })
+            .into_iter()
+            .collect::<std::io::Result<Vec<()>>>()?;
     }
     assert_eq!(count, 1000);
 

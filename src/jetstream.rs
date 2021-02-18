@@ -54,7 +54,10 @@
 //!
 //! nc.create_stream("my_stream")?;
 //!
-//! nc.create_consumer("my_stream", "my_consumer")?;
+//! let consumer: Consumer = nc.create_consumer("my_stream", "my_consumer")?;
+//!
+//! // process a single item, sending an ack if the closure returns `Ok`.
+//! consumer.process
 //!
 //! # Ok(()) }
 //! ```
@@ -569,7 +572,7 @@ impl NatsClient {
     }
 }
 
-/// `JetStream` reliable consumption functionality
+/// `JetStream` reliable consumption functionality.
 pub struct Consumer {
     /// The underlying NATS client
     pub nc: NatsClient,
@@ -689,18 +692,27 @@ impl Consumer {
     /// returning the partial set of processed and acknowledged
     /// messages.
     ///
+    /// If the closure returns `Err`, the batch processing will stop,
+    /// and the returned vector will contain this error as the final
+    /// element. The message that caused this error will not be acknowledged
+    /// to the `JetStream` server, but all previous messages will be.
+    /// If an error is encountered while subscribing or acking messages
+    /// that may have returned `Ok` from the closure, that Ok will be
+    /// present in the returned vector but the last item in the vector
+    /// will be the encountered error.
+    ///
     /// Requires the `jetstream` feature.
-    pub fn process_batch<R, F: FnMut(&Message) -> R>(
+    pub fn process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
         &self,
         batch_size: usize,
         mut f: F,
-    ) -> io::Result<Vec<R>> {
+    ) -> Vec<io::Result<R>> {
         if self.cfg.durable_name.is_none() {
-            return Err(Error::new(
+            return vec![Err(Error::new(
                 ErrorKind::InvalidData,
                 "process and process_batch are only usable from \
                 Pull-based Consumers with a durable_name set",
-            ));
+            ))];
         }
 
         let subject = format!(
@@ -714,8 +726,12 @@ impl Consumer {
         let responses = if let Some(ps) = self.push_subscriber.as_ref() {
             ps
         } else {
-            _sub_opt =
-                Some(self.nc.request_multi(&subject, batch_size.to_string())?);
+            let sub =
+                match self.nc.request_multi(&subject, batch_size.to_string()) {
+                    Ok(sub) => sub,
+                    Err(e) => return vec![Err(e)],
+                };
+            _sub_opt = Some(sub);
             _sub_opt.as_ref().unwrap()
         };
 
@@ -724,6 +740,8 @@ impl Consumer {
         let start = std::time::Instant::now();
 
         let mut received = 0;
+        let mut acked = 0;
+
         while let Ok(msg) = responses.next_timeout(if received == 0 {
             // wait "forever" for first message
             std::time::Duration::new(std::u64::MAX >> 2, 0)
@@ -734,11 +752,28 @@ impl Consumer {
         }) {
             let ret = f(&msg);
 
-            if self.cfg.ack_policy == AckPolicy::Explicit {
-                msg.respond(b"")?;
+            if ret.is_err() {
+                rets.push(ret);
+                return rets;
             }
 
+            let is_err = ret.is_err();
             rets.push(ret);
+
+            if is_err {
+                // we will still try to ack all messages before this one
+                // if our ack policy is `All`, after breaking.
+                break;
+            } else if self.cfg.ack_policy == AckPolicy::Explicit {
+                let res = msg.respond(AckKind::Ack);
+                if let Err(e) = res {
+                    rets.truncate(acked);
+                    rets.push(Err(e));
+                } else {
+                    acked += 1;
+                }
+            }
+
             last = Some(msg);
             received += 1;
             if received == batch_size {
@@ -748,17 +783,27 @@ impl Consumer {
 
         if let Some(msg) = last {
             if self.cfg.ack_policy == AckPolicy::All {
-                msg.respond(b"")?
+                let res = msg.respond(AckKind::Ack);
+                if let Err(e) = res {
+                    rets.truncate(acked);
+                    rets.push(Err(e));
+                }
             }
         }
 
-        Ok(rets)
+        rets
     }
 
-    /// Process and acknowledge a single message, waiting indefinitely
+    /// Process and acknowledge a single message, waiting indefinitely for
+    /// one to arrive.
+    ///
+    /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
     /// Requires the `jetstream` feature.
-    pub fn process<R, F: Fn(&Message) -> R>(&self, f: F) -> io::Result<R> {
+    pub fn process<R, F: Fn(&Message) -> io::Result<R>>(
+        &self,
+        f: F,
+    ) -> io::Result<R> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -777,11 +822,11 @@ impl Consumer {
         let next = if let Some(ps) = &self.push_subscriber {
             ps.next().unwrap()
         } else {
-            self.nc.request(&subject, b"")?
+            self.nc.request(&subject, AckKind::Ack)?
         };
-        let ret = f(&next);
+        let ret = f(&next)?;
         if self.cfg.ack_policy != AckPolicy::None {
-            next.respond(b"")?;
+            next.respond(AckKind::Ack)?;
         }
         Ok(ret)
     }
@@ -789,8 +834,10 @@ impl Consumer {
     /// Process and acknowledge a single message, waiting up to the `Consumer`'s
     /// configured `timeout` before returning a timeout error.
     ///
+    /// Does not ack the processed message if the internal closure returns an `Err`.
+    ///
     /// Requires the `jetstream` feature.
-    pub fn process_timeout<R, F: Fn(&Message) -> R>(
+    pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(
         &self,
         f: F,
     ) -> io::Result<R> {
@@ -814,9 +861,9 @@ impl Consumer {
         } else {
             self.nc.request(&subject, b"")?
         };
-        let ret = f(&next);
+        let ret = f(&next)?;
         if self.cfg.ack_policy != AckPolicy::None {
-            next.respond(b"")?;
+            next.respond(AckKind::Ack)?;
         }
         Ok(ret)
     }
