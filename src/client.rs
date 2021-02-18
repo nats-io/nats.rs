@@ -62,6 +62,10 @@ pub struct Client {
 
     /// Set to `true` if shutdown has been requested.
     shutdown: Arc<Mutex<bool>>,
+
+    /// The options that this `Client` was created using.
+    #[cfg(feature = "jetstream")]
+    pub(crate) options: Arc<Options>,
 }
 
 impl Client {
@@ -86,9 +90,17 @@ impl Client {
             })),
             server_info: Arc::new(Mutex::new(None)),
             shutdown: Arc::new(Mutex::new(false)),
+
+            #[cfg(feature = "jetstream")]
+            options: Arc::new(options),
         };
 
+        #[cfg(feature = "jetstream")]
+        let options = client.options.clone();
+
+        #[cfg(not(feature = "jetstream"))]
         let options = Arc::new(options);
+
         // Connector for creating the initial connection and reconnecting when
         // it is broken.
         let connector = Connector::new(url, options.clone())?;

@@ -135,7 +135,7 @@
     clippy::fallible_impl_from,
     clippy::filter_map,
     clippy::filter_map_next,
-    clippy::find_map,
+    clippy::manual_find_map,
     clippy::float_arithmetic,
     clippy::get_unwrap,
     clippy::if_not_else,
@@ -148,7 +148,6 @@
     clippy::maybe_infinite_iter,
     clippy::mem_forget,
     clippy::module_name_repetitions,
-    clippy::multiple_inherent_impl,
     clippy::needless_borrow,
     clippy::needless_continue,
     clippy::needless_pass_by_value,
@@ -186,6 +185,13 @@ mod message;
 mod options;
 mod proto;
 mod secure_wipe;
+
+#[cfg(feature = "jetstream")]
+/// `JetStream` stream management and consumers.
+pub mod jetstream;
+
+#[cfg(feature = "jetstream")]
+mod jetstream_types;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;

@@ -26,6 +26,9 @@ pub struct Options {
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
+
+    #[cfg(feature = "jetstream")]
+    pub(crate) jetstream_prefix: String,
 }
 
 impl fmt::Debug for Options {
@@ -64,6 +67,8 @@ impl Default for Options {
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
+            #[cfg(feature = "jetstream")]
+            jetstream_prefix: "$JS.API.".to_string(),
         }
     }
 }
@@ -413,6 +418,33 @@ impl Options {
         F: Fn() + Send + Sync + 'static,
     {
         self.reconnect_callback = Callback(Some(Box::new(cb)));
+        self
+    }
+
+    /// Set a custom `JetStream` API prefix. This is useful
+    /// when using `JetStream` through exports/imports.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .jetstream_api_prefix("some_exported_prefix".to_string())
+    ///     .connect("demo.nats.io")?;
+    /// nc.drain().unwrap();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "jetstream")]
+    pub fn jetstream_api_prefix(
+        mut self,
+        mut jetstream_prefix: String,
+    ) -> Self {
+        if !jetstream_prefix.ends_with('.') {
+            jetstream_prefix.push('.');
+        }
+
+        self.jetstream_prefix = jetstream_prefix;
         self
     }
 
