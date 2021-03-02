@@ -37,6 +37,8 @@ impl Message {
 
     /// Acknowledge a `JetStream` message. See `AckKind` documentation for
     /// details of what each variant means.
+    ///
+    /// Requires the `jetstream` feature.
     #[cfg(feature = "jetstream")]
     pub fn ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         self.respond(ack_kind)
@@ -45,6 +47,8 @@ impl Message {
     /// Acknowledge a `JetStream` message and wait for acknowledgement from the server
     /// that it has received our ack. Retry acknowledgement until we receive a response.
     /// See `AckKind` documentation for details of what each variant means.
+    ///
+    /// Requires the `jetstream` feature.
     #[cfg(feature = "jetstream")]
     pub fn double_ack(
         &self,
@@ -54,7 +58,7 @@ impl Message {
             None => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "no reply subject available",
+                    "No reply subject available (not a JetStream message)",
                 ))
             }
             Some(original_reply) => original_reply,
@@ -65,8 +69,8 @@ impl Message {
             if retries == 2 {
                 log::warn!("double_ack is retrying until the server connection is reestablished");
             }
-            let reply = format!("_INBOX.{}", nuid::next());
-            let sub_ret = self.client.subscribe(&reply, None);
+            let ack_reply = format!("_INBOX.{}", nuid::next());
+            let sub_ret = self.client.subscribe(&ack_reply, None);
             if sub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -74,14 +78,14 @@ impl Message {
             let (sid, receiver) = sub_ret?;
             let sub = crate::Subscription::new(
                 sid,
-                reply.to_string(),
+                ack_reply.to_string(),
                 receiver,
                 self.client.clone(),
             );
 
             let pub_ret = self.client.publish(
                 original_reply,
-                Some(&reply),
+                Some(&ack_reply),
                 None,
                 ack_kind.as_ref(),
             );
