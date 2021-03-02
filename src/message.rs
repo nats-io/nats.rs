@@ -34,6 +34,69 @@ impl Message {
             Some(reply) => self.client.publish(reply, None, None, msg.as_ref()),
         }
     }
+
+    /// Acknowledge a `JetStream` message. See `AckKind` documentation for
+    /// details of what each variant means.
+    #[cfg(feature = "jetstream")]
+    pub fn ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
+        self.respond(ack_kind)
+    }
+
+    /// Acknowledge a `JetStream` message and wait for acknowledgement from the server
+    /// that it has received our ack. Retry acknowledgement until we receive a response.
+    /// See `AckKind` documentation for details of what each variant means.
+    #[cfg(feature = "jetstream")]
+    pub fn double_ack(
+        &self,
+        ack_kind: crate::jetstream::AckKind,
+    ) -> io::Result<()> {
+        let original_reply = match self.reply.as_ref() {
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "no reply subject available",
+                ))
+            }
+            Some(original_reply) => original_reply,
+        };
+        let mut retries = 0;
+        loop {
+            retries += 1;
+            if retries == 2 {
+                log::warn!("double_ack is retrying until the server connection is reestablished");
+            }
+            let reply = format!("_INBOX.{}", nuid::next());
+            let sub_ret = self.client.subscribe(&reply, None);
+            if sub_ret.is_err() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+            let (sid, receiver) = sub_ret?;
+            let sub = crate::Subscription::new(
+                sid,
+                reply.to_string(),
+                receiver,
+                self.client.clone(),
+            );
+
+            let pub_ret = self.client.publish(
+                original_reply,
+                Some(&reply),
+                None,
+                ack_kind.as_ref(),
+            );
+            if pub_ret.is_err() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+            if sub
+                .next_timeout(std::time::Duration::from_millis(100))
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
 }
 
 impl fmt::Debug for Message {
