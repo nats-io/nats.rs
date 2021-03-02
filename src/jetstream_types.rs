@@ -464,7 +464,7 @@ pub struct SequencePair {
 /// for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub(crate) struct NextRequest {
-    pub expires: DateTime,
+    pub expires: Option<usize>,
     pub batch: Option<usize>,
     pub no_wait: Option<bool>,
 }
