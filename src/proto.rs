@@ -67,7 +67,7 @@ fn read_line<R: BufRead + ?Sized>(
         if len + read > buf.len() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "command operation exceeded 4k buffer",
+                "received command exceeded fixed command buffer",
             ));
         }
         buf[read..read + len].copy_from_slice(&available[..len]);
