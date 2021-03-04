@@ -101,6 +101,11 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     };
     let command_len = read_line(&mut stream, &mut command_buf)?;
 
+    if command_len == 0 {
+        // If zero bytes were read, the connection is closed.
+        return Ok(None);
+    }
+
     // Convert into a UTF8 string for simpler parsing.
     let line = str::from_utf8(&command_buf[..command_len])
         .map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
