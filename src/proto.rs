@@ -57,28 +57,24 @@ fn read_line<R: BufRead + ?Sized>(
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             };
-            match memchr::memchr(b'\n', available) {
-                Some(i) => {
-                    if i + read >= buf.len() {
-                        return Err(Error::new(
-                            ErrorKind::InvalidInput,
-                            "command operation exceeded 4k buffer",
-                        ));
-                    }
-                    buf[read..=read + i].copy_from_slice(&available[..=i]);
-                    (true, i + 1)
+            if let Some(i) = memchr::memchr(b'\n', available) {
+                if i + read >= buf.len() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "command operation exceeded 4k buffer",
+                    ));
                 }
-                None => {
-                    if available.len() + read > buf.len() {
-                        return Err(Error::new(
-                            ErrorKind::InvalidInput,
-                            "command operation exceeded 4k buffer",
-                        ));
-                    }
-                    buf[read..read + available.len()]
-                        .copy_from_slice(available);
-                    (false, available.len())
+                buf[read..=read + i].copy_from_slice(&available[..=i]);
+                (true, i + 1)
+            } else {
+                if available.len() + read > buf.len() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "command operation exceeded 4k buffer",
+                    ));
                 }
+                buf[read..read + available.len()].copy_from_slice(available);
+                (false, available.len())
             }
         };
         r.consume(used);
