@@ -51,35 +51,29 @@ fn read_line<R: BufRead + ?Sized>(
 ) -> io::Result<usize> {
     let mut read = 0;
     loop {
-        let (done, used) = {
-            let available = match r.fill_buf() {
-                Ok(n) => n,
-                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e),
-            };
+        let available = match r.fill_buf() {
+            Ok(n) => n,
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        let (done, len) = {
             if let Some(i) = memchr::memchr(b'\n', available) {
-                if i + read >= buf.len() {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "command operation exceeded 4k buffer",
-                    ));
-                }
-                buf[read..=read + i].copy_from_slice(&available[..=i]);
                 (true, i + 1)
             } else {
-                if available.len() + read > buf.len() {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "command operation exceeded 4k buffer",
-                    ));
-                }
                 buf[read..read + available.len()].copy_from_slice(available);
                 (false, available.len())
             }
         };
-        r.consume(used);
-        read += used;
-        if done || used == 0 {
+        if len + read > buf.len() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "command operation exceeded 4k buffer",
+            ));
+        }
+        buf[read..read + len].copy_from_slice(&available[..len]);
+        r.consume(len);
+        read += len;
+        if done || len == 0 {
             return Ok(read);
         }
     }
