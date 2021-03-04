@@ -12,6 +12,9 @@ readme = "README.md"
 keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
+[package.metadata.docs.rs]
+features = ["jetstream"]
+
 [features]
 fault_injection = []
 jetstream = ["serde", "chrono", "serde_json"]
@@ -19,11 +22,11 @@ jetstream = ["serde", "chrono", "serde_json"]
 [badges]
 maintenance = { status = "actively-developed" }
 
+[profile.release]
+debug = true
+
 [profile.dev]
 panic = 'abort'
-
-[package.metadata.docs.rs]
-features = ["jetstream"]
 
 [dependencies]
 base64 = "0.13.0"
@@ -44,6 +47,7 @@ webpki = "0.21.3"
 serde = { version = "1.0.119", optional = true, features = ["derive"] }
 serde_json = { version = "1.0.56", optional = true }
 chrono = { version = "0.4.19", optional = true, features = ["serde"]}
+memchr = "2.3.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.80"
