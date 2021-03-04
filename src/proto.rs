@@ -93,14 +93,11 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     inject_io_failure()?;
 
     // Read a line, which should be human readable.
-    let mut command_buf: [u8; 4096] = {
-        #[allow(unsafe_code)]
-        unsafe {
-            std::mem::MaybeUninit::uninit().assume_init()
-        }
-    };
-    let command_len = read_line(&mut stream, &mut command_buf)?;
+    #[allow(unsafe_code)]
+    let mut command_buf: [u8; 4096] =
+        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
+    let command_len = read_line(&mut stream, &mut command_buf)?;
     if command_len == 0 {
         // If zero bytes were read, the connection is closed.
         return Ok(None);
