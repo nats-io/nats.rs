@@ -36,7 +36,8 @@ impl Message {
     }
 
     /// Acknowledge a `JetStream` message. See `AckKind` documentation for
-    /// details of what each variant means.
+    /// details of what each variant means. If you need to block until the
+    /// server acks your ack, use the `double_ack` method instead.
     ///
     /// Requires the `jetstream` feature.
     #[cfg(feature = "jetstream")]

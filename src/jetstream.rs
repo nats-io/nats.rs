@@ -135,7 +135,6 @@
 //!
 //! # Ok(()) }
 //! ```
-//!
 
 use std::{
     collections::VecDeque,
@@ -591,7 +590,7 @@ pub struct Consumer {
 
     /// Contains ranges of processed messages that will be
     /// filtered out upon future receipt.
-    pub dedupe_window: RangeTree,
+    pub dedupe_window: IntervalTree,
 }
 
 impl Consumer {
@@ -712,17 +711,17 @@ impl Consumer {
             ))];
         }
 
-        let subject = format!(
-            "{}CONSUMER.MSG.NEXT.{}.{}",
-            self.api_prefix(),
-            self.stream,
-            self.cfg.durable_name.as_ref().unwrap()
-        );
-
         let mut _sub_opt = None;
         let responses = if let Some(ps) = self.push_subscriber.as_ref() {
             ps
         } else {
+            let subject = format!(
+                "{}CONSUMER.MSG.NEXT.{}.{}",
+                self.api_prefix(),
+                self.stream,
+                self.cfg.durable_name.as_ref().unwrap()
+            );
+
             let sub =
                 match self.nc.request_multi(&subject, batch_size.to_string()) {
                     Ok(sub) => sub,
@@ -810,16 +809,16 @@ impl Consumer {
             ));
         }
 
-        let subject = format!(
-            "{}CONSUMER.MSG.NEXT.{}.{}",
-            self.api_prefix(),
-            self.stream,
-            self.cfg.durable_name.as_ref().unwrap()
-        );
-
         let next = if let Some(ps) = &self.push_subscriber {
             ps.next().unwrap()
         } else {
+            let subject = format!(
+                "{}CONSUMER.MSG.NEXT.{}.{}",
+                self.api_prefix(),
+                self.stream,
+                self.cfg.durable_name.as_ref().unwrap()
+            );
+
             self.nc.request(&subject, AckKind::Ack)?
         };
         let ret = f(&next)?;
@@ -848,16 +847,16 @@ impl Consumer {
             ));
         }
 
-        let subject = format!(
-            "{}CONSUMER.MSG.NEXT.{}.{}",
-            self.api_prefix(),
-            self.stream,
-            self.cfg.durable_name.as_ref().unwrap()
-        );
-
         let next = if let Some(ps) = &self.push_subscriber {
             ps.next_timeout(self.timeout)?
         } else {
+            let subject = format!(
+                "{}CONSUMER.MSG.NEXT.{}.{}",
+                self.api_prefix(),
+                self.stream,
+                self.cfg.durable_name.as_ref().unwrap()
+            );
+
             self.nc.request(&subject, b"")?
         };
         let ret = f(&next)?;
@@ -872,15 +871,15 @@ impl Consumer {
     }
 }
 
-/// Records ranges of acknowledged messages for
+/// Records ranges of acknowledged IDs for
 /// low-memory deduplication.
 #[derive(Default)]
-pub struct RangeTree {
+pub struct IntervalTree {
     // stores interval start-end
     inner: std::collections::BTreeMap<u64, u64>,
 }
 
-impl RangeTree {
+impl IntervalTree {
     /// Mark this ID as being processed. Returns `true`
     /// if this ID was not already marked as processed.
     pub fn mark_processed(&mut self, id: u64) -> bool {
@@ -956,7 +955,7 @@ mod test {
 
     #[test]
     fn range_tree() {
-        let mut rt = RangeTree {
+        let mut rt = IntervalTree {
             inner: vec![(0, 0), (6, 6)].into_iter().collect(),
         };
 
@@ -970,7 +969,7 @@ mod test {
         assert!(rt.already_processed(6));
         assert!(!rt.already_processed(7));
 
-        let mut rt = RangeTree {
+        let mut rt = IntervalTree {
             inner: vec![(3, 3), (6, 6)].into_iter().collect(),
         };
 
@@ -982,7 +981,7 @@ mod test {
         assert!(rt.already_processed(6));
         assert!(!rt.already_processed(7));
 
-        let mut rt = RangeTree {
+        let mut rt = IntervalTree {
             inner: vec![(0, 0), (5, 5)].into_iter().collect(),
         };
         rt.mark_processed(4);
@@ -992,7 +991,7 @@ mod test {
         assert!(rt.already_processed(5));
         assert!(!rt.already_processed(6));
 
-        let mut rt = RangeTree {
+        let mut rt = IntervalTree {
             inner: vec![(2, 3), (5, 6)].into_iter().collect(),
         };
         rt.mark_processed(4);
