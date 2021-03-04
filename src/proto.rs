@@ -43,6 +43,8 @@ pub(crate) enum ServerOp {
     Unknown(String),
 }
 
+// adapted from `std::io::BufRead::read_until`, made
+// to use a fixed buffer instead of a growable vector.
 fn read_line<R: BufRead + ?Sized>(
     r: &mut R,
     buf: &mut [u8],
@@ -57,7 +59,7 @@ fn read_line<R: BufRead + ?Sized>(
             };
             match memchr::memchr(b'\n', available) {
                 Some(i) => {
-                    if i + read > buf.len() {
+                    if i + read >= buf.len() {
                         return Err(Error::new(
                             ErrorKind::InvalidInput,
                             "command operation exceeded 4k buffer",
@@ -67,6 +69,12 @@ fn read_line<R: BufRead + ?Sized>(
                     (true, i + 1)
                 }
                 None => {
+                    if available.len() + read > buf.len() {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            "command operation exceeded 4k buffer",
+                        ));
+                    }
                     buf[read..read + available.len()]
                         .copy_from_slice(available);
                     (false, available.len())
