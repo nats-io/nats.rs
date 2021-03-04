@@ -51,15 +51,28 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     inject_io_failure()?;
 
     // Read a line, which should be human readable.
-    let mut line = Vec::new();
-    if stream.read_until(b'\n', &mut line)? == 0 {
+    let command_buf: &mut [u8] = &mut [0; 4096];
+    let available_bytes = stream.fill_buf()?;
+    if available_bytes.is_empty() {
         // If zero bytes were read, the connection is closed.
         return Ok(None);
     }
+    let command_len =
+        if let Some(cl) = available_bytes.iter().position(|c| *c == b'\n') {
+            cl
+        } else {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "command operation exceeded 4k buffer",
+            ));
+        };
+    command_buf[..command_len].copy_from_slice(&available_bytes[..command_len]);
+    stream.consume(command_len);
 
     // Convert into a UTF8 string for simpler parsing.
-    let line = str::from_utf8(&line)
+    let line = str::from_utf8(&command_buf[..command_len])
         .map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
+
     let op = line
         .split_ascii_whitespace()
         .next()
