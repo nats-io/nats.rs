@@ -43,6 +43,42 @@ pub(crate) enum ServerOp {
     Unknown(String),
 }
 
+// adapted from `std::io::BufRead::read_until`, made
+// to use a fixed buffer instead of a growable vector.
+fn read_line<R: BufRead + ?Sized>(
+    r: &mut R,
+    buf: &mut [u8],
+) -> io::Result<usize> {
+    let mut read = 0;
+    loop {
+        let available = match r.fill_buf() {
+            Ok(n) => n,
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        let (done, len) = {
+            if let Some(i) = memchr::memchr(b'\n', available) {
+                (true, i + 1)
+            } else {
+                buf[read..read + available.len()].copy_from_slice(available);
+                (false, available.len())
+            }
+        };
+        if len + read > buf.len() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "received command exceeded fixed command buffer",
+            ));
+        }
+        buf[read..read + len].copy_from_slice(&available[..len]);
+        r.consume(len);
+        read += len;
+        if done || len == 0 {
+            return Ok(read);
+        }
+    }
+}
+
 /// Decodes a single operation from the server.
 ///
 /// If the connection is closed, `None` will be returned.
@@ -51,15 +87,20 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     inject_io_failure()?;
 
     // Read a line, which should be human readable.
-    let mut line = Vec::new();
-    if stream.read_until(b'\n', &mut line)? == 0 {
+    #[allow(unsafe_code)]
+    let mut command_buf: [u8; 4096] =
+        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+
+    let command_len = read_line(&mut stream, &mut command_buf)?;
+    if command_len == 0 {
         // If zero bytes were read, the connection is closed.
         return Ok(None);
     }
 
     // Convert into a UTF8 string for simpler parsing.
-    let line = str::from_utf8(&line)
+    let line = str::from_utf8(&command_buf[..command_len])
         .map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
+
     let op = line
         .split_ascii_whitespace()
         .next()
