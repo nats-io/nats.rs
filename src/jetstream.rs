@@ -54,7 +54,7 @@
 //!
 //! nc.create_stream("my_stream")?;
 //!
-//! let consumer: Consumer = nc.create_consumer("my_stream", "my_consumer")?;
+//! let consumer: nats::jetstream::Consumer = nc.create_consumer("my_stream", "my_consumer")?;
 //!
 //! # Ok(()) }
 //! ```
@@ -69,7 +69,7 @@
 //!
 //! nc.create_stream("my_stream")?;
 //!
-//! let consumer: Consumer = nc.create_consumer("my_stream", ConsumerConfig {
+//! let consumer: nats::jetstream::Consumer = nc.create_consumer("my_stream", ConsumerConfig {
 //!     durable_name: Some("my_consumer".to_string()),
 //!     deliver_subject: Some("my_push_consumer_subject".to_string()),
 //!     ack_policy: AckPolicy::All,
@@ -107,7 +107,7 @@
 //! let nc = nats::connect("my_server::4222")?;
 //!
 //! // this will create the consumer if it does not exist already
-//! let consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
+//! let mut consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //!
 //! // wait indefinitely for the message to arrive
 //! let msg = consumer.pull()?;
@@ -121,16 +121,18 @@
 //! // This can be set manually, and has a very low default of 5ms.
 //! let msg_data_len: usize = consumer.process_timeout(|msg| {
 //!     println!("got message {:?}", msg);
-//!     msg.data.len()
+//!     Ok(msg.data.len())
 //! })?;
 //!
 //! // wait indefinitely for the first message in a batch, then process
 //! // more messages until the configured timeout is expired
 //! let batch_size = 128;
-//! let results: Vec<usize> = consumer.process_batch(batch_size, |msg| {
+//! let results: Vec<std::io::Result<usize>> = consumer.process_batch(batch_size, |msg| {
 //!     println!("got message {:?}", msg);
-//!     msg.data.len()
-//! })?;
+//!     Ok(msg.data.len())
+//! });
+//! let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
+//! let sizes: Vec<usize> = flipped?;
 //!
 //! # Ok(()) }
 //! ```
