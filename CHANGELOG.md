@@ -1,3 +1,10 @@
+# 0.9.5
+
+## New Features
+
+- JetStream consumer and message acknowledgement is now
+  supported via the `jetstream` feature.
+
 # 0.9.4
 
 ## Bug Fixes
