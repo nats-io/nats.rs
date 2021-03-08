@@ -56,9 +56,6 @@
 //!
 //! let consumer: Consumer = nc.create_consumer("my_stream", "my_consumer")?;
 //!
-//! // process a single item, sending an ack if the closure returns `Ok`.
-//! consumer.process
-//!
 //! # Ok(()) }
 //! ```
 //!
@@ -113,10 +110,12 @@
 //! let consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //!
 //! // wait indefinitely for the message to arrive
-//! let msg_data_len: usize = consumer.process(|msg| {
-//!     println!("got message {:?}", msg);
-//!     msg.data.len()
-//! })?;
+//! let msg = consumer.pull()?;
+//!
+//! // --- process message ---
+//!
+//! // tell the server the message has been processed
+//! msg.ack()?;
 //!
 //! // wait until the consumer's `timeout` field for the message to arrive.
 //! // This can be set manually, and has a very low default of 5ms.
@@ -141,6 +140,7 @@ use std::{
     convert::TryFrom,
     fmt::Debug,
     io::{self, Error, ErrorKind},
+    time::Duration,
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -256,7 +256,7 @@ impl NatsClient {
         let cfg: StreamConfig = stream_config.into();
         if cfg.name.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -272,7 +272,7 @@ impl NatsClient {
     pub fn update_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
         if cfg.name.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -322,7 +322,7 @@ impl NatsClient {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -348,7 +348,7 @@ impl NatsClient {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -367,7 +367,7 @@ impl NatsClient {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -386,7 +386,7 @@ impl NatsClient {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -410,7 +410,7 @@ impl NatsClient {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -436,7 +436,7 @@ impl NatsClient {
         let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -484,14 +484,14 @@ impl NatsClient {
         let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
         let consumer = consumer.as_ref();
         if consumer.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the consumer name must not be empty",
             ));
         }
@@ -522,7 +522,7 @@ impl NatsClient {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
@@ -586,7 +586,7 @@ pub struct Consumer {
     /// out during `process` and `process_batch`. Defaults
     /// to 5ms, which is likely to be far too low for
     /// workloads crossing physical sites.
-    pub timeout: std::time::Duration,
+    pub timeout: Duration,
 
     /// Contains ranges of processed messages that will be
     /// filtered out upon future receipt.
@@ -672,7 +672,7 @@ impl Consumer {
             stream,
             cfg,
             push_subscriber,
-            timeout: std::time::Duration::from_millis(5),
+            timeout: Duration::from_millis(5),
             dedupe_window: Default::default(),
         })
     }
@@ -705,7 +705,7 @@ impl Consumer {
     ) -> Vec<io::Result<R>> {
         if self.cfg.durable_name.is_none() {
             return vec![Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "process and process_batch are only usable from \
                 Pull-based Consumers with a durable_name set",
             ))];
@@ -740,7 +740,7 @@ impl Consumer {
 
         while let Ok(msg) = responses.next_timeout(if received == 0 {
             // wait "forever" for first message
-            std::time::Duration::new(std::u64::MAX >> 2, 0)
+            Duration::new(std::u64::MAX >> 2, 0)
         } else {
             self.timeout
                 .checked_sub(start.elapsed())
@@ -803,7 +803,7 @@ impl Consumer {
     ) -> io::Result<R> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "process and process_batch are only usable from \
                 Pull-based Consumers with a durable_name set",
             ));
@@ -841,7 +841,7 @@ impl Consumer {
     ) -> io::Result<R> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
-                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
                 "process and process_batch are only usable from \
                 Pull-based Consumers with a durable_name set",
             ));
@@ -864,6 +864,63 @@ impl Consumer {
             next.respond(AckKind::Ack)?;
         }
         Ok(ret)
+    }
+
+    /// For pull-based consumers (a consumer where `ConsumerConfig.deliver_subject` is `None`)
+    /// this can be used to request a single message, and wait forever for a response.
+    /// If you require specifying the batch size or using a timeout while consuming the
+    /// responses, use the `pull_opt` method below.
+    pub fn pull(&mut self) -> io::Result<Message> {
+        let ret_opt = self
+            .pull_opt(NextRequest {
+                batch: 1,
+                ..Default::default()
+            })?
+            .next();
+
+        if let Some(ret) = ret_opt {
+            Ok(ret)
+        } else {
+            Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "The nats client is shutting down.",
+            ))
+        }
+    }
+
+    /// For pull-based consumers (a consumer where `ConsumerConfig.deliver_subject` is `None`)
+    /// this can be used to request a configurable number of messages, as well as specify
+    /// how the server will keep track of this batch request over time. See the docs for
+    /// `NextRequest` for more information about the options.
+    pub fn pull_opt(
+        &mut self,
+        next_request: NextRequest,
+    ) -> io::Result<crate::Subscription> {
+        if self.cfg.durable_name.is_none() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "this method is only usable from \
+                Pull-based Consumers with a durable_name set",
+            ));
+        }
+
+        if self.cfg.deliver_subject.is_none() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "this method is only usable from \
+                Pull-based Consumers with a deliver_subject set",
+            ));
+        }
+
+        let subject = format!(
+            "{}CONSUMER.MSG.NEXT.{}.{}",
+            self.api_prefix(),
+            self.stream,
+            self.cfg.durable_name.as_ref().unwrap()
+        );
+
+        let req = serde_json::ser::to_vec(&next_request).unwrap();
+        self.nc.request_multi(&subject, &req)
     }
 
     fn api_prefix(&self) -> &str {

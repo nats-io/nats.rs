@@ -65,7 +65,7 @@ pub struct ConsumerConfig {
     /// "exactly once" semantics, it is necessary to implement idempotent
     /// semantics in any system that is written to as a result of processing
     /// a message.
-    pub durable_name: Option<String>,
+    pub deliver_subject: Option<String>,
 
     /// Setting `durable_name` to `Some(...)` will cause this consumer
     /// to be "durable". This may be a good choice for workloads that
@@ -82,7 +82,7 @@ pub struct ConsumerConfig {
     /// progress in the case of a crash, such as certain "high churn"
     /// workloads or workloads where a crashed instance is not required
     /// to recover.
-    pub deliver_subject: Option<String>,
+    pub durable_name: Option<String>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
@@ -463,9 +463,16 @@ pub struct SequencePair {
 
 /// for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
-pub(crate) struct NextRequest {
+pub struct NextRequest {
+    /// The number of messages that are being requested to be delivered.
+    pub batch: usize,
+    /// The optional number of nanoseconds that the server will store this next request for
+    /// before forgetting about the pending batch size.
     pub expires: Option<usize>,
-    pub batch: Option<usize>,
+    /// This optionally causes the server not to store this pending request at all, but when there are no
+    /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
+    /// can know when you reached the end of the stream for example. A 409 is returned if the
+    /// Consumer has reached MaxAckPending limits.
     pub no_wait: Option<bool>,
 }
 

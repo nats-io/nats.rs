@@ -35,13 +35,28 @@ impl Message {
         }
     }
 
+    /// Acknowledge a `JetStream` message with a default acknowledgement.
+    /// See `AckKind` documentation for details of what other types of
+    /// acks are available. If you need to send a non-default ack, use
+    /// the `ack_kind` method below. If you need to block until the
+    /// server acks your ack, use the `double_ack` method instead.
+    ///
+    /// Requires the `jetstream` feature.
+    #[cfg(feature = "jetstream")]
+    pub fn ack(&self) -> io::Result<()> {
+        self.respond(b"")
+    }
+
     /// Acknowledge a `JetStream` message. See `AckKind` documentation for
     /// details of what each variant means. If you need to block until the
     /// server acks your ack, use the `double_ack` method instead.
     ///
     /// Requires the `jetstream` feature.
     #[cfg(feature = "jetstream")]
-    pub fn ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
+    pub fn ack_kind(
+        &self,
+        ack_kind: crate::jetstream::AckKind,
+    ) -> io::Result<()> {
         self.respond(ack_kind)
     }
 
