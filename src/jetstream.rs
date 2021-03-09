@@ -576,7 +576,6 @@ impl NatsClient {
         Res: DeserializeOwned,
     {
         let res_msg = self.request(subject, req)?;
-        println!("got response: {:?}", std::str::from_utf8(&res_msg.data));
         let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),

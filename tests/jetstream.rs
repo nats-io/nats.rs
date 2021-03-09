@@ -49,7 +49,7 @@ fn jetstream_create_consumer() -> io::Result<()> {
     let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
 
     nc.create_stream("stream1")?;
-    let mut consumer = nc.create_consumer("stream1", "consumer1")?;
+    nc.create_consumer("stream1", "consumer1")?;
     Ok(())
 }
 
@@ -116,7 +116,7 @@ fn jetstream_basics() -> io::Result<()> {
 
     nc.create_consumer("test2", "consumer3")?;
 
-    let mut consumer3 = Consumer::existing(nc.clone(), "test2", "consumer3")?;
+    Consumer::existing(nc.clone(), "test2", "consumer3")?;
 
     let _ = dbg!(nc.account_info());
 
