@@ -872,6 +872,8 @@ impl Consumer {
     /// this can be used to request a single message, and wait forever for a response.
     /// If you require specifying the batch size or using a timeout while consuming the
     /// responses, use the `pull_opt` method below.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn pull(&mut self) -> io::Result<Message> {
         let ret_opt = self
             .pull_opt(NextRequest {
@@ -894,6 +896,8 @@ impl Consumer {
     /// this can be used to request a configurable number of messages, as well as specify
     /// how the server will keep track of this batch request over time. See the docs for
     /// `NextRequest` for more information about the options.
+    ///
+    /// Requires the `jetstream` feature.
     pub fn pull_opt(
         &mut self,
         next_request: NextRequest,
