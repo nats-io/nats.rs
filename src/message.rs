@@ -25,7 +25,7 @@ pub struct Message {
     pub client: Client,
 
     /// Whether this message has already been successfully double-acked
-    /// using JetStream.
+    /// using `JetStream`.
     #[doc(hidden)]
     pub double_acked: AtomicBool,
 }
@@ -154,10 +154,10 @@ impl Message {
         }
     }
 
-    /// Returns the JetStream message ID
-    /// if this is a JetStream message.
+    /// Returns the `JetStream` message ID
+    /// if this is a `JetStream` message.
     /// Returns `None` if this is not
-    /// a JetStream message with headers
+    /// a `JetStream` message with headers
     /// set.
     ///
     /// Requires the `jetstream` feature.
