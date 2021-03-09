@@ -1,3 +1,12 @@
+# 0.9.6
+
+## New Features
+
+- JetStream consumers are now better supported
+  through the `Consumer::process*` methods,
+  which also perform message deduplication
+  backed by an interval tree.
+
 # 0.9.5
 
 ## New Features

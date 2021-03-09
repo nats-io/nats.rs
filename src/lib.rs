@@ -104,14 +104,16 @@
 
 #![cfg_attr(test, deny(warnings))]
 #![deny(
-    missing_docs,
     future_incompatible,
+    missing_copy_implementations,
+    missing_docs,
     nonstandard_style,
     rust_2018_idioms,
-    missing_copy_implementations,
+    rustdoc,
     trivial_casts,
     trivial_numeric_casts,
     unsafe_code,
+    unused,
     unused_qualifications
 )]
 #![deny(

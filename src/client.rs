@@ -619,6 +619,7 @@ impl Client {
                             data: payload,
                             headers: None,
                             client: self.clone(),
+                            double_acked: Default::default(),
                         };
 
                         // Send a message or drop it if the channel is
@@ -642,6 +643,7 @@ impl Client {
                             data: payload,
                             headers: Some(headers),
                             client: self.clone(),
+                            double_acked: Default::default(),
                         };
 
                         // Send a message or drop it if the channel is
