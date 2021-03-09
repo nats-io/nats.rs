@@ -106,7 +106,11 @@
 //!
 //! let nc = nats::connect("my_server::4222")?;
 //!
-//! // this will create the consumer if it does not exist already
+//! // this will create the consumer if it does not exist already.
+//! // consumer must be mut because the `process*` methods perform
+//! // message deduplication using an interval tree, which is
+//! // also publicly accessible via the `Consumer`'s `dedupe_window`
+//! // field.
 //! let mut consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //!
 //! // wait indefinitely for the message to arrive
@@ -117,15 +121,37 @@
 //! // tell the server the message has been processed
 //! msg.ack()?;
 //!
-//! // wait until the consumer's `timeout` field for the message to arrive.
-//! // This can be set manually, and has a very low default of 5ms.
+//! // The `Consumer::process` method executes a closure
+//! // on both push- and pull-based consumers, and if
+//! // the closure returns `Ok` then the message is acked.
+//! // If no message is available, it will wait forever
+//! // for one to arrive.
+//! let msg_data_len: usize = consumer.process(|msg| {
+//!     println!("got message {:?}", msg);
+//!     Ok(msg.data.len())
+//! })?;
+//!
+//! // Similar to `Consumer::process` except wait until the
+//! // consumer's `timeout` field for the message to arrive.
+//! // This can and should be set manually, as it has a low
+//! // default of 5ms.
 //! let msg_data_len: usize = consumer.process_timeout(|msg| {
 //!     println!("got message {:?}", msg);
 //!     Ok(msg.data.len())
 //! })?;
 //!
-//! // wait indefinitely for the first message in a batch, then process
-//! // more messages until the configured timeout is expired
+//! // For consumers operating with `AckPolicy::All`, batch
+//! // processing can provide nice throughput optimizations.
+//! // `Consumer::process_batch` will wait indefinitely for
+//! // the first message in a batch, then process
+//! // more messages until the configured timeout is expired.
+//! // It will batch acks if running with `AckPolicy::All`.
+//! // If there is an error with acking, the last item in the
+//! // returned `Vec` will be the io error. Terminates early
+//! // without acking if the closure returns an `Err`, which
+//! // is included in the final element of the `Vec`. If a
+//! // Timeout happens before the batch size is reached, then
+//! // there will be no errors included in the response `Vec`.
 //! let batch_size = 128;
 //! let results: Vec<std::io::Result<usize>> = consumer.process_batch(batch_size, |msg| {
 //!     println!("got message {:?}", msg);
@@ -696,27 +722,35 @@ impl Consumer {
     /// If an error is encountered while subscribing or acking messages
     /// that may have returned `Ok` from the closure, that Ok will be
     /// present in the returned vector but the last item in the vector
-    /// will be the encountered error.
+    /// will be the encountered error. If the consumer's timeout expires
+    /// before the entire batch is processed, there will be no error
+    /// pushed to the returned `Vec`, it will just be shorter than the
+    /// specified batch size.
+    ///
+    /// All messages are deduplicated using the `Consumer`'s built-in
+    /// `dedupe_window` before being fed to the provided closure. If
+    /// a message that has already been processed is received, it will
+    /// be acked and skipped. Errors for acking deduplicated messages
+    /// are not included in the returned `Vec`.
     ///
     /// Requires the `jetstream` feature.
-    #[doc(hidden)]
     pub fn process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
-        &self,
+        &mut self,
         batch_size: usize,
         mut f: F,
     ) -> Vec<io::Result<R>> {
-        if self.cfg.durable_name.is_none() {
-            return vec![Err(Error::new(
-                ErrorKind::InvalidInput,
-                "process and process_batch are only usable from \
-                Pull-based Consumers with a durable_name set",
-            ))];
-        }
-
         let mut _sub_opt = None;
         let responses = if let Some(ps) = self.push_subscriber.as_ref() {
             ps
         } else {
+            if self.cfg.durable_name.is_none() {
+                return vec![Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "process and process_batch are only usable from \
+                    Pull-based Consumers if there is a durable_name set",
+                ))];
+            }
+
             let subject = format!(
                 "{}CONSUMER.MSG.NEXT.{}.{}",
                 self.api_prefix(),
@@ -738,9 +772,8 @@ impl Consumer {
         let start = std::time::Instant::now();
 
         let mut received = 0;
-        let mut acked = 0;
 
-        while let Ok(msg) = responses.next_timeout(if received == 0 {
+        while let Ok(next) = responses.next_timeout(if received == 0 {
             // wait "forever" for first message
             Duration::new(std::u64::MAX >> 2, 0)
         } else {
@@ -748,12 +781,14 @@ impl Consumer {
                 .checked_sub(start.elapsed())
                 .unwrap_or_default()
         }) {
-            let ret = f(&msg);
+            let next_id = next.jetstream_message_info().unwrap().stream_seq;
 
-            if ret.is_err() {
-                rets.push(ret);
-                return rets;
+            if self.dedupe_window.already_processed(next_id) {
+                let _dont_care_about_success = next.ack();
+                continue;
             }
+
+            let ret = f(&next);
 
             let is_err = ret.is_err();
             rets.push(ret);
@@ -763,27 +798,24 @@ impl Consumer {
                 // if our ack policy is `All`, after breaking.
                 break;
             } else if self.cfg.ack_policy == AckPolicy::Explicit {
-                let res = msg.respond(AckKind::Ack);
+                self.dedupe_window.mark_processed(next_id);
+                let res = next.ack();
                 if let Err(e) = res {
-                    rets.truncate(acked);
                     rets.push(Err(e));
-                } else {
-                    acked += 1;
                 }
             }
 
-            last = Some(msg);
+            last = Some(next);
             received += 1;
             if received == batch_size {
                 break;
             }
         }
 
-        if let Some(msg) = last {
+        if let Some(last) = last {
             if self.cfg.ack_policy == AckPolicy::All {
-                let res = msg.respond(AckKind::Ack);
+                let res = last.ack();
                 if let Err(e) = res {
-                    rets.truncate(acked);
                     rets.push(Err(e));
                 }
             }
@@ -797,37 +829,60 @@ impl Consumer {
     ///
     /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
+    /// All messages are deduplicated using the `Consumer`'s built-in
+    /// `dedupe_window` before being fed to the provided closure. If
+    /// a message that has already been processed is received, it will
+    /// be acked and skipped.
+    ///
+    /// Does not return an `Err` if acking the message is unsuccessful,
+    /// but the message is still marked in the dedupe window. If you
+    /// require stronger processing guarantees, you can manually call
+    /// the `double_ack` method of the argument message. If you require
+    /// both the returned `Ok` from the closure and the `Err` from a
+    /// failed ack, use `process_batch` instead.
+    ///
     /// Requires the `jetstream` feature.
-    #[doc(hidden)]
     pub fn process<R, F: Fn(&Message) -> io::Result<R>>(
-        &self,
+        &mut self,
         f: F,
     ) -> io::Result<R> {
-        if self.cfg.durable_name.is_none() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "process and process_batch are only usable from \
-                Pull-based Consumers with a durable_name set",
-            ));
-        }
+        loop {
+            let next = if let Some(ps) = &self.push_subscriber {
+                ps.next().unwrap()
+            } else {
+                if self.cfg.durable_name.is_none() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "process and process_batch are only usable from \
+                Pull-based Consumers if there is a durable_name set",
+                    ));
+                }
 
-        let next = if let Some(ps) = &self.push_subscriber {
-            ps.next().unwrap()
-        } else {
-            let subject = format!(
-                "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.api_prefix(),
-                self.stream,
-                self.cfg.durable_name.as_ref().unwrap()
-            );
+                let subject = format!(
+                    "{}CONSUMER.MSG.NEXT.{}.{}",
+                    self.api_prefix(),
+                    self.stream,
+                    self.cfg.durable_name.as_ref().unwrap()
+                );
 
-            self.nc.request(&subject, AckKind::Ack)?
-        };
-        let ret = f(&next)?;
-        if self.cfg.ack_policy != AckPolicy::None {
-            next.respond(AckKind::Ack)?;
+                self.nc.request(&subject, AckKind::Ack)?
+            };
+
+            let next_id = next.jetstream_message_info().unwrap().stream_seq;
+
+            if self.dedupe_window.already_processed(next_id) {
+                let _dont_care = next.ack();
+                continue;
+            }
+
+            let ret = f(&next)?;
+            if self.cfg.ack_policy != AckPolicy::None {
+                let _dont_care = next.ack();
+            }
+
+            self.dedupe_window.mark_processed(next_id);
+            return Ok(ret);
         }
-        Ok(ret)
     }
 
     /// Process and acknowledge a single message, waiting up to the `Consumer`'s
@@ -835,43 +890,68 @@ impl Consumer {
     ///
     /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
+    /// All messages are deduplicated using the `Consumer`'s built-in
+    /// `dedupe_window` before being fed to the provided closure. If
+    /// a message that has already been processed is received, it will
+    /// be acked and skipped.
+    ///
+    /// Does not return an `Err` if acking the message is unsuccessful,
+    /// but the message is still marked in the dedupe window. If you
+    /// require stronger processing guarantees, you can manually call
+    /// the `double_ack` method of the argument message. If you require
+    /// both the returned `Ok` from the closure and the `Err` from a
+    /// failed ack, use `process_batch` instead.
+    ///
     /// Requires the `jetstream` feature.
-    #[doc(hidden)]
     pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(
-        &self,
+        &mut self,
         f: F,
     ) -> io::Result<R> {
-        if self.cfg.durable_name.is_none() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "process and process_batch are only usable from \
-                Pull-based Consumers with a durable_name set",
-            ));
-        }
+        loop {
+            let next = if let Some(ps) = &self.push_subscriber {
+                ps.next_timeout(self.timeout)?
+            } else {
+                if self.cfg.durable_name.is_none() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "process and process_batch are only usable from \
+                Pull-based Consumers if there is a a durable_name set",
+                    ));
+                }
 
-        let next = if let Some(ps) = &self.push_subscriber {
-            ps.next_timeout(self.timeout)?
-        } else {
-            let subject = format!(
-                "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.api_prefix(),
-                self.stream,
-                self.cfg.durable_name.as_ref().unwrap()
-            );
+                let subject = format!(
+                    "{}CONSUMER.MSG.NEXT.{}.{}",
+                    self.api_prefix(),
+                    self.stream,
+                    self.cfg.durable_name.as_ref().unwrap()
+                );
 
-            self.nc.request(&subject, b"")?
-        };
-        let ret = f(&next)?;
-        if self.cfg.ack_policy != AckPolicy::None {
-            next.respond(AckKind::Ack)?;
+                self.nc.request(&subject, b"")?
+            };
+
+            let next_id = next.jetstream_message_info().unwrap().stream_seq;
+
+            if self.dedupe_window.already_processed(next_id) {
+                self.dedupe_window.mark_processed(next_id);
+                let _dont_care = next.ack();
+                continue;
+            }
+
+            let ret = f(&next)?;
+            if self.cfg.ack_policy != AckPolicy::None {
+                let _dont_care = next.ack();
+            }
+            return Ok(ret);
         }
-        Ok(ret)
     }
 
     /// For pull-based consumers (a consumer where `ConsumerConfig.deliver_subject` is `None`)
     /// this can be used to request a single message, and wait forever for a response.
     /// If you require specifying the batch size or using a timeout while consuming the
     /// responses, use the `pull_opt` method below.
+    ///
+    /// This is a lower-level method and does not filter messages through the `Consumer`'s
+    /// built-in `dedupe_window` as the various `process*` methods do.
     ///
     /// Requires the `jetstream` feature.
     pub fn pull(&mut self) -> io::Result<Message> {
@@ -896,6 +976,9 @@ impl Consumer {
     /// this can be used to request a configurable number of messages, as well as specify
     /// how the server will keep track of this batch request over time. See the docs for
     /// `NextRequest` for more information about the options.
+    ///
+    /// This is a lower-level method and does not filter messages through the `Consumer`'s
+    /// built-in `dedupe_window` as the various `process*` methods do.
     ///
     /// Requires the `jetstream` feature.
     pub fn pull_opt(
@@ -946,11 +1029,17 @@ impl IntervalTree {
     /// Mark this ID as being processed. Returns `true`
     /// if this ID was not already marked as processed.
     pub fn mark_processed(&mut self, id: u64) -> bool {
+        if self.inner.is_empty() {
+            self.inner.insert(1, 1);
+            return true;
+        }
+
         let (prev_start, prev_end) = self
             .inner
             .range(..=&id)
             .next_back()
-            .map_or((0, 0), |(s, e)| (*s, *e));
+            .map(|(s, e)| (*s, *e))
+            .unwrap();
 
         if (prev_start..=prev_end).contains(&id) {
             // range already includes id
@@ -1018,6 +1107,9 @@ mod test {
 
     #[test]
     fn range_tree() {
+        let mut rt = IntervalTree::default();
+        assert!(rt.mark_processed(1));
+
         let mut rt = IntervalTree {
             inner: vec![(0, 0), (6, 6)].into_iter().collect(),
         };

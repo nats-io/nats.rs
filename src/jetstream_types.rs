@@ -191,6 +191,25 @@ pub struct StreamInfo {
     pub state: StreamState,
 }
 
+/// Information about a received message
+#[derive(Debug, Clone)]
+pub struct JetStreamMessageInfo<'a> {
+    /// The stream name
+    pub stream: &'a str,
+    /// The consumer name
+    pub consumer: &'a str,
+    ///
+    pub stream_seq: u64,
+    ///
+    pub consumer_seq: u64,
+    ///
+    pub delivered: i64,
+    ///
+    pub pending: u64,
+    ///
+    pub published: std::time::SystemTime,
+}
+
 /// information about the given stream.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct StreamState {

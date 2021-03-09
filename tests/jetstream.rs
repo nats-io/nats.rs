@@ -49,7 +49,7 @@ fn jetstream_create_consumer() -> io::Result<()> {
     let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
 
     nc.create_stream("stream1")?;
-    let consumer = nc.create_consumer("stream1", "consumer1")?;
+    let mut consumer = nc.create_consumer("stream1", "consumer1")?;
     Ok(())
 }
 
@@ -72,7 +72,7 @@ fn jetstream_basics() -> io::Result<()> {
     nc.stream_info("test2")?;
     nc.create_consumer("test2", "consumer1")?;
 
-    let consumer2_cfg = ConsumerConfig {
+    let mut consumer2_cfg = ConsumerConfig {
         durable_name: Some("consumer2".to_string()),
         ack_policy: AckPolicy::All,
         deliver_subject: Some("consumer2_ds".to_string()),
@@ -87,13 +87,13 @@ fn jetstream_basics() -> io::Result<()> {
 
     assert_eq!(nc.stream_info("test2")?.state.messages, 1000);
 
-    let consumer1 = Consumer::existing(nc.clone(), "test2", "consumer1")?;
+    let mut consumer1 = Consumer::existing(nc.clone(), "test2", "consumer1")?;
 
     for _ in 1..=1000 {
         consumer1.process(|_msg| Ok(()))?;
     }
 
-    let consumer2 = Consumer::existing(nc.clone(), "test2", consumer2_cfg)?;
+    let mut consumer2 = Consumer::existing(nc.clone(), "test2", consumer2_cfg)?;
 
     let mut count = 0;
     while count != 1000 {
@@ -116,7 +116,7 @@ fn jetstream_basics() -> io::Result<()> {
 
     nc.create_consumer("test2", "consumer3")?;
 
-    let consumer3 = Consumer::existing(nc.clone(), "test2", "consumer3")?;
+    let mut consumer3 = Consumer::existing(nc.clone(), "test2", "consumer3")?;
 
     let _ = dbg!(nc.account_info());
 
