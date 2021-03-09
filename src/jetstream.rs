@@ -113,14 +113,6 @@
 //! // field.
 //! let mut consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //!
-//! // wait indefinitely for the message to arrive
-//! let msg = consumer.pull()?;
-//!
-//! // --- process message ---
-//!
-//! // tell the server the message has been processed
-//! msg.ack()?;
-//!
 //! // The `Consumer::process` method executes a closure
 //! // on both push- and pull-based consumers, and if
 //! // the closure returns `Ok` then the message is acked.
@@ -159,6 +151,18 @@
 //! });
 //! let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
 //! let sizes: Vec<usize> = flipped?;
+//!
+//! // For lower-level control for use cases that are not
+//! // well-served by the high-level process* methods,
+//! // there are a number of lower level primitives that
+//! // can be used, such as `Consumer::pull` for pull-based
+//! // consumers and `Message::ack` for manually acking things:
+//! let msg = consumer.pull()?;
+//!
+//! // --- process message ---
+//!
+//! // tell the server the message has been processed
+//! msg.ack()?;
 //!
 //! # Ok(()) }
 //! ```
