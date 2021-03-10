@@ -1,3 +1,11 @@
+# 0.9.7
+
+## Improvements
+
+- Improved error log output and avoid panicking
+  when problems are encountered while parsing the
+  JetStream reply subject.
+
 # 0.9.6
 
 ## New Features
