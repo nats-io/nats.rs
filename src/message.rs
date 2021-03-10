@@ -170,18 +170,50 @@ impl Message {
         if split.next()? != "$JS" || split.next()? != "ACK" {
             return None;
         }
+
+        macro_rules! try_parse {
+            () => {
+                match str::parse(try_parse!(str)) {
+                    Ok(parsed) => parsed,
+                    Err(e) => {
+                        log::error!(
+                            "failed to parse jetstream reply \
+                            subject: {}, error: {:?}. Is your \
+                            nats-server up to date?",
+                            reply,
+                            e
+                        );
+                        return None;
+                    }
+                }
+            };
+            (str) => {
+                if let Some(next) = split.next() {
+                    next
+                } else {
+                    log::error!(
+                        "unexpectedly few tokens while parsing \
+                        jetstream reply subject: {}. Is your \
+                        nats-server up to date?",
+                        reply
+                    );
+                    return None;
+                }
+            };
+        }
+
         Some(crate::jetstream::JetStreamMessageInfo {
-            stream: split.next()?,
-            consumer: split.next()?,
-            delivered: str::parse(split.next()?).ok()?,
-            stream_seq: str::parse(split.next()?).ok()?,
-            consumer_seq: str::parse(split.next()?).ok()?,
+            stream: try_parse!(str),
+            consumer: try_parse!(str),
+            delivered: try_parse!(),
+            stream_seq: try_parse!(),
+            consumer_seq: try_parse!(),
             published: {
-                let nanos: u64 = str::parse(split.next()?).ok()?;
+                let nanos: u64 = try_parse!();
                 let offset = std::time::Duration::from_nanos(nanos);
                 std::time::UNIX_EPOCH + offset
             },
-            pending: str::parse(split.next()?).ok()?,
+            pending: try_parse!(),
         })
     }
 }

@@ -72,7 +72,7 @@ fn jetstream_basics() -> io::Result<()> {
     nc.stream_info("test2")?;
     nc.create_consumer("test2", "consumer1")?;
 
-    let mut consumer2_cfg = ConsumerConfig {
+    let consumer2_cfg = ConsumerConfig {
         durable_name: Some("consumer2".to_string()),
         ack_policy: AckPolicy::All,
         deliver_subject: Some("consumer2_ds".to_string()),
