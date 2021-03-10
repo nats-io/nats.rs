@@ -857,7 +857,7 @@ impl Consumer {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
                         "process and process_batch are only usable from \
-                Pull-based Consumers if there is a durable_name set",
+                        Pull-based Consumers if there is a durable_name set",
                     ));
                 }
 
@@ -871,7 +871,15 @@ impl Consumer {
                 self.nc.request(&subject, AckKind::Ack)?
             };
 
-            let next_id = next.jetstream_message_info().unwrap().stream_seq;
+            let next_id = if let Some(jmi) = next.jetstream_message_info() {
+                jmi.stream_seq
+            } else {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "failed to process jetstream message info \
+                    from message reply subject. Is your nats-server up to date?"
+                ));
+            };
 
             if self.dedupe_window.already_processed(next_id) {
                 let _dont_care = next.ack();
