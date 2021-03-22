@@ -272,6 +272,8 @@ struct ServerInfo {
     pub connect_urls: Vec<String>,
     /// The client IP as known by the server.
     pub client_ip: String,
+    /// Whether the server supports headers.
+    pub headers: bool,
 }
 
 impl ServerInfo {
@@ -295,6 +297,7 @@ impl ServerInfo {
                 .filter_map(|m| m.take_string())
                 .collect(),
             client_ip: obj["client_ip"].take_string().unwrap_or_default(),
+            headers: obj["headers"].as_bool().unwrap_or(false),
         })
     }
 }
