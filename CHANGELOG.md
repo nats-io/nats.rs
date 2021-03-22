@@ -1,3 +1,12 @@
+# 0.9.8
+
+## Bug Fixes
+
+- #161 When attempting to send a message with headers
+  to a server that does not support headers, an error
+  is now properly returned instead of silently dropping
+  the message.
+
 # 0.9.7
 
 ## Improvements

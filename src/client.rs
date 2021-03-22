@@ -337,6 +337,15 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
+        if headers.is_some()
+            && !self.server_info.lock().as_ref().unwrap().headers
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "the server does not support headers",
+            ));
+        }
+
         let mut state = self.state.lock();
 
         // Check if the client is closed.
