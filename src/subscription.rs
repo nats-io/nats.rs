@@ -50,6 +50,34 @@ impl Subscription {
         }))
     }
 
+    /// Get a crossbeam Receiver for subscription messages.
+    /// Useful for crossbeam_channel::select macro
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// # let sub1 = nc.subscribe("foo")?;
+    /// # let sub2 = nc.subscribe("bar")?;
+    /// # nc.publish("foo", "hello")?;
+    /// let sub1_ch = sub1.receiver();
+    /// let sub2_ch = sub2.receiver();
+    /// crossbeam_channel::select! {
+    ///     recv(sub1_ch) -> msg {
+    ///         println!("Got message from sub1: {:?}", msg);
+    ///         Ok(())
+    ///     }
+    ///     recv(sub2_ch) -> msg {
+    ///         println!("Got message from sub2: {:?}", msg);
+    ///         Ok(())
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    pub fn receiver(&self) -> &channel::Receiver<Message> {
+        &self.0.messages
+    }
+
     /// Get the next message, or None if the subscription
     /// has been unsubscribed or the connection closed.
     ///
