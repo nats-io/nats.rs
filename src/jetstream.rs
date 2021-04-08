@@ -926,7 +926,7 @@ impl Consumer {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
                         "process and process_batch are only usable from \
-                Pull-based Consumers if there is a a durable_name set",
+                        Pull-based Consumers if there is a a durable_name set",
                     ));
                 }
 
@@ -937,7 +937,7 @@ impl Consumer {
                     self.cfg.durable_name.as_ref().unwrap()
                 );
 
-                self.nc.request(&subject, b"")?
+                self.nc.request_timeout(&subject, b"", self.timeout)?
             };
 
             let next_id = next.jetstream_message_info().unwrap().stream_seq;
