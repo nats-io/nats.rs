@@ -1004,11 +1004,11 @@ impl Consumer {
             ));
         }
 
-        if self.cfg.deliver_subject.is_none() {
+        if self.cfg.deliver_subject.is_some() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "this method is only usable from \
-                Pull-based Consumers with a deliver_subject set",
+                Pull-based Consumers with a deliver_subject set to None",
             ));
         }
 
