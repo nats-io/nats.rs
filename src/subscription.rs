@@ -63,11 +63,11 @@ impl Subscription {
     /// let sub1_ch = sub1.receiver();
     /// let sub2_ch = sub2.receiver();
     /// crossbeam_channel::select! {
-    ///     recv(sub1_ch) -> msg {
+    ///     recv(sub1_ch) -> msg => {
     ///         println!("Got message from sub1: {:?}", msg);
     ///         Ok(())
     ///     }
-    ///     recv(sub2_ch) -> msg {
+    ///     recv(sub2_ch) -> msg => {
     ///         println!("Got message from sub2: {:?}", msg);
     ///         Ok(())
     ///     }
