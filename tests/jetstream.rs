@@ -162,14 +162,17 @@ fn jetstream_libdoc_test() {
     )
     .unwrap();
 
-    let msg_data_len: usize = consumer
+    // set this very high for CI
+    consumer.timeout = std::time::Duration::from_millis(500);
+
+    consumer
         .process(|msg| {
             println!("got message {:?}", msg);
             Ok(msg.data.len())
         })
         .unwrap();
 
-    let msg_data_len: usize = consumer
+    consumer
         .process_timeout(|msg| {
             println!("got message {:?}", msg);
             Ok(msg.data.len())
