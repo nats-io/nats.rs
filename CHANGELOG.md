@@ -1,3 +1,12 @@
+# 0.9.9
+
+## Bug Fixes
+
+- #164 `Consumer::process_timeout` properly times out
+  from all branches.
+- #164 `Consumer::pull_opt` now properly checks the
+  `Consumer.deliver_subject`.
+
 # 0.9.8
 
 ## Bug Fixes

@@ -140,3 +140,51 @@ fn jetstream_basics() -> io::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn jetstream_libdoc_test() {
+    use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
+
+    let server = server();
+
+    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
+
+    nc.create_stream("my_stream").unwrap();
+    nc.publish("my_stream", "1").unwrap();
+    nc.publish("my_stream", "2").unwrap();
+    nc.publish("my_stream", "3").unwrap();
+    nc.publish("my_stream", "4").unwrap();
+
+    let mut consumer = Consumer::create_or_open(
+        nc,
+        "my_stream",
+        "existing_or_created_consumer",
+    )
+    .unwrap();
+
+    // set this very high for CI
+    consumer.timeout = std::time::Duration::from_millis(500);
+
+    consumer
+        .process(|msg| {
+            println!("got message {:?}", msg);
+            Ok(msg.data.len())
+        })
+        .unwrap();
+
+    consumer
+        .process_timeout(|msg| {
+            println!("got message {:?}", msg);
+            Ok(msg.data.len())
+        })
+        .unwrap();
+
+    let msg = consumer.pull().unwrap();
+    msg.ack().unwrap();
+
+    let batch_size = 128;
+    let results: Vec<std::io::Result<usize>> =
+        consumer.process_batch(batch_size, |msg| Ok(msg.data.len()));
+    let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
+    let sizes: Vec<usize> = flipped.unwrap();
+}
