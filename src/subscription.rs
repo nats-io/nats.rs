@@ -51,7 +51,7 @@ impl Subscription {
     }
 
     /// Get a crossbeam Receiver for subscription messages.
-    /// Useful for crossbeam_channel::select macro
+    /// Useful for `crossbeam_channel::select` macro
     ///
     /// # Example
     /// ```
