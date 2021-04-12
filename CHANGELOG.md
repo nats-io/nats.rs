@@ -1,3 +1,12 @@
+# 0.9.10
+
+## Improvements
+
+- #162 `Subscription::receiver` has been added to
+  provide access to a `Subscription`'s underlying
+  `crossbeam_challel::Receiver` for use in `select!`
+  blocks etc...
+
 # 0.9.9
 
 ## Bug Fixes
