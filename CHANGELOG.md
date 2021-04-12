@@ -1,3 +1,10 @@
+# 0.9.12
+
+## Bug Fixes
+
+- #169 fix an off-by-one error preventing empty
+  messages with headers from being received.
+
 # 0.9.11
 
 ## Bug Fixes
