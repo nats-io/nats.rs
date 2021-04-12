@@ -241,7 +241,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
             )
         })?;
 
-        if num_bytes <= num_header_bytes {
+        if num_bytes < num_header_bytes {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "number of header bytes was greater than or equal to the \
