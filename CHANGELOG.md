@@ -1,3 +1,10 @@
+# 0.9.11
+
+## Bug Fixes
+
+- #168 properly handle headers whose value contains
+  colon characters.
+
 # 0.9.10
 
 ## Improvements
