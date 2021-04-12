@@ -120,7 +120,7 @@ impl TryFrom<&[u8]> for Headers {
         };
 
         for line in lines {
-            let splits = line.split(':').map(str::trim).collect::<Vec<_>>();
+            let splits = line.splitn(2, ':').map(str::trim).collect::<Vec<_>>();
             match splits[..] {
                 [k, v] => {
                     let entry = inner
