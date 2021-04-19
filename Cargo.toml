@@ -24,9 +24,11 @@ maintenance = { status = "actively-developed" }
 
 [profile.release]
 debug = true
+split-debuginfo = "unpacked"
 
 [profile.dev]
 panic = 'abort'
+split-debuginfo = "unpacked"
 
 [dependencies]
 base64 = "0.13.0"
