@@ -212,6 +212,7 @@ impl Options {
     /// ";
     ///
     /// let nc = nats::Options::with_static_credentials(creds)
+    ///     .expect("failed to parse static creds")
     ///     .connect("connect.ngs.global")?;
     /// # Ok(())
     /// # }
