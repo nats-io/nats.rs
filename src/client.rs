@@ -665,7 +665,9 @@ impl Client {
                     return Err(Error::new(ErrorKind::Other, msg));
                 }
 
-                ServerOp::Unknown(line) => log::warn!("unknown op: {}", line),
+                ServerOp::Unknown(line) => {
+                    log::warn!("unknown op: {}", line);
+                }
             }
         }
 
