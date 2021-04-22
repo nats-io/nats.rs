@@ -153,6 +153,10 @@ impl Options {
 
     /// Authenticate with NATS using a `.creds` file.
     ///
+    /// This will open the provided file, load its creds,
+    /// perform the desired authentication, and then zero
+    /// the memory used to store the creds before continuing.
+    ///
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
@@ -181,6 +185,49 @@ impl Options {
             },
             ..Default::default()
         }
+    }
+
+    /// Authenticate with NATS using a static credential str, using
+    /// the creds file format. Note that this is more hazardous than
+    /// using the above `with_credentials` method because it retains
+    /// the secret in-memory for the lifetime of this client instead
+    /// of zeroing the credentials after holding them for a very short
+    /// time, as the `with_credentials` method does.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let creds =
+    /// "-----BEGIN NATS USER JWT-----
+    /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
+    /// ------END NATS USER JWT------
+    ///
+    /// ************************* IMPORTANT *************************
+    /// NKEY Seed printed below can be used sign and prove identity.
+    /// NKEYs are sensitive and should be treated as secrets.
+    ///
+    /// -----BEGIN USER NKEY SEED-----
+    /// SUAIO3FHUX5PNV2LQIIP7TZ3N4L7TX3W53MQGEIVYFIGA635OZCKEYHFLM
+    /// ------END USER NKEY SEED------
+    /// ";
+    ///
+    /// let nc = nats::Options::with_static_credentials(creds)
+    ///     .expect("failed to parse static creds")
+    ///     .connect("connect.ngs.global")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_static_credentials(creds: &str) -> io::Result<Options> {
+        let (jwt, kp) = auth_utils::jwt_kp(creds)?;
+        Ok(Options {
+            auth: AuthStyle::Credentials {
+                jwt_cb: { Arc::new(move || Ok(jwt.clone())) },
+                sig_cb: {
+                    Arc::new(move |nonce| auth_utils::sign_nonce(nonce, &kp))
+                },
+            },
+            ..Default::default()
+        })
     }
 
     /// Authenticate with a function that loads user JWT and a signature
