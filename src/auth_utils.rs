@@ -17,14 +17,14 @@ pub(crate) fn load_creds(path: &Path) -> io::Result<(SecureString, KeyPair)> {
 }
 
 pub(crate) fn jwt_kp(contents: &str) -> io::Result<(SecureString, KeyPair)> {
-    let jwt = parse_decorated_jwt(&contents).ok_or_else(|| {
+    let jwt = parse_decorated_jwt(contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "cannot parse user JWT from the credentials file",
         )
     })?;
 
-    let nkey = parse_decorated_nkey(&contents).ok_or_else(|| {
+    let nkey = parse_decorated_nkey(contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "cannot parse nkey from the credentials file",
