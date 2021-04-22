@@ -1,3 +1,10 @@
+# 0.9.13
+
+## Bug Fixes
+
+- #172 fix an issue with a newly future-incompatible
+  usage of the `log` crate's macros in a match arm.
+
 # 0.9.12
 
 ## Bug Fixes
