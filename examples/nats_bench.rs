@@ -51,17 +51,20 @@ struct Args {
 
 fn main() -> std::io::Result<()> {
     let args = Args::from_args();
-
-    let opts = if let Some(creds_path) = args.creds {
-        nats::Options::with_credentials(creds_path)
-    } else {
-        nats::Options::new()
+    let tls = args.tls;
+    let url = args.url;
+    let creds = args.creds;
+    let connect = || {
+        let opts = if let Some(creds_path) = creds.clone() {
+            nats::Options::with_credentials(creds_path)
+        } else {
+            nats::Options::new()
+        };
+        opts.with_name("nats_bench rust client")
+            .tls_required(tls)
+            .connect(&url)
+            .expect("failed to connect to NATS server")
     };
-
-    let nc = opts
-        .with_name("nats_bench rust client")
-        .tls_required(args.tls)
-        .connect(&args.url)?;
 
     let messages = if args.number_of_messages.get() % args.publishers.get() != 0
     {
@@ -82,7 +85,7 @@ fn main() -> std::io::Result<()> {
     let pubs = args.publishers.get();
     for _ in 0..pubs {
         let barrier = barrier.clone();
-        let nc = nc.clone();
+        let nc = connect();
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
             let msg: String = (0..message_size).map(|_| 'a').collect();
@@ -97,16 +100,18 @@ fn main() -> std::io::Result<()> {
 
     for _ in 0..args.subscribers {
         let barrier = barrier.clone();
-        let nc = nc.clone();
         let subject = args.subject.clone();
+        let nc = connect();
         threads.push(thread::spawn(move || {
-            barrier.wait();
             let s = nc.subscribe(&subject).unwrap();
-            for _ in 0..messages {
+            barrier.wait();
+            for i in 0..messages {
                 s.next().unwrap();
             }
         }));
     }
+
+    barrier.wait();
 
     println!(
         "Starting benchmark [msgs={}, msgsize={}, pubs={}, subs={}]",
@@ -115,8 +120,6 @@ fn main() -> std::io::Result<()> {
         args.publishers.get(),
         args.subscribers
     );
-
-    barrier.wait();
 
     let start = Instant::now();
 
