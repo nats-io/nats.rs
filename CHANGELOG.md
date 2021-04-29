@@ -1,3 +1,9 @@
+# 0.9.15
+
+## Improvements
+
+- #177 Add support of request_timeout for async-nats
+
 # 0.9.14
 
 ## New Features

@@ -160,6 +160,21 @@ impl Connection {
         Ok(Message::new(msg))
     }
 
+    /// Publishes a message and waits for the response or until the
+    /// timeout duration is reached
+    pub async fn request_timeout(
+        &self,
+        subject: &str,
+        msg: impl AsRef<[u8]>,
+        timeout: Duration,
+    ) -> io::Result<Message> {
+        let subject = subject.to_string();
+        let msg = msg.as_ref().to_vec();
+        let inner = self.inner.clone();
+        let msg = unblock(move || inner.request_timeout(&subject, msg, timeout)).await?;
+        Ok(Message::new(msg))
+    }
+
     /// Publishes a message and returns a subscription for awaiting the
     /// response.
     pub async fn request_multi(
