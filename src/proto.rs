@@ -88,6 +88,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
 
     // Read a line, which should be human readable.
     #[allow(unsafe_code)]
+    #[allow(clippy::uninit_assumed_init)]
     let mut command_buf: [u8; 4096] =
         unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
