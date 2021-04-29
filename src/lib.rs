@@ -103,20 +103,22 @@
 //! ```
 
 #![cfg_attr(test, deny(warnings))]
-#![deny(
-    future_incompatible,
-    missing_copy_implementations,
-    missing_docs,
-    nonstandard_style,
-    rust_2018_idioms,
-    rustdoc,
-    trivial_casts,
-    trivial_numeric_casts,
-    unsafe_code,
-    unused,
-    unused_qualifications
+#![cfg_attr(
+    feature = "fault_injection",
+    deny(
+        future_incompatible,
+        missing_copy_implementations,
+        missing_docs,
+        nonstandard_style,
+        rust_2018_idioms,
+        trivial_casts,
+        trivial_numeric_casts,
+        unsafe_code,
+        unused,
+        unused_qualifications
+    )
 )]
-#![deny(
+#![cfg_attr(feature = "fault_injection", deny(
     // over time, consider enabling the following commented-out lints:
     // clippy::else_if_without_else,
     // clippy::indexing_slicing,
@@ -135,15 +137,15 @@
     clippy::explicit_iter_loop,
     clippy::expl_impl_clone_on_copy,
     clippy::fallible_impl_from,
-    clippy::filter_map,
     clippy::filter_map_next,
-    clippy::manual_find_map,
     clippy::float_arithmetic,
     clippy::get_unwrap,
     clippy::if_not_else,
     clippy::inline_always,
     clippy::invalid_upcast_comparisons,
     clippy::items_after_statements,
+    clippy::manual_filter_map,
+    clippy::manual_find_map,
     clippy::map_flatten,
     clippy::map_unwrap_or,
     clippy::match_same_arms,
@@ -170,7 +172,7 @@
     clippy::wildcard_dependencies,
     clippy::wildcard_enum_match_arm,
     clippy::wrong_pub_self_convention,
-)]
+))]
 #![allow(
     clippy::match_like_matches_macro,
     clippy::await_holding_lock,

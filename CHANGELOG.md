@@ -1,8 +1,19 @@
-# 0.9.15
+# 0.9.16
 
 ## Improvements
 
-- #177 Add support of request_timeout for async-nats
+- #178 client state has been reorganized to allow
+  reading and writing to make progress independently,
+  preventing issues that were sometimes encountered
+  where the act of creating a subscription would lead
+  to a connection timing out after a slow consumer
+  was detected by the server.
+
+# 0.9.15
+
+## New Features
+
+- #177 Add `request_timeout` support for async-nats
 
 # 0.9.14
 

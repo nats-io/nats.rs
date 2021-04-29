@@ -1184,9 +1184,7 @@ impl IntervalTree {
     ///
     /// assert_eq!(gaps, vec![Range { start: 123, end: 222 }]);
     /// ```
-    pub fn gaps<'a>(
-        &'a self,
-    ) -> impl 'a + DoubleEndedIterator<Item = Range<u64>> {
+    pub fn gaps(&self) -> impl '_ + DoubleEndedIterator<Item = Range<u64>> {
         let mut iter = self.inner.iter();
         let mut last_hi = iter.next().map(|(_l, h)| *h);
         iter.map(move |(lo, hi)| {
