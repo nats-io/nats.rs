@@ -111,7 +111,6 @@
         missing_docs,
         nonstandard_style,
         rust_2018_idioms,
-        rustdoc::all,
         trivial_casts,
         trivial_numeric_casts,
         unsafe_code,
