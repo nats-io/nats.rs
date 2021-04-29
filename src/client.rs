@@ -248,8 +248,7 @@ impl Client {
         // Initiate shutdown process.
         if self.shutdown() {
             // Clear all subscriptions.
-            let old_subscriptions =
-                mem::replace(&mut read.subscriptions, HashMap::new());
+            let old_subscriptions = mem::take(&mut read.subscriptions);
             for (sid, _) in old_subscriptions {
                 // Send an UNSUB message and ignore errors.
                 if let Some(writer) = write.writer.as_mut() {
@@ -286,10 +285,7 @@ impl Client {
 
     fn check_shutdown(&self) -> io::Result<()> {
         if *self.shutdown.lock() {
-            return Err(Error::new(
-                ErrorKind::NotConnected,
-                "the client is closed",
-            ));
+            Err(Error::new(ErrorKind::NotConnected, "the client is closed"))
         } else {
             Ok(())
         }
@@ -589,7 +585,7 @@ impl Client {
         }
 
         // Take out expected PONGs.
-        let pongs = mem::replace(&mut read.pongs, VecDeque::new());
+        let pongs = mem::take(&mut read.pongs);
 
         // Take out buffered operations.
         let buffered = write.buffer.clear();
