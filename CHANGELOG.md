@@ -1,3 +1,31 @@
+# 0.9.15
+
+## Improvements
+
+- #177 Add support of request_timeout for async-nats
+
+# 0.9.14
+
+## New Features
+
+- #173 `Options::with_static_credentials` adds
+  support for static credential files for use
+  in environments where they are injected into
+  the process by means other than an on-disk file.
+- #174 `IntervalTree` now has the methods `min`,
+  `max`, and `gaps` for getting the minimum,
+  maximum, and non-contiguous gaps for the tracked
+  intervals, for use in situations where users
+  may want to implement their own deduplication
+  strategies.
+
+# 0.9.13
+
+## Bug Fixes
+
+- #172 fix an issue with a newly future-incompatible
+  usage of the `log` crate's macros in a match arm.
+
 # 0.9.12
 
 ## Bug Fixes

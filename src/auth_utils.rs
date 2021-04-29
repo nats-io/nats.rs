@@ -13,20 +13,24 @@ use crate::SecureString;
 pub(crate) fn load_creds(path: &Path) -> io::Result<(SecureString, KeyPair)> {
     // Load the private nkey.
     let contents = SecureString::from(fs::read_to_string(path)?);
+    jwt_kp(&contents)
+}
 
-    let jwt = parse_decorated_jwt(&contents).ok_or_else(|| {
+pub(crate) fn jwt_kp(contents: &str) -> io::Result<(SecureString, KeyPair)> {
+    let jwt = parse_decorated_jwt(contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "cannot parse user JWT from the credentials file",
         )
     })?;
 
-    let nkey = parse_decorated_nkey(&contents).ok_or_else(|| {
+    let nkey = parse_decorated_nkey(contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "cannot parse nkey from the credentials file",
         )
     })?;
+
     let kp = KeyPair::from_seed(&nkey)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
@@ -71,13 +75,13 @@ static USER_CONFIG_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// Parses a credentials file and returns its user JWT.
-fn parse_decorated_jwt(contents: &SecureString) -> Option<SecureString> {
+fn parse_decorated_jwt(contents: &str) -> Option<SecureString> {
     let capture = USER_CONFIG_RE.captures_iter(contents).next()?;
     Some(SecureString::from(capture[1].to_string()))
 }
 
 /// Parses a credentials file and returns its nkey.
-fn parse_decorated_nkey(contents: &SecureString) -> Option<SecureString> {
+fn parse_decorated_nkey(contents: &str) -> Option<SecureString> {
     let capture = USER_CONFIG_RE.captures_iter(contents).nth(1)?;
     Some(SecureString::from(capture[1].to_string()))
 }

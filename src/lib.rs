@@ -580,7 +580,7 @@ impl Connection {
     /// ```
     pub fn close(self) {
         self.0.client.flush(DEFAULT_FLUSH_TIMEOUT).ok();
-        self.0.client.close().ok();
+        self.0.client.close();
     }
 
     /// Calculates the round trip time between this client and the server,
@@ -697,7 +697,7 @@ impl Connection {
     /// ```
     pub fn drain(&self) -> io::Result<()> {
         self.0.client.flush(DEFAULT_FLUSH_TIMEOUT)?;
-        self.0.client.close()?;
+        self.0.client.close();
         Ok(())
     }
 

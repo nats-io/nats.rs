@@ -238,7 +238,7 @@ impl Client {
     }
 
     /// Closes the client.
-    pub(crate) fn close(&self) -> io::Result<()> {
+    pub(crate) fn close(&self) {
         // Inject random delays when testing.
         inject_delay();
 
@@ -273,8 +273,6 @@ impl Client {
             drop(read);
             drop(write);
         }
-
-        Ok(())
     }
 
     /// Kicks off the shutdown process, but doesn't wait for its completion.
@@ -729,7 +727,9 @@ impl Client {
                     return Err(Error::new(ErrorKind::Other, msg));
                 }
 
-                ServerOp::Unknown(line) => log::warn!("unknown op: {}", line),
+                ServerOp::Unknown(line) => {
+                    log::warn!("unknown op: {}", line);
+                }
             }
         }
 

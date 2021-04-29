@@ -120,6 +120,32 @@ jobs:
           rustup update
           cargo test --doc --features=jetstream
 
+  examples:
+    name: examples
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache Rust
+        uses: actions/cache@v1
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '1.14'
+      - name: install nats-server
+        run: go get github.com/nats-io/nats-server
+      - name: JetStream test
+        env:
+          RUST_LOG: trace
+        run: |
+          rustup update
+          cargo check --examples --features=jetstream
+
   jetstream:
     name: JetStream
     runs-on: ubuntu-latest
