@@ -18,7 +18,17 @@ use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 const BUF_CAPACITY: usize = 128 * 1024;
 
 /// Client state.
+///
+/// NB: locking protocol - writes must ALWAYS be locked
+///     first and released after when both are used.
+///     Failure to follow this strict rule WILL create
+///     a deadlock!
 struct State {
+    write: Mutex<WriteState>,
+    read: Mutex<ReadState>,
+}
+
+struct WriteState {
     /// Buffered writer with an active connection.
     ///
     /// When `None`, the client is either reconnecting or closed.
@@ -36,7 +46,9 @@ struct State {
 
     /// Next subscription ID.
     next_sid: u64,
+}
 
+struct ReadState {
     /// Current subscriptions.
     subscriptions: HashMap<u64, Subscription>,
 
@@ -55,7 +67,7 @@ struct Subscription {
 #[derive(Clone)]
 pub struct Client {
     /// Shared client state.
-    state: Arc<Mutex<State>>,
+    state: Arc<State>,
 
     /// Server info provided by the last INFO message.
     server_info: Arc<Mutex<Option<ServerInfo>>>,
@@ -80,14 +92,18 @@ impl Client {
 
         // The client state.
         let client = Client {
-            state: Arc::new(Mutex::new(State {
-                writer: None,
-                flush_kicker,
-                buffer: Buffer::new(options.reconnect_buffer_size),
-                next_sid: 1,
-                subscriptions: HashMap::new(),
-                pongs: VecDeque::from(vec![pong_sender]),
-            })),
+            state: Arc::new(State {
+                write: Mutex::new(WriteState {
+                    writer: None,
+                    flush_kicker,
+                    buffer: Buffer::new(options.reconnect_buffer_size),
+                    next_sid: 1,
+                }),
+                read: Mutex::new(ReadState {
+                    subscriptions: HashMap::new(),
+                    pongs: VecDeque::from(vec![pong_sender]),
+                }),
+            }),
             server_info: Arc::new(Mutex::new(None)),
             shutdown: Arc::new(Mutex::new(false)),
 
@@ -120,8 +136,8 @@ impl Client {
                 // This way we make sure buffered published messages reach the
                 // server.
                 {
-                    let mut state = client.state.lock();
-                    if let Some(writer) = state.writer.as_mut() {
+                    let mut write = client.state.write.lock();
+                    if let Some(writer) = write.writer.as_mut() {
                         writer.flush().ok();
                     }
                 }
@@ -145,19 +161,20 @@ impl Client {
                 // Wait until at least one message is buffered.
                 while dirty.recv().is_ok() {
                     let start = Instant::now();
-                    {
-                        // Flush the writer.
-                        let mut state = client.state.lock();
-                        if let Some(writer) = state.writer.as_mut() {
-                            let res = writer.flush();
+                    // Flush the writer.
+                    let mut write = client.state.write.lock();
+                    if let Some(writer) = write.writer.as_mut() {
+                        let res = writer.flush();
 
-                            // If flushing fails, disconnect.
-                            if res.is_err() {
-                                state.writer = None;
-                                state.pongs.clear();
-                            }
+                        // If flushing fails, disconnect.
+                        if res.is_err() {
+                            let mut read = client.state.read.lock();
+                            write.writer = None;
+                            read.pongs.clear();
                         }
                     }
+                    drop(write);
+
                     // Wait a little bit before flushing again.
                     thread::sleep(start.elapsed() * 9);
                 }
@@ -178,15 +195,10 @@ impl Client {
             // Inject random delays when testing.
             inject_delay();
 
-            let mut state = self.state.lock();
+            let mut state = self.state.write.lock();
 
             // Check if the client is closed.
-            if *self.shutdown.lock() {
-                return Err(Error::new(
-                    ErrorKind::NotConnected,
-                    "the client is closed",
-                ));
-            }
+            self.check_shutdown()?;
 
             let (sender, receiver) = channel::bounded(1);
 
@@ -205,7 +217,7 @@ impl Client {
             }
 
             // Enqueue an expected PONG.
-            state.pongs.push_back(sender);
+            self.state.read.lock().pongs.push_back(sender);
             receiver
         };
 
@@ -223,40 +235,59 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
-        let mut state = self.state.lock();
+        let mut write = self.state.write.lock();
+        let mut read = self.state.read.lock();
 
         // Initiate shutdown process.
-        if !mem::replace(&mut *self.shutdown.lock(), true) {
+        if self.shutdown() {
             // Clear all subscriptions.
             let old_subscriptions =
-                mem::replace(&mut state.subscriptions, HashMap::new());
+                mem::replace(&mut read.subscriptions, HashMap::new());
             for (sid, _) in old_subscriptions {
                 // Send an UNSUB message and ignore errors.
-                if let Some(writer) = state.writer.as_mut() {
+                if let Some(writer) = write.writer.as_mut() {
                     let max_msgs = None;
                     proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
                         .ok();
-                    state.flush_kicker.try_send(()).ok();
+                    write.flush_kicker.try_send(()).ok();
                 }
             }
-            state.subscriptions.clear();
+            read.subscriptions.clear();
 
             // Flush the writer in case there are buffered messages.
-            if let Some(writer) = state.writer.as_mut() {
+            if let Some(writer) = write.writer.as_mut() {
                 writer.flush().ok();
             }
 
             // Wake up all pending flushes.
-            state.pongs.clear();
-            drop(state);
+            read.pongs.clear();
+
+            // NB see locking protocol for state.write and state.read
+            drop(read);
+            drop(write);
         }
 
         Ok(())
     }
 
     /// Kicks off the shutdown process, but doesn't wait for its completion.
-    pub(crate) fn shutdown(&self) {
-        *self.shutdown.lock() = true;
+    /// Returns true if this is the first attempt to shut down the system.
+    pub(crate) fn shutdown(&self) -> bool {
+        let mut shutdown = self.shutdown.lock();
+        let old = *shutdown;
+        *shutdown = true;
+        !old
+    }
+
+    fn check_shutdown(&self) -> io::Result<()> {
+        if *self.shutdown.lock() {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "the client is closed",
+            ));
+        } else {
+            Ok(())
+        }
     }
 
     /// Subscribes to a subject.
@@ -268,34 +299,30 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
-        let mut state = self.state.lock();
+        let mut write = self.state.write.lock();
+        let mut read = self.state.read.lock();
 
         // Check if the client is closed.
-        if *self.shutdown.lock() {
-            return Err(Error::new(
-                ErrorKind::NotConnected,
-                "the client is closed",
-            ));
-        }
+        self.check_shutdown()?;
 
         // Generate a subject ID.
-        let sid = state.next_sid;
-        state.next_sid += 1;
+        let sid = write.next_sid;
+        write.next_sid += 1;
 
         // If connected, send a SUB operation.
-        if let Some(writer) = state.writer.as_mut() {
+        if let Some(writer) = write.writer.as_mut() {
             let op = ClientOp::Sub {
                 subject,
                 queue_group,
                 sid,
             };
             proto::encode(writer, op).ok();
-            state.flush_kicker.try_send(()).ok();
+            write.flush_kicker.try_send(()).ok();
         }
 
         // Register the subscription in the hash map.
         let (sender, receiver) = channel::unbounded();
-        state.subscriptions.insert(
+        read.subscriptions.insert(
             sid,
             Subscription {
                 subject: subject.to_string(),
@@ -303,6 +330,11 @@ impl Client {
                 messages: sender,
             },
         );
+
+        // NB see locking protocol for state.write and state.read
+        drop(read);
+        drop(write);
+
         Ok((sid, receiver))
     }
 
@@ -311,17 +343,22 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
-        let mut state = self.state.lock();
+        let mut write = self.state.write.lock();
+        let mut read = self.state.read.lock();
 
         // Remove the subscription from the map.
-        state.subscriptions.remove(&sid);
+        read.subscriptions.remove(&sid);
 
         // Send an UNSUB message.
-        if let Some(writer) = state.writer.as_mut() {
+        if let Some(writer) = write.writer.as_mut() {
             let max_msgs = None;
             proto::encode(writer, ClientOp::Unsub { sid, max_msgs })?;
-            state.flush_kicker.try_send(()).ok();
+            write.flush_kicker.try_send(()).ok();
         }
+
+        // NB see locking protocol for state.write and state.read
+        drop(read);
+        drop(write);
 
         Ok(())
     }
@@ -337,24 +374,17 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
-        if headers.is_some()
-            && !self.server_info.lock().as_ref().unwrap().headers
-        {
+        let server_info = self.server_info.lock();
+        if headers.is_some() && !server_info.as_ref().unwrap().headers {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "the server does not support headers",
             ));
         }
-
-        let mut state = self.state.lock();
+        drop(server_info);
 
         // Check if the client is closed.
-        if *self.shutdown.lock() {
-            return Err(Error::new(
-                ErrorKind::NotConnected,
-                "the client is closed",
-            ));
-        }
+        self.check_shutdown()?;
 
         let op = if let Some(headers) = headers {
             ClientOp::Hpub {
@@ -371,23 +401,32 @@ impl Client {
             }
         };
 
-        match state.writer.as_mut() {
+        let mut write = self.state.write.lock();
+
+        let written = write.buffer.written;
+
+        match write.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                proto::encode(&mut state.buffer, op)?;
-                state.buffer.flush()?;
+                proto::encode(&mut write.buffer, op)?;
+                write.buffer.flush()?;
                 Ok(())
             }
             Some(mut writer) => {
+                assert_eq!(written, 0);
+
                 // If connected, write into the writer.
                 let res = proto::encode(&mut writer, op);
-                state.flush_kicker.try_send(()).ok();
 
                 // If writing fails, disconnect.
                 if res.is_err() {
-                    state.writer = None;
-                    state.pongs.clear();
+                    write.writer = None;
+                    let mut read = self.state.read.lock();
+                    read.pongs.clear();
                 }
+
+                write.flush_kicker.try_send(()).ok();
+
                 res
             }
         }
@@ -404,14 +443,9 @@ impl Client {
         headers: Option<&Headers>,
         msg: &[u8],
     ) -> Option<io::Result<()>> {
-        let mut state = self.state.try_lock()?;
-
         // Check if the client is closed.
-        if *self.shutdown.lock() {
-            return Some(Err(Error::new(
-                ErrorKind::NotConnected,
-                "the client is closed",
-            )));
+        if let Err(e) = self.check_shutdown() {
+            return Some(Err(e));
         }
 
         // Estimate how many bytes the message will consume when written into
@@ -441,11 +475,13 @@ impl Client {
             }
         };
 
-        match state.writer.as_mut() {
+        let mut write = self.state.write.try_lock()?;
+
+        match write.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                let res = proto::encode(&mut state.buffer, op)
-                    .and_then(|_| state.buffer.flush());
+                let res = proto::encode(&mut write.buffer, op)
+                    .and_then(|_| write.buffer.flush());
                 Some(res)
             }
             Some(mut writer) => {
@@ -458,12 +494,13 @@ impl Client {
                 // If connected, write into the writer. This is not going to
                 // block because there's enough space in the buffer.
                 let res = proto::encode(&mut writer, op);
-                state.flush_kicker.try_send(()).ok();
+                write.flush_kicker.try_send(()).ok();
 
                 // If writing fails, disconnect.
                 if res.is_err() {
-                    state.writer = None;
-                    state.pongs.clear();
+                    write.writer = None;
+                    let mut read = self.state.read.lock();
+                    read.pongs.clear();
                 }
                 Some(res)
             }
@@ -501,7 +538,7 @@ impl Client {
             inject_delay();
 
             // Check if the client is closed.
-            if *self.shutdown.lock() {
+            if self.check_shutdown().is_err() {
                 return Ok(());
             }
             first_connect = false;
@@ -517,24 +554,20 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
-        let mut state = self.state.lock();
-
         // Check if the client is closed.
-        if *self.shutdown.lock() {
-            return Err(Error::new(
-                ErrorKind::NotConnected,
-                "the client is closed",
-            ));
-        }
+        self.check_shutdown()?;
+
+        let mut write = self.state.write.lock();
+        let mut read = self.state.read.lock();
 
         // Drop the current writer, if there is one.
-        state.writer = None;
+        write.writer = None;
 
         // Inject random I/O failures when testing.
         inject_io_failure()?;
 
         // Restart subscriptions that existed before the last reconnect.
-        for (sid, subscription) in &state.subscriptions {
+        for (sid, subscription) in &read.subscriptions {
             // Send a SUB operation to the server.
             proto::encode(
                 &mut writer,
@@ -547,10 +580,10 @@ impl Client {
         }
 
         // Take out expected PONGs.
-        let pongs = mem::replace(&mut state.pongs, VecDeque::new());
+        let pongs = mem::replace(&mut read.pongs, VecDeque::new());
 
         // Take out buffered operations.
-        let buffered = state.buffer.clear();
+        let buffered = write.buffer.clear();
 
         // Write buffered PUB operations into the new writer.
         writer.write_all(buffered)?;
@@ -558,12 +591,16 @@ impl Client {
 
         // All good, continue with this connection.
         *self.server_info.lock() = Some(server_info);
-        state.writer = Some(writer);
+        write.writer = Some(writer);
 
         // Complete PONGs because the connection is healthy.
         for p in pongs {
             p.try_send(()).ok();
         }
+
+        // NB see locking protocol for state.write and state.read
+        drop(read);
+        drop(write);
 
         Ok(())
     }
@@ -579,11 +616,9 @@ impl Client {
             // Inject random delays when testing.
             inject_delay();
 
-            if *self.shutdown.lock() {
+            if self.check_shutdown().is_err() {
                 break;
             }
-
-            let mut state = self.state.lock();
 
             match op {
                 ServerOp::Info(server_info) => {
@@ -595,23 +630,37 @@ impl Client {
 
                 ServerOp::Ping => {
                     // Respond with a PONG if connected.
-                    if let Some(w) = state.writer.as_mut() {
+                    let mut write = self.state.write.lock();
+                    let read = self.state.read.lock();
+
+                    if let Some(w) = write.writer.as_mut() {
                         proto::encode(w, ClientOp::Pong)?;
-                        state.flush_kicker.try_send(()).ok();
+                        write.flush_kicker.try_send(()).ok();
                     }
+
+                    // NB see locking protocol for state.write and state.read
+                    drop(read);
+                    drop(write);
                 }
 
                 ServerOp::Pong => {
                     // If a PONG is received while disconnected, it came from a
                     // connection that isn't alive anymore and therefore doesn't
                     // correspond to the next expected PONG.
-                    if state.writer.is_some() {
+                    let write = self.state.write.lock();
+                    let mut read = self.state.read.lock();
+
+                    if write.writer.is_some() {
                         // Take the next expected PONG and complete it by
                         // sending a message.
-                        if let Some(pong) = state.pongs.pop_front() {
+                        if let Some(pong) = read.pongs.pop_front() {
                             pong.try_send(()).ok();
                         }
                     }
+
+                    // NB see locking protocol for state.write and state.read
+                    drop(read);
+                    drop(write);
                 }
 
                 ServerOp::Msg {
@@ -620,8 +669,10 @@ impl Client {
                     reply_to,
                     payload,
                 } => {
+                    let read = self.state.read.lock();
+
                     // Send the message to matching subscription.
-                    if let Some(subscription) = state.subscriptions.get(&sid) {
+                    if let Some(subscription) = read.subscriptions.get(&sid) {
                         let msg = Message {
                             subject,
                             reply: reply_to,
@@ -644,8 +695,10 @@ impl Client {
                     reply_to,
                     payload,
                 } => {
+                    let read = self.state.read.lock();
+
                     // Send the message to matching subscription.
-                    if let Some(subscription) = state.subscriptions.get(&sid) {
+                    if let Some(subscription) = read.subscriptions.get(&sid) {
                         let msg = Message {
                             subject,
                             reply: reply_to,

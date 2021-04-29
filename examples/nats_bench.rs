@@ -100,13 +100,15 @@ fn main() -> std::io::Result<()> {
         let nc = nc.clone();
         let subject = args.subject.clone();
         threads.push(thread::spawn(move || {
-            barrier.wait();
             let s = nc.subscribe(&subject).unwrap();
-            for _ in 0..messages {
+            barrier.wait();
+            for i in 0..messages {
                 s.next().unwrap();
             }
         }));
     }
+
+    barrier.wait();
 
     println!(
         "Starting benchmark [msgs={}, msgsize={}, pubs={}, subs={}]",
@@ -115,8 +117,6 @@ fn main() -> std::io::Result<()> {
         args.publishers.get(),
         args.subscribers
     );
-
-    barrier.wait();
 
     let start = Instant::now();
 
