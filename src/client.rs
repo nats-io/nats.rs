@@ -168,6 +168,7 @@ impl Client {
 
                         // If flushing fails, disconnect.
                         if res.is_err() {
+                            // NB see locking protocol for state.write and state.read
                             let mut read = client.state.read.lock();
                             write.writer = None;
                             read.pongs.clear();
@@ -195,7 +196,7 @@ impl Client {
             // Inject random delays when testing.
             inject_delay();
 
-            let mut state = self.state.write.lock();
+            let mut write = self.state.write.lock();
 
             // Check if the client is closed.
             self.check_shutdown()?;
@@ -203,7 +204,7 @@ impl Client {
             let (sender, receiver) = channel::bounded(1);
 
             // If connected, send a PING.
-            match state.writer.as_mut() {
+            match write.writer.as_mut() {
                 None => {}
                 Some(mut writer) => {
                     // TODO(stjepang): We probably want to set the deadline
@@ -217,7 +218,13 @@ impl Client {
             }
 
             // Enqueue an expected PONG.
-            self.state.read.lock().pongs.push_back(sender);
+            let mut read = self.state.read.lock();
+            read.pongs.push_back(sender);
+
+            // NB see locking protocol for state.write and state.read
+            drop(read);
+            drop(write);
+
             receiver
         };
 
@@ -421,6 +428,8 @@ impl Client {
                 // If writing fails, disconnect.
                 if res.is_err() {
                     write.writer = None;
+
+                    // NB see locking protocol for state.write and state.read
                     let mut read = self.state.read.lock();
                     read.pongs.clear();
                 }
@@ -499,6 +508,8 @@ impl Client {
                 // If writing fails, disconnect.
                 if res.is_err() {
                     write.writer = None;
+
+                    // NB see locking protocol for state.write and state.read
                     let mut read = self.state.read.lock();
                     read.pongs.clear();
                 }
