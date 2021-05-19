@@ -289,6 +289,11 @@ impl Connection {
 }
 
 /// A subscription to a subject.
+///
+/// Due to async limitations (lack of `AsyncDrop` etc...),
+/// please call `Subscription::unsubscribe().await` manually
+/// before dropping `Subscription` to avoid blocking the
+/// runtime.
 #[derive(Debug)]
 pub struct Subscription {
     inner: nats::Subscription,
@@ -314,7 +319,9 @@ impl Subscription {
     }
 
     /// Stops listening for new messages and discards the remaining queued
-    /// messages.
+    /// messages. This should always be called before dropping
+    /// `async_nats::Subscription` to avoid blocking the non-async `Drop`
+    /// implementation.
     pub async fn unsubscribe(&self) -> io::Result<()> {
         let inner = self.inner.clone();
         unblock(move || inner.unsubscribe()).await
