@@ -2,6 +2,13 @@
 
 ## Improvements
 
+- #180 idempotent unsubscription avoids sending
+  multiple UNSUB messages.
+
+# 0.9.16
+
+## Improvements
+
 - #178 client state has been reorganized to allow
   reading and writing to make progress independently,
   preventing issues that were sometimes encountered
