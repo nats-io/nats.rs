@@ -348,7 +348,15 @@ impl Client {
         let mut read = self.state.read.lock();
 
         // Remove the subscription from the map.
-        read.subscriptions.remove(&sid);
+        if read.subscriptions.remove(&sid).is_none() {
+            // already unsubscribed
+
+            // NB see locking protocol for state.write and state.read
+            drop(read);
+            drop(write);
+
+            return Ok(());
+        }
 
         // Send an UNSUB message.
         if let Some(writer) = write.writer.as_mut() {

@@ -1,3 +1,10 @@
+# 0.9.17
+
+## Improvements
+
+- #180 idempotent unsubscription avoids sending
+  multiple UNSUB messages.
+
 # 0.9.16
 
 ## Improvements
