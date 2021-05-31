@@ -1,3 +1,9 @@
+# 0.9.18
+
+## Improvements
+
+- #183 reset client writer to None upon disconnection
+
 # 0.9.17
 
 ## Improvements
