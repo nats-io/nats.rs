@@ -169,8 +169,9 @@ impl Client {
                         // If flushing fails, disconnect.
                         if res.is_err() {
                             // NB see locking protocol for state.write and state.read
-                            let mut read = client.state.read.lock();
                             write.writer = None;
+
+                            let mut read = client.state.read.lock();
                             read.pongs.clear();
                         }
                     }
