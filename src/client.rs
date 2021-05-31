@@ -544,6 +544,7 @@ impl Client {
                     return Ok(());
                 } else {
                     connector.get_options().disconnect_callback.call();
+                    self.state.write.lock().writer = None;
                 }
             }
 
