@@ -835,7 +835,10 @@ impl Consumer {
                 };
 
                 match responses.next_timeout(timeout) {
-                    Ok(next) => next,
+                    Ok(next) => {
+                        received += 1;
+                        next
+                    }
                     Err(_) => break,
                 }
             };
@@ -879,8 +882,6 @@ impl Consumer {
             }
 
             self.stream_id_floor += 1;
-
-            received += 1;
 
             if received == batch_size {
                 break;
