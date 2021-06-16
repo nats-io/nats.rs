@@ -1,3 +1,10 @@
+# 0.9.19
+
+## New Features
+
+* #187 jetstream consumers now consume messages in
+  FIFO order, matching the expectations of most users.
+
 # 0.9.18
 
 ## Improvements
