@@ -169,7 +169,7 @@
 
 use std::{
     collections::{BTreeMap, VecDeque},
-    convert::TryFrom,
+    convert::{TryFrom, TryInto},
     fmt::Debug,
     io::{self, Error, ErrorKind},
     time::{Duration, Instant},
@@ -733,7 +733,10 @@ impl Consumer {
         let stream_id_floor = cfg
             .opt_start_seq
             .map(|start_seq| start_seq - 1)
-            .unwrap_or(1);
+            .unwrap_or(1)
+            .max(1)
+            .try_into()
+            .unwrap();
 
         let push_subscriber =
             if let Some(deliver_subject) = &cfg.deliver_subject {
