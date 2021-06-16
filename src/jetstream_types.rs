@@ -87,7 +87,7 @@ pub struct ConsumerConfig {
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
     /// after this sequence number.
-    pub opt_start_seq: Option<i64>,
+    pub opt_start_seq: Option<u64>,
     /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
     /// after this time.
     pub opt_start_time: Option<DateTime>,

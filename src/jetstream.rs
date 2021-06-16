@@ -108,9 +108,9 @@
 //!
 //! // this will create the consumer if it does not exist already.
 //! // consumer must be mut because the `process*` methods perform
-//! // message deduplication using an interval tree, which is
-//! // also publicly accessible via the `Consumer`'s `dedupe_window`
-//! // field.
+//! // message deduplication using an interval buffer for deduplicating
+//! // messages and reassembling them into FIFO ordering before
+//! // being consumed by the various process* methods.
 //! let mut consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
 //!
 //! // The `Consumer::process` method executes a closure
@@ -168,12 +168,10 @@
 //! ```
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     convert::TryFrom,
     fmt::Debug,
     io::{self, Error, ErrorKind},
-    iter::DoubleEndedIterator,
-    ops::Range,
     time::Duration,
 };
 
@@ -621,9 +619,12 @@ pub struct Consumer {
     /// workloads crossing physical sites.
     pub timeout: Duration,
 
-    /// Contains ranges of processed messages that will be
-    /// filtered out upon future receipt.
-    pub dedupe_window: IntervalTree,
+    /// The lowest stream ID that will be processed
+    pub stream_id_floor: u64,
+
+    /// Messages received out-of-order (above `stream_id_floor`)
+    /// that are awaiting reassembly.
+    pub reassembly_buffer: BTreeMap<u64, Message>,
 }
 
 impl Consumer {
@@ -693,6 +694,11 @@ impl Consumer {
         let stream = stream.as_ref().to_string();
         let cfg = ConsumerConfig::from(cfg);
 
+        let stream_id_floor = cfg
+            .opt_start_seq
+            .map(|start_seq| start_seq - 1)
+            .unwrap_or(1);
+
         let push_subscriber =
             if let Some(deliver_subject) = &cfg.deliver_subject {
                 Some(nc.subscribe(deliver_subject)?)
@@ -700,18 +706,14 @@ impl Consumer {
                 None
             };
 
-        let mut dedupe_window = IntervalTree::default();
-
-        // JetStream starts indexing at 1
-        dedupe_window.mark_processed(0);
-
         Ok(Consumer {
             nc,
             stream,
             cfg,
             push_subscriber,
             timeout: Duration::from_millis(5),
-            dedupe_window,
+            stream_id_floor,
+            reassembly_buffer: BTreeMap::new(),
         })
     }
 
@@ -736,12 +738,6 @@ impl Consumer {
     /// before the entire batch is processed, there will be no error
     /// pushed to the returned `Vec`, it will just be shorter than the
     /// specified batch size.
-    ///
-    /// All messages are deduplicated using the `Consumer`'s built-in
-    /// `dedupe_window` before being fed to the provided closure. If
-    /// a message that has already been processed is received, it will
-    /// be acked and skipped. Errors for acking deduplicated messages
-    /// are not included in the returned `Vec`.
     ///
     /// Requires the `jetstream` feature.
     pub fn process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
@@ -778,25 +774,47 @@ impl Consumer {
         };
 
         let mut rets = Vec::with_capacity(batch_size);
-        let mut last = None;
+        let mut last_unacked = None;
         let start = std::time::Instant::now();
 
         let mut received = 0;
 
-        while let Ok(next) = responses.next_timeout(if received == 0 {
-            // wait "forever" for first message
-            Duration::new(std::u64::MAX >> 2, 0)
-        } else {
-            self.timeout
-                .checked_sub(start.elapsed())
-                .unwrap_or_default()
-        }) {
-            let next_id = next.jetstream_message_info().unwrap().stream_seq;
+        loop {
+            let next = if let Some(next) =
+                self.reassembly_buffer.remove(&self.stream_id_floor)
+            {
+                next
+            } else {
+                let timeout = if received == 0 {
+                    // wait "forever" for first message
+                    Duration::new(std::u64::MAX >> 2, 0)
+                } else {
+                    self.timeout
+                        .checked_sub(start.elapsed())
+                        .unwrap_or_default()
+                };
 
-            if self.dedupe_window.already_processed(next_id) {
-                let _dont_care_about_success = next.ack();
+                match responses.next_timeout(timeout) {
+                    Ok(next) => next,
+                    Err(_) => break,
+                }
+            };
+
+            let next_id = next.jetstream_stream_seq().unwrap();
+
+            if next_id < self.stream_id_floor {
+                // We've either already seen this message, or it's below
+                // the configured interest threshold specified in the
+                // `ConsumerConfig::opt_start_seq`.
+                let _dont_care = next.ack();
+                continue;
+            } else if next_id > self.stream_id_floor {
+                // queue this message up for future in-order processing
+                self.reassembly_buffer.insert(next_id, next);
                 continue;
             }
+
+            assert_eq!(next_id, self.stream_id_floor);
 
             let ret = f(&next);
 
@@ -808,21 +826,24 @@ impl Consumer {
                 // if our ack policy is `All`, after breaking.
                 break;
             } else if self.cfg.ack_policy == AckPolicy::Explicit {
-                self.dedupe_window.mark_processed(next_id);
                 let res = next.ack();
                 if let Err(e) = res {
                     rets.push(Err(e));
                 }
+            } else {
+                last_unacked = Some(next);
             }
 
-            last = Some(next);
+            self.stream_id_floor += 1;
+
             received += 1;
+
             if received == batch_size {
                 break;
             }
         }
 
-        if let Some(last) = last {
+        if let Some(last) = last_unacked {
             if self.cfg.ack_policy == AckPolicy::All {
                 let res = last.ack();
                 if let Err(e) = res {
@@ -839,10 +860,11 @@ impl Consumer {
     ///
     /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
-    /// All messages are deduplicated using the `Consumer`'s built-in
-    /// `dedupe_window` before being fed to the provided closure. If
-    /// a message that has already been processed is received, it will
-    /// be acked and skipped.
+    /// All messages are deduplicated and processed in FIFO ordering by
+    /// buffering out-of-order messages and and occasionally pruning the
+    /// buffer for any messages that have been deleted according to
+    /// the stream's configured retention policy. If a message that has
+    /// already been processed is received, it will be acked and skipped.
     ///
     /// Does not return an `Err` if acking the message is unsuccessful,
     /// but the message is still marked in the dedupe window. If you
@@ -856,51 +878,69 @@ impl Consumer {
         &mut self,
         f: F,
     ) -> io::Result<R> {
-        loop {
-            let next = if let Some(ps) = &self.push_subscriber {
-                ps.next().unwrap()
-            } else {
-                if self.cfg.durable_name.is_none() {
+        let next = if let Some(next) =
+            self.reassembly_buffer.remove(&self.stream_id_floor)
+        {
+            next
+        } else {
+            loop {
+                let next = if let Some(ps) = &self.push_subscriber {
+                    ps.next().unwrap()
+                } else {
+                    if self.cfg.durable_name.is_none() {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            "process and process_batch are only usable from \
+                            Pull-based Consumers if there is a durable_name set",
+                        ));
+                    }
+
+                    let subject = format!(
+                        "{}CONSUMER.MSG.NEXT.{}.{}",
+                        self.api_prefix(),
+                        self.stream,
+                        self.cfg.durable_name.as_ref().unwrap()
+                    );
+
+                    self.nc.request(&subject, AckKind::Ack)?
+                };
+
+                let next_id = if let Some(jmi) = next.jetstream_message_info() {
+                    jmi.stream_seq
+                } else {
                     return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "process and process_batch are only usable from \
-                        Pull-based Consumers if there is a durable_name set",
+                        ErrorKind::Other,
+                        "failed to process jetstream message info \
+                        from message reply subject. Is your nats-server up to date?"
                     ));
+                };
+
+                if next_id < self.stream_id_floor {
+                    // We've either already seen this message, or it's below
+                    // the configured interest threshold specified in the
+                    // `ConsumerConfig::opt_start_seq`.
+                    let _dont_care = next.ack();
+                    continue;
+                } else if next_id > self.stream_id_floor {
+                    // queue this message up for future in-order processing
+                    self.reassembly_buffer.insert(next_id, next);
+                    continue;
                 }
 
-                let subject = format!(
-                    "{}CONSUMER.MSG.NEXT.{}.{}",
-                    self.api_prefix(),
-                    self.stream,
-                    self.cfg.durable_name.as_ref().unwrap()
-                );
+                assert_eq!(next_id, self.stream_id_floor);
 
-                self.nc.request(&subject, AckKind::Ack)?
-            };
-
-            let next_id = if let Some(jmi) = next.jetstream_message_info() {
-                jmi.stream_seq
-            } else {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    "failed to process jetstream message info \
-                    from message reply subject. Is your nats-server up to date?"
-                ));
-            };
-
-            if self.dedupe_window.already_processed(next_id) {
-                let _dont_care = next.ack();
-                continue;
+                break next;
             }
+        };
 
-            let ret = f(&next)?;
-            if self.cfg.ack_policy != AckPolicy::None {
-                let _dont_care = next.ack();
-            }
-
-            self.dedupe_window.mark_processed(next_id);
-            return Ok(ret);
+        let ret = f(&next)?;
+        if self.cfg.ack_policy != AckPolicy::None {
+            let _dont_care = next.ack();
         }
+
+        self.stream_id_floor += 1;
+
+        Ok(ret)
     }
 
     /// Process and acknowledge a single message, waiting up to the `Consumer`'s
@@ -908,10 +948,11 @@ impl Consumer {
     ///
     /// Does not ack the processed message if the internal closure returns an `Err`.
     ///
-    /// All messages are deduplicated using the `Consumer`'s built-in
-    /// `dedupe_window` before being fed to the provided closure. If
-    /// a message that has already been processed is received, it will
-    /// be acked and skipped.
+    /// All messages are deduplicated and processed in FIFO ordering by
+    /// buffering out-of-order messages and and occasionally pruning the
+    /// buffer for any messages that have been deleted according to
+    /// the stream's configured retention policy. If a message that has
+    /// already been processed is received, it will be acked and skipped.
     ///
     /// Does not return an `Err` if acking the message is unsuccessful,
     /// but the message is still marked in the dedupe window. If you
@@ -925,42 +966,61 @@ impl Consumer {
         &mut self,
         f: F,
     ) -> io::Result<R> {
-        loop {
-            let next = if let Some(ps) = &self.push_subscriber {
-                ps.next_timeout(self.timeout)?
-            } else {
-                if self.cfg.durable_name.is_none() {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "process and process_batch are only usable from \
-                        Pull-based Consumers if there is a a durable_name set",
-                    ));
+        let next = if let Some(next) =
+            self.reassembly_buffer.remove(&self.stream_id_floor)
+        {
+            next
+        } else {
+            loop {
+                let next = if let Some(ps) = &self.push_subscriber {
+                    ps.next_timeout(self.timeout)?
+                } else {
+                    if self.cfg.durable_name.is_none() {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            "process and process_batch are only usable from \
+                            Pull-based Consumers if there is a a durable_name set",
+                        ));
+                    }
+
+                    let subject = format!(
+                        "{}CONSUMER.MSG.NEXT.{}.{}",
+                        self.api_prefix(),
+                        self.stream,
+                        self.cfg.durable_name.as_ref().unwrap()
+                    );
+
+                    self.nc.request_timeout(&subject, b"", self.timeout)?
+                };
+
+                let next_id = next.jetstream_stream_seq()?;
+
+                if next_id < self.stream_id_floor {
+                    // We've either already seen this message, or it's below
+                    // the configured interest threshold specified in the
+                    // `ConsumerConfig::opt_start_seq`.
+                    let _dont_care = next.ack();
+                    continue;
+                } else if next_id > self.stream_id_floor {
+                    // queue this message up for future in-order processing
+                    self.reassembly_buffer.insert(next_id, next);
+                    continue;
                 }
 
-                let subject = format!(
-                    "{}CONSUMER.MSG.NEXT.{}.{}",
-                    self.api_prefix(),
-                    self.stream,
-                    self.cfg.durable_name.as_ref().unwrap()
-                );
+                assert_eq!(next_id, self.stream_id_floor);
 
-                self.nc.request_timeout(&subject, b"", self.timeout)?
-            };
-
-            let next_id = next.jetstream_message_info().unwrap().stream_seq;
-
-            if self.dedupe_window.already_processed(next_id) {
-                self.dedupe_window.mark_processed(next_id);
-                let _dont_care = next.ack();
-                continue;
+                break next;
             }
+        };
 
-            let ret = f(&next)?;
-            if self.cfg.ack_policy != AckPolicy::None {
-                let _dont_care = next.ack();
-            }
-            return Ok(ret);
+        let ret = f(&next)?;
+        if self.cfg.ack_policy != AckPolicy::None {
+            let _dont_care = next.ack();
         }
+
+        self.stream_id_floor += 1;
+
+        Ok(ret)
     }
 
     /// For pull-based consumers (a consumer where `ConsumerConfig.deliver_subject` is `None`)
@@ -969,7 +1029,9 @@ impl Consumer {
     /// responses, use the `pull_opt` method below.
     ///
     /// This is a lower-level method and does not filter messages through the `Consumer`'s
-    /// built-in `dedupe_window` as the various `process*` methods do.
+    /// built-in FIFO `reassembly_buffer` as the various `process*` methods do. This means
+    /// that you need to perform your own deduplication and message reordering reassembly based
+    /// on the `Message`'s stream ID yourself, if you require this.
     ///
     /// Requires the `jetstream` feature.
     pub fn pull(&mut self) -> io::Result<Message> {
@@ -996,7 +1058,9 @@ impl Consumer {
     /// `NextRequest` for more information about the options.
     ///
     /// This is a lower-level method and does not filter messages through the `Consumer`'s
-    /// built-in `dedupe_window` as the various `process*` methods do.
+    /// built-in FIFO buffer as the various `process*` methods do. This means that you
+    /// need to perform your own deduplication and message reordering reassembly based
+    /// on the `Message`'s
     ///
     /// Requires the `jetstream` feature.
     pub fn pull_opt(
@@ -1032,254 +1096,5 @@ impl Consumer {
 
     fn api_prefix(&self) -> &str {
         &self.nc.0.client.options.jetstream_prefix
-    }
-}
-
-/// Records ranges of acknowledged IDs for
-/// low-memory deduplication.
-#[derive(Default)]
-pub struct IntervalTree {
-    // stores interval start-end
-    inner: std::collections::BTreeMap<u64, u64>,
-}
-
-impl IntervalTree {
-    /// Mark this ID as being processed. Returns `true`
-    /// if this ID was not already marked as processed.
-    pub fn mark_processed(&mut self, id: u64) -> bool {
-        if self.inner.is_empty() {
-            self.inner.insert(id, id);
-            return true;
-        }
-
-        let (prev_start, prev_end) = self
-            .inner
-            .range(..=&id)
-            .next_back()
-            .map(|(s, e)| (*s, *e))
-            .unwrap();
-
-        if (prev_start..=prev_end).contains(&id) {
-            // range already includes id
-            return false;
-        }
-
-        // we may have to merge one or two ranges.
-        //
-        // say we're inserting 4:
-        //
-        // case 1, fully disjoint:
-        // [0] [4] [6]
-        //
-        // case 2, left merge
-        // [0, 1, 2, 3, 4] [6]
-        //
-        // case 3, right merge
-        // [0] [4, 5, 6]
-        //
-        // case 4, double merge
-        // [3, 4, 5]
-
-        let left_merge = prev_end + 1 == id;
-        let right_merge = self.inner.contains_key(&(id + 1));
-
-        match (left_merge, right_merge) {
-            (true, true) => {
-                let right_end = self.inner.remove(&(id + 1)).unwrap();
-                assert_eq!(
-                    self.inner.insert(prev_start, right_end),
-                    Some(id - 1)
-                );
-            }
-            (true, false) => {
-                assert_eq!(self.inner.insert(prev_start, id), Some(id - 1));
-            }
-            (false, true) => {
-                let right_end = self.inner.remove(&(id + 1)).unwrap();
-                assert_eq!(self.inner.insert(id, right_end), None);
-            }
-            (false, false) => {
-                // created disjoint range
-                self.inner.insert(id, id);
-            }
-        }
-
-        true
-    }
-
-    /// Returns `true` if this ID has already been processed.
-    pub fn already_processed(&self, id: u64) -> bool {
-        if let Some((prev_start, prev_end)) =
-            self.inner.range(..=&id).next_back()
-        {
-            (prev_start..=prev_end).contains(&&id)
-        } else {
-            false
-        }
-    }
-
-    /// Returns the minimum ID marked as processed,
-    /// if any have been.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use nats::jetstream::IntervalTree;
-    ///
-    /// let mut it = IntervalTree::default();
-    ///
-    /// it.mark_processed(56);
-    /// it.mark_processed(259);
-    ///
-    /// assert_eq!(it.min(), Some(56));
-    /// ```
-    pub fn min(&self) -> Option<u64> {
-        self.inner.iter().next().map(|(l, _h)| *l)
-    }
-
-    /// Returns the maximum ID marked as processed,
-    /// if any have been.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use nats::jetstream::IntervalTree;
-    ///
-    /// let mut it = IntervalTree::default();
-    ///
-    /// it.mark_processed(56);
-    /// it.mark_processed(259);
-    ///
-    /// assert_eq!(it.max(), Some(259));
-    /// ```
-    pub fn max(&self) -> Option<u64> {
-        self.inner.iter().next_back().map(|(_l, h)| *h)
-    }
-
-    /// Returns a `DoubleEndedIterator` over
-    /// non-contiguous gaps that have not been
-    /// processed yet.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::ops::Range;
-    ///
-    /// use nats::jetstream::IntervalTree;
-    ///
-    /// let mut it = IntervalTree::default();
-    ///
-    /// for id in 56..=122 {
-    ///     it.mark_processed(id);
-    /// }
-    ///
-    /// for id in 222..=259 {
-    ///     it.mark_processed(id);
-    /// }
-    ///
-    /// # assert_eq!(it.min(), Some(56));
-    /// # assert_eq!(it.max(), Some(259));
-    ///
-    /// let gaps: Vec<Range<u64>> = it.gaps().collect();
-    ///
-    /// assert_eq!(gaps, vec![Range { start: 123, end: 222 }]);
-    /// ```
-    pub fn gaps(&self) -> impl '_ + DoubleEndedIterator<Item = Range<u64>> {
-        let mut iter = self.inner.iter();
-        let mut last_hi = iter.next().map(|(_l, h)| *h);
-        iter.map(move |(lo, hi)| {
-            let lh = last_hi.unwrap();
-            last_hi = Some(*hi);
-
-            assert!(lh + 1 < *lo);
-
-            Range {
-                start: lh + 1,
-                end: *lo,
-            }
-        })
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn range_tree() {
-        let mut rt = IntervalTree::default();
-        assert!(rt.mark_processed(1));
-
-        let mut rt = IntervalTree {
-            inner: vec![(0, 0), (6, 6)].into_iter().collect(),
-        };
-
-        rt.mark_processed(4);
-        assert_eq!(
-            rt.inner,
-            vec![(0, 0), (4, 4), (6, 6)].into_iter().collect()
-        );
-        assert!(rt.already_processed(0));
-        assert!(rt.already_processed(4));
-        assert!(rt.already_processed(6));
-        assert!(!rt.already_processed(7));
-
-        let mut rt = IntervalTree {
-            inner: vec![(3, 3), (6, 6)].into_iter().collect(),
-        };
-
-        rt.mark_processed(4);
-        assert_eq!(rt.inner, vec![(3, 4), (6, 6)].into_iter().collect());
-        assert!(!rt.already_processed(0));
-        assert!(rt.already_processed(3));
-        assert!(rt.already_processed(4));
-        assert!(rt.already_processed(6));
-        assert!(!rt.already_processed(7));
-
-        let mut rt = IntervalTree {
-            inner: vec![(0, 0), (5, 5)].into_iter().collect(),
-        };
-        rt.mark_processed(4);
-        assert_eq!(rt.inner, vec![(0, 0), (4, 5)].into_iter().collect());
-        assert!(rt.already_processed(0));
-        assert!(rt.already_processed(4));
-        assert!(rt.already_processed(5));
-        assert!(!rt.already_processed(6));
-
-        let mut rt = IntervalTree {
-            inner: vec![(2, 3), (5, 6)].into_iter().collect(),
-        };
-        rt.mark_processed(4);
-        assert_eq!(rt.inner, vec![(2, 6)].into_iter().collect());
-        assert!(!rt.already_processed(0));
-        assert!(rt.already_processed(2));
-        assert!(rt.already_processed(3));
-        assert!(rt.already_processed(4));
-        assert!(rt.already_processed(5));
-        assert!(rt.already_processed(6));
-        assert!(!rt.already_processed(7));
-
-        let mut it = IntervalTree::default();
-
-        for id in 56..=122 {
-            it.mark_processed(id);
-        }
-
-        for id in 222..=259 {
-            it.mark_processed(id);
-        }
-
-        assert_eq!(it.min(), Some(56));
-        assert_eq!(it.max(), Some(259));
-
-        let gaps: Vec<Range<u64>> = it.gaps().collect();
-
-        assert_eq!(
-            gaps,
-            vec![Range {
-                start: 123,
-                end: 222
-            }]
-        );
     }
 }
