@@ -172,7 +172,7 @@ use std::{
     convert::TryFrom,
     fmt::Debug,
     io::{self, Error, ErrorKind},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -625,6 +625,10 @@ pub struct Consumer {
     /// Messages received out-of-order (above `stream_id_floor`)
     /// that are awaiting reassembly.
     pub reassembly_buffer: BTreeMap<u64, Message>,
+
+    /// The last time that we updated our stream floor due to
+    /// receiving out-of-order messages.
+    pub last_floor_update: Instant,
 }
 
 // Bumps our `stream_id_floor` to the minimum ID currently in the stream.
@@ -635,19 +639,26 @@ pub struct Consumer {
 // desired behavior otherwise or with lower boilerplate than this.
 macro_rules! update_stream_floor {
     ($consumer:expr) => {
-        match $consumer.nc.stream_info(&$consumer.stream) {
-            Ok(info) => {
-                $consumer.stream_id_floor =
-                    $consumer.stream_id_floor.max(info.state.first_seq);
+        // only update our stream floor once every 5 seconds at the most
+        if $consumer.last_floor_update.elapsed() > Duration::from_secs(5) {
+            match $consumer.nc.stream_info(&$consumer.stream) {
+                Ok(info) => {
+                    $consumer.stream_id_floor =
+                        $consumer.stream_id_floor.max(info.state.first_seq);
 
-                // drop all messages that are beneath our `stream_id_floor`.
-                $consumer.reassembly_buffer = $consumer
-                    .reassembly_buffer
-                    .split_off(&$consumer.stream_id_floor);
+                    // drop all messages that are beneath our `stream_id_floor`.
+                    $consumer.reassembly_buffer = $consumer
+                        .reassembly_buffer
+                        .split_off(&$consumer.stream_id_floor);
 
-                Ok(())
+                    $consumer.last_floor_update = Instant::now();
+
+                    Ok(())
+                }
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
+        } else {
+            Ok(())
         }
     };
 }
@@ -739,6 +750,7 @@ impl Consumer {
             timeout: Duration::from_millis(5),
             stream_id_floor,
             reassembly_buffer: BTreeMap::new(),
+            last_floor_update: Instant::now(),
         })
     }
 
@@ -801,7 +813,7 @@ impl Consumer {
 
         let mut rets = Vec::with_capacity(batch_size);
         let mut last_unacked = None;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         let mut received = 0;
 
