@@ -627,6 +627,31 @@ pub struct Consumer {
     pub reassembly_buffer: BTreeMap<u64, Message>,
 }
 
+// Bumps our `stream_id_floor` to the minimum ID currently in the stream.
+// This is a macro instead of an &mut self method because this lets us operate
+// on a subset of the Consumer struct's fields without taking out a conflicting
+// mutable reference while the Consumer's `push_subscriber` may be immutably
+// borrowed. Kind of a hack, but it's not clear if Rust will ever allow our
+// desired behavior otherwise or with lower boilerplate than this.
+macro_rules! update_stream_floor {
+    ($consumer:expr) => {
+        match $consumer.nc.stream_info(&$consumer.stream) {
+            Ok(info) => {
+                $consumer.stream_id_floor =
+                    $consumer.stream_id_floor.max(info.state.first_seq);
+
+                // drop all messages that are beneath our `stream_id_floor`.
+                $consumer.reassembly_buffer = $consumer
+                    .reassembly_buffer
+                    .split_off(&$consumer.stream_id_floor);
+
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    };
+}
+
 impl Consumer {
     /// Instantiate a `JetStream` `Consumer` from an existing
     /// `ConsumerInfo` that may have been returned
@@ -746,6 +771,7 @@ impl Consumer {
         mut f: F,
     ) -> Vec<io::Result<R>> {
         let mut _sub_opt = None;
+
         let responses = if let Some(ps) = self.push_subscriber.as_ref() {
             ps
         } else {
@@ -811,6 +837,10 @@ impl Consumer {
             } else if next_id > self.stream_id_floor {
                 // queue this message up for future in-order processing
                 self.reassembly_buffer.insert(next_id, next);
+                if let Err(e) = update_stream_floor!(self) {
+                    rets.push(Err(e));
+                    break;
+                }
                 continue;
             }
 
@@ -924,6 +954,7 @@ impl Consumer {
                 } else if next_id > self.stream_id_floor {
                     // queue this message up for future in-order processing
                     self.reassembly_buffer.insert(next_id, next);
+                    update_stream_floor!(self)?;
                     continue;
                 }
 
@@ -1004,6 +1035,7 @@ impl Consumer {
                 } else if next_id > self.stream_id_floor {
                     // queue this message up for future in-order processing
                     self.reassembly_buffer.insert(next_id, next);
+                    update_stream_floor!(self)?;
                     continue;
                 }
 
