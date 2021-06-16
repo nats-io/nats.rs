@@ -732,8 +732,7 @@ impl Consumer {
 
         let stream_id_floor = cfg
             .opt_start_seq
-            .map(|start_seq| start_seq - 1)
-            .unwrap_or(1)
+            .map_or(1, |start_seq| start_seq - 1)
             .max(1)
             .try_into()
             .unwrap();

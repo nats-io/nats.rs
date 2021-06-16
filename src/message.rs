@@ -217,6 +217,8 @@ impl Message {
         })
     }
 
+    /// Returns the JetStream Stream sequence number associated
+    /// with this message, if it is a JetStream message.
     #[cfg(feature = "jetstream")]
     pub fn jetstream_stream_seq(&self) -> io::Result<u64> {
         if let Some(jmi) = self.jetstream_message_info() {
