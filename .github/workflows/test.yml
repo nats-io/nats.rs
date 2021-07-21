@@ -63,9 +63,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
         with:
-          go-version: '1.14'
+          go-version: '1.16'
       - name: install nats-server
-        run: go get github.com/nats-io/nats-server
+        run: go get github.com/nats-io/nats-server/v2
       - name: cargo test
         env:
           RUST_BACKTRACE: 1
@@ -110,9 +110,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
         with:
-          go-version: '1.14'
+          go-version: '1.16'
       - name: install nats-server
-        run: go get github.com/nats-io/nats-server
+        run: go get github.com/nats-io/nats-server/v2
       - name: JetStream test
         env:
           RUST_LOG: trace
@@ -136,9 +136,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
         with:
-          go-version: '1.14'
+          go-version: '1.16'
       - name: install nats-server
-        run: go get github.com/nats-io/nats-server
+        run: go get github.com/nats-io/nats-server/v2
       - name: JetStream test
         env:
           RUST_LOG: trace
@@ -162,9 +162,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
         with:
-          go-version: '1.14'
+          go-version: '1.16'
       - name: install nats-server
-        run: go get github.com/nats-io/nats-server
+        run: go get github.com/nats-io/nats-server/v2
       - name: JetStream test
         env:
           RUST_LOG: trace
