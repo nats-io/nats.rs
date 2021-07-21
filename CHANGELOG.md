@@ -1,8 +1,19 @@
+# 0.9.19
+
+## Improvements
+
+- #189 ipv6 address parsing support has been added.
+
 # 0.9.18
 
 ## Improvements
 
 - #183 reset client writer to None upon disconnection
+
+## Breaking Changes
+
+- #183 the MSRV bumped to Rust 1.51, which was
+  released on March 25 2021.
 
 # 0.9.17
 
