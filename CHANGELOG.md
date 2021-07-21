@@ -1,3 +1,9 @@
+# 0.9.19
+
+## Improvements
+
+- #189 ipv6 address parsing support has been added.
+
 # 0.9.18
 
 ## Improvements
