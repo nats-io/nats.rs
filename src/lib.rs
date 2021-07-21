@@ -243,7 +243,7 @@ const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
@@ -261,7 +261,7 @@ struct ServerInfo {
     /// If this is set, then the server must authenticate using TLS.
     pub tls_required: bool,
     /// Maximum payload size that the server will accept.
-    pub max_payload: i32,
+    pub max_payload: usize,
     /// The protocol version in use.
     pub proto: i8,
     /// The server-assigned client ID. This may change during reconnection.
@@ -289,7 +289,7 @@ impl ServerInfo {
             version: obj["version"].take_string()?,
             auth_required: obj["auth_required"].as_bool().unwrap_or(false),
             tls_required: obj["tls_required"].as_bool().unwrap_or(false),
-            max_payload: obj["max_payload"].as_i32()?,
+            max_payload: obj["max_payload"].as_usize()?,
             proto: obj["proto"].as_i8()?,
             client_id: obj["client_id"].as_u64()?,
             go: obj["go"].take_string()?,
@@ -614,11 +614,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn client_ip(&self) -> io::Result<std::net::IpAddr> {
-        let info = self
-            .0
-            .client
-            .server_info()
-            .expect("INFO should've been received at connection");
+        let info = self.0.client.server_info();
 
         match info.client_ip.as_str() {
             "" => Err(Error::new(
@@ -655,11 +651,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn client_id(&self) -> u64 {
-        self.0
-            .client
-            .server_info()
-            .expect("INFO should've been received at connection")
-            .client_id
+        self.0.client.server_info().client_id
     }
 
     /// Send an unsubscription for all subs then flush the connection, allowing
@@ -728,6 +720,20 @@ impl Connection {
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         self.0.client.publish(subject, reply, headers, msg.as_ref())
+    }
+
+    /// Returns the maximum payload size the most recently
+    /// connected server will accept.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::connect("demo.nats.io")?;
+    /// println!("max payload: {:?}", nc.max_payload());
+    /// # Ok(())
+    /// # }
+    pub fn max_payload(&self) -> usize {
+        self.0.client.server_info.lock().max_payload
     }
 
     fn do_subscribe(

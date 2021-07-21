@@ -70,7 +70,7 @@ pub struct Client {
     state: Arc<State>,
 
     /// Server info provided by the last INFO message.
-    server_info: Arc<Mutex<Option<ServerInfo>>>,
+    pub(crate) server_info: Arc<Mutex<ServerInfo>>,
 
     /// Set to `true` if shutdown has been requested.
     shutdown: Arc<Mutex<bool>>,
@@ -104,7 +104,7 @@ impl Client {
                     pongs: VecDeque::from(vec![pong_sender]),
                 }),
             }),
-            server_info: Arc::new(Mutex::new(None)),
+            server_info: Arc::new(Mutex::new(ServerInfo::default())),
             shutdown: Arc::new(Mutex::new(false)),
 
             #[cfg(feature = "jetstream")]
@@ -187,7 +187,7 @@ impl Client {
     }
 
     /// Retrieves server info as received by the most recent connection.
-    pub(crate) fn server_info(&self) -> Option<ServerInfo> {
+    pub(crate) fn server_info(&self) -> ServerInfo {
         self.server_info.lock().clone()
     }
 
@@ -385,7 +385,7 @@ impl Client {
         inject_delay();
 
         let server_info = self.server_info.lock();
-        if headers.is_some() && !server_info.as_ref().unwrap().headers {
+        if headers.is_some() && !server_info.headers {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "the server does not support headers",
@@ -605,7 +605,7 @@ impl Client {
         writer.flush()?;
 
         // All good, continue with this connection.
-        *self.server_info.lock() = Some(server_info);
+        *self.server_info.lock() = server_info;
         write.writer = Some(writer);
 
         // Complete PONGs because the connection is healthy.
@@ -640,7 +640,7 @@ impl Client {
                     for url in &server_info.connect_urls {
                         connector.add_url(url).ok();
                     }
-                    *self.server_info.lock() = Some(server_info);
+                    *self.server_info.lock() = server_info;
                 }
 
                 ServerOp::Ping => {

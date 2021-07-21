@@ -1,3 +1,11 @@
+# 0.10.1
+
+## Improvements
+
+- #190 exposed the last connected server's max_payload
+  configurable with the new Connection::max_payload
+  method.
+
 # 0.10.0
 
 ## Improvements
