@@ -408,21 +408,66 @@ impl Server {
         };
 
         // Extract the host.
-        let mut host_port_splits = host_port.split(':');
-        let host_opt = host_port_splits.next();
-        if host_opt.map_or(true, str::is_empty) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("invalid URL provided: {}", url),
-            ));
+        let (host, port) = if host_port.starts_with('[') {
+            // ipv6
+            let close_idx = if let Some(ci) = host_port.find(']') {
+                ci
+            } else {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("invalid URL provided: {}", url),
+                ));
+            };
+
+            let host = host_port[1..close_idx].to_string();
+
+            let port = if host_port.len() == close_idx + 1 {
+                4222
+            } else if let Ok(port) = host_port[close_idx + 2..].parse() {
+                port
+            } else {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("unable to parse port number in URL: {}", url),
+                ));
+            };
+
+            (host, port)
+        } else {
+            let mut host_port_splits = host_port.split(':');
+            let host_opt = host_port_splits.next();
+            if host_opt.map_or(true, str::is_empty) {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("invalid URL provided: {}", url),
+                ));
+            };
+
+            let host = host_opt.unwrap().to_string();
+
+            let port_opt = host_port_splits
+                .next()
+                .and_then(|port_str| port_str.parse().ok());
+            let port = port_opt.unwrap_or(4222);
+
+            if host_port_splits.next().is_some() {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "unable to parse port number in URL: {}. \
+                        If you are trying to use ipv6, please wrap \
+                        the address in square brackets: [{}] etc... \
+                        with an optional colon and port after the \
+                        closing bracket.",
+                        url, url
+                    ),
+                ));
+            }
+
+            (host, port)
         };
-        let host = host_opt.unwrap().to_string();
 
         // Extract the port.
-        let port_opt = host_port_splits
-            .next()
-            .and_then(|port_str| port_str.parse().ok());
-        let port = port_opt.unwrap_or(4222);
 
         Ok(Server {
             host,

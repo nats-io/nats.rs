@@ -1,9 +1,20 @@
-# 0.9.19
+# Unreleased
 
 ## New Features
 
 * #187 jetstream consumers now consume messages in
   FIFO order, matching the expectations of most users.
+
+# 0.10.0
+
+## Improvements
+
+- #189 ipv6 address parsing support has been added.
+
+## Breaking Changes
+
+- #183 the MSRV bumped to Rust 1.51, which was
+  released on March 25 2021.
 
 # 0.9.18
 
