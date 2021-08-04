@@ -158,7 +158,6 @@
     clippy::non_ascii_literal,
     clippy::path_buf_push_overwrite,
     clippy::print_stdout,
-    clippy::pub_enum_variant_names,
     clippy::shadow_reuse,
     clippy::shadow_same,
     clippy::shadow_unrelated,
@@ -171,7 +170,6 @@
     clippy::unseparated_literal_suffix,
     clippy::wildcard_dependencies,
     clippy::wildcard_enum_match_arm,
-    clippy::wrong_pub_self_convention,
 ))]
 #![allow(
     clippy::match_like_matches_macro,

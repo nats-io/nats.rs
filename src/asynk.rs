@@ -281,7 +281,7 @@ impl Connection {
         unblock(move || {
             inner.publish_with_reply_or_headers(
                 &subject,
-                reply.as_ref().map(String::as_str),
+                reply.as_deref(),
                 headers.as_ref(),
                 msg,
             )
@@ -352,9 +352,9 @@ pub struct Message {
 impl Message {
     fn new(mut inner: crate::Message) -> Message {
         Message {
-            subject: mem::replace(&mut inner.subject, String::new()),
+            subject: mem::take(&mut inner.subject),
             reply: inner.reply.take(),
-            data: mem::replace(&mut inner.data, Vec::new()),
+            data: mem::take(&mut inner.data),
             headers: inner.headers.take(),
             inner,
         }
