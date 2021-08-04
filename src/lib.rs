@@ -190,6 +190,7 @@ mod message;
 mod options;
 mod proto;
 mod secure_wipe;
+mod subscription;
 
 #[cfg(feature = "jetstream")]
 /// `JetStream` stream management and consumers.
@@ -211,10 +212,6 @@ fn inject_delay() {}
 fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }
-
-/// Functionality relating to subscribing to a
-/// subject.
-pub mod subscription;
 
 #[doc(hidden)]
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
