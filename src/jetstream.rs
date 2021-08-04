@@ -173,7 +173,6 @@ use std::{
     fmt::Debug,
     io::{self, Error, ErrorKind},
     iter::DoubleEndedIterator,
-    ops::Range,
     time::Duration,
 };
 
@@ -623,7 +622,7 @@ pub struct Consumer {
 
     /// Contains ranges of processed messages that will be
     /// filtered out upon future receipt.
-    pub dedupe_window: IntervalTree,
+    dedupe_window: IntervalTree,
 }
 
 impl Consumer {
@@ -1038,7 +1037,7 @@ impl Consumer {
 /// Records ranges of acknowledged IDs for
 /// low-memory deduplication.
 #[derive(Default)]
-pub struct IntervalTree {
+struct IntervalTree {
     // stores interval start-end
     inner: std::collections::BTreeMap<u64, u64>,
 }
@@ -1116,88 +1115,6 @@ impl IntervalTree {
         } else {
             false
         }
-    }
-
-    /// Returns the minimum ID marked as processed,
-    /// if any have been.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use nats::jetstream::IntervalTree;
-    ///
-    /// let mut it = IntervalTree::default();
-    ///
-    /// it.mark_processed(56);
-    /// it.mark_processed(259);
-    ///
-    /// assert_eq!(it.min(), Some(56));
-    /// ```
-    pub fn min(&self) -> Option<u64> {
-        self.inner.iter().next().map(|(l, _h)| *l)
-    }
-
-    /// Returns the maximum ID marked as processed,
-    /// if any have been.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use nats::jetstream::IntervalTree;
-    ///
-    /// let mut it = IntervalTree::default();
-    ///
-    /// it.mark_processed(56);
-    /// it.mark_processed(259);
-    ///
-    /// assert_eq!(it.max(), Some(259));
-    /// ```
-    pub fn max(&self) -> Option<u64> {
-        self.inner.iter().next_back().map(|(_l, h)| *h)
-    }
-
-    /// Returns a `DoubleEndedIterator` over
-    /// non-contiguous gaps that have not been
-    /// processed yet.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::ops::Range;
-    ///
-    /// use nats::jetstream::IntervalTree;
-    ///
-    /// let mut it = IntervalTree::default();
-    ///
-    /// for id in 56..=122 {
-    ///     it.mark_processed(id);
-    /// }
-    ///
-    /// for id in 222..=259 {
-    ///     it.mark_processed(id);
-    /// }
-    ///
-    /// # assert_eq!(it.min(), Some(56));
-    /// # assert_eq!(it.max(), Some(259));
-    ///
-    /// let gaps: Vec<Range<u64>> = it.gaps().collect();
-    ///
-    /// assert_eq!(gaps, vec![Range { start: 123, end: 222 }]);
-    /// ```
-    pub fn gaps(&self) -> impl '_ + DoubleEndedIterator<Item = Range<u64>> {
-        let mut iter = self.inner.iter();
-        let mut last_hi = iter.next().map(|(_l, h)| *h);
-        iter.map(move |(lo, hi)| {
-            let lh = last_hi.unwrap();
-            last_hi = Some(*hi);
-
-            assert!(lh + 1 < *lo);
-
-            Range {
-                start: lh + 1,
-                end: *lo,
-            }
-        })
     }
 }
 
