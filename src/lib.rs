@@ -178,7 +178,9 @@
     clippy::wildcard_enum_match_arm
 )]
 
+/// Async-enabled NATS client.
 pub mod asynk;
+
 mod auth_utils;
 mod client;
 mod connect;
