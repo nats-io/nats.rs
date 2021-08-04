@@ -2,7 +2,7 @@
 
 ## Breaking Changes
 
-- #*** the async_nats crate has been merged into the
+- #192 the async_nats crate has been merged into the
   main nats crate, under the `asynk` module name.
 
 # 0.10.1
