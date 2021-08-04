@@ -48,9 +48,9 @@ fn main() -> std::io::Result<()> {
         let args = Args::from_args();
 
         let opts = if let Some(creds_path) = args.creds {
-            async_nats::Options::with_credentials(creds_path)
+            nats::asynk::Options::with_credentials(creds_path)
         } else {
-            async_nats::Options::new()
+            nats::asynk::Options::new()
         };
 
         let nc = opts
