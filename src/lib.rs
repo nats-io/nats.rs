@@ -180,6 +180,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+pub mod asynk;
 mod auth_utils;
 mod client;
 mod connect;

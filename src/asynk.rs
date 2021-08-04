@@ -17,18 +17,18 @@
 //!
 //! ```no_run
 //! # smol::block_on(async {
-//! let nc = async_nats::connect("demo.nats.io").await?;
+//! let nc = nats::asynk::connect("demo.nats.io").await?;
 //!
-//! let nc2 = async_nats::Options::with_user_pass("derek", "s3cr3t!")
+//! let nc2 = nats::asynk::Options::with_user_pass("derek", "s3cr3t!")
 //!     .with_name("My Rust NATS App")
 //!     .connect("127.0.0.1")
 //!     .await?;
 //!
-//! let nc3 = async_nats::Options::with_credentials("path/to/my.creds")
+//! let nc3 = nats::asynk::Options::with_credentials("path/to/my.creds")
 //!     .connect("connect.ngs.global")
 //!     .await?;
 //!
-//! let nc4 = async_nats::Options::new()
+//! let nc4 = nats::asynk::Options::new()
 //!     .add_root_certificate("my-certs.pem")
 //!     .connect("tls://demo.nats.io:4443")
 //!     .await?;
@@ -39,7 +39,7 @@
 //!
 //! ```
 //! # smol::block_on(async {
-//! let nc = async_nats::connect("demo.nats.io").await?;
+//! let nc = nats::asynk::connect("demo.nats.io").await?;
 //! nc.publish("my.subject", "Hello World!").await?;
 //!
 //! nc.publish("my.subject", "my message").await?;
@@ -56,7 +56,7 @@
 //! ```no_run
 //! # smol::block_on(async {
 //! # use std::time::Duration;
-//! let nc = async_nats::connect("demo.nats.io").await?;
+//! let nc = nats::asynk::connect("demo.nats.io").await?;
 //! let sub = nc.subscribe("foo").await?;
 //!
 //! // Receive a message.
@@ -72,7 +72,7 @@
 //! ```no_run
 //! # use std::time::Duration;
 //! # smol::block_on(async {
-//! let nc = async_nats::connect("demo.nats.io").await?;
+//! let nc = nats::asynk::connect("demo.nats.io").await?;
 //! let resp = nc.request("foo", "Help me?").await?;
 //!
 //! // With multiple responses.
@@ -97,16 +97,16 @@ use std::time::Duration;
 
 use blocking::unblock;
 
-pub use nats::Headers;
+use crate::Headers;
 
 /// A NATS client connection.
 #[derive(Clone, Debug)]
 pub struct Connection {
-    inner: nats::Connection,
+    inner: crate::Connection,
 }
 
 impl Connection {
-    fn new(inner: nats::Connection) -> Connection {
+    fn new(inner: crate::Connection) -> Connection {
         Self { inner }
     }
 
@@ -171,7 +171,9 @@ impl Connection {
         let subject = subject.to_string();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
-        let msg = unblock(move || inner.request_timeout(&subject, msg, timeout)).await?;
+        let msg =
+            unblock(move || inner.request_timeout(&subject, msg, timeout))
+                .await?;
         Ok(Message::new(msg))
     }
 
@@ -296,7 +298,7 @@ impl Connection {
 /// runtime.
 #[derive(Debug)]
 pub struct Subscription {
-    inner: nats::Subscription,
+    inner: crate::Subscription,
 }
 
 impl Subscription {
@@ -320,7 +322,7 @@ impl Subscription {
 
     /// Stops listening for new messages and discards the remaining queued
     /// messages. This should always be called before dropping
-    /// `async_nats::Subscription` to avoid blocking the non-async `Drop`
+    /// `nats::asynk::Subscription` to avoid blocking the non-async `Drop`
     /// implementation.
     pub async fn unsubscribe(&self) -> io::Result<()> {
         let inner = self.inner.clone();
@@ -344,11 +346,11 @@ pub struct Message {
     /// Optional headers associated with this `Message`.
     pub headers: Option<Headers>,
 
-    inner: nats::Message,
+    inner: crate::Message,
 }
 
 impl Message {
-    fn new(mut inner: nats::Message) -> Message {
+    fn new(mut inner: crate::Message) -> Message {
         Message {
             subject: mem::replace(&mut inner.subject, String::new()),
             reply: inner.reply.take(),
@@ -400,7 +402,7 @@ impl fmt::Debug for Message {
 /// Connect options.
 #[derive(Debug, Default)]
 pub struct Options {
-    inner: nats::Options,
+    inner: crate::Options,
 }
 
 impl Options {
@@ -409,13 +411,13 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let options = async_nats::Options::new();
+    /// let options = nats::asynk::Options::new();
     /// let nc = options.connect("demo.nats.io").await?;
     /// # std::io::Result::Ok(()) });
     /// ```
     pub fn new() -> Options {
         Options {
-            inner: nats::Options::new(),
+            inner: crate::Options::new(),
         }
     }
 
@@ -424,14 +426,14 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::with_token("t0k3n!")
+    /// let nc = nats::asynk::Options::with_token("t0k3n!")
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
     pub fn with_token(token: &str) -> Options {
         Options {
-            inner: nats::Options::with_token(token),
+            inner: crate::Options::with_token(token),
         }
     }
 
@@ -440,14 +442,14 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::with_user_pass("derek", "s3cr3t!")
+    /// let nc = nats::asynk::Options::with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
     pub fn with_user_pass(user: &str, password: &str) -> Options {
         Options {
-            inner: nats::Options::with_user_pass(user, password),
+            inner: crate::Options::with_user_pass(user, password),
         }
     }
 
@@ -456,14 +458,14 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::with_credentials("path/to/my.creds")
+    /// let nc = nats::asynk::Options::with_credentials("path/to/my.creds")
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
     pub fn with_credentials(path: impl AsRef<Path>) -> Options {
         Options {
-            inner: nats::Options::with_credentials(path),
+            inner: crate::Options::with_credentials(path),
         }
     }
 
@@ -480,7 +482,7 @@ impl Options {
     /// }
     ///
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::with_jwt(load_jwt, move |nonce| kp.sign(nonce).unwrap())
+    /// let nc = nats::asynk::Options::with_jwt(load_jwt, move |nonce| kp.sign(nonce).unwrap())
     ///     .connect("localhost")
     ///     .await?;
     /// # std::io::Result::Ok(()) });
@@ -491,7 +493,7 @@ impl Options {
         S: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     {
         Options {
-            inner: nats::Options::with_jwt(jwt_cb, sig_cb),
+            inner: crate::Options::with_jwt(jwt_cb, sig_cb),
         }
     }
 
@@ -504,7 +506,7 @@ impl Options {
     /// let kp = nkeys::KeyPair::from_seed(seed).unwrap();
     ///
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::with_nkey(nkey, move |nonce| kp.sign(nonce).unwrap())
+    /// let nc = nats::asynk::Options::with_nkey(nkey, move |nonce| kp.sign(nonce).unwrap())
     ///     .connect("localhost")
     ///     .await?;
     /// # std::io::Result::Ok(()) });
@@ -514,7 +516,7 @@ impl Options {
         F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     {
         Options {
-            inner: nats::Options::with_nkey(nkey, sig_cb),
+            inner: crate::Options::with_nkey(nkey, sig_cb),
         }
     }
 
@@ -523,7 +525,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .client_cert("client-cert.pem", "client-key.pem")
     ///     .connect("nats://localhost:4443")
     ///     .await?;
@@ -544,7 +546,7 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .with_name("My App")
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -561,7 +563,7 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .no_echo()
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -583,7 +585,7 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .max_reconnects(3)
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -607,7 +609,7 @@ impl Options {
     /// # Example
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .reconnect_buffer_size(64 * 1024)
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -631,7 +633,7 @@ impl Options {
     ///
     /// ```
     /// # smol::block_on(async {
-    /// let options = async_nats::Options::new();
+    /// let options = nats::asynk::Options::new();
     /// let nc = options.connect("demo.nats.io").await?;
     /// # std::io::Result::Ok(()) });
     /// ```
@@ -645,7 +647,7 @@ impl Options {
     ///
     /// ```
     /// # smol::block_on(async {
-    /// let options = async_nats::Options::new();
+    /// let options = nats::asynk::Options::new();
     /// let nc = options
     ///     .connect("nats://demo.nats.io:4222,tls://demo.nats.io:4443")
     ///     .await?;
@@ -664,7 +666,7 @@ impl Options {
     ///
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .disconnect_callback(|| println!("connection has been lost"))
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -686,7 +688,7 @@ impl Options {
     ///
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .reconnect_callback(|| println!("connection has been reestablished"))
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -709,7 +711,7 @@ impl Options {
     ///
     /// ```
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .close_callback(|| println!("connection has been closed"))
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -739,7 +741,7 @@ impl Options {
     /// ```
     /// # use std::time::Duration;
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .reconnect_delay_callback(|c| Duration::from_millis(std::cmp::min((c * 100) as u64, 8000)))
     ///     .connect("demo.nats.io")
     ///     .await?;
@@ -763,7 +765,7 @@ impl Options {
     /// # Examples
     /// ```no_run
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .tls_required(true)
     ///     .connect("tls://demo.nats.io:4443")
     ///     .await?;
@@ -782,7 +784,7 @@ impl Options {
     /// # Examples
     /// ```no_run
     /// # smol::block_on(async {
-    /// let nc = async_nats::Options::new()
+    /// let nc = nats::asynk::Options::new()
     ///     .add_root_certificate("my-certs.pem")
     ///     .connect("tls://demo.nats.io:4443")
     ///     .await?;
@@ -800,7 +802,7 @@ impl Options {
 /// # Example
 /// ```
 /// # smol::block_on(async {
-/// let nc = async_nats::connect("demo.nats.io").await?;
+/// let nc = nats::asynk::connect("demo.nats.io").await?;
 /// # std::io::Result::Ok(()) });
 /// ```
 pub async fn connect(nats_url: &str) -> io::Result<Connection> {

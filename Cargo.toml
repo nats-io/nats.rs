@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.10.1"
+version = "0.11.0"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
@@ -33,6 +33,7 @@ split-debuginfo = "unpacked"
 [dependencies]
 base64 = "0.13.0"
 base64-url = "1.4.10"
+blocking = "1.0.2"
 crossbeam-channel = "0.5.1"
 fastrand = "1.5.0"
 itoa = "0.4.7"
@@ -60,13 +61,14 @@ winapi = { version = "0.3.9", features = ["winsock2"] }
 [dev-dependencies]
 criterion = "0.3.4"
 env_logger = "0.9.0"
-nats_test_server = { path = "nats_test_server" }
-quicli = "0.4.0"
-serde = { version = "1.0.126", features = ["derive"] }
-serde_json = "1.0.64"
-structopt = "0.3.22"
 historian = "4.0.4"
 lazy_static = "1.4.0"
+nats_test_server = { path = "nats_test_server" }
+quicli = "0.4.0"
+serde_json = "1.0.64"
+serde = { version = "1.0.126", features = ["derive"] }
+smol = "1.2.5"
+structopt = "0.3.21"
 
 [[bench]]
 name = "nats_bench"
@@ -80,8 +82,6 @@ path = "examples/nats-box/main.rs"
 name = "serde-json"
 path = "examples/serde-json/main.rs"
 
-[workspace]
-members = [
-    ".",
-    "async-nats",
-]
+[[example]]
+name = "async_nats_bench"
+path = "examples/async_nats_bench.rs"
