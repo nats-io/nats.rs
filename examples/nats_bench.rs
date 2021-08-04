@@ -105,7 +105,7 @@ fn main() -> std::io::Result<()> {
         threads.push(thread::spawn(move || {
             let s = nc.subscribe(&subject).unwrap();
             barrier.wait();
-            for i in 0..messages {
+            for _ in 0..messages {
                 s.next().unwrap();
             }
         }));

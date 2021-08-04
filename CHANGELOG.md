@@ -1,3 +1,14 @@
+# 0.11.0
+
+## Breaking Changes
+
+- #192 the async_nats crate has been merged into the
+  main nats crate, under the `asynk` module name.
+- #192 the `jetstream::IntervalTree` type has been made
+  private in anticipation of built-in FIFO (ordered)
+  message processing functionality built on top of
+  different internal structures.
+
 # 0.10.1
 
 ## Improvements

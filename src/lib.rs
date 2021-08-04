@@ -158,7 +158,6 @@
     clippy::non_ascii_literal,
     clippy::path_buf_push_overwrite,
     clippy::print_stdout,
-    clippy::pub_enum_variant_names,
     clippy::shadow_reuse,
     clippy::shadow_same,
     clippy::shadow_unrelated,
@@ -171,7 +170,6 @@
     clippy::unseparated_literal_suffix,
     clippy::wildcard_dependencies,
     clippy::wildcard_enum_match_arm,
-    clippy::wrong_pub_self_convention,
 ))]
 #![allow(
     clippy::match_like_matches_macro,
@@ -179,6 +177,9 @@
     clippy::shadow_reuse,
     clippy::wildcard_enum_match_arm
 )]
+
+/// Async-enabled NATS client.
+pub mod asynk;
 
 mod auth_utils;
 mod client;
@@ -189,6 +190,7 @@ mod message;
 mod options;
 mod proto;
 mod secure_wipe;
+mod subscription;
 
 #[cfg(feature = "jetstream")]
 /// `JetStream` stream management and consumers.
@@ -210,10 +212,6 @@ fn inject_delay() {}
 fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }
-
-/// Functionality relating to subscribing to a
-/// subject.
-pub mod subscription;
 
 #[doc(hidden)]
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
