@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Experimental `JetStream` support enabled via the `jetstream` feature.
+//! Support for the `JetStream` at-least-once messaging system.
 //!
 //! # Examples
 //!
@@ -280,8 +280,6 @@ where
 
 impl NatsClient {
     /// Create a `JetStream` stream.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn create_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,
@@ -300,8 +298,6 @@ impl NatsClient {
     }
 
     /// Update a `JetStream` stream.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn update_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
         if cfg.name.is_empty() {
             return Err(Error::new(
@@ -317,8 +313,6 @@ impl NatsClient {
 
     /// List all `JetStream` stream names. If you also want stream information,
     /// use the `list_streams` method instead.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn stream_names(&self) -> PagedIterator<'_, String> {
         PagedIterator {
             subject: format!("{}STREAM.NAMES", self.api_prefix()),
@@ -330,8 +324,6 @@ impl NatsClient {
     }
 
     /// List all `JetStream` streams.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn list_streams(&self) -> PagedIterator<'_, StreamInfo> {
         PagedIterator {
             subject: format!("{}STREAM.LIST", self.api_prefix()),
@@ -343,8 +335,6 @@ impl NatsClient {
     }
 
     /// List `JetStream` consumers for a stream.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn list_consumers<S>(
         &self,
         stream: S,
@@ -372,8 +362,6 @@ impl NatsClient {
     }
 
     /// Query `JetStream` stream information.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn stream_info<S: AsRef<str>>(
         &self,
         stream: S,
@@ -391,8 +379,6 @@ impl NatsClient {
     }
 
     /// Purge `JetStream` stream messages.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn purge_stream<S: AsRef<str>>(
         &self,
         stream: S,
@@ -409,8 +395,6 @@ impl NatsClient {
     }
 
     /// Delete message in a `JetStream` stream.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn delete_message<S: AsRef<str>>(
         &self,
         stream: S,
@@ -437,8 +421,6 @@ impl NatsClient {
     }
 
     /// Delete `JetStream` stream.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn delete_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<bool> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
@@ -454,8 +436,6 @@ impl NatsClient {
     }
 
     /// Create a `JetStream` consumer.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn create_consumer<S, C>(
         &self,
         stream: S,
@@ -503,8 +483,6 @@ impl NatsClient {
     }
 
     /// Delete a `JetStream` consumer.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn delete_consumer<S, C>(
         &self,
         stream: S,
@@ -541,8 +519,6 @@ impl NatsClient {
     }
 
     /// Query `JetStream` consumer information.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn consumer_info<S, C>(
         &self,
         stream: S,
@@ -570,8 +546,6 @@ impl NatsClient {
     }
 
     /// Query `JetStream` account information.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn account_info(&self) -> io::Result<AccountInfo> {
         self.js_request(&format!("{}INFO", self.api_prefix()), b"")
     }
@@ -630,8 +604,6 @@ impl Consumer {
     /// `ConsumerInfo` that may have been returned
     /// from the `nats::Connection::list_consumers`
     /// iterator.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn from_consumer_info(
         ci: ConsumerInfo,
         nc: NatsClient,
@@ -647,8 +619,6 @@ impl Consumer {
     /// already exists, and creates it if not. If you want to use an existing
     /// `Consumer` without this check and creation, use the `Consumer::existing`
     /// method.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn create_or_open<S, C>(
         nc: NatsClient,
         stream: S,
@@ -678,8 +648,6 @@ impl Consumer {
     }
 
     /// Use an existing `JetStream` `Consumer`
-    ///
-    /// Requires the `jetstream` feature.
     pub fn existing<S, C>(
         nc: NatsClient,
         stream: S,
@@ -741,8 +709,6 @@ impl Consumer {
     /// a message that has already been processed is received, it will
     /// be acked and skipped. Errors for acking deduplicated messages
     /// are not included in the returned `Vec`.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
         &mut self,
         batch_size: usize,
@@ -782,14 +748,17 @@ impl Consumer {
 
         let mut received = 0;
 
-        while let Ok(next) = responses.next_timeout(if received == 0 {
-            // wait "forever" for first message
-            Duration::new(std::u64::MAX >> 2, 0)
-        } else {
-            self.timeout
-                .checked_sub(start.elapsed())
-                .unwrap_or_default()
-        }) {
+        while let Some(next) = {
+            if received == 0 {
+                responses.next()
+            } else {
+                let timeout = self
+                    .timeout
+                    .checked_sub(start.elapsed())
+                    .unwrap_or_default();
+                responses.next_timeout(timeout).ok()
+            }
+        } {
             let next_id = next.jetstream_message_info().unwrap().stream_seq;
 
             if self.dedupe_window.already_processed(next_id) {
@@ -849,8 +818,6 @@ impl Consumer {
     /// the `double_ack` method of the argument message. If you require
     /// both the returned `Ok` from the closure and the `Err` from a
     /// failed ack, use `process_batch` instead.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn process<R, F: Fn(&Message) -> io::Result<R>>(
         &mut self,
         f: F,
@@ -918,8 +885,6 @@ impl Consumer {
     /// the `double_ack` method of the argument message. If you require
     /// both the returned `Ok` from the closure and the `Err` from a
     /// failed ack, use `process_batch` instead.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(
         &mut self,
         f: F,
@@ -969,8 +934,6 @@ impl Consumer {
     ///
     /// This is a lower-level method and does not filter messages through the `Consumer`'s
     /// built-in `dedupe_window` as the various `process*` methods do.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn pull(&mut self) -> io::Result<Message> {
         let ret_opt = self
             .pull_opt(NextRequest {
@@ -996,8 +959,6 @@ impl Consumer {
     ///
     /// This is a lower-level method and does not filter messages through the `Consumer`'s
     /// built-in `dedupe_window` as the various `process*` methods do.
-    ///
-    /// Requires the `jetstream` feature.
     pub fn pull_opt(
         &mut self,
         next_request: NextRequest,

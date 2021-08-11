@@ -65,9 +65,6 @@ impl Message {
     ///
     /// Returns immediately if this message has already been
     /// double-acked.
-    ///
-    /// Requires the `jetstream` feature.
-    #[cfg(feature = "jetstream")]
     pub fn ack(&self) -> io::Result<()> {
         if self.double_acked.load(Ordering::Acquire) {
             return Ok(());
@@ -80,9 +77,6 @@ impl Message {
     /// server acks your ack, use the `double_ack` method instead.
     ///
     /// Does not check whether this message has already been double-acked.
-    ///
-    /// Requires the `jetstream` feature.
-    #[cfg(feature = "jetstream")]
     pub fn ack_kind(
         &self,
         ack_kind: crate::jetstream::AckKind,
@@ -95,9 +89,6 @@ impl Message {
     /// See `AckKind` documentation for details of what each variant means.
     ///
     /// Returns immediately if this message has already been double-acked.
-    ///
-    /// Requires the `jetstream` feature.
-    #[cfg(feature = "jetstream")]
     pub fn double_ack(
         &self,
         ack_kind: crate::jetstream::AckKind,
@@ -159,9 +150,6 @@ impl Message {
     /// Returns `None` if this is not
     /// a `JetStream` message with headers
     /// set.
-    ///
-    /// Requires the `jetstream` feature.
-    #[cfg(feature = "jetstream")]
     pub fn jetstream_message_info(
         &self,
     ) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {

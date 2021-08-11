@@ -1,3 +1,11 @@
+# 0.12.0
+
+## Breaking Changes
+
+- #195 JetStream support is now available without
+  any feature set, and the jetstream feature has
+  been removed.
+
 # 0.11.0
 
 ## Breaking Changes

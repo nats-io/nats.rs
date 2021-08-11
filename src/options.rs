@@ -26,8 +26,6 @@ pub struct Options {
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
-
-    #[cfg(feature = "jetstream")]
     pub(crate) jetstream_prefix: String,
 }
 
@@ -67,7 +65,6 @@ impl Default for Options {
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
-            #[cfg(feature = "jetstream")]
             jetstream_prefix: "$JS.API.".to_string(),
         }
     }
@@ -482,7 +479,6 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(feature = "jetstream")]
     pub fn jetstream_api_prefix(
         mut self,
         mut jetstream_prefix: String,

@@ -118,7 +118,7 @@ jobs:
           RUST_LOG: trace
         run: |
           rustup update
-          cargo test --doc --features=jetstream
+          cargo test --doc
 
   examples:
     name: examples
@@ -144,7 +144,7 @@ jobs:
           RUST_LOG: trace
         run: |
           rustup update
-          cargo check --examples --features=jetstream
+          cargo check --examples
 
   jetstream:
     name: JetStream
@@ -170,7 +170,7 @@ jobs:
           RUST_LOG: trace
         run: |
           rustup update
-          cargo test jetstream --features=jetstream
+          cargo test jetstream
 
   msrv:
     name: MSRV
