@@ -748,14 +748,17 @@ impl Consumer {
 
         let mut received = 0;
 
-        while let Ok(next) = responses.next_timeout(if received == 0 {
-            // wait "forever" for first message
-            Duration::new(std::u64::MAX >> 2, 0)
-        } else {
-            self.timeout
-                .checked_sub(start.elapsed())
-                .unwrap_or_default()
-        }) {
+        while let Some(next) = {
+            if received == 0 {
+                responses.next()
+            } else {
+                let timeout = self
+                    .timeout
+                    .checked_sub(start.elapsed())
+                    .unwrap_or_default();
+                responses.next_timeout(timeout).ok()
+            }
+        } {
             let next_id = next.jetstream_message_info().unwrap().stream_seq;
 
             if self.dedupe_window.already_processed(next_id) {
