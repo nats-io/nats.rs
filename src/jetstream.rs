@@ -445,7 +445,7 @@ impl NatsClient {
         S: AsRef<str>,
         ConsumerConfig: From<C>,
     {
-        let mut config = ConsumerConfig::from(cfg);
+        let config = ConsumerConfig::from(cfg);
         let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
@@ -454,18 +454,13 @@ impl NatsClient {
             ));
         }
 
-        let subject = if let Some(durable_name) = &config.durable_name {
-            if durable_name.is_empty() {
-                config.durable_name = None;
-                format!("{}CONSUMER.CREATE.{}", self.api_prefix(), stream)
-            } else {
-                format!(
-                    "{}CONSUMER.DURABLE.CREATE.{}.{}",
-                    self.api_prefix(),
-                    stream,
-                    durable_name
-                )
-            }
+        let subject = if let Some(ref durable_name) = config.durable_name {
+            format!(
+                "{}CONSUMER.DURABLE.CREATE.{}.{}",
+                self.api_prefix(),
+                stream,
+                durable_name
+            )
         } else {
             format!("{}CONSUMER.CREATE.{}", self.api_prefix(), stream)
         };
@@ -559,6 +554,10 @@ impl NatsClient {
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
             ApiResponse::Err { error, .. } => {
+                log::error!(
+                    "failed to parse API response: {:?}",
+                    std::str::from_utf8(&res_msg.data)
+                );
                 if let Some(desc) = error.description {
                     Err(Error::new(ErrorKind::Other, desc))
                 } else {
@@ -631,7 +630,7 @@ impl Consumer {
         let stream = stream.as_ref().to_string();
         let cfg = ConsumerConfig::from(cfg);
 
-        if let Some(durable_name) = &cfg.durable_name {
+        if let Some(ref durable_name) = cfg.durable_name {
             // attempt to create a durable config if it does not yet exist
             let consumer_info = nc.consumer_info(&stream, durable_name);
             if let Err(e) = consumer_info {
@@ -661,7 +660,7 @@ impl Consumer {
         let cfg = ConsumerConfig::from(cfg);
 
         let push_subscriber =
-            if let Some(deliver_subject) = &cfg.deliver_subject {
+            if let Some(ref deliver_subject) = cfg.deliver_subject {
                 Some(nc.subscribe(deliver_subject)?)
             } else {
                 None
