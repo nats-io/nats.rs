@@ -661,7 +661,7 @@ impl Consumer {
 
         let push_subscriber =
             if let Some(ref deliver_subject) = cfg.deliver_subject {
-                Some(nc.subscribe(&deliver_subject)?)
+                Some(nc.subscribe(deliver_subject)?)
             } else {
                 None
             };
