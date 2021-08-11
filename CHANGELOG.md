@@ -1,5 +1,10 @@
 # 0.13.0
 
+## Improvements
+
+- #197 JetStream configuration objects now implement
+  PartialEq and Eq.
+
 ## Breaking Changes
 
 - #197 Some JetStream configuration objects have been
