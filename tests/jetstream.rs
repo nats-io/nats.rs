@@ -142,7 +142,7 @@ fn jetstream_basics() -> io::Result<()> {
 
 #[test]
 fn jetstream_libdoc_test() {
-    use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
+    use nats::jetstream::Consumer;
 
     let server = server();
 
@@ -185,5 +185,5 @@ fn jetstream_libdoc_test() {
     let results: Vec<std::io::Result<usize>> =
         consumer.process_batch(batch_size, |msg| Ok(msg.data.len()));
     let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
-    let sizes: Vec<usize> = flipped.unwrap();
+    let _sizes: Vec<usize> = flipped.unwrap();
 }

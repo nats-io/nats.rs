@@ -65,8 +65,8 @@ pub struct ConsumerConfig {
     /// "exactly once" semantics, it is necessary to implement idempotent
     /// semantics in any system that is written to as a result of processing
     /// a message.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub deliver_subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deliver_subject: Option<String>,
 
     /// Setting `durable_name` to `Some(...)` will cause this consumer
     /// to be "durable". This may be a good choice for workloads that
@@ -83,8 +83,8 @@ pub struct ConsumerConfig {
     /// progress in the case of a crash, such as certain "high churn"
     /// workloads or workloads where a crashed instance is not required
     /// to recover.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub durable_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_name: Option<String>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
@@ -94,7 +94,7 @@ pub struct ConsumerConfig {
     /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
     /// after this time.
     #[serde(default, skip_serializing_if = "is_default")]
-    pub opt_start_time: DateTime,
+    pub opt_start_time: Option<DateTime>,
     /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
@@ -133,7 +133,7 @@ impl From<&ConsumerConfig> for ConsumerConfig {
 impl From<&str> for ConsumerConfig {
     fn from(s: &str) -> ConsumerConfig {
         ConsumerConfig {
-            durable_name: s.to_string(),
+            durable_name: Some(s.to_string()),
             ..Default::default()
         }
     }
@@ -147,25 +147,25 @@ pub struct StreamConfig {
     /// A name for the Stream. Must not have spaces, tabs or period `.` characters
     pub name: String,
     /// How large the Stream may become in total bytes before the configured discard policy kicks in
-    pub max_bytes: u64,
+    pub max_bytes: i64,
     /// How large the Stream may become in total messages before the configured discard policy kicks in
-    pub max_msgs: u64,
+    pub max_msgs: i64,
     /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
     /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
     pub discard: DiscardPolicy,
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
     #[serde(default, skip_serializing_if = "is_default")]
-    pub subjects: Vec<String>,
+    pub subjects: Option<Vec<String>>,
     /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
     pub retention: RetentionPolicy,
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
-    pub max_consumers: isize,
+    pub max_consumers: i32,
     /// Maximum age of any message in the stream, expressed in nanoseconds
-    pub max_age: u64,
+    pub max_age: i64,
     /// The largest message that will be accepted by the Stream
     #[serde(default, skip_serializing_if = "is_default")]
-    pub max_msg_size: usize,
+    pub max_msg_size: i32,
     /// The type of storage backend, `File` (default) and `Memory`
     pub storage: StorageType,
     /// How many replicas to keep for each message in a clustered JetStream, maximum 5
@@ -175,14 +175,15 @@ pub struct StreamConfig {
     pub no_ack: bool,
     /// The window within which to track duplicate messages.
     #[serde(default, skip_serializing_if = "is_default")]
-    pub duplicate_window: u64,
+    pub duplicate_window: i64,
     /// The owner of the template associated with this stream.
     #[serde(default, skip_serializing_if = "is_default")]
     pub template_owner: String,
 }
 
-fn is_default<T: Default + Eq>(t: &T) -> bool {
-    t == &T::default()
+fn is_default<T: Default + Eq>(_t: &T) -> bool {
+    // t == &T::default()
+    false
 }
 
 impl From<&StreamConfig> for StreamConfig {

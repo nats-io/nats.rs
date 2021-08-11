@@ -454,12 +454,12 @@ impl NatsClient {
             ));
         }
 
-        let subject = if !config.durable_name.is_empty() {
+        let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
                 "{}CONSUMER.DURABLE.CREATE.{}.{}",
                 self.api_prefix(),
                 stream,
-                config.durable_name
+                durable_name
             )
         } else {
             format!("{}CONSUMER.CREATE.{}", self.api_prefix(), stream)
@@ -554,6 +554,10 @@ impl NatsClient {
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
             ApiResponse::Err { error, .. } => {
+                log::error!(
+                    "failed to parse API response: {:?}",
+                    std::str::from_utf8(&res_msg.data)
+                );
                 if let Some(desc) = error.description {
                     Err(Error::new(ErrorKind::Other, desc))
                 } else {
@@ -626,9 +630,9 @@ impl Consumer {
         let stream = stream.as_ref().to_string();
         let cfg = ConsumerConfig::from(cfg);
 
-        if !cfg.durable_name.is_empty() {
+        if let Some(ref durable_name) = cfg.durable_name {
             // attempt to create a durable config if it does not yet exist
-            let consumer_info = nc.consumer_info(&stream, &cfg.durable_name);
+            let consumer_info = nc.consumer_info(&stream, durable_name);
             if let Err(e) = consumer_info {
                 if e.kind() == std::io::ErrorKind::Other {
                     nc.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
@@ -655,11 +659,12 @@ impl Consumer {
         let stream = stream.as_ref().to_string();
         let cfg = ConsumerConfig::from(cfg);
 
-        let push_subscriber = if !cfg.deliver_subject.is_empty() {
-            Some(nc.subscribe(&cfg.deliver_subject)?)
-        } else {
-            None
-        };
+        let push_subscriber =
+            if let Some(ref deliver_subject) = cfg.deliver_subject {
+                Some(nc.subscribe(&deliver_subject)?)
+            } else {
+                None
+            };
 
         let mut dedupe_window = IntervalTree::default();
 
@@ -712,7 +717,7 @@ impl Consumer {
         let responses = if let Some(ps) = self.push_subscriber.as_ref() {
             ps
         } else {
-            if self.cfg.durable_name.is_empty() {
+            if self.cfg.durable_name.is_none() {
                 return vec![Err(Error::new(
                     ErrorKind::InvalidInput,
                     "process and process_batch are only usable from \
@@ -724,7 +729,7 @@ impl Consumer {
                 "{}CONSUMER.MSG.NEXT.{}.{}",
                 self.api_prefix(),
                 self.stream,
-                self.cfg.durable_name
+                self.cfg.durable_name.as_ref().unwrap()
             );
 
             let sub =
@@ -820,7 +825,7 @@ impl Consumer {
             let next = if let Some(ps) = &self.push_subscriber {
                 ps.next().unwrap()
             } else {
-                if self.cfg.durable_name.is_empty() {
+                if self.cfg.durable_name.is_none() {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
                         "process and process_batch are only usable from \
@@ -832,7 +837,7 @@ impl Consumer {
                     "{}CONSUMER.MSG.NEXT.{}.{}",
                     self.api_prefix(),
                     self.stream,
-                    self.cfg.durable_name
+                    self.cfg.durable_name.as_ref().unwrap()
                 );
 
                 self.nc.request(&subject, AckKind::Ack)?
@@ -887,7 +892,7 @@ impl Consumer {
             let next = if let Some(ps) = &self.push_subscriber {
                 ps.next_timeout(self.timeout)?
             } else {
-                if self.cfg.durable_name.is_empty() {
+                if self.cfg.durable_name.is_none() {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
                         "process and process_batch are only usable from \
@@ -899,7 +904,7 @@ impl Consumer {
                     "{}CONSUMER.MSG.NEXT.{}.{}",
                     self.api_prefix(),
                     self.stream,
-                    self.cfg.durable_name
+                    self.cfg.durable_name.as_ref().unwrap()
                 );
 
                 self.nc.request_timeout(&subject, b"", self.timeout)?
@@ -957,7 +962,7 @@ impl Consumer {
         &mut self,
         next_request: NextRequest,
     ) -> io::Result<crate::Subscription> {
-        if self.cfg.durable_name.is_empty() {
+        if self.cfg.durable_name.is_none() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "this method is only usable from \
@@ -965,7 +970,7 @@ impl Consumer {
             ));
         }
 
-        if !self.cfg.deliver_subject.is_empty() {
+        if self.cfg.deliver_subject.is_some() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "this method is only usable from \
@@ -977,7 +982,7 @@ impl Consumer {
             "{}CONSUMER.MSG.NEXT.{}.{}",
             self.api_prefix(),
             self.stream,
-            self.cfg.durable_name
+            self.cfg.durable_name.as_ref().unwrap()
         );
 
         let req = serde_json::ser::to_vec(&next_request).unwrap();
