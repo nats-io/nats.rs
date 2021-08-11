@@ -149,7 +149,7 @@ pub struct StreamConfig {
     pub retention: RetentionPolicy,
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
     pub max_consumers: isize,
-    /// Maximum age of any message in the stream, expressed in microseconds
+    /// Maximum age of any message in the stream, expressed in nanoseconds
     pub max_age: isize,
     /// The largest message that will be accepted by the Stream
     pub max_msg_size: Option<i32>,

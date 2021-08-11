@@ -1,3 +1,9 @@
+# 0.12.1
+
+## Improvements
+
+- #196 minor documentation fix.
+
 # 0.12.0
 
 ## Breaking Changes
