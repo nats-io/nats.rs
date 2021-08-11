@@ -1,3 +1,11 @@
+# 0.13.0
+
+## Breaking Changes
+
+- #197 Some JetStream configuration objects have been
+  simplified while more closely matching the Golang
+  JS client semantics.
+
 # 0.12.1
 
 ## Improvements
