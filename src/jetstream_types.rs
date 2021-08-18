@@ -181,9 +181,8 @@ pub struct StreamConfig {
     pub template_owner: String,
 }
 
-fn is_default<T: Default + Eq>(_t: &T) -> bool {
-    // t == &T::default()
-    false
+fn is_default<T: Default + Eq>(t: &T) -> bool {
+    t == &T::default()
 }
 
 impl From<&StreamConfig> for StreamConfig {
