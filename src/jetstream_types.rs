@@ -150,6 +150,8 @@ pub struct StreamConfig {
     pub max_bytes: i64,
     /// How large the Stream may become in total messages before the configured discard policy kicks in
     pub max_msgs: i64,
+    /// Maximum amount of messages to keep per subject
+    pub max_msgs_per_subject: i64,
     /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
     /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
     pub discard: DiscardPolicy,
