@@ -1,3 +1,11 @@
+# Unreleased
+
+## New Features
+
+- #199 implemented `asynk::Subscription::try_next`.
+- #199 implemented conversion traits b/w sync & async
+  Message types.
+
 # 0.13.0
 
 ## Improvements
