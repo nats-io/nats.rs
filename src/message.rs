@@ -1,11 +1,15 @@
 use std::{
     fmt, io,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use crate::{client::Client, Headers};
 
 /// A message received on a subject.
+#[derive(Clone)]
 pub struct Message {
     /// The subject this message came from.
     pub subject: String,
@@ -27,20 +31,18 @@ pub struct Message {
     /// Whether this message has already been successfully double-acked
     /// using `JetStream`.
     #[doc(hidden)]
-    pub double_acked: AtomicBool,
+    pub double_acked: Arc<AtomicBool>,
 }
 
-impl Clone for Message {
-    fn clone(&self) -> Message {
+impl From<crate::asynk::Message> for Message {
+    fn from(asynk: crate::asynk::Message) -> Message {
         Message {
-            subject: self.subject.clone(),
-            reply: self.reply.clone(),
-            data: self.data.clone(),
-            headers: self.headers.clone(),
-            client: self.client.clone(),
-            double_acked: AtomicBool::new(
-                self.double_acked.load(Ordering::Acquire),
-            ),
+            subject: asynk.subject,
+            reply: asynk.reply,
+            data: asynk.data,
+            headers: asynk.headers,
+            client: asynk.client,
+            double_acked: asynk.double_acked,
         }
     }
 }
