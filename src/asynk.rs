@@ -169,7 +169,7 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let msg = unblock(move || inner.request(&subject, msg)).await?;
-        Ok(Message::new(msg))
+        Ok(msg.into())
     }
 
     /// Publishes a message and waits for the response or until the
@@ -186,7 +186,7 @@ impl Connection {
         let msg =
             unblock(move || inner.request_timeout(&subject, msg, timeout))
                 .await?;
-        Ok(Message::new(msg))
+        Ok(msg.into())
     }
 
     /// Publishes a message and returns a subscription for awaiting the
@@ -318,11 +318,30 @@ impl Subscription {
     /// has been unsubscribed or the connection is closed.
     pub async fn next(&self) -> Option<Message> {
         if let Some(msg) = self.inner.try_next() {
-            return Some(Message::new(msg));
+            return Some(msg.into());
         }
         let inner = self.inner.clone();
         let msg = unblock(move || inner.next()).await?;
-        Some(Message::new(msg))
+        Some(msg.into())
+    }
+
+    /// Try to get the next message, or None if no messages
+    /// are present or if the subscription has been unsubscribed
+    /// or the connection closed.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// # let sub = nc.subscribe("foo")?;
+    /// if let Some(msg) = sub.try_next() {
+    ///   println!("Received {}", msg);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn try_next(&self) -> Option<Message> {
+        self.inner.try_next().map(From::from)
     }
 
     /// Stops listening for new messages, but the remaining queued messages can
@@ -358,20 +377,30 @@ pub struct Message {
     /// Optional headers associated with this `Message`.
     pub headers: Option<Headers>,
 
-    inner: crate::Message,
+    /// Client for publishing on the reply subject.
+    #[doc(hidden)]
+    pub client: crate::Client,
+
+    /// Whether this message has already been successfully double-acked
+    /// using `JetStream`.
+    #[doc(hidden)]
+    pub double_acked: Arc<AtomicBool>,
+}
+
+impl From<crate::Message> for Message {
+    fn from(sync: crate::Message) -> Message {
+        Message {
+            subject: sync.subject,
+            reply: sync.reply,
+            data: sync.data,
+            headers: sync.headers,
+            client: sync.client,
+            double_acked: sync.double_acked,
+        }
+    }
 }
 
 impl Message {
-    fn new(mut inner: crate::Message) -> Message {
-        Message {
-            subject: mem::take(&mut inner.subject),
-            reply: inner.reply.take(),
-            data: mem::take(&mut inner.data),
-            headers: inner.headers.take(),
-            inner,
-        }
-    }
-
     /// Respond to a request message.
     pub async fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
         match self.reply.as_ref() {
@@ -380,17 +409,14 @@ impl Message {
                 "no reply subject available",
             )),
             Some(reply) => {
-                if let Some(res) = self.inner.client.try_publish(
-                    reply,
-                    None,
-                    None,
-                    msg.as_ref(),
-                ) {
+                if let Some(res) =
+                    self.client.try_publish(reply, None, None, msg.as_ref())
+                {
                     return res;
                 }
                 let reply = reply.to_string();
                 let msg = msg.as_ref().to_vec();
-                let client = self.inner.client.clone();
+                let client = self.client.clone();
                 unblock(move || {
                     client.publish(&reply, None, None, msg.as_ref())
                 })
