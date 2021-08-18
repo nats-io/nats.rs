@@ -90,14 +90,26 @@
 
 use std::fmt;
 use std::io;
-use std::mem;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::Duration;
 
 use blocking::unblock;
 
 use crate::Headers;
+
+/// Connect to a NATS server at the given url.
+///
+/// # Example
+/// ```
+/// # smol::block_on(async {
+/// let nc = nats::asynk::connect("demo.nats.io").await?;
+/// # std::io::Result::Ok(()) });
+/// ```
+pub async fn connect(nats_url: &str) -> io::Result<Connection> {
+    Options::new().connect(nats_url).await
+}
 
 /// A NATS client connection.
 #[derive(Clone, Debug)]
@@ -795,16 +807,4 @@ impl Options {
             inner: self.inner.add_root_certificate(path),
         }
     }
-}
-
-/// Connect to a NATS server at the given url.
-///
-/// # Example
-/// ```
-/// # smol::block_on(async {
-/// let nc = nats::asynk::connect("demo.nats.io").await?;
-/// # std::io::Result::Ok(()) });
-/// ```
-pub async fn connect(nats_url: &str) -> io::Result<Connection> {
-    Options::new().connect(nats_url).await
 }
