@@ -10,10 +10,12 @@
   for communicating to the server, for cases where
   certificates are not available on the filesystem.
 
-## Improvements
+## Breaking Changes
 
 - #207 Support ADR-15-style JetStream reply subject
-  parsing.
+  parsing, with several new fields added to the
+  `JetstreamMessageInfo` struct that can be
+  parsed from a message.
 
 # 0.13.0
 
