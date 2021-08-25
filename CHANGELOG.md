@@ -10,6 +10,11 @@
   for communicating to the server, for cases where
   certificates are not available on the filesystem.
 
+## Improvements
+
+- #207 Support ADR-15-style JetStream reply subject
+  parsing.
+
 # 0.13.0
 
 ## Improvements
