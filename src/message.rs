@@ -155,11 +155,32 @@ impl Message {
     pub fn jetstream_message_info(
         &self,
     ) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
-        let reply = self.reply.as_ref()?;
-        let mut split = reply.split('.');
-        if split.next()? != "$JS" || split.next()? != "ACK" {
+        const PREFIX: &'static str = "$JS.ACK.";
+        const SKIP: usize = PREFIX.len();
+
+        let mut reply: &str = self.reply.as_ref()?;
+
+        if !reply.starts_with(PREFIX) {
             return None;
         }
+
+        reply = &reply[SKIP..];
+
+        let mut split = reply.split('.');
+
+        // we should avoid allocating to prevent
+        // large performance degradations in
+        // parsing this.
+        let mut tokens: [Option<&str>; 10] = [None; 10];
+        let mut n_tokens = 0;
+        for index in 0..10 {
+            if let Some(token) = split.next() {
+                tokens[index] = Some(token);
+                n_tokens += 1;
+            }
+        }
+
+        let mut token_index = 0;
 
         macro_rules! try_parse {
             () => {
@@ -178,7 +199,9 @@ impl Message {
                 }
             };
             (str) => {
-                if let Some(next) = split.next() {
+                if let Some(next) = tokens[token_index].take() {
+                    token_index += 1;
+                    dbg!(&token_index);
                     next
                 } else {
                     log::error!(
@@ -192,19 +215,64 @@ impl Message {
             };
         }
 
-        Some(crate::jetstream::JetStreamMessageInfo {
-            stream: try_parse!(str),
-            consumer: try_parse!(str),
-            delivered: try_parse!(),
-            stream_seq: try_parse!(),
-            consumer_seq: try_parse!(),
-            published: {
-                let nanos: u64 = try_parse!();
-                let offset = std::time::Duration::from_nanos(nanos);
-                std::time::UNIX_EPOCH + offset
-            },
-            pending: try_parse!(),
-        })
+        // now we can try to parse the tokens to
+        // individual types. We use an if-else
+        // chain instead of a match because it
+        // produces more optimal code usually,
+        // and we want to try the 9 (11 - the first 2)
+        // case first because we expect it to
+        // be the most common. We use >= to be
+        // future-proof.
+        if n_tokens >= 9 {
+            Some(crate::jetstream::JetStreamMessageInfo {
+                domain: {
+                    let domain: &str = try_parse!(str);
+                    if domain == "_" {
+                        None
+                    } else {
+                        Some(domain)
+                    }
+                },
+                acc_hash: Some(try_parse!(str)),
+                stream: try_parse!(str),
+                consumer: try_parse!(str),
+                delivered: try_parse!(),
+                stream_seq: try_parse!(),
+                consumer_seq: try_parse!(),
+                published: {
+                    let nanos: u64 = try_parse!();
+                    let offset = std::time::Duration::from_nanos(nanos);
+                    std::time::UNIX_EPOCH + offset
+                },
+                pending: try_parse!(),
+                token: if n_tokens >= 9 {
+                    Some(try_parse!(str))
+                } else {
+                    None
+                },
+            })
+        } else if n_tokens == 7 {
+            // we expect this to be increasingly rare, as older
+            // servers are phased out.
+            Some(crate::jetstream::JetStreamMessageInfo {
+                domain: None,
+                acc_hash: None,
+                stream: try_parse!(str),
+                consumer: try_parse!(str),
+                delivered: try_parse!(),
+                stream_seq: try_parse!(),
+                consumer_seq: try_parse!(),
+                published: {
+                    let nanos: u64 = try_parse!();
+                    let offset = std::time::Duration::from_nanos(nanos);
+                    std::time::UNIX_EPOCH + offset
+                },
+                pending: try_parse!(),
+                token: None,
+            })
+        } else {
+            None
+        }
     }
 }
 

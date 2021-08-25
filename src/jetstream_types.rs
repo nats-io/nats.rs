@@ -216,6 +216,10 @@ pub struct StreamInfo {
 /// Information about a received message
 #[derive(Debug, Clone)]
 pub struct JetStreamMessageInfo<'a> {
+    // Optional domain, present in servers post-ADR-15
+    pub domain: Option<&'a str>,
+    // Optional account hash, present in servers post-ADR-15
+    pub acc_hash: Option<&'a str>,
     /// The stream name
     pub stream: &'a str,
     /// The consumer name
@@ -230,6 +234,8 @@ pub struct JetStreamMessageInfo<'a> {
     pub pending: u64,
     ///
     pub published: std::time::SystemTime,
+    // Optional token, present in servers post-ADR-15
+    pub token: Option<&'a str>,
 }
 
 /// information about the given stream.
