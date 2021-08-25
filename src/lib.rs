@@ -225,6 +225,11 @@ pub use message::Message;
 pub use options::Options;
 pub use subscription::Subscription;
 
+/// A re-export of the `rustls` crate used in this crate,
+/// for use in cases where manual client configurations
+/// must be provided using `Options::tls_client_config`.
+pub use rustls;
+
 #[doc(hidden)]
 pub use connect::ConnectInfo;
 
