@@ -5,6 +5,10 @@
 - #199 implemented `asynk::Subscription::try_next`.
 - #199 implemented conversion traits b/w sync & async
   Message types.
+- #205 `Options::tls_client_config` allows users to
+  provide a manually-configured `rustls::ClientConfig`
+  for communicating to the server, for cases where
+  certificates are not available on the filesystem.
 
 # 0.13.0
 
