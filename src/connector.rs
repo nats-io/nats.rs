@@ -7,11 +7,11 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::{Mutex, MutexGuard};
-use rustls::{ClientConfig, ClientSession, Session};
 use webpki::DNSNameRef;
 
 use crate::auth_utils;
 use crate::proto::{self, ClientOp, ServerOp};
+use crate::rustls::{ClientConfig, ClientSession, Session};
 use crate::secure_wipe::SecureString;
 use crate::{
     connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo,
@@ -39,7 +39,7 @@ impl Connector {
         url: &str,
         options: Arc<Options>,
     ) -> io::Result<Connector> {
-        let mut tls_config = ClientConfig::new();
+        let mut tls_config = options.tls_client_config.clone();
 
         // Include system root certificates.
         //

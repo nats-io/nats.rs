@@ -21,6 +21,7 @@ pub struct Options {
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
+    pub(crate) tls_client_config: crate::rustls::ClientConfig,
 
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
@@ -41,6 +42,7 @@ impl fmt::Debug for Options {
             .entry(&"certificates", &self.certificates)
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
+            .entry(&"tls_client_config", &"XXXXXXXX")
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
@@ -66,6 +68,7 @@ impl Default for Options {
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
             jetstream_prefix: "$JS.API.".to_string(),
+            tls_client_config: crate::rustls::ClientConfig::default(),
         }
     }
 }
@@ -308,6 +311,43 @@ impl Options {
     ) -> Options {
         self.client_cert = Some(cert.as_ref().to_owned());
         self.client_key = Some(key.as_ref().to_owned());
+        self
+    }
+
+    /// Set the default TLS config that will be used
+    /// for connections. Note that this is less secure
+    /// than specifying TLS certificate file paths
+    /// using the other methods on `Options`, which
+    /// will avoid keeping raw key material in-memory
+    /// and will zero memory buffers that temporarily
+    /// contain key material during connection attempts.
+    /// This is intended to be used as a method of
+    /// last-resort when providing well-known file
+    /// paths is not feasible.
+    ///
+    /// To avoid version conflicts, the `rustls` version
+    /// used by this crate is exported as `nats::rustls`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    /// let mut tls_client_config = nats::rustls::ClientConfig::default();
+    /// tls_client_config
+    ///     .set_single_client_cert(
+    ///         vec![nats::rustls::Certificate(b"MY_CERT".to_vec())],
+    ///         nats::rustls::PrivateKey(b"MY_KEY".to_vec()),
+    ///     );
+    /// let nc = nats::Options::new()
+    ///     .tls_client_config(tls_client_config)
+    ///     .connect("nats://localhost:4443")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_client_config(
+        mut self,
+        tls_client_config: crate::rustls::ClientConfig,
+    ) -> Options {
+        self.tls_client_config = tls_client_config;
         self
     }
 
