@@ -92,7 +92,10 @@ use std::fmt;
 use std::io;
 use std::net::IpAddr;
 use std::path::Path;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 use blocking::unblock;
@@ -200,7 +203,10 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
-        Ok(Subscription { inner: sub })
+        Ok(Subscription {
+            inner: sub,
+            did_close: AtomicBool::new(false),
+        })
     }
 
     /// Creates a subscription.
@@ -208,7 +214,10 @@ impl Connection {
         let subject = subject.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
-        Ok(Subscription { inner })
+        Ok(Subscription {
+            inner,
+            did_close: AtomicBool::new(false),
+        })
     }
 
     /// Creates a queue subscription.
@@ -222,7 +231,10 @@ impl Connection {
         let inner = self.inner.clone();
         let inner =
             unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
-        Ok(Subscription { inner })
+        Ok(Subscription {
+            inner,
+            did_close: AtomicBool::new(false),
+        })
     }
 
     /// Flushes by performing a round trip to the server.
@@ -311,6 +323,7 @@ impl Connection {
 #[derive(Debug)]
 pub struct Subscription {
     inner: crate::Subscription,
+    did_close: AtomicBool,
 }
 
 impl Subscription {
@@ -347,6 +360,7 @@ impl Subscription {
     /// Stops listening for new messages, but the remaining queued messages can
     /// still be received.
     pub async fn drain(&self) -> io::Result<()> {
+        self.did_close.store(true, Ordering::Release);
         let inner = self.inner.clone();
         unblock(move || inner.drain()).await
     }
@@ -356,8 +370,25 @@ impl Subscription {
     /// `nats::asynk::Subscription` to avoid blocking the non-async `Drop`
     /// implementation.
     pub async fn unsubscribe(&self) -> io::Result<()> {
+        self.did_close.store(true, Ordering::Release);
         let inner = self.inner.clone();
         unblock(move || inner.unsubscribe()).await
+    }
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        if !self.did_close.load(Ordering::Acquire) {
+            // The user didn't close the subscription, so we should do so in order to free up any
+            // blocking threads waiting on calls to `next()`. This is a blocking operation, so
+            // we'll do it on a background thread to avoid blocking async runtimes. And we avoid
+            // using `unblock` or similar here, because if all the worker threads are busy waiting,
+            // we want to be able to free them up (as opposed to deadlocking).
+            let sub = self.inner.clone();
+            std::thread::spawn(move || {
+                let _ = sub.unsubscribe();
+            });
+        }
     }
 }
 
