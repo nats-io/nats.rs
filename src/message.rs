@@ -200,8 +200,12 @@ impl Message {
             };
             (str) => {
                 if let Some(next) = tokens[token_index].take() {
-                    token_index += 1;
-                    dbg!(&token_index);
+                    #[allow(unused)]
+                    {
+                        // this isn't actually unused, but it's
+                        // difficult for the compiler to infer this.
+                        token_index += 1;
+                    }
                     next
                 } else {
                     log::error!(
