@@ -99,7 +99,7 @@ pub struct ConsumerConfig {
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
     #[serde(default, skip_serializing_if = "is_default")]
-    pub ack_wait: isize,
+    pub ack_wait: i64,
     /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_deliver: i64,
@@ -551,7 +551,7 @@ pub(crate) struct SubOpts {
 /// Options for publishing
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub(crate) struct PubOpts {
-    pub ttl: isize,
+    pub ttl: i64,
     pub id: String,
     // Expected last msgId
     pub lid: String,
