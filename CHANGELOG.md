@@ -1,3 +1,11 @@
+# 0.14.0
+
+## Breaking Changes
+
+- #211 `jetstream::ConsumerConfig.ack_wait` and
+  `jetstream::PubOpts.ttl` have been changed from
+  `isize` to `i64`.
+
 # 0.13.1
 
 ## New Features
