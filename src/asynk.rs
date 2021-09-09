@@ -92,13 +92,11 @@ use std::fmt;
 use std::io;
 use std::net::IpAddr;
 use std::path::Path;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::Duration;
 
 use blocking::unblock;
+use crossbeam_channel::{Receiver, Sender};
 
 use crate::Headers;
 
@@ -203,9 +201,11 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
+        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner: sub,
-            did_close: AtomicBool::new(false),
+            closer_tx,
+            closer_rx,
         })
     }
 
@@ -214,9 +214,11 @@ impl Connection {
         let subject = subject.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
+        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
-            did_close: AtomicBool::new(false),
+            closer_tx,
+            closer_rx,
         })
     }
 
@@ -231,9 +233,11 @@ impl Connection {
         let inner = self.inner.clone();
         let inner =
             unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
+        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
-            did_close: AtomicBool::new(false),
+            closer_tx,
+            closer_rx,
         })
     }
 
@@ -323,7 +327,12 @@ impl Connection {
 #[derive(Debug)]
 pub struct Subscription {
     inner: crate::Subscription,
-    did_close: AtomicBool,
+
+    // Dropping this signals to any receivers that the subscription has been closed. These should
+    // be dropped after inner is dropped, so if another thread is currently blocking, the
+    // subscription is closed on that thread.
+    closer_tx: Sender<()>,
+    closer_rx: Receiver<()>,
 }
 
 impl Subscription {
@@ -334,7 +343,15 @@ impl Subscription {
             return Some(msg.into());
         }
         let inner = self.inner.clone();
-        let msg = unblock(move || inner.next()).await?;
+        let closer = self.closer_rx.clone();
+        let msg = unblock(move || {
+            // If the subscription is dropped, we should stop blocking this thread immediately.
+            crossbeam_channel::select! {
+                recv(closer) -> _ => None,
+                recv(inner.receiver()) -> msg => msg.ok(),
+            }
+        })
+        .await?;
         Some(msg.into())
     }
 
@@ -360,7 +377,6 @@ impl Subscription {
     /// Stops listening for new messages, but the remaining queued messages can
     /// still be received.
     pub async fn drain(&self) -> io::Result<()> {
-        self.did_close.store(true, Ordering::Release);
         let inner = self.inner.clone();
         unblock(move || inner.drain()).await
     }
@@ -370,25 +386,8 @@ impl Subscription {
     /// `nats::asynk::Subscription` to avoid blocking the non-async `Drop`
     /// implementation.
     pub async fn unsubscribe(&self) -> io::Result<()> {
-        self.did_close.store(true, Ordering::Release);
         let inner = self.inner.clone();
         unblock(move || inner.unsubscribe()).await
-    }
-}
-
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        if !self.did_close.load(Ordering::Acquire) {
-            // The user didn't close the subscription, so we should do so in order to free up any
-            // blocking threads waiting on calls to `next()`. This is a blocking operation, so
-            // we'll do it on a background thread to avoid blocking async runtimes. And we avoid
-            // using `unblock` or similar here, because if all the worker threads are busy waiting,
-            // we want to be able to free them up (as opposed to deadlocking).
-            let sub = self.inner.clone();
-            std::thread::spawn(move || {
-                let _ = sub.unsubscribe();
-            });
-        }
     }
 }
 
