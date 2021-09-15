@@ -243,6 +243,7 @@ const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
+#[allow(unused)]
 #[derive(Debug, Default, Clone)]
 struct ServerInfo {
     /// The unique identifier of the NATS server.
