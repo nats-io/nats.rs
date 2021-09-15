@@ -201,10 +201,10 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
-        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner: sub,
-            closer_tx,
+            _closer_tx,
             closer_rx,
         })
     }
@@ -214,10 +214,10 @@ impl Connection {
         let subject = subject.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
-        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
-            closer_tx,
+            _closer_tx,
             closer_rx,
         })
     }
@@ -233,10 +233,10 @@ impl Connection {
         let inner = self.inner.clone();
         let inner =
             unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
-        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
-            closer_tx,
+            _closer_tx,
             closer_rx,
         })
     }
@@ -319,11 +319,6 @@ impl Connection {
 }
 
 /// A subscription to a subject.
-///
-/// Due to async limitations (lack of `AsyncDrop` etc...),
-/// please call `Subscription::unsubscribe().await` manually
-/// before dropping `Subscription` to avoid blocking the
-/// runtime.
 #[derive(Debug)]
 pub struct Subscription {
     inner: crate::Subscription,
@@ -331,7 +326,7 @@ pub struct Subscription {
     // Dropping this signals to any receivers that the subscription has been closed. These should
     // be dropped after inner is dropped, so if another thread is currently blocking, the
     // subscription is closed on that thread.
-    closer_tx: Sender<()>,
+    _closer_tx: Sender<()>,
     closer_rx: Receiver<()>,
 }
 
@@ -382,9 +377,7 @@ impl Subscription {
     }
 
     /// Stops listening for new messages and discards the remaining queued
-    /// messages. This should always be called before dropping
-    /// `nats::asynk::Subscription` to avoid blocking the non-async `Drop`
-    /// implementation.
+    /// messages.
     pub async fn unsubscribe(&self) -> io::Result<()> {
         let inner = self.inner.clone();
         unblock(move || inner.unsubscribe()).await

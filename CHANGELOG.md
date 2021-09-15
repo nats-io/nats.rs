@@ -1,3 +1,17 @@
+# 0.15.2
+
+# Bug Fixes
+
+- #217 Fix thread leak when `asynk::Subscription`
+  is dropped without explicitly `unsubscribe` first.
+
+# 0.15.1
+
+# Improvements
+
+- Minor debug statement removed that was present in
+  previous release.
+
 # 0.15.0
 
 ## Breaking Changes

@@ -155,7 +155,7 @@ impl Message {
     pub fn jetstream_message_info(
         &self,
     ) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
-        const PREFIX: &'static str = "$JS.ACK.";
+        const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
 
         let mut reply: &str = self.reply.as_ref()?;
@@ -173,9 +173,9 @@ impl Message {
         // parsing this.
         let mut tokens: [Option<&str>; 10] = [None; 10];
         let mut n_tokens = 0;
-        for index in 0..10 {
+        for each_token in &mut tokens {
             if let Some(token) = split.next() {
-                tokens[index] = Some(token);
+                *each_token = Some(token);
                 n_tokens += 1;
             }
         }
