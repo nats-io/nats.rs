@@ -1,3 +1,4 @@
+use smol::future::FutureExt;
 use std::io;
 
 #[test]
@@ -29,4 +30,38 @@ fn two_connections() -> io::Result<()> {
     nc2.publish("foo", b"bar")?;
 
     Ok(())
+}
+
+#[test]
+fn async_subscription_drop() -> io::Result<()> {
+    smol::block_on(async {
+        let nc = nats::asynk::connect("demo.nats.io").await?;
+
+        let inbox = nc.new_inbox();
+
+        // This makes sure the subscription is closed after being dropped. If it wasn't closed,
+        // creating the 501st subscription would block forever due to the `blocking` crate's thread
+        // pool being fully occupied.
+        for _ in 0..600 {
+            let sub = nc
+                .subscribe(&inbox)
+                .or(async {
+                    smol::Timer::after(std::time::Duration::from_secs(2)).await;
+                    Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "unable to create subscription",
+                    ))
+                })
+                .await?;
+            sub.next()
+                .or(async {
+                    smol::Timer::after(std::time::Duration::from_millis(1))
+                        .await;
+                    None
+                })
+                .await;
+        }
+
+        Ok(())
+    })
 }

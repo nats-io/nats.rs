@@ -96,6 +96,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use std::time::Duration;
 
 use blocking::unblock;
+use crossbeam_channel::{Receiver, Sender};
 
 use crate::Headers;
 
@@ -200,7 +201,12 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
-        Ok(Subscription { inner: sub })
+        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        Ok(Subscription {
+            inner: sub,
+            closer_tx,
+            closer_rx,
+        })
     }
 
     /// Creates a subscription.
@@ -208,7 +214,12 @@ impl Connection {
         let subject = subject.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
-        Ok(Subscription { inner })
+        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        Ok(Subscription {
+            inner,
+            closer_tx,
+            closer_rx,
+        })
     }
 
     /// Creates a queue subscription.
@@ -222,7 +233,12 @@ impl Connection {
         let inner = self.inner.clone();
         let inner =
             unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
-        Ok(Subscription { inner })
+        let (closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        Ok(Subscription {
+            inner,
+            closer_tx,
+            closer_rx,
+        })
     }
 
     /// Flushes by performing a round trip to the server.
@@ -311,6 +327,12 @@ impl Connection {
 #[derive(Debug)]
 pub struct Subscription {
     inner: crate::Subscription,
+
+    // Dropping this signals to any receivers that the subscription has been closed. These should
+    // be dropped after inner is dropped, so if another thread is currently blocking, the
+    // subscription is closed on that thread.
+    closer_tx: Sender<()>,
+    closer_rx: Receiver<()>,
 }
 
 impl Subscription {
@@ -321,7 +343,15 @@ impl Subscription {
             return Some(msg.into());
         }
         let inner = self.inner.clone();
-        let msg = unblock(move || inner.next()).await?;
+        let closer = self.closer_rx.clone();
+        let msg = unblock(move || {
+            // If the subscription is dropped, we should stop blocking this thread immediately.
+            crossbeam_channel::select! {
+                recv(closer) -> _ => None,
+                recv(inner.receiver()) -> msg => msg.ok(),
+            }
+        })
+        .await?;
         Some(msg.into())
     }
 
