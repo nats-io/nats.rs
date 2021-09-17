@@ -552,7 +552,7 @@ fn subject_match(subject: &str, subject_pattern: &str) -> bool {
         }
         return false;
     }
-    true
+    pattern_parts.next().is_none()
 }
 
 #[test]
@@ -561,6 +561,8 @@ fn test_subject_match() {
     assert!(subject_match("sub", "*"));
     assert!(subject_match("sub", ">"));
     assert!(!subject_match("pub", "sub"));
+    assert!(!subject_match("sub", "sub.pub"));
+    assert!(!subject_match("sub", "*.pub"));
     assert!(subject_match("sub.pub", "sub.pub"));
     assert!(subject_match("sub.pub", "sub.*"));
     assert!(subject_match("sub.pub", "*.pub"));
@@ -568,6 +570,7 @@ fn test_subject_match() {
     assert!(subject_match("sub.pub", ">"));
     assert!(!subject_match("sub.pub", "sub"));
     assert!(!subject_match("sub.pub", "pub"));
+    assert!(!subject_match("sub.pub", "sub.*.pub"));
 }
 
 #[test]
