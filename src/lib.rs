@@ -191,6 +191,7 @@ mod message;
 mod options;
 mod proto;
 mod secure_wipe;
+mod subject;
 mod subscription;
 
 /// `JetStream` stream management and consumers.
@@ -223,6 +224,7 @@ use std::{
 pub use headers::Headers;
 pub use message::Message;
 pub use options::Options;
+pub use subject::*;
 pub use subscription::Subscription;
 
 /// A re-export of the `rustls` crate used in this crate,
