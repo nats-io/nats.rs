@@ -1,6 +1,6 @@
 //! Typed implementation of a NATS subject.
 
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 /// Wildcard matching a single [`Token`].
 pub const SINGLE_WILDCARD: Token = Token("*");
@@ -50,6 +50,8 @@ pub struct Tokens<'s> {
 
 impl<'s> Subject<'s> {
     /// Create a new, validated NATS subject.
+    // [`FromStr`] does not allow Self to borrow from the input string.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(subject: &'s str) -> Result<Self, Error> {
         match subject {
             s if s.is_empty() => Err(Error::InvalidToken),
@@ -129,6 +131,10 @@ impl SubjectBuf {
         Subject::from_str(&subject)?;
         Ok(Self(subject))
     }
+    /// Convert the subject buffer into the inner string.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
     /// The subject as `&str`.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -162,6 +168,15 @@ impl SubjectBuf {
     }
 }
 
+impl FromStr for SubjectBuf {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Subject::from_str(s)?;
+        Ok(SubjectBuf(s.to_owned()))
+    }
+}
+
 impl<'o> PartialEq<&'o str> for SubjectBuf {
     fn eq(&self, other: &&'o str) -> bool {
         self.as_str() == *other
@@ -176,12 +191,23 @@ impl fmt::Display for SubjectBuf {
 
 impl<'t> Token<'t> {
     /// Create a new validated token.
+    // [`FromStr`] does not allow Self to borrow from the input string.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(token: &'t str) -> Result<Self, Error> {
         match token {
             "*" | ">" => Ok(Self(token)),
             s if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(Self(token)),
             _ => Err(Error::InvalidToken),
         }
+    }
+    /// Const constructor for a token.
+    ///
+    /// # WARNING
+    ///
+    /// An invalid token may brake assumptions of the [`Token`] type. Reassure,
+    /// that this call definitely constructs a valid token.
+    pub const fn new_unchecked(token: &'t str) -> Self {
+        Token(token)
     }
     /// The token as a `&str`
     pub fn as_str(&self) -> &str {
