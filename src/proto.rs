@@ -39,6 +39,10 @@ pub(crate) enum ServerOp {
     /// `-ERR <error message>`
     Err(String),
 
+    NoResponders {
+        subject: String,
+        sid: u64,
+    },
     /// Unknown protocol message.
     Unknown(String),
 }
@@ -260,6 +264,16 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         let mut header_payload = Vec::new();
         header_payload.resize(num_header_bytes as usize, 0_u8);
         stream.read_exact(&mut header_payload[..])?;
+
+        // check for 503 no responders
+        if  let Ok(s) = str::from_utf8(&header_payload) {
+            if s.trim().eq("NATS/1.0 503") {
+                return Ok(Some(ServerOp::NoResponders {
+                    subject,
+                    sid
+                }));
+            }
+        }
 
         let headers = Headers::try_from(&*header_payload)?;
 

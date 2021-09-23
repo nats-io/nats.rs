@@ -50,6 +50,10 @@ pub struct ConnectInfo {
 
     /// Whether the client supports the usage of headers.
     pub headers: bool,
+
+    /// Whether the client supports sending no responders error on request messages
+    /// with no subscribers
+    pub no_responders: bool,
 }
 
 impl ConnectInfo {
@@ -62,6 +66,7 @@ impl ConnectInfo {
             version: self.version.clone(),
             tls_required: self.tls_required,
             headers: self.headers,
+            no_responders: self.headers,
         };
         if let Some(s) = &self.user_jwt {
             obj.insert("jwt", s.to_string()).ok()?;
