@@ -94,6 +94,13 @@ impl<'s> Subject<'s> {
         }
         true
     }
+
+    /// Check if the subject contains any wildcards.
+    ///
+    /// _Note:_ You can't publish to a subject that contains a wildcard.
+    pub fn contains_wildcards(&self) -> bool {
+        self.0.contains(SINGLE_WILDCARD_CHAR) | self.0.contains(MULTI_WILDCARD_CHAR)
+    }
 }
 
 impl<'s> AsRef<str> for Subject<'s> {
@@ -150,7 +157,7 @@ impl SubjectBuf {
         }
     }
     /// Append a token.
-    pub fn join(&mut self, token: &Token) -> Result<&mut Self, Error> {
+    pub fn join(mut self, token: Token) -> Result<Self, Error> {
         if self.0.ends_with(MULTI_WILDCARD_CHAR) {
             Err(Error::CanNotJoin)
         } else {
@@ -162,9 +169,16 @@ impl SubjectBuf {
         }
     }
     /// Append a string. If the string is not a valid token an [`Error`] is returned.
-    pub fn join_str(&mut self, token: &str) -> Result<&mut Self, Error> {
+    pub fn join_str(self, token: &str) -> Result<Self, Error> {
         let token = Token::from_str(token)?;
-        self.join(&token)
+        self.join(token)
+    }
+
+    /// Check if the subject contains any wildcards.
+    ///
+    /// _Note:_ You can't publish to a subject that contains a wildcard.
+    pub fn contains_wildcards(&self) -> bool {
+        self.as_ref().contains_wildcards()
     }
 }
 
@@ -332,9 +346,9 @@ mod test {
     #[test_case("abc", &[">"], "abc.>"                           ; "multi wildcard")]
     #[test_case("abc", &[">", "cba"], "" => panics               ; "multi wildcard and more")]
     fn join_subject(base: &str, appends: &[&str], expect: &str) {
-        let mut base = SubjectBuf::new(base.to_owned()).unwrap();
+        let mut base = base.parse::<SubjectBuf>().unwrap();
         for append in appends {
-            base.join_str(append).unwrap();
+            base = base.join_str(append).unwrap();
         }
 
         assert_eq!(base, expect);
