@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{client::Client, Headers};
+use std::fmt::{Display, Formatter};
 
 /// A message received on a subject.
 #[derive(Clone)]
@@ -32,6 +33,9 @@ pub struct Message {
     /// using `JetStream`.
     #[doc(hidden)]
     pub double_acked: Arc<AtomicBool>,
+
+    /// Holds error related to message
+    pub err: Option<MessageError>,
 }
 
 impl From<crate::asynk::Message> for Message {
@@ -43,9 +47,26 @@ impl From<crate::asynk::Message> for Message {
             headers: asynk.headers,
             client: asynk.client,
             double_acked: asynk.double_acked,
+            // fixme: implement error in async
+            err: None,
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub enum MessageError {
+    NoResponders,
+}
+
+impl Display for MessageError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageError::NoResponders => write!(f, "no responders found"),
+        }
+    }
+}
+
+impl std::error::Error for MessageError {}
 
 impl Message {
     /// Respond to a request message.

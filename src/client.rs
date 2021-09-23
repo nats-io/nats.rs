@@ -11,7 +11,7 @@ use crossbeam_channel as channel;
 use parking_lot::Mutex;
 
 use crate::connector::{Connector, NatsStream};
-use crate::message::Message;
+use crate::message::{Message, MessageError};
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
@@ -688,6 +688,7 @@ impl Client {
                             headers: None,
                             client: self.clone(),
                             double_acked: Default::default(),
+                            err: None,
                         };
 
                         // Send a message or drop it if the channel is
@@ -714,6 +715,7 @@ impl Client {
                             headers: Some(headers),
                             client: self.clone(),
                             double_acked: Default::default(),
+                            err: None,
                         };
 
                         // Send a message or drop it if the channel is
@@ -734,6 +736,7 @@ impl Client {
                             headers: None,
                             client: self.clone(),
                             double_acked: Default::default(),
+                            err: Some(MessageError::NoResponders),
                         };
 
                         // Send a message or drop it if the channel is
