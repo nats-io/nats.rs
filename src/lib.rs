@@ -222,6 +222,7 @@ use std::{
 
 pub use headers::Headers;
 pub use message::Message;
+pub use message::MessageError;
 pub use options::Options;
 pub use subscription::Subscription;
 
