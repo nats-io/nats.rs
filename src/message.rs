@@ -47,8 +47,7 @@ impl From<crate::asynk::Message> for Message {
             headers: asynk.headers,
             client: asynk.client,
             double_acked: asynk.double_acked,
-            // fixme: implement error in async
-            err: None,
+            err: asynk.err,
         }
     }
 }

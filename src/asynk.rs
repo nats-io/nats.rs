@@ -97,7 +97,7 @@ use std::time::Duration;
 
 use blocking::unblock;
 
-use crate::Headers;
+use crate::{Headers, MessageError};
 
 /// Connect to a NATS server at the given url.
 ///
@@ -385,6 +385,8 @@ pub struct Message {
     /// using `JetStream`.
     #[doc(hidden)]
     pub double_acked: Arc<AtomicBool>,
+
+    pub err: Option<MessageError>,
 }
 
 impl From<crate::Message> for Message {
@@ -396,6 +398,7 @@ impl From<crate::Message> for Message {
             headers: sync.headers,
             client: sync.client,
             double_acked: sync.double_acked,
+            err: sync.err,
         }
     }
 }
