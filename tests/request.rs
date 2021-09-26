@@ -6,10 +6,16 @@ use std::sync::mpsc;
 #[test]
 fn no_responders() -> Result<(), String> {
     let nc = nats::Options::new().connect("demo.nats.io").unwrap();
-    let res = nc.request("noresponders", "message").unwrap();
-    match res.err {
-        Some(MessageError::NoResponders) => Ok(()),
-        None => Err(String::from("should be no responders error, got None")),
+    let res = nc.request("noresponders", "message");
+    match res {
+        Err(e) => {
+            if e.to_string() == String::from("no responders") {
+                Ok(())
+            } else {
+                Err(String::from(format!("should be no responders, but is {}", e)))
+            }
+        },
+        Ok(_) => Err(String::from("should be no responders")),
     }
 }
 

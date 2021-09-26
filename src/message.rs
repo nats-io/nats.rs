@@ -60,7 +60,7 @@ pub enum MessageError {
 impl Display for MessageError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            MessageError::NoResponders => write!(f, "no responders found"),
+            MessageError::NoResponders => write!(f, "no responders"),
         }
     }
 }

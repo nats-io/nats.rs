@@ -462,14 +462,14 @@ impl Connection {
 
         // fixme: think how to handle the errors
         // Wait for the response.
-        // if let Some(msg) = sub.next() {
-        //     if let Some(err) = msg.err {
-        //         return Err(err);
-        //     }
-        // }
-        // Err(ErrorKind::ConnectionReset.into())
-        sub.next().ok_or_else(|| ErrorKind::ConnectionReset.into())
+        if let Some(msg) = sub.next() {
 
+            if let Some(e) = msg.err {
+                return Err(Error::new(ErrorKind::Other, e));
+            }
+            return Ok(msg)
+        }
+        Err(ErrorKind::ConnectionReset.into())
     }
 
     /// Publish a message on the given subject as a request and receive the
