@@ -210,7 +210,12 @@ impl<'t> Token<'t> {
     pub fn from_str(token: &'t str) -> Result<Self, Error> {
         match token {
             "*" | ">" => Ok(Self(token)),
-            s if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(Self(token)),
+            s if !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') =>
+            {
+                Ok(Self(token))
+            }
             _ => Err(Error::InvalidToken),
         }
     }
