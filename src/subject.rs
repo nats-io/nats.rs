@@ -83,7 +83,13 @@ impl<'s> Subject<'s> {
         SubjectBuf(self.0.to_owned())
     }
     /// Check if two subjects match, considering wildcards.
-    pub fn matches(&self, other: &Subject) -> bool {
+    pub fn matches(&self, other: Subject) -> bool {
+        if self.tokens().count() != other.tokens().count()
+            && !self.ends_with_multi_wildcard()
+            && !other.ends_with_multi_wildcard()
+        {
+            return false;
+        }
         for (s, o) in self.tokens().zip(other.tokens()) {
             if s.is_multi_wildcard() || o.is_multi_wildcard() {
                 return true;
@@ -94,7 +100,10 @@ impl<'s> Subject<'s> {
         }
         true
     }
-
+    /// Check if the subjects ends with a multi wildcard.
+    pub fn ends_with_multi_wildcard(&self) -> bool {
+        self.0.ends_with(MULTI_WILDCARD_CHAR)
+    }
     /// Check if the subject contains any wildcards.
     ///
     /// _Note:_ You can't publish to a subject that contains a wildcard.
@@ -150,6 +159,10 @@ impl SubjectBuf {
     pub fn as_ref(&self) -> Subject {
         Subject(&self.0)
     }
+    /// Check if two subjects match, considering wildcards.
+    pub fn matches(&self, other: Subject) -> bool {
+        self.as_ref().matches(other)
+    }
     /// Iterate over the subject's [`Token`]s.
     pub fn tokens(&self) -> Tokens {
         Tokens {
@@ -173,7 +186,6 @@ impl SubjectBuf {
         let token = Token::from_str(token)?;
         self.join(token)
     }
-
     /// Check if the subject contains any wildcards.
     ///
     /// _Note:_ You can't publish to a subject that contains a wildcard.
@@ -331,6 +343,8 @@ mod test {
     #[test_case("cba", "abc" => false               ; "unequal subjects")]
     #[test_case("cba.*", "cba.abc" => true          ; "single wildcard")]
     #[test_case("cba.*.zzz", "cba.abc.zzz" => true  ; "single wildcard middle")]
+    #[test_case("ab.cd.ef", "ab.cd" => false        ; "longer")]
+    #[test_case("ab.cd", "ab.cd.ef" => false        ; "longer reverse")]
     #[test_case(">", "cba.abc.zzz" => true          ; "wire tap")]
     #[test_case(">", "cba.*.zzz" => true            ; "wire tap against single wildcard")]
     #[test_case("cba.>", "cba.abc.zzz" => true      ; "multi wildcard")]
@@ -339,7 +353,7 @@ mod test {
     fn match_subjects(l: &str, r: &str) -> bool {
         let l = Subject::from_str(l).unwrap();
         let r = Subject::from_str(r).unwrap();
-        l.matches(&r)
+        l.matches(r)
     }
 
     #[test_case("abc", &["def"], "abc.def"                       ; "single token")]
@@ -351,7 +365,7 @@ mod test {
     #[test_case("abc", &[">"], "abc.>"                           ; "multi wildcard")]
     #[test_case("abc", &[">", "cba"], "" => panics               ; "multi wildcard and more")]
     fn join_subject(base: &str, appends: &[&str], expect: &str) {
-        let mut base = base.parse::<SubjectBuf>().unwrap();
+        let mut base = SubjectBuf::new(base.to_owned()).unwrap();
         for append in appends {
             base = base.join_str(append).unwrap();
         }
