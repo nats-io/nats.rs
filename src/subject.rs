@@ -84,21 +84,23 @@ impl<'s> Subject<'s> {
     }
     /// Check if two subjects match, considering wildcards.
     pub fn matches(&self, other: Subject) -> bool {
-        if self.tokens().count() != other.tokens().count()
-            && !self.ends_with_multi_wildcard()
-            && !other.ends_with_multi_wildcard()
-        {
-            return false;
-        }
-        for (s, o) in self.tokens().zip(other.tokens()) {
-            if s.is_multi_wildcard() || o.is_multi_wildcard() {
-                return true;
+        let mut s_tokens = self.tokens();
+        let mut o_tokens = other.tokens();
+
+        loop {
+            match (s_tokens.next(), o_tokens.next()) {
+                (Some(MULTI_WILDCARD), Some(_)) | (Some(_), Some(MULTI_WILDCARD)) => break true,
+                (Some(s_t), Some(o_t)) => {
+                    if s_t.matches(&o_t) {
+                        continue;
+                    } else {
+                        break false;
+                    }
+                }
+                (None, Some(_)) | (Some(_), None) => break false,
+                (None, None) => break true,
             }
-            if !s.matches(&o) {
-                return false;
-            }
         }
-        true
     }
     /// Check if the subjects ends with a multi wildcard.
     pub fn ends_with_multi_wildcard(&self) -> bool {
