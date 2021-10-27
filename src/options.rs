@@ -28,6 +28,9 @@ pub struct Options {
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
     pub(crate) jetstream_prefix: String,
+
+    pub(crate) tcp_read_timeout: Option<Option<Duration>>,
+    pub(crate) tcp_write_timeout: Option<Option<Duration>>,
 }
 
 impl fmt::Debug for Options {
@@ -47,6 +50,8 @@ impl fmt::Debug for Options {
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
+            .entry(&"tcp_read_timeout", &self.tcp_read_timeout)
+            .entry(&"tcp_write_timeout", &self.tcp_write_timeout)
             .finish()
     }
 }
@@ -69,6 +74,8 @@ impl Default for Options {
             close_callback: Callback(None),
             jetstream_prefix: "$JS.API.".to_string(),
             tls_client_config: crate::rustls::ClientConfig::default(),
+            tcp_read_timeout: None,
+            tcp_write_timeout: None,
         }
     }
 }
@@ -387,7 +394,7 @@ impl Options {
     /// If no servers remain that are under this threshold,
     /// then no further reconnect shall be attempted.
     /// The reconnect attempt for a server is reset upon
-    /// successfull connection.
+    /// successful connection.
     /// If None then there is no maximum number of attempts.
     ///
     /// # Example
@@ -620,6 +627,45 @@ impl Options {
     /// ```
     pub fn add_root_certificate(mut self, path: impl AsRef<Path>) -> Options {
         self.certificates.push(path.as_ref().to_owned());
+        self
+    }
+
+    /// Sets the tcp read timeout to the timeout specified
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    ///
+    /// let nc = nats::Options::new()
+    ///     .tcp_read_timeout(std::time::Duration::from_secs(5))
+    ///     .connect("tls://demo.nats.io:4443")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tcp_read_timeout<T: Into<Option<Duration>>>(
+        mut self,
+        timeout: T,
+    ) -> Options {
+        self.tcp_read_timeout = Some(timeout.into());
+        self
+    }
+    /// Sets the tcp write timeout to the timeout specified
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # fn main() -> std::io::Result<()> {
+    ///
+    /// let nc = nats::Options::new()
+    ///     .tcp_write_timeout(std::time::Duration::from_secs(5))
+    ///     .connect("tls://demo.nats.io:4443")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tcp_write_timeout<T: Into<Option<Duration>>>(
+        mut self,
+        timeout: T,
+    ) -> Options {
+        self.tcp_write_timeout = Some(timeout.into());
         self
     }
 }

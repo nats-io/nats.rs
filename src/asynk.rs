@@ -856,4 +856,43 @@ impl Options {
             inner: self.inner.add_root_certificate(path),
         }
     }
+
+    /// Sets the tcp read timeout to the timeout specified
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # smol::block_on(async {
+    /// let nc = nats::asynk::Options::new()
+    ///     .tcp_read_timeout(std::time::Duration::from_secs(5))
+    ///     .connect("tls://demo.nats.io:4443")
+    ///     .await?;
+    /// # std::io::Result::Ok(()) });
+    /// ```
+    pub fn tcp_read_timeout<T: Into<Option<Duration>>>(
+        self,
+        timeout: T,
+    ) -> Options {
+        Options {
+            inner: self.inner.tcp_read_timeout(timeout),
+        }
+    }
+    /// Sets the tcp write timeout to the timeout specified
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # smol::block_on(async {
+    /// let nc = nats::asynk::Options::new()
+    ///     .tcp_write_timeout(std::time::Duration::from_secs(5))
+    ///     .connect("tls://demo.nats.io:4443")
+    ///     .await?;
+    /// # std::io::Result::Ok(()) });
+    /// ```
+    pub fn tcp_write_timeout<T: Into<Option<Duration>>>(
+        self,
+        timeout: T,
+    ) -> Options {
+        Options {
+            inner: self.inner.tcp_write_timeout(timeout),
+        }
+    }
 }

@@ -233,6 +233,13 @@ impl Connector {
         // Connect to the remote socket.
         let mut stream = TcpStream::connect(addr)?;
         stream.set_nodelay(true)?;
+        // set read and write timeouts, if they were specified
+        if let Some(timeout) = self.options.tcp_read_timeout {
+            stream.set_read_timeout(timeout)?;
+        }
+        if let Some(timeout) = self.options.tcp_write_timeout {
+            stream.set_write_timeout(timeout)?;
+        }
 
         // Expect an INFO message.
         let mut line = crate::SecureVec::with_capacity(512);
