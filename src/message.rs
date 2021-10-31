@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::{
     fmt, io,
     sync::{
@@ -59,6 +72,22 @@ impl Message {
         }
     }
 
+    // Helper for detecting no responders response.
+    pub(crate) fn is_no_responders(&self) -> bool {
+        use crate::headers::STATUS_HDR;
+        if !self.data.is_empty() {
+            return false;
+        }
+        if let Some(hdrs) = &self.headers {
+            if let Some(set) = hdrs.get(STATUS_HDR) {
+                if set.get("503").is_some() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Acknowledge a `JetStream` message with a default acknowledgement.
     /// See `AckKind` documentation for details of what other types of
     /// acks are available. If you need to send a non-default ack, use
@@ -79,10 +108,7 @@ impl Message {
     /// server acks your ack, use the `double_ack` method instead.
     ///
     /// Does not check whether this message has already been double-acked.
-    pub fn ack_kind(
-        &self,
-        ack_kind: crate::jetstream::AckKind,
-    ) -> io::Result<()> {
+    pub fn ack_kind(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         self.respond(ack_kind)
     }
 
@@ -91,10 +117,7 @@ impl Message {
     /// See `AckKind` documentation for details of what each variant means.
     ///
     /// Returns immediately if this message has already been double-acked.
-    pub fn double_ack(
-        &self,
-        ack_kind: crate::jetstream::AckKind,
-    ) -> io::Result<()> {
+    pub fn double_ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         if self.double_acked.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -120,19 +143,12 @@ impl Message {
                 continue;
             }
             let (sid, receiver) = sub_ret?;
-            let sub = crate::Subscription::new(
-                sid,
-                ack_reply.to_string(),
-                receiver,
-                self.client.clone(),
-            );
+            let sub =
+                crate::Subscription::new(sid, ack_reply.to_string(), receiver, self.client.clone());
 
-            let pub_ret = self.client.publish(
-                original_reply,
-                Some(&ack_reply),
-                None,
-                ack_kind.as_ref(),
-            );
+            let pub_ret =
+                self.client
+                    .publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -152,9 +168,8 @@ impl Message {
     /// Returns `None` if this is not
     /// a `JetStream` message with headers
     /// set.
-    pub fn jetstream_message_info(
-        &self,
-    ) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
+    #[allow(clippy::eval_order_dependence)]
+    pub fn jetstream_message_info(&self) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
 

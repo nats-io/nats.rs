@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! A Rust client for the NATS.io ecosystem.
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
@@ -245,7 +258,7 @@ const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// during initial connection, and possibly again later.
 #[allow(unused)]
 #[derive(Debug, Default, Clone)]
-struct ServerInfo {
+pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
     /// Generated Server Name.
@@ -335,10 +348,7 @@ pub fn connect(nats_url: &str) -> io::Result<Connection> {
 
 impl Connection {
     /// Connects on a URL with the given options.
-    pub(crate) fn connect_with_options(
-        url: &str,
-        options: Options,
-    ) -> io::Result<Connection> {
+    pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
         let client = Client::connect(url, options)?;
         client.flush(DEFAULT_FLUSH_TIMEOUT)?;
         Ok(Connection(Arc::new(Inner { client })))
@@ -368,11 +378,7 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn queue_subscribe(
-        &self,
-        subject: &str,
-        queue: &str,
-    ) -> io::Result<Subscription> {
+    pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
         self.do_subscribe(subject, Some(queue))
     }
 
@@ -386,11 +392,7 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn publish(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
@@ -445,23 +447,21 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<Message> {
+    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(
-            subject,
-            Some(reply.as_str()),
-            None,
-            msg,
-        )?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
 
         // Wait for the response.
-        sub.next().ok_or_else(|| ErrorKind::ConnectionReset.into())
+        if let Some(msg) = sub.next() {
+            if msg.is_no_responders() {
+                return Err(Error::new(ErrorKind::NotFound, "no responders"));
+            }
+            Ok(msg)
+        } else {
+            Err(ErrorKind::ConnectionReset.into())
+        }
     }
 
     /// Publish a message on the given subject as a request and receive the
@@ -486,12 +486,7 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(
-            subject,
-            Some(reply.as_str()),
-            None,
-            msg,
-        )?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
 
         // Wait for the response.
         sub.next_timeout(timeout)
@@ -509,20 +504,11 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request_multi(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<Subscription> {
+    pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(
-            subject,
-            Some(reply.as_str()),
-            None,
-            msg,
-        )?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
 
         // Return the subscription.
         Ok(sub)
@@ -737,11 +723,7 @@ impl Connection {
         self.0.client.server_info.lock().max_payload
     }
 
-    fn do_subscribe(
-        &self,
-        subject: &str,
-        queue: Option<&str>,
-    ) -> io::Result<Subscription> {
+    fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
         let (sid, receiver) = self.0.client.subscribe(subject, queue)?;
         Ok(Subscription::new(
             sid,

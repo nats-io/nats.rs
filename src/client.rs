@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::prelude::*;
@@ -15,7 +28,7 @@ use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
-const BUF_CAPACITY: usize = 128 * 1024;
+const BUF_CAPACITY: usize = 32 * 1024;
 
 /// Client state.
 ///
@@ -83,7 +96,7 @@ impl Client {
     /// Creates a new client that will begin connecting in the background.
     pub(crate) fn connect(url: &str, options: Options) -> io::Result<Client> {
         // A channel for coordinating flushes.
-        let (flush_kicker, dirty) = channel::bounded(1);
+        let (flush_kicker, flush_wanted) = channel::bounded(1);
 
         // Channels for coordinating initial connect.
         let (run_sender, run_receiver) = channel::bounded(1);
@@ -151,27 +164,32 @@ impl Client {
         thread::spawn({
             let client = client.clone();
             move || {
+                // Track last flush/write time.
+                const MIN_FLUSH_BETWEEN: Duration = Duration::from_millis(5);
+                let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
+
                 // Wait until at least one message is buffered.
-                while dirty.recv().is_ok() {
-                    let start = Instant::now();
+                while flush_wanted.recv().is_ok() {
+                    let since = last.elapsed();
+                    if since < MIN_FLUSH_BETWEEN {
+                        thread::sleep(MIN_FLUSH_BETWEEN - since);
+                    }
+
                     // Flush the writer.
                     let mut write = client.state.write.lock();
+
                     if let Some(writer) = write.writer.as_mut() {
                         let res = writer.flush();
-
+                        last = Instant::now();
                         // If flushing fails, disconnect.
                         if res.is_err() {
                             // NB see locking protocol for state.write and state.read
                             write.writer = None;
-
                             let mut read = client.state.read.lock();
                             read.pongs.clear();
                         }
                     }
                     drop(write);
-
-                    // Wait a little bit before flushing again.
-                    thread::sleep(start.elapsed() * 9);
                 }
             }
         });
@@ -180,7 +198,7 @@ impl Client {
     }
 
     /// Retrieves server info as received by the most recent connection.
-    pub(crate) fn server_info(&self) -> ServerInfo {
+    pub fn server_info(&self) -> ServerInfo {
         self.server_info.lock().clone()
     }
 
@@ -225,9 +243,7 @@ impl Client {
         // Wait until the PONG operation is received.
         match pong.recv() {
             Ok(()) => Ok(()),
-            Err(_) => {
-                Err(Error::new(ErrorKind::ConnectionReset, "flush failed"))
-            }
+            Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
         }
     }
 
@@ -247,8 +263,7 @@ impl Client {
                 // Send an UNSUB message and ignore errors.
                 if let Some(writer) = write.writer.as_mut() {
                     let max_msgs = None;
-                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
-                        .ok();
+                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).ok();
                     write.flush_kicker.try_send(()).ok();
                 }
             }
@@ -456,8 +471,7 @@ impl Client {
         // Estimate how many bytes the message will consume when written into
         // the stream. We must make a conservative guess: it's okay to
         // overestimate but not to underestimate.
-        let mut estimate =
-            1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
+        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
         if let Some(headers) = headers {
             estimate += headers
                 .iter()
@@ -485,8 +499,7 @@ impl Client {
         match write.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                let res = proto::encode(&mut write.buffer, op)
-                    .and_then(|_| write.buffer.flush());
+                let res = proto::encode(&mut write.buffer, op).and_then(|_| write.buffer.flush());
                 Some(res)
             }
             Some(mut writer) => {
@@ -614,11 +627,7 @@ impl Client {
     }
 
     /// Reads messages from the server and dispatches them to subscribers.
-    fn dispatch(
-        &self,
-        mut reader: impl BufRead,
-        connector: &mut Connector,
-    ) -> io::Result<()> {
+    fn dispatch(&self, mut reader: impl BufRead, connector: &mut Connector) -> io::Result<()> {
         // Handle operations received from the server.
         while let Some(op) = proto::decode(&mut reader)? {
             // Inject random delays when testing.
@@ -704,7 +713,6 @@ impl Client {
                     payload,
                 } => {
                     let read = self.state.read.lock();
-
                     // Send the message to matching subscription.
                     if let Some(subscription) = read.subscriptions.get(&sid) {
                         let msg = Message {

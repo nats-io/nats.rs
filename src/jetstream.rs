@@ -1,4 +1,4 @@
-// Copyright 2020 The NATS Authors
+// Copyright 2020-2021 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -225,10 +225,7 @@ pub struct PagedIterator<'a, T> {
     done: bool,
 }
 
-impl<'a, T> std::iter::FusedIterator for PagedIterator<'a, T> where
-    T: DeserializeOwned + Debug
-{
-}
+impl<'a, T> std::iter::FusedIterator for PagedIterator<'a, T> where T: DeserializeOwned + Debug {}
 
 impl<'a, T> Iterator for PagedIterator<'a, T>
 where
@@ -248,8 +245,7 @@ where
         })
         .unwrap();
 
-        let res: io::Result<PagedResponse<T>> =
-            self.manager.js_request(&self.subject, &req);
+        let res: io::Result<PagedResponse<T>> = self.manager.js_request(&self.subject, &req);
 
         let mut page = match res {
             Err(e) => {
@@ -291,8 +287,7 @@ impl NatsClient {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String =
-            format!("{}STREAM.CREATE.{}", self.api_prefix(), cfg.name);
+        let subject: String = format!("{}STREAM.CREATE.{}", self.api_prefix(), cfg.name);
         let req = serde_json::ser::to_vec(&cfg)?;
         self.js_request(&subject, &req)
     }
@@ -305,8 +300,7 @@ impl NatsClient {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String =
-            format!("{}STREAM.UPDATE.{}", self.api_prefix(), cfg.name);
+        let subject: String = format!("{}STREAM.UPDATE.{}", self.api_prefix(), cfg.name);
         let req = serde_json::ser::to_vec(&cfg)?;
         self.js_request(&subject, &req)
     }
@@ -335,10 +329,7 @@ impl NatsClient {
     }
 
     /// List `JetStream` consumers for a stream.
-    pub fn list_consumers<S>(
-        &self,
-        stream: S,
-    ) -> io::Result<PagedIterator<'_, ConsumerInfo>>
+    pub fn list_consumers<S>(&self, stream: S) -> io::Result<PagedIterator<'_, ConsumerInfo>>
     where
         S: AsRef<str>,
     {
@@ -349,8 +340,7 @@ impl NatsClient {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String =
-            format!("{}CONSUMER.LIST.{}", self.api_prefix(), stream);
+        let subject: String = format!("{}CONSUMER.LIST.{}", self.api_prefix(), stream);
 
         Ok(PagedIterator {
             subject,
@@ -362,10 +352,7 @@ impl NatsClient {
     }
 
     /// Query `JetStream` stream information.
-    pub fn stream_info<S: AsRef<str>>(
-        &self,
-        stream: S,
-    ) -> io::Result<StreamInfo> {
+    pub fn stream_info<S: AsRef<str>>(&self, stream: S) -> io::Result<StreamInfo> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
@@ -373,16 +360,12 @@ impl NatsClient {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String =
-            format!("{}STREAM.INFO.{}", self.api_prefix(), stream);
+        let subject: String = format!("{}STREAM.INFO.{}", self.api_prefix(), stream);
         self.js_request(&subject, b"")
     }
 
     /// Purge `JetStream` stream messages.
-    pub fn purge_stream<S: AsRef<str>>(
-        &self,
-        stream: S,
-    ) -> io::Result<PurgeResponse> {
+    pub fn purge_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<PurgeResponse> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
             return Err(Error::new(
@@ -413,8 +396,7 @@ impl NatsClient {
         })
         .unwrap();
 
-        let subject =
-            format!("{}STREAM.MSG.DELETE.{}", self.api_prefix(), stream);
+        let subject = format!("{}STREAM.MSG.DELETE.{}", self.api_prefix(), stream);
 
         self.js_request::<DeleteResponse>(&subject, &req)
             .map(|dr| dr.success)
@@ -436,11 +418,7 @@ impl NatsClient {
     }
 
     /// Create a `JetStream` consumer.
-    pub fn create_consumer<S, C>(
-        &self,
-        stream: S,
-        cfg: C,
-    ) -> io::Result<Consumer>
+    pub fn create_consumer<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -478,11 +456,7 @@ impl NatsClient {
     }
 
     /// Delete a `JetStream` consumer.
-    pub fn delete_consumer<S, C>(
-        &self,
-        stream: S,
-        consumer: C,
-    ) -> io::Result<bool>
+    pub fn delete_consumer<S, C>(&self, stream: S, consumer: C) -> io::Result<bool>
     where
         S: AsRef<str>,
         C: AsRef<str>,
@@ -514,11 +488,7 @@ impl NatsClient {
     }
 
     /// Query `JetStream` consumer information.
-    pub fn consumer_info<S, C>(
-        &self,
-        stream: S,
-        consumer: C,
-    ) -> io::Result<ConsumerInfo>
+    pub fn consumer_info<S, C>(&self, stream: S, consumer: C) -> io::Result<ConsumerInfo>
     where
         S: AsRef<str>,
         C: AsRef<str>,
@@ -531,12 +501,7 @@ impl NatsClient {
             ));
         }
         let consumer: &str = consumer.as_ref();
-        let subject: String = format!(
-            "{}CONSUMER.INFO.{}.{}",
-            self.api_prefix(),
-            stream,
-            consumer
-        );
+        let subject: String = format!("{}CONSUMER.INFO.{}.{}", self.api_prefix(), stream, consumer);
         self.js_request(&subject, b"")
     }
 
@@ -603,26 +568,15 @@ impl Consumer {
     /// `ConsumerInfo` that may have been returned
     /// from the `nats::Connection::list_consumers`
     /// iterator.
-    pub fn from_consumer_info(
-        ci: ConsumerInfo,
-        nc: NatsClient,
-    ) -> io::Result<Consumer> {
-        Consumer::existing::<String, ConsumerConfig>(
-            nc,
-            ci.stream_name,
-            ci.config,
-        )
+    pub fn from_consumer_info(ci: ConsumerInfo, nc: NatsClient) -> io::Result<Consumer> {
+        Consumer::existing::<String, ConsumerConfig>(nc, ci.stream_name, ci.config)
     }
 
     /// Instantiate a `JetStream` `Consumer`. Performs a check to see if the consumer
     /// already exists, and creates it if not. If you want to use an existing
     /// `Consumer` without this check and creation, use the `Consumer::existing`
     /// method.
-    pub fn create_or_open<S, C>(
-        nc: NatsClient,
-        stream: S,
-        cfg: C,
-    ) -> io::Result<Consumer>
+    pub fn create_or_open<S, C>(nc: NatsClient, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -647,11 +601,7 @@ impl Consumer {
     }
 
     /// Use an existing `JetStream` `Consumer`
-    pub fn existing<S, C>(
-        nc: NatsClient,
-        stream: S,
-        cfg: C,
-    ) -> io::Result<Consumer>
+    pub fn existing<S, C>(nc: NatsClient, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -659,12 +609,11 @@ impl Consumer {
         let stream = stream.as_ref().to_string();
         let cfg = ConsumerConfig::from(cfg);
 
-        let push_subscriber =
-            if let Some(ref deliver_subject) = cfg.deliver_subject {
-                Some(nc.subscribe(deliver_subject)?)
-            } else {
-                None
-            };
+        let push_subscriber = if let Some(ref deliver_subject) = cfg.deliver_subject {
+            Some(nc.subscribe(deliver_subject)?)
+        } else {
+            None
+        };
 
         let mut dedupe_window = IntervalTree::default();
 
@@ -732,11 +681,10 @@ impl Consumer {
                 self.cfg.durable_name.as_ref().unwrap()
             );
 
-            let sub =
-                match self.nc.request_multi(&subject, batch_size.to_string()) {
-                    Ok(sub) => sub,
-                    Err(e) => return vec![Err(e)],
-                };
+            let sub = match self.nc.request_multi(&subject, batch_size.to_string()) {
+                Ok(sub) => sub,
+                Err(e) => return vec![Err(e)],
+            };
             _sub_opt = Some(sub);
             _sub_opt.as_ref().unwrap()
         };
@@ -817,10 +765,7 @@ impl Consumer {
     /// the `double_ack` method of the argument message. If you require
     /// both the returned `Ok` from the closure and the `Err` from a
     /// failed ack, use `process_batch` instead.
-    pub fn process<R, F: Fn(&Message) -> io::Result<R>>(
-        &mut self,
-        f: F,
-    ) -> io::Result<R> {
+    pub fn process<R, F: Fn(&Message) -> io::Result<R>>(&mut self, f: F) -> io::Result<R> {
         loop {
             let next = if let Some(ps) = &self.push_subscriber {
                 ps.next().unwrap()
@@ -849,7 +794,7 @@ impl Consumer {
                 return Err(Error::new(
                     ErrorKind::Other,
                     "failed to process jetstream message info \
-                    from message reply subject. Is your nats-server up to date?"
+                    from message reply subject. Is your nats-server up to date?",
                 ));
             };
 
@@ -884,10 +829,7 @@ impl Consumer {
     /// the `double_ack` method of the argument message. If you require
     /// both the returned `Ok` from the closure and the `Err` from a
     /// failed ack, use `process_batch` instead.
-    pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(
-        &mut self,
-        f: F,
-    ) -> io::Result<R> {
+    pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(&mut self, f: F) -> io::Result<R> {
         loop {
             let next = if let Some(ps) = &self.push_subscriber {
                 ps.next_timeout(self.timeout)?
@@ -958,10 +900,7 @@ impl Consumer {
     ///
     /// This is a lower-level method and does not filter messages through the `Consumer`'s
     /// built-in `dedupe_window` as the various `process*` methods do.
-    pub fn pull_opt(
-        &mut self,
-        next_request: NextRequest,
-    ) -> io::Result<crate::Subscription> {
+    pub fn pull_opt(&mut self, next_request: NextRequest) -> io::Result<crate::Subscription> {
         if self.cfg.durable_name.is_none() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -1045,10 +984,7 @@ impl IntervalTree {
         match (left_merge, right_merge) {
             (true, true) => {
                 let right_end = self.inner.remove(&(id + 1)).unwrap();
-                assert_eq!(
-                    self.inner.insert(prev_start, right_end),
-                    Some(id - 1)
-                );
+                assert_eq!(self.inner.insert(prev_start, right_end), Some(id - 1));
             }
             (true, false) => {
                 assert_eq!(self.inner.insert(prev_start, id), Some(id - 1));
@@ -1068,9 +1004,7 @@ impl IntervalTree {
 
     /// Returns `true` if this ID has already been processed.
     pub fn already_processed(&self, id: u64) -> bool {
-        if let Some((prev_start, prev_end)) =
-            self.inner.range(..=&id).next_back()
-        {
+        if let Some((prev_start, prev_end)) = self.inner.range(..=&id).next_back() {
             (prev_start..=prev_end).contains(&&id)
         } else {
             false

@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::convert::TryFrom;
 use std::io::prelude::*;
 use std::io::{self, Error, ErrorKind};
@@ -45,10 +58,7 @@ pub(crate) enum ServerOp {
 
 // adapted from `std::io::BufRead::read_until`, made
 // to use a fixed buffer instead of a growable vector.
-fn read_line<R: BufRead + ?Sized>(
-    r: &mut R,
-    buf: &mut [u8],
-) -> io::Result<usize> {
+fn read_line<R: BufRead + ?Sized>(r: &mut R, buf: &mut [u8]) -> io::Result<usize> {
     let mut read = 0;
     loop {
         let available = match r.fill_buf() {
@@ -89,8 +99,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     // Read a line, which should be human readable.
     #[allow(unsafe_code)]
     #[allow(clippy::uninit_assumed_init)]
-    let mut command_buf: [u8; 4096] =
-        unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+    let mut command_buf: [u8; 4096] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
     let command_len = read_line(&mut stream, &mut command_buf)?;
     if command_len == 0 {
@@ -118,10 +127,8 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
 
     if op == "INFO" {
         // Parse the JSON-formatted server information.
-        let server_info =
-            ServerInfo::parse(&line["INFO".len()..]).ok_or_else(|| {
-                Error::new(ErrorKind::InvalidInput, "cannot parse server info")
-            })?;
+        let server_info = ServerInfo::parse(&line["INFO".len()..])
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "cannot parse server info"))?;
 
         return Ok(Some(ServerOp::Info(server_info)));
     }
@@ -136,9 +143,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
         let (subject, sid, reply_to, num_bytes) = match args[..] {
             [subject, sid, num_bytes] => (subject, sid, None, num_bytes),
-            [subject, sid, reply_to, num_bytes] => {
-                (subject, sid, Some(reply_to), num_bytes)
-            }
+            [subject, sid, reply_to, num_bytes] => (subject, sid, Some(reply_to), num_bytes),
             _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
@@ -194,8 +199,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         // Parse the operation syntax:
         // `HMSG <subject> <sid> [reply-to] <# header bytes>
         // <# total bytes>\r\n<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
-        let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..]
-        {
+        let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..] {
             [subject, sid, num_header_bytes, num_bytes] => {
                 (subject, sid, None, num_header_bytes, num_bytes)
             }
@@ -225,14 +229,13 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         let reply_to = reply_to.map(ToString::to_string);
 
         // Parse the number of payload bytes.
-        let num_header_bytes =
-            u32::from_str(num_header_bytes).map_err(|_| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "cannot parse the number of header bytes argument after \
+        let num_header_bytes = u32::from_str(num_header_bytes).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "cannot parse the number of header bytes argument after \
                      HMSG",
-                )
-            })?;
+            )
+        })?;
 
         // Parse the number of payload bytes.
         let num_bytes = u32::from_str(num_bytes).map_err(|_| {
@@ -328,10 +331,7 @@ pub(crate) enum ClientOp<'a> {
 }
 
 /// Encodes a single operation from the client.
-pub(crate) fn encode(
-    mut stream: impl Write,
-    op: ClientOp<'_>,
-) -> io::Result<()> {
+pub(crate) fn encode(mut stream: impl Write, op: ClientOp<'_>) -> io::Result<()> {
     match &op {
         ClientOp::Connect(connect_info) => {
             let op = format!(

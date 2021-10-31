@@ -1,3 +1,17 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use parking_lot::{Mutex, MutexGuard};
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Error, ErrorKind};
@@ -5,17 +19,15 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use url::Url;
 
-use parking_lot::{Mutex, MutexGuard};
 use webpki::DNSNameRef;
 
 use crate::auth_utils;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::rustls::{ClientConfig, ClientSession, Session};
 use crate::secure_wipe::SecureString;
-use crate::{
-    connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo,
-};
+use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
 
 /// Maintains a list of servers and establishes connections.
 ///
@@ -35,10 +47,7 @@ pub(crate) struct Connector {
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
-    pub(crate) fn new(
-        url: &str,
-        options: Arc<Options>,
-    ) -> io::Result<Connector> {
+    pub(crate) fn new(url: &str, options: Arc<Options>) -> io::Result<Connector> {
         let mut tls_config = options.tls_client_config.clone();
 
         // Include system root certificates.
@@ -63,10 +72,7 @@ impl Connector {
                 .root_store
                 .add_pem_file(&mut cursor)
                 .map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "invalid certificate file",
-                    )
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid certificate file")
                 })?;
         }
 
@@ -80,10 +86,7 @@ impl Connector {
                     .map_err(|err| {
                         io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!(
-                                "invalid client certificate and key pair: {}",
-                                err
-                            ),
+                            format!("invalid client certificate and key pair: {}", err),
                         )
                     })?;
             }
@@ -143,14 +146,10 @@ impl Connector {
     ///
     /// If `use_backoff` is `true`, this method will try connecting in a loop
     /// and will back off after failed connect attempts.
-    pub(crate) fn connect(
-        &mut self,
-        use_backoff: bool,
-    ) -> io::Result<(ServerInfo, NatsStream)> {
+    pub(crate) fn connect(&mut self, use_backoff: bool) -> io::Result<(ServerInfo, NatsStream)> {
         // The last seen error, which gets returned if all connect attempts
         // fail.
-        let mut last_err =
-            Error::new(ErrorKind::AddrNotAvailable, "no socket addresses");
+        let mut last_err = Error::new(ErrorKind::AddrNotAvailable, "no socket addresses");
 
         loop {
             // Shuffle the list of servers.
@@ -162,19 +161,17 @@ impl Connector {
                 // Calculate sleep duration for exponential backoff and bump the
                 // reconnect counter.
                 let reconnects = self.attempts.get_mut(server).unwrap();
-                let sleep_duration =
-                    self.options.reconnect_delay_callback.call(*reconnects);
+                let sleep_duration = self.options.reconnect_delay_callback.call(*reconnects);
                 *reconnects += 1;
 
                 // Resolve the server URL to socket addresses.
-                let host = server.host.clone();
-                let port = server.port;
+                let host = server.host();
+                let port = server.port();
 
                 // Inject random I/O failures when testing.
                 let fault_injection = inject_io_failure();
 
-                let lookup_res = fault_injection
-                    .and_then(|_| (host.as_str(), port).to_socket_addrs());
+                let lookup_res = fault_injection.and_then(|_| (host, port).to_socket_addrs());
 
                 let mut addrs = match lookup_res {
                     Ok(addrs) => addrs.collect::<Vec<_>>(),
@@ -235,7 +232,7 @@ impl Connector {
         stream.set_nodelay(true)?;
 
         // Expect an INFO message.
-        let mut line = crate::SecureVec::with_capacity(512);
+        let mut line = crate::SecureVec::with_capacity(1024);
         while !line.ends_with(b"\r\n") {
             let byte = &mut [0];
             stream.read_exact(byte)?;
@@ -250,10 +247,7 @@ impl Connector {
                 ));
             }
             None => {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "connection closed",
-                ));
+                return Err(Error::new(ErrorKind::UnexpectedEof, "connection closed"));
             }
         };
 
@@ -261,9 +255,8 @@ impl Connector {
         // - Has `self.options.tls_required(true)` been set?
         // - Was the server address prefixed with `tls://`?
         // - Does the INFO line contain `tls_required: true`?
-        let tls_required = self.options.tls_required
-            || server.tls_required
-            || server_info.tls_required;
+        let tls_required =
+            self.options.tls_required || server.tls_required() || server_info.tls_required;
 
         // Upgrade to TLS if required.
         let session = if tls_required {
@@ -272,9 +265,7 @@ impl Connector {
 
             // Connect using TLS.
             let dns_name = DNSNameRef::try_from_ascii_str(&server_info.host)
-                .or_else(|_| {
-                    DNSNameRef::try_from_ascii_str(server.host.as_str())
-                })
+                .or_else(|_| DNSNameRef::try_from_ascii_str(server.host()))
                 .map_err(|_| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -303,6 +294,7 @@ impl Connector {
             signature: None,
             echo: !self.options.no_echo,
             headers: true,
+            no_responders: true,
         };
 
         // Fill in the info that authenticates the client.
@@ -327,6 +319,12 @@ impl Connector {
                 connect_info.nkey = Some(nkey);
                 connect_info.signature = Some(sig);
             }
+        }
+
+        // If our server url had embedded username, check that here.
+        if server.has_user_pass() {
+            connect_info.user = server.username();
+            connect_info.pass = server.password();
         }
 
         // Send CONNECT and PING messages.
@@ -371,109 +369,84 @@ impl Connector {
     }
 }
 
-/// A parsed URL.
+/// A parsed URL with defaults for port and scheme if needed.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Server {
-    host: String,
-    port: u16,
-    tls_required: bool,
+    url: Url,
 }
 
 impl Server {
+    /// Returns if tls is required by the client for this server.
+    fn tls_required(&self) -> bool {
+        self.url.scheme() == "tls"
+    }
+
+    /// Returns if the server url had embedded username and password.
+    fn has_user_pass(&self) -> bool {
+        self.url.username() != ""
+    }
+
+    /// Returns the host.
+    fn host(&self) -> &str {
+        self.url.host_str().unwrap()
+    }
+
+    /// Returns the port.
+    fn port(&self) -> u16 {
+        self.url.port().unwrap()
+    }
+
+    /// Returns the optional username in the url.
+    fn username(&self) -> Option<SecureString> {
+        let user = self.url.username();
+        if user.is_empty() {
+            None
+        } else {
+            Some(SecureString::from(user.to_string()))
+        }
+    }
+
+    /// Returns the optional password in the url.
+    fn password(&self) -> Option<SecureString> {
+        self.url
+            .password()
+            .map(|password| SecureString::from(password.to_string()))
+    }
+
     /// Creates a new server from an URL.
     ///
     /// Returns an error if the URL cannot be parsed.
-    fn new(url: &str) -> io::Result<Server> {
+    fn new(raw_url: &str) -> io::Result<Server> {
+        let mut url_str = raw_url.to_string();
+
         // Make sure this isn't a comma-separated URL list.
-        if url.contains(',') {
+        if url_str.contains(',') {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "only one server URL should be passed to Server::new",
             ));
         }
 
-        // Check if the URL starts with "tls://".
-        let tls_required = if let Some("tls") = url.split("://").next() {
-            true
-        } else {
-            false
-        };
+        // Check for scheme. Url::parse requires it.
+        if !url_str.contains("://") {
+            url_str = format!("nats://{}", url_str);
+        }
 
-        // Extract the part after "://".
-        let scheme_separator = "://";
-        let host_port = if let Some(idx) = url.find(&scheme_separator) {
-            &url[idx + scheme_separator.len()..]
-        } else {
+        let mut url = if let Ok(url) = Url::parse(&url_str) {
             url
-        };
-
-        // Extract the host.
-        let (host, port) = if host_port.starts_with('[') {
-            // ipv6
-            let close_idx = if let Some(ci) = host_port.find(']') {
-                ci
-            } else {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("invalid URL provided: {}", url),
-                ));
-            };
-
-            let host = host_port[1..close_idx].to_string();
-
-            let port = if host_port.len() == close_idx + 1 {
-                4222
-            } else if let Ok(port) = host_port[close_idx + 2..].parse() {
-                port
-            } else {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("unable to parse port number in URL: {}", url),
-                ));
-            };
-
-            (host, port)
         } else {
-            let mut host_port_splits = host_port.split(':');
-            let host_opt = host_port_splits.next();
-            if host_opt.map_or(true, str::is_empty) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("invalid URL provided: {}", url),
-                ));
-            };
-
-            let host = host_opt.unwrap().to_string();
-
-            let port_opt = host_port_splits
-                .next()
-                .and_then(|port_str| port_str.parse().ok());
-            let port = port_opt.unwrap_or(4222);
-
-            if host_port_splits.next().is_some() {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!(
-                        "unable to parse port number in URL: {}. \
-                        If you are trying to use ipv6, please wrap \
-                        the address in square brackets: [{}] etc... \
-                        with an optional colon and port after the \
-                        closing bracket.",
-                        url, url
-                    ),
-                ));
-            }
-
-            (host, port)
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid URL provided: {}", url_str),
+            ));
         };
 
-        // Extract the port.
+        // Set default port.
+        if url.port().is_none() {
+            url.set_port(Some(4222)).ok();
+        }
 
-        Ok(Server {
-            host,
-            port,
-            tls_required,
-        })
+        Ok(Server { url })
     }
 }
 
@@ -497,10 +470,7 @@ struct TlsStream {
 
 impl NatsStream {
     /// Creates a NATS stream from a TCP stream and an optional TLS session.
-    fn new(
-        tcp: TcpStream,
-        session: Option<ClientSession>,
-    ) -> io::Result<NatsStream> {
+    fn new(tcp: TcpStream, session: Option<ClientSession>) -> io::Result<NatsStream> {
         let flavor = match session {
             None => Flavor::Tcp(tcp),
             Some(session) => {
@@ -512,10 +482,7 @@ impl NatsStream {
         Ok(NatsStream { flavor })
     }
 
-    pub(crate) fn set_write_timeout(
-        &self,
-        timeout: Option<Duration>,
-    ) -> io::Result<()> {
+    pub(crate) fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => tcp.set_write_timeout(timeout),
             Flavor::Tls(tls) => tls.lock().tcp.set_write_timeout(timeout),
@@ -533,12 +500,10 @@ impl Read for &NatsStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => (&*tcp).read(buf),
-            Flavor::Tls(tls) => {
-                tls_op(tls, |session, eof| match session.read(buf) {
-                    Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
-                    res => res,
-                })
-            }
+            Flavor::Tls(tls) => tls_op(tls, |session, eof| match session.read(buf) {
+                Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
+                res => res,
+            }),
         }
     }
 }
@@ -585,9 +550,9 @@ fn tls_op<T: std::fmt::Debug>(
         if session.wants_read() {
             match session.read_tls(tcp) {
                 Ok(0) => eof = true,
-                Ok(_) => session.process_new_packets().map_err(|err| {
-                    Error::new(ErrorKind::Other, format!("TLS error: {}", err))
-                })?,
+                Ok(_) => session
+                    .process_new_packets()
+                    .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {}", err)))?,
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {}
                 Err(err) => return Err(err),
             }
@@ -622,9 +587,7 @@ fn tls_wait(mut tls: MutexGuard<'_, TlsStream>) -> io::Result<()> {
     #[cfg(windows)]
     use {
         std::os::windows::io::AsRawSocket,
-        winapi::um::winsock2::{
-            self as sys, WSAPoll as poll, WSAPOLLFD as pollfd,
-        },
+        winapi::um::winsock2::{self as sys, WSAPoll as poll, WSAPOLLFD as pollfd},
     };
 
     let TlsStream { tcp, session } = &mut *tls;

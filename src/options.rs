@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::cmp;
 use std::convert::TryInto;
 use std::fmt;
@@ -137,7 +150,7 @@ impl Options {
     /// Authenticate with NATS using a username and password.
     ///
     /// # Example
-    /// ```
+    /// ```should_panic
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
@@ -222,9 +235,7 @@ impl Options {
         Ok(Options {
             auth: AuthStyle::Credentials {
                 jwt_cb: { Arc::new(move || Ok(jwt.clone())) },
-                sig_cb: {
-                    Arc::new(move |nonce| auth_utils::sign_nonce(nonce, &kp))
-                },
+                sig_cb: { Arc::new(move |nonce| auth_utils::sign_nonce(nonce, &kp)) },
             },
             ..Default::default()
         })
@@ -254,9 +265,7 @@ impl Options {
         Options {
             auth: AuthStyle::Credentials {
                 jwt_cb: Arc::new(move || jwt_cb().map(|s| s.into())),
-                sig_cb: Arc::new(move |nonce| {
-                    Ok(base64_url::encode(&sig_cb(nonce)).into())
-                }),
+                sig_cb: Arc::new(move |nonce| Ok(base64_url::encode(&sig_cb(nonce)).into())),
             },
             ..Default::default()
         }
@@ -304,11 +313,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn client_cert(
-        mut self,
-        cert: impl AsRef<Path>,
-        key: impl AsRef<Path>,
-    ) -> Options {
+    pub fn client_cert(mut self, cert: impl AsRef<Path>, key: impl AsRef<Path>) -> Options {
         self.client_cert = Some(cert.as_ref().to_owned());
         self.client_key = Some(key.as_ref().to_owned());
         self
@@ -343,10 +348,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tls_client_config(
-        mut self,
-        tls_client_config: crate::rustls::ClientConfig,
-    ) -> Options {
+    pub fn tls_client_config(mut self, tls_client_config: crate::rustls::ClientConfig) -> Options {
         self.tls_client_config = tls_client_config;
         self
     }
@@ -399,10 +401,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn max_reconnects<T: Into<Option<usize>>>(
-        mut self,
-        max_reconnects: T,
-    ) -> Options {
+    pub fn max_reconnects<T: Into<Option<usize>>>(mut self, max_reconnects: T) -> Options {
         self.max_reconnects = max_reconnects.into();
         self
     }
@@ -422,10 +421,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn reconnect_buffer_size(
-        mut self,
-        reconnect_buffer_size: usize,
-    ) -> Options {
+    pub fn reconnect_buffer_size(mut self, reconnect_buffer_size: usize) -> Options {
         self.reconnect_buffer_size = reconnect_buffer_size;
         self
     }
@@ -519,10 +515,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn jetstream_api_prefix(
-        mut self,
-        mut jetstream_prefix: String,
-    ) -> Self {
+    pub fn jetstream_api_prefix(mut self, mut jetstream_prefix: String) -> Self {
         if !jetstream_prefix.ends_with('.') {
             jetstream_prefix.push('.');
         }
@@ -660,9 +653,7 @@ impl fmt::Debug for AuthStyle {
             AuthStyle::UserPass(user, pass) => {
                 f.debug_tuple("Token").field(user).field(pass).finish()
             }
-            AuthStyle::Credentials { .. } => {
-                f.debug_struct("Credentials").finish()
-            }
+            AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
             AuthStyle::NKey { .. } => f.debug_struct("NKey").finish(),
         }
     }
@@ -695,9 +686,7 @@ impl fmt::Debug for Callback {
     }
 }
 
-pub(crate) struct ReconnectDelayCallback(
-    Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
-);
+pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
 impl ReconnectDelayCallback {
     pub fn call(&self, reconnects: usize) -> Duration {
         self.0(reconnects)

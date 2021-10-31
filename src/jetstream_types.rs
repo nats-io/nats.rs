@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -401,9 +414,7 @@ impl Default for StorageType {
 }
 
 /// Various limits imposed on a particular account.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct AccountLimits {
     /// Maximum memory for this account (-1 if no limit)
     pub max_memory: i64,
@@ -416,9 +427,7 @@ pub struct AccountLimits {
 }
 
 /// returns current statistics about the account's `JetStream` usage.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AccountStats {
     pub memory: u64,
     pub storage: u64,
@@ -505,9 +514,7 @@ pub struct ClusterInfo {
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SequencePair {
     /// How far along the consumer has progressed
     pub consumer_seq: u64,
@@ -516,9 +523,7 @@ pub struct SequencePair {
 }
 
 /// for getting next messages for pull based consumers.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct NextRequest {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,

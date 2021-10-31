@@ -124,11 +124,7 @@ impl Connection {
     }
 
     /// Publishes a message.
-    pub async fn publish(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    pub async fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
             .await
     }
@@ -140,12 +136,10 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        if let Some(res) = self.inner.try_publish_with_reply_or_headers(
-            subject,
-            Some(reply),
-            None,
-            &msg,
-        ) {
+        if let Some(res) =
+            self.inner
+                .try_publish_with_reply_or_headers(subject, Some(reply), None, &msg)
+        {
             return res;
         }
         let subject = subject.to_string();
@@ -161,11 +155,7 @@ impl Connection {
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<Message> {
+    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         let subject = subject.to_string();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
@@ -184,9 +174,7 @@ impl Connection {
         let subject = subject.to_string();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
-        let msg =
-            unblock(move || inner.request_timeout(&subject, msg, timeout))
-                .await?;
+        let msg = unblock(move || inner.request_timeout(&subject, msg, timeout)).await?;
         Ok(msg.into())
     }
 
@@ -223,16 +211,11 @@ impl Connection {
     }
 
     /// Creates a queue subscription.
-    pub async fn queue_subscribe(
-        &self,
-        subject: &str,
-        queue: &str,
-    ) -> io::Result<Subscription> {
+    pub async fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
         let subject = subject.to_string();
         let queue = queue.to_string();
         let inner = self.inner.clone();
-        let inner =
-            unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
+        let inner = unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
@@ -307,12 +290,7 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         unblock(move || {
-            inner.publish_with_reply_or_headers(
-                &subject,
-                reply.as_deref(),
-                headers.as_ref(),
-                msg,
-            )
+            inner.publish_with_reply_or_headers(&subject, reply.as_deref(), headers.as_ref(), msg)
         })
         .await
     }
@@ -432,18 +410,13 @@ impl Message {
                 "no reply subject available",
             )),
             Some(reply) => {
-                if let Some(res) =
-                    self.client.try_publish(reply, None, None, msg.as_ref())
-                {
+                if let Some(res) = self.client.try_publish(reply, None, None, msg.as_ref()) {
                     return res;
                 }
                 let reply = reply.to_string();
                 let msg = msg.as_ref().to_vec();
                 let client = self.client.clone();
-                unblock(move || {
-                    client.publish(&reply, None, None, msg.as_ref())
-                })
-                .await
+                unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
             }
         }
     }
@@ -592,11 +565,7 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub fn client_cert(
-        self,
-        cert: impl AsRef<Path>,
-        key: impl AsRef<Path>,
-    ) -> Options {
+    pub fn client_cert(self, cert: impl AsRef<Path>, key: impl AsRef<Path>) -> Options {
         Options {
             inner: self.inner.client_cert(cert, key),
         }
@@ -652,10 +621,7 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub fn max_reconnects<T: Into<Option<usize>>>(
-        self,
-        max_reconnects: T,
-    ) -> Options {
+    pub fn max_reconnects<T: Into<Option<usize>>>(self, max_reconnects: T) -> Options {
         Options {
             inner: self.inner.max_reconnects(max_reconnects),
         }
@@ -676,10 +642,7 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub fn reconnect_buffer_size(
-        self,
-        reconnect_buffer_size: usize,
-    ) -> Options {
+    pub fn reconnect_buffer_size(self, reconnect_buffer_size: usize) -> Options {
         Options {
             inner: self.inner.reconnect_buffer_size(reconnect_buffer_size),
         }
