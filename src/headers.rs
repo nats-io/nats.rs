@@ -119,13 +119,17 @@ fn parse_error<T, E: AsRef<str>>(e: E) -> std::io::Result<T> {
     ))
 }
 
+fn is_continuation(c: char) -> bool {
+    return c == ' ' || c == '\t';
+}
+
 impl TryFrom<&[u8]> for Headers {
     type Error = std::io::Error;
 
     fn try_from(buf: &[u8]) -> std::io::Result<Self> {
         let mut inner = HashMap::default();
         let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
-            line.lines()
+            line.lines().peekable()
         } else {
             return parse_error("invalid header received");
         };
@@ -157,12 +161,19 @@ impl TryFrom<&[u8]> for Headers {
             return parse_error("expected header information not present");
         };
 
-        for line in lines {
+        while let Some(line) = lines.next() {
             let splits = line.splitn(2, ':').map(str::trim).collect::<Vec<_>>();
             match splits[..] {
                 [k, v] => {
                     let entry = inner.entry(k.to_string()).or_insert_with(HashSet::default);
-                    entry.insert(v.to_string());
+
+                    let mut s = String::from(v.trim());
+                    while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)) {
+                        s.push_str(" ");
+                        s.push_str(v.trim());
+                    }
+
+                    entry.insert(s);
                 }
                 [""] => continue,
                 _ => {
@@ -250,6 +261,48 @@ mod try_from {
         assert_eq!(
             headers.inner.get(&DESCRIPTION_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+        );
+    }
+
+    #[test]
+    fn single_line() {
+        let headers = Headers::try_from(
+            "NATS/1.0 200\r\nAccept-Encoding: json\r\nAuthorization: s3cr3t\r\n".as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            headers.inner.get(&"Accept-Encoding".to_string()),
+            Some(&HashSet::from_iter(vec!["json".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&"Authorization".to_string()),
+            Some(&HashSet::from_iter(vec!["s3cr3t".to_string()]))
+        );
+    }
+
+    #[test]
+    fn multi_line_with_tabs() {
+        let headers =
+            Headers::try_from("NATS/1.0 200\r\nX-Test: one,\r\n\ttwo,\r\n\tthree\r\n".as_bytes())
+                .unwrap();
+
+        assert_eq!(
+            headers.inner.get(&"X-Test".to_string()),
+            Some(&HashSet::from_iter(vec!["one, two, three".to_string()]))
+        );
+    }
+
+    #[test]
+    fn multi_line_with_spaces() {
+        let headers =
+            Headers::try_from("NATS/1.0 200\r\nX-Test: one,\r\n two,\r\n three\r\n".as_bytes())
+                .unwrap();
+
+        assert_eq!(
+            headers.inner.get(&"X-Test".to_string()),
+            Some(&HashSet::from_iter(vec!["one, two, three".to_string()]))
         );
     }
 }
