@@ -112,8 +112,28 @@ impl TryFrom<&[u8]> for Headers {
         };
 
         if let Some(line) = lines.next() {
-            if !line.starts_with("NATS/") {
-                return parse_error("version line does not begin with NATS/");
+            let mut parts = line.splitn(3, ' ');
+
+            if let Some(v) = parts.next() {
+                if !v.starts_with("NATS") {
+                    return parse_error("version line does not begin with NATS/");
+                }
+            }
+
+            if let Some(v) = parts.next() {
+                let entry = inner
+                    .entry("Status".to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
+            }
+
+            if let Some(v) = parts.next() {
+                let entry = inner
+                    .entry("Description".to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
             }
         } else {
             return parse_error("expected header information not present");
@@ -160,5 +180,35 @@ impl Headers {
         }
         buf.extend_from_slice(b"\r\n");
         buf
+    }
+}
+
+#[cfg(test)]
+mod try_from {
+    use super::*;
+
+    #[test]
+    fn inline_status() {
+        let headers = Headers::try_from("NATS/1.0 503".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&"Status".to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string(),]))
+        );
+    }
+
+    #[test]
+    fn inline_status_with_description() {
+        let headers = Headers::try_from("NATS/1.0 503 no-responders".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&"Status".to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&"Description".to_string()),
+            Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+        );
     }
 }
