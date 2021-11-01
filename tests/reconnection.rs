@@ -48,9 +48,7 @@ fn reconnect_test() {
             const EXPECTED_SUCCESSES: usize = 25;
             let mut received = 0;
 
-            while received < EXPECTED_SUCCESSES
-                && !shutdown.load(Ordering::Acquire)
-            {
+            while received < EXPECTED_SUCCESSES && !shutdown.load(Ordering::Acquire) {
                 if nc
                     .request_timeout(
                         "rust.tests.faulty_requests",
