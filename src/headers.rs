@@ -8,6 +8,8 @@ use std::{
 use log::trace;
 
 const VERSION_LINE: &str = "NATS/1.0";
+const VERSION_LINE_LEN: usize = VERSION_LINE.len();
+
 pub const HEADER_STATUS: &str = "Status";
 pub const HEADER_DESCRIPTION: &str = "Description";
 
@@ -116,28 +118,27 @@ impl TryFrom<&[u8]> for Headers {
         };
 
         if let Some(line) = lines.next() {
-            let mut parts = line.splitn(3, ' ');
+            if !line.starts_with(VERSION_LINE) {
+                return parse_error("version line does not begin with NATS/1.0");
+            }
 
-            if let Some(v) = parts.next() {
-                if !v.starts_with(VERSION_LINE) {
-                    return parse_error("version line does not begin with NATS/");
+            if line.len() > VERSION_LINE_LEN {
+                let status_line = &line[VERSION_LINE_LEN..];
+                let mut parts = status_line.split_whitespace();
+
+                if let Some(status) = parts.next() {
+                    let entry = inner
+                        .entry(HEADER_STATUS.to_string())
+                        .or_insert_with(HashSet::default);
+                    entry.insert(status.to_string());
+
+                    if let Some(description) = parts.next() {
+                        let entry = inner
+                            .entry(HEADER_DESCRIPTION.to_string())
+                            .or_insert_with(HashSet::default);
+                        entry.insert(description.to_string());
+                    }
                 }
-            }
-
-            if let Some(v) = parts.next() {
-                let entry = inner
-                    .entry(HEADER_STATUS.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
-            }
-
-            if let Some(v) = parts.next() {
-                let entry = inner
-                    .entry(HEADER_DESCRIPTION.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
             }
         } else {
             return parse_error("expected header information not present");
@@ -193,7 +194,16 @@ mod try_from {
 
     #[test]
     fn inline_status() {
+        // With single spacing.
         let headers = Headers::try_from("NATS/1.0 503".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&HEADER_STATUS.to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string(),]))
+        );
+
+        // With double spacing.
+        let headers = Headers::try_from("NATS/1.0  503".as_bytes()).unwrap();
 
         assert_eq!(
             headers.inner.get(&HEADER_STATUS.to_string()),
@@ -203,7 +213,21 @@ mod try_from {
 
     #[test]
     fn inline_status_with_description() {
+        // With single spacing
         let headers = Headers::try_from("NATS/1.0 503 no-responders".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&HEADER_STATUS.to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&HEADER_DESCRIPTION.to_string()),
+            Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+        );
+
+        // With double spacing.
+        let headers = Headers::try_from("NATS/1.0  503  no-responders".as_bytes()).unwrap();
 
         assert_eq!(
             headers.inner.get(&HEADER_STATUS.to_string()),
