@@ -115,7 +115,7 @@ impl TryFrom<&[u8]> for Headers {
             let mut parts = line.splitn(3, ' ');
 
             if let Some(v) = parts.next() {
-                if !v.starts_with("NATS") {
+                if !v.starts_with("NATS/1.0") {
                     return parse_error("version line does not begin with NATS/");
                 }
             }
