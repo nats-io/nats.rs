@@ -167,7 +167,9 @@ impl TryFrom<&[u8]> for Headers {
             }
 
             if let Some((k, v)) = line.split_once(':') {
-                let entry = inner.entry(k.to_string()).or_insert_with(HashSet::default);
+                let entry = inner
+                    .entry(k.trim().to_string())
+                    .or_insert_with(HashSet::default);
 
                 let mut s = String::from(v.trim());
                 while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)) {
