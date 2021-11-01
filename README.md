@@ -16,8 +16,8 @@
 
 ## Motivation
 
-Rust may be the most interesting new language the NATS ecosystem has seen. We
-believe this client will have a large impact on NATS, distributed systems, and
+Rust may be one the most interesting new languages the NATS ecosystem has seen.
+We believe this client will have a large impact on NATS, distributed systems, and
 embedded and IoT environments. With Rust we wanted to be as idiomatic as we
 could be and lean into the strengths of the language. We moved many things that
 would have been runtime checks and errors to the compiler, most notably options
@@ -134,7 +134,7 @@ The following is a list of features currently supported and planned for the near
 * [x] Header Support
 
 ### Miscellaneous TODOs
-* [ ] Ping timer
+* [X] Ping timer
 * [X] msg.respond
 * [X] Drain mode
 * [ ] COW for received messages

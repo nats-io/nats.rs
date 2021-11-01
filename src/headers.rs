@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -100,6 +113,14 @@ fn parse_error<T, E: AsRef<str>>(e: E) -> std::io::Result<T> {
     ))
 }
 
+// Header status processing.
+const HDR_PRE: &str = "NATS/1.0";
+const HDR_PRE_END: usize = HDR_PRE.len();
+
+// Public
+pub const STATUS_HDR: &str = "Status";
+pub const DESC_HDR: &str = "Description";
+
 impl TryFrom<&[u8]> for Headers {
     type Error = std::io::Error;
 
@@ -108,12 +129,29 @@ impl TryFrom<&[u8]> for Headers {
         let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
             line.lines()
         } else {
-            return parse_error("invalid utf8 received");
+            return parse_error("invalid header received");
         };
 
         if let Some(line) = lines.next() {
-            if !line.starts_with("NATS/") {
+            if !line.starts_with(HDR_PRE) {
                 return parse_error("version line does not begin with NATS/");
+            }
+            // Check for an inline status and optional description.
+            if line.len() > HDR_PRE_END {
+                let status_line = &line[HDR_PRE_END..];
+                let mut parts: Vec<&str> = status_line.split_whitespace().collect();
+                let code = parts.pop().unwrap();
+                let entry = inner
+                    .entry(STATUS_HDR.to_string())
+                    .or_insert_with(HashSet::default);
+                entry.insert(code.to_string());
+                // Optional description.
+                if let Some(description) = parts.pop() {
+                    let entry = inner
+                        .entry(DESC_HDR.to_string())
+                        .or_insert_with(HashSet::default);
+                    entry.insert(description.to_string());
+                }
             }
         } else {
             return parse_error("expected header information not present");

@@ -49,6 +49,8 @@ fn main() -> CliResult {
 
     let nc = opts
         .with_name("nats-box rust example")
+        .disconnect_callback(|| println!("Disconnected"))
+        .reconnect_callback(|| println!("Reconnected"))
         .connect(&args.server)?;
 
     match args.cmd {
