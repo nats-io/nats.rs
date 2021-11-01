@@ -15,10 +15,8 @@ pub struct Server {
 }
 
 lazy_static! {
-    static ref SD_RE: Regex =
-        Regex::new(r#".+\sStore Directory:\s+"([^"]+)""#).unwrap();
-    static ref CLIENT_RE: Regex =
-        Regex::new(r#".+\sclient connections on\s+(\S+)"#).unwrap();
+    static ref SD_RE: Regex = Regex::new(r#".+\sStore Directory:\s+"([^"]+)""#).unwrap();
+    static ref CLIENT_RE: Regex = Regex::new(r#".+\sclient connections on\s+(\S+)"#).unwrap();
 }
 
 impl Drop for Server {
@@ -43,8 +41,7 @@ impl Server {
     // Helpful when dynamically allocating ports with -1.
     pub fn client_url(&self) -> String {
         let addr = self.client_addr();
-        let mut r =
-            BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
+        let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
         let mut line = String::new();
         r.read_line(&mut line).expect("did not receive INFO");
         let si = json::parse(&line["INFO".len()..]).unwrap();
@@ -68,20 +65,20 @@ impl Server {
     // Grab client addr from logs.
     fn client_addr(&self) -> String {
         // We may need to wait for log to be present.
-        let mut log = String::new();
         // Wait up to 2s. (20 * 100ms)
         for _ in 0..20 {
             match fs::read_to_string(self.logfile.as_os_str()) {
                 Ok(l) => {
-                    log.push_str(&l);
-                    break;
+                    if let Some(cre) = CLIENT_RE.captures(&l) {
+                        return cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1");
+                    } else {
+                        thread::sleep(Duration::from_millis(250));
+                    }
                 }
-                _ => thread::sleep(Duration::from_millis(100)),
+                _ => thread::sleep(Duration::from_millis(250)),
             }
         }
-        let cre = CLIENT_RE.captures(&log).expect("no client information");
-        // Replace 0.0.0.0 as well with 127.0.0.1
-        cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1")
+        panic!("no client addr info");
     }
 }
 
