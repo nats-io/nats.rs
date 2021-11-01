@@ -176,12 +176,13 @@ impl Client {
             move || {
                 // Track last flush/write time.
                 const MIN_FLUSH_BETWEEN: Duration = Duration::from_millis(5);
-                let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
 
                 // Handle recv timeouts and check if we should send a PING.
                 // TODO(dlc) - Make configurable.
                 const PING_INTERVAL: Duration = Duration::from_secs(2 * 60);
                 const MAX_PINGS_OUT: u8 = 2;
+
+                let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
 
                 // Wait until at least one message is buffered.
                 loop {
