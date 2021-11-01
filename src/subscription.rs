@@ -133,12 +133,10 @@ impl Subscription {
                 io::ErrorKind::TimedOut,
                 "next_timeout: timed out",
             )),
-            Err(channel::RecvTimeoutError::Disconnected) => {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "next_timeout: unsubscribed",
-                ))
-            }
+            Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                "next_timeout: unsubscribed",
+            )),
         }
     }
 

@@ -123,9 +123,7 @@ impl TryFrom<&[u8]> for Headers {
             let splits = line.splitn(2, ':').map(str::trim).collect::<Vec<_>>();
             match splits[..] {
                 [k, v] => {
-                    let entry = inner
-                        .entry(k.to_string())
-                        .or_insert_with(HashSet::default);
+                    let entry = inner.entry(k.to_string()).or_insert_with(HashSet::default);
                     entry.insert(v.to_string());
                 }
                 [""] => continue,

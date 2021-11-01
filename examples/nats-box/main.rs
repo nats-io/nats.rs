@@ -26,22 +26,13 @@ struct Cli {
 #[derive(StructOpt, Debug, Clone)]
 enum Command {
     /// The type of operation, can be one of pub, sub, qsub, req, reply.
-    #[structopt(
-        name = "pub",
-        about = "Publishes a message to a given subject"
-    )]
+    #[structopt(name = "pub", about = "Publishes a message to a given subject")]
     Pub { subject: String, msg: String },
     #[structopt(name = "sub", about = "Subscribes to a given subject")]
     Sub { subject: String },
-    #[structopt(
-        name = "request",
-        about = "Sends a request and waits on reply"
-    )]
+    #[structopt(name = "request", about = "Sends a request and waits on reply")]
     Request { subject: String, msg: String },
-    #[structopt(
-        name = "reply",
-        about = "Listens for requests and sends the reply"
-    )]
+    #[structopt(name = "reply", about = "Listens for requests and sends the reply")]
     Reply { subject: String, resp: String },
 }
 

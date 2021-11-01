@@ -66,10 +66,8 @@ fn main() -> std::io::Result<()> {
             .expect("failed to connect to NATS server")
     };
 
-    let messages = if args.number_of_messages.get() % args.publishers.get() != 0
-    {
-        let bumped_idx =
-            (args.number_of_messages.get() / args.publishers.get()) + 1;
+    let messages = if args.number_of_messages.get() % args.publishers.get() != 0 {
+        let bumped_idx = (args.number_of_messages.get() / args.publishers.get()) + 1;
         bumped_idx * args.publishers.get()
     } else {
         args.number_of_messages.get()
@@ -77,8 +75,7 @@ fn main() -> std::io::Result<()> {
 
     let message_size = args.message_size;
 
-    let barrier =
-        Arc::new(Barrier::new(1 + args.publishers.get() + args.subscribers));
+    let barrier = Arc::new(Barrier::new(1 + args.publishers.get() + args.subscribers));
 
     let mut threads = vec![];
 

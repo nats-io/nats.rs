@@ -194,12 +194,8 @@ fn jetstream_libdoc_test() {
     nc.publish("my_stream", "3").unwrap();
     nc.publish("my_stream", "4").unwrap();
 
-    let mut consumer = Consumer::create_or_open(
-        nc,
-        "my_stream",
-        "existing_or_created_consumer",
-    )
-    .unwrap();
+    let mut consumer =
+        Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer").unwrap();
 
     // set this very high for CI
     consumer.timeout = std::time::Duration::from_millis(500);
