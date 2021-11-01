@@ -106,7 +106,7 @@ impl Options {
     /// `Options` for establishing a new NATS `Connection`.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let options = nats::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
@@ -120,7 +120,7 @@ impl Options {
     /// Authenticate with NATS using a token.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::with_token("t0k3n!")
     ///     .connect("demo.nats.io")?;
@@ -137,7 +137,7 @@ impl Options {
     /// Authenticate with NATS using a username and password.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
