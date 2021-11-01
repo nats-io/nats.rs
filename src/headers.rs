@@ -162,23 +162,22 @@ impl TryFrom<&[u8]> for Headers {
         };
 
         while let Some(line) = lines.next() {
-            let splits = line.splitn(2, ':').map(str::trim).collect::<Vec<_>>();
-            match splits[..] {
-                [k, v] => {
-                    let entry = inner.entry(k.to_string()).or_insert_with(HashSet::default);
+            if line.is_empty() {
+                continue;
+            }
 
-                    let mut s = String::from(v.trim());
-                    while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)) {
-                        s.push_str(" ");
-                        s.push_str(v.trim());
-                    }
+            if let Some((k, v)) = line.split_once(':') {
+                let entry = inner.entry(k.to_string()).or_insert_with(HashSet::default);
 
-                    entry.insert(s);
+                let mut s = String::from(v.trim());
+                while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)) {
+                    s.push_str(" ");
+                    s.push_str(v.trim());
                 }
-                [""] => continue,
-                _ => {
-                    return parse_error("malformed header input");
-                }
+
+                entry.insert(s);
+            } else {
+                return parse_error("malformed header line");
             }
         }
 
@@ -261,6 +260,35 @@ mod try_from {
         assert_eq!(
             headers.inner.get(&DESCRIPTION_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+        );
+    }
+
+    #[test]
+    fn malformed_line() {
+        let error = Headers::try_from("NATS/1.0 200\r\n\nX-Test-A a\r\n".as_bytes()).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn empty_lines() {
+        let headers = Headers::try_from(
+            "NATS/1.0 200\r\n\nX-Test-A: a\r\n\nX-Test-B: b\r\n\nX-Test-C: c\r\n\n".as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            headers.inner.get(&"X-Test-A".to_string()),
+            Some(&HashSet::from_iter(vec!["a".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&"X-Test-B".to_string()),
+            Some(&HashSet::from_iter(vec!["b".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&"X-Test-C".to_string()),
+            Some(&HashSet::from_iter(vec!["c".to_string()]))
         );
     }
 
