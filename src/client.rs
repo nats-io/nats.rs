@@ -17,10 +17,12 @@ use std::io::prelude::*;
 use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
 use std::mem;
 use std::sync::Arc;
+
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
+use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
 use crate::connector::{Connector, NatsStream};
@@ -67,6 +69,12 @@ struct ReadState {
 
     /// Expected pongs and their notification channels.
     pongs: VecDeque<channel::Sender<()>>,
+
+    /// Tracks the last activity from the server.
+    last_active: Instant,
+
+    /// Used for client side monitoring of connection health.
+    pings_out: u8,
 }
 
 /// A registered subscription.
@@ -114,6 +122,8 @@ impl Client {
                 read: Mutex::new(ReadState {
                     subscriptions: HashMap::new(),
                     pongs: VecDeque::from(vec![pong_sender]),
+                    last_active: Instant::now(),
+                    pings_out: 0,
                 }),
             }),
             server_info: Arc::new(Mutex::new(ServerInfo::default())),
@@ -168,28 +178,71 @@ impl Client {
                 const MIN_FLUSH_BETWEEN: Duration = Duration::from_millis(5);
                 let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
 
+                // Handle recv timeouts and check if we should send a PING.
+                // TODO(dlc) - Make configurable.
+                const PING_INTERVAL: Duration = Duration::from_secs(2 * 60);
+                const MAX_PINGS_OUT: u8 = 2;
+
                 // Wait until at least one message is buffered.
-                while flush_wanted.recv().is_ok() {
-                    let since = last.elapsed();
-                    if since < MIN_FLUSH_BETWEEN {
-                        thread::sleep(MIN_FLUSH_BETWEEN - since);
-                    }
+                loop {
+                    match flush_wanted.recv_timeout(PING_INTERVAL) {
+                        Ok(_) => {
+                            let since = last.elapsed();
+                            if since < MIN_FLUSH_BETWEEN {
+                                thread::sleep(MIN_FLUSH_BETWEEN - since);
+                            }
 
-                    // Flush the writer.
-                    let mut write = client.state.write.lock();
-
-                    if let Some(writer) = write.writer.as_mut() {
-                        let res = writer.flush();
-                        last = Instant::now();
-                        // If flushing fails, disconnect.
-                        if res.is_err() {
-                            // NB see locking protocol for state.write and state.read
-                            write.writer = None;
+                            // Flush the writer.
+                            let mut write = client.state.write.lock();
+                            if let Some(writer) = write.writer.as_mut() {
+                                let res = writer.flush();
+                                last = Instant::now();
+                                // If flushing fails, disconnect.
+                                if res.is_err() {
+                                    // NB see locking protocol for state.write and state.read
+                                    writer.get_ref().shutdown();
+                                    write.writer = None;
+                                    let mut read = client.state.read.lock();
+                                    read.pongs.clear();
+                                }
+                            }
+                            drop(write);
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            let mut write = client.state.write.lock();
                             let mut read = client.state.read.lock();
-                            read.pongs.clear();
+
+                            if read.pings_out >= MAX_PINGS_OUT {
+                                if let Some(writer) = write.writer.as_mut() {
+                                    writer.get_ref().shutdown();
+                                }
+                                write.writer = None;
+                                read.pongs.clear();
+                            } else if read.last_active.elapsed() > PING_INTERVAL {
+                                read.pings_out += 1;
+                                read.pongs.push_back(write.flush_kicker.clone());
+                                // Send out a PING here.
+                                if let Some(mut writer) = write.writer.as_mut() {
+                                    // Ok to ignore errors here.
+                                    proto::encode(&mut writer, ClientOp::Ping).ok();
+                                    let res = writer.flush();
+                                    if res.is_err() {
+                                        // NB see locking protocol for state.write and state.read
+                                        writer.get_ref().shutdown();
+                                        write.writer = None;
+                                        read.pongs.clear();
+                                    }
+                                }
+                            }
+
+                            drop(read);
+                            drop(write);
+                        }
+                        _ => {
+                            // Any other err break and exit.
+                            break;
                         }
                     }
-                    drop(write);
                 }
             }
         });
@@ -555,6 +608,11 @@ impl Client {
                 }
             }
 
+            // Clear our pings_out.
+            let mut read = self.state.read.lock();
+            read.pings_out = 0;
+            drop(read);
+
             // Inject random delays when testing.
             inject_delay();
 
@@ -626,6 +684,12 @@ impl Client {
         Ok(())
     }
 
+    /// Updates our last activity from the server.
+    fn update_activity(&self) {
+        let mut read = self.state.read.lock();
+        read.last_active = Instant::now();
+    }
+
     /// Reads messages from the server and dispatches them to subscribers.
     fn dispatch(&self, mut reader: impl BufRead, connector: &mut Connector) -> io::Result<()> {
         // Handle operations received from the server.
@@ -636,6 +700,9 @@ impl Client {
             if self.check_shutdown().is_err() {
                 break;
             }
+
+            // Track activity.
+            self.update_activity();
 
             match op {
                 ServerOp::Info(server_info) => {
@@ -666,6 +733,9 @@ impl Client {
                     // correspond to the next expected PONG.
                     let write = self.state.write.lock();
                     let mut read = self.state.read.lock();
+
+                    // Clear any outstanding pings.
+                    read.pings_out = 0;
 
                     if write.writer.is_some() {
                         // Take the next expected PONG and complete it by
@@ -739,7 +809,6 @@ impl Client {
                 }
             }
         }
-
         // The stream of operation is broken, meaning the connection was lost.
         Err(ErrorKind::ConnectionReset.into())
     }

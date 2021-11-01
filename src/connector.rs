@@ -15,7 +15,7 @@ use parking_lot::{Mutex, MutexGuard};
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Error, ErrorKind};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -487,6 +487,15 @@ impl NatsStream {
             Flavor::Tcp(tcp) => tcp.set_write_timeout(timeout),
             Flavor::Tls(tls) => tls.lock().tcp.set_write_timeout(timeout),
         }
+    }
+
+    /// Will attempt to shutdown the underlying stream.
+    pub(crate) fn shutdown(&self) {
+        match &*self.flavor {
+            Flavor::Tcp(tcp) => tcp.shutdown(Shutdown::Both),
+            Flavor::Tls(tls) => tls.lock().tcp.shutdown(Shutdown::Both),
+        }
+        .ok();
     }
 }
 
