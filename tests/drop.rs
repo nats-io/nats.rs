@@ -1,10 +1,15 @@
 use smol::future::FutureExt;
 use std::io;
 
+mod util;
+pub use util::*;
+
 #[test]
 fn drop_flushes() -> io::Result<()> {
-    let nc1 = nats::connect("demo.nats.io")?;
-    let nc2 = nats::connect("demo.nats.io")?;
+    let s = util::run_basic_server();
+
+    let nc1 = nats::connect(&s.client_url())?;
+    let nc2 = nats::connect(&s.client_url())?;
 
     let inbox = nc1.new_inbox();
     let sub = nc2.subscribe(&inbox)?;
@@ -20,7 +25,9 @@ fn drop_flushes() -> io::Result<()> {
 
 #[test]
 fn two_connections() -> io::Result<()> {
-    let nc1 = nats::connect("demo.nats.io")?;
+    let s = util::run_basic_server();
+
+    let nc1 = nats::connect(&s.client_url())?;
     let nc2 = nc1.clone();
 
     nc1.publish("foo", b"bar")?;
@@ -34,8 +41,10 @@ fn two_connections() -> io::Result<()> {
 
 #[test]
 fn async_subscription_drop() -> io::Result<()> {
+    let s = util::run_basic_server();
+
     smol::block_on(async {
-        let nc = nats::asynk::connect("demo.nats.io").await?;
+        let nc = nats::asynk::connect(&s.client_url()).await?;
 
         let inbox = nc.new_inbox();
 

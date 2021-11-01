@@ -1,52 +1,12 @@
 use std::io;
-use std::process::{Child, Command};
-use std::sync::atomic::{AtomicU16, Ordering::SeqCst};
 
-struct Server {
-    child: Child,
-    port: u16,
-    storage_dir: String,
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.child.kill().unwrap();
-        self.child.wait().unwrap();
-        std::fs::remove_dir_all(&self.storage_dir).unwrap();
-    }
-}
-
-/// Starts a local NATS server that gets killed on drop.
-fn server() -> Server {
-    static PORT: AtomicU16 = AtomicU16::new(4333);
-    let port = PORT.fetch_add(1, SeqCst);
-    let storage_dir = format!("jetstream_test_{}", port);
-    let _ = std::fs::remove_dir_all(&storage_dir);
-
-    let child = Command::new("nats-server")
-        .args(&["--port", &port.to_string()])
-        .arg("-js")
-        .args(&["-sd", &storage_dir])
-        .arg("-V")
-        .arg("-D")
-        .spawn()
-        .unwrap();
-
-    Server {
-        child,
-        port,
-        storage_dir,
-    }
-}
-
+mod util;
 use nats::jetstream::*;
+pub use util::*;
 
 #[test]
-fn jetstream_create_consumer() -> io::Result<()> {
-    let server = server();
-
-    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
-
+fn jetstream_create_stream_and_consumer() -> io::Result<()> {
+    let (_s, nc) = run_basic_jetstream();
     nc.create_stream("stream1")?;
     nc.create_consumer("stream1", "consumer1")?;
     Ok(())
@@ -54,9 +14,7 @@ fn jetstream_create_consumer() -> io::Result<()> {
 
 #[test]
 fn jetstream_queue_process() -> io::Result<()> {
-    let server = server();
-
-    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
+    let (_s, nc) = run_basic_jetstream();
 
     let _ = nc.delete_stream("qtest1");
 
@@ -94,9 +52,7 @@ fn jetstream_queue_process() -> io::Result<()> {
 
 #[test]
 fn jetstream_basics() -> io::Result<()> {
-    let server = server();
-
-    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
+    let (_s, nc) = run_basic_jetstream();
 
     let _ = nc.delete_stream("test1");
     let _ = nc.delete_stream("test2");
@@ -157,8 +113,6 @@ fn jetstream_basics() -> io::Result<()> {
 
     Consumer::existing(nc.clone(), "test2", "consumer3")?;
 
-    let _ = dbg!(nc.account_info());
-
     // cleanup
     let streams: io::Result<Vec<StreamInfo>> = nc.list_streams().collect();
 
@@ -184,9 +138,7 @@ fn jetstream_basics() -> io::Result<()> {
 fn jetstream_libdoc_test() {
     use nats::jetstream::Consumer;
 
-    let server = server();
-
-    let nc = nats::connect(&format!("localhost:{}", server.port)).unwrap();
+    let (_s, nc) = run_basic_jetstream();
 
     nc.create_stream("my_stream").unwrap();
     nc.publish("my_stream", "1").unwrap();
@@ -198,21 +150,11 @@ fn jetstream_libdoc_test() {
         Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer").unwrap();
 
     // set this very high for CI
-    consumer.timeout = std::time::Duration::from_millis(500);
+    consumer.timeout = std::time::Duration::from_millis(1500);
 
-    consumer
-        .process(|msg| {
-            println!("got message {:?}", msg);
-            Ok(msg.data.len())
-        })
-        .unwrap();
+    consumer.process(|msg| Ok(msg.data.len())).unwrap();
 
-    consumer
-        .process_timeout(|msg| {
-            println!("got message {:?}", msg);
-            Ok(msg.data.len())
-        })
-        .unwrap();
+    consumer.process_timeout(|msg| Ok(msg.data.len())).unwrap();
 
     let msg = consumer.pull().unwrap();
     msg.ack().unwrap();

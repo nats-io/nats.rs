@@ -1,13 +1,28 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::prelude::*;
 use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
 use std::mem;
 use std::sync::Arc;
+
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
+use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
 use crate::connector::{Connector, NatsStream};
@@ -15,7 +30,7 @@ use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
 
-const BUF_CAPACITY: usize = 128 * 1024;
+const BUF_CAPACITY: usize = 32 * 1024;
 
 /// Client state.
 ///
@@ -54,6 +69,12 @@ struct ReadState {
 
     /// Expected pongs and their notification channels.
     pongs: VecDeque<channel::Sender<()>>,
+
+    /// Tracks the last activity from the server.
+    last_active: Instant,
+
+    /// Used for client side monitoring of connection health.
+    pings_out: u8,
 }
 
 /// A registered subscription.
@@ -83,7 +104,7 @@ impl Client {
     /// Creates a new client that will begin connecting in the background.
     pub(crate) fn connect(url: &str, options: Options) -> io::Result<Client> {
         // A channel for coordinating flushes.
-        let (flush_kicker, dirty) = channel::bounded(1);
+        let (flush_kicker, flush_wanted) = channel::bounded(1);
 
         // Channels for coordinating initial connect.
         let (run_sender, run_receiver) = channel::bounded(1);
@@ -101,6 +122,8 @@ impl Client {
                 read: Mutex::new(ReadState {
                     subscriptions: HashMap::new(),
                     pongs: VecDeque::from(vec![pong_sender]),
+                    last_active: Instant::now(),
+                    pings_out: 0,
                 }),
             }),
             server_info: Arc::new(Mutex::new(ServerInfo::default())),
@@ -151,27 +174,76 @@ impl Client {
         thread::spawn({
             let client = client.clone();
             move || {
+                // Track last flush/write time.
+                const MIN_FLUSH_BETWEEN: Duration = Duration::from_millis(5);
+
+                // Handle recv timeouts and check if we should send a PING.
+                // TODO(dlc) - Make configurable.
+                const PING_INTERVAL: Duration = Duration::from_secs(2 * 60);
+                const MAX_PINGS_OUT: u8 = 2;
+
+                let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
+
                 // Wait until at least one message is buffered.
-                while dirty.recv().is_ok() {
-                    let start = Instant::now();
-                    // Flush the writer.
-                    let mut write = client.state.write.lock();
-                    if let Some(writer) = write.writer.as_mut() {
-                        let res = writer.flush();
+                loop {
+                    match flush_wanted.recv_timeout(PING_INTERVAL) {
+                        Ok(_) => {
+                            let since = last.elapsed();
+                            if since < MIN_FLUSH_BETWEEN {
+                                thread::sleep(MIN_FLUSH_BETWEEN - since);
+                            }
 
-                        // If flushing fails, disconnect.
-                        if res.is_err() {
-                            // NB see locking protocol for state.write and state.read
-                            write.writer = None;
-
+                            // Flush the writer.
+                            let mut write = client.state.write.lock();
+                            if let Some(writer) = write.writer.as_mut() {
+                                let res = writer.flush();
+                                last = Instant::now();
+                                // If flushing fails, disconnect.
+                                if res.is_err() {
+                                    // NB see locking protocol for state.write and state.read
+                                    writer.get_ref().shutdown();
+                                    write.writer = None;
+                                    let mut read = client.state.read.lock();
+                                    read.pongs.clear();
+                                }
+                            }
+                            drop(write);
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            let mut write = client.state.write.lock();
                             let mut read = client.state.read.lock();
-                            read.pongs.clear();
+
+                            if read.pings_out >= MAX_PINGS_OUT {
+                                if let Some(writer) = write.writer.as_mut() {
+                                    writer.get_ref().shutdown();
+                                }
+                                write.writer = None;
+                                read.pongs.clear();
+                            } else if read.last_active.elapsed() > PING_INTERVAL {
+                                read.pings_out += 1;
+                                read.pongs.push_back(write.flush_kicker.clone());
+                                // Send out a PING here.
+                                if let Some(mut writer) = write.writer.as_mut() {
+                                    // Ok to ignore errors here.
+                                    proto::encode(&mut writer, ClientOp::Ping).ok();
+                                    let res = writer.flush();
+                                    if res.is_err() {
+                                        // NB see locking protocol for state.write and state.read
+                                        writer.get_ref().shutdown();
+                                        write.writer = None;
+                                        read.pongs.clear();
+                                    }
+                                }
+                            }
+
+                            drop(read);
+                            drop(write);
+                        }
+                        _ => {
+                            // Any other err break and exit.
+                            break;
                         }
                     }
-                    drop(write);
-
-                    // Wait a little bit before flushing again.
-                    thread::sleep(start.elapsed() * 9);
                 }
             }
         });
@@ -180,7 +252,7 @@ impl Client {
     }
 
     /// Retrieves server info as received by the most recent connection.
-    pub(crate) fn server_info(&self) -> ServerInfo {
+    pub fn server_info(&self) -> ServerInfo {
         self.server_info.lock().clone()
     }
 
@@ -537,6 +609,11 @@ impl Client {
                 }
             }
 
+            // Clear our pings_out.
+            let mut read = self.state.read.lock();
+            read.pings_out = 0;
+            drop(read);
+
             // Inject random delays when testing.
             inject_delay();
 
@@ -608,6 +685,12 @@ impl Client {
         Ok(())
     }
 
+    /// Updates our last activity from the server.
+    fn update_activity(&self) {
+        let mut read = self.state.read.lock();
+        read.last_active = Instant::now();
+    }
+
     /// Reads messages from the server and dispatches them to subscribers.
     fn dispatch(&self, mut reader: impl BufRead, connector: &mut Connector) -> io::Result<()> {
         // Handle operations received from the server.
@@ -618,6 +701,9 @@ impl Client {
             if self.check_shutdown().is_err() {
                 break;
             }
+
+            // Track activity.
+            self.update_activity();
 
             match op {
                 ServerOp::Info(server_info) => {
@@ -648,6 +734,9 @@ impl Client {
                     // correspond to the next expected PONG.
                     let write = self.state.write.lock();
                     let mut read = self.state.read.lock();
+
+                    // Clear any outstanding pings.
+                    read.pings_out = 0;
 
                     if write.writer.is_some() {
                         // Take the next expected PONG and complete it by
@@ -695,7 +784,6 @@ impl Client {
                     payload,
                 } => {
                     let read = self.state.read.lock();
-
                     // Send the message to matching subscription.
                     if let Some(subscription) = read.subscriptions.get(&sid) {
                         let msg = Message {
@@ -722,7 +810,6 @@ impl Client {
                 }
             }
         }
-
         // The stream of operation is broken, meaning the connection was lost.
         Err(ErrorKind::ConnectionReset.into())
     }

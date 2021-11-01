@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -7,11 +20,11 @@ use std::{
 
 use log::trace;
 
-const VERSION_LINE: &str = "NATS/1.0";
-const VERSION_LINE_LEN: usize = VERSION_LINE.len();
+const HEADER_LINE: &str = "NATS/1.0";
+const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 
-pub const HEADER_STATUS: &str = "Status";
-pub const HEADER_DESCRIPTION: &str = "Description";
+pub const STATUS_HEADER: &str = "Status";
+pub const DESCRIPTION_HEADER: &str = "Description";
 
 /// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -114,27 +127,27 @@ impl TryFrom<&[u8]> for Headers {
         let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
             line.lines()
         } else {
-            return parse_error("invalid utf8 received");
+            return parse_error("invalid header received");
         };
 
         if let Some(line) = lines.next() {
-            if !line.starts_with(VERSION_LINE) {
+            if !line.starts_with(HEADER_LINE) {
                 return parse_error("version line does not begin with NATS/1.0");
             }
 
-            if line.len() > VERSION_LINE_LEN {
-                let status_line = &line[VERSION_LINE_LEN..];
+            if line.len() > HEADER_LINE_LEN {
+                let status_line = &line[HEADER_LINE_LEN..];
                 let mut parts = status_line.split_whitespace();
 
                 if let Some(status) = parts.next() {
                     let entry = inner
-                        .entry(HEADER_STATUS.to_string())
+                        .entry(STATUS_HEADER.to_string())
                         .or_insert_with(HashSet::default);
                     entry.insert(status.to_string());
 
                     if let Some(description) = parts.next() {
                         let entry = inner
-                            .entry(HEADER_DESCRIPTION.to_string())
+                            .entry(DESCRIPTION_HEADER.to_string())
                             .or_insert_with(HashSet::default);
                         entry.insert(description.to_string());
                     }
@@ -198,7 +211,7 @@ mod try_from {
         let headers = Headers::try_from("NATS/1.0 503".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&HEADER_STATUS.to_string()),
+            headers.inner.get(&STATUS_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["503".to_string(),]))
         );
 
@@ -206,7 +219,7 @@ mod try_from {
         let headers = Headers::try_from("NATS/1.0  503".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&HEADER_STATUS.to_string()),
+            headers.inner.get(&STATUS_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["503".to_string(),]))
         );
     }
@@ -217,12 +230,12 @@ mod try_from {
         let headers = Headers::try_from("NATS/1.0 503 no-responders".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&HEADER_STATUS.to_string()),
+            headers.inner.get(&STATUS_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["503".to_string()]))
         );
 
         assert_eq!(
-            headers.inner.get(&HEADER_DESCRIPTION.to_string()),
+            headers.inner.get(&DESCRIPTION_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
         );
 
@@ -230,12 +243,12 @@ mod try_from {
         let headers = Headers::try_from("NATS/1.0  503  no-responders".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&HEADER_STATUS.to_string()),
+            headers.inner.get(&STATUS_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["503".to_string()]))
         );
 
         assert_eq!(
-            headers.inner.get(&HEADER_DESCRIPTION.to_string()),
+            headers.inner.get(&DESCRIPTION_HEADER.to_string()),
             Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
         );
     }
