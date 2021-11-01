@@ -31,17 +31,14 @@ pub(crate) fn jwt_kp(contents: &str) -> io::Result<(SecureString, KeyPair)> {
         )
     })?;
 
-    let kp = KeyPair::from_seed(&nkey)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let kp =
+        KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok((jwt, kp))
 }
 
 /// Signs nonce using a credentials file.
-pub(crate) fn sign_nonce(
-    nonce: &[u8],
-    key_pair: &KeyPair,
-) -> io::Result<SecureString> {
+pub(crate) fn sign_nonce(nonce: &[u8], key_pair: &KeyPair) -> io::Result<SecureString> {
     // Use the nkey to sign the nonce.
     let sig = key_pair
         .sign(nonce)
@@ -121,9 +118,8 @@ fn extract<A>(
 
         if line.starts_with(end_mark) {
             take_base64 = false;
-            let der = base64::decode(&b64buf).map_err(|err| {
-                io::Error::new(io::ErrorKind::InvalidData, err)
-            })?;
+            let der = base64::decode(&b64buf)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
             ders.push(f(der));
             b64buf = String::new();
             continue;

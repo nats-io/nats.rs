@@ -401,9 +401,7 @@ impl Default for StorageType {
 }
 
 /// Various limits imposed on a particular account.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct AccountLimits {
     /// Maximum memory for this account (-1 if no limit)
     pub max_memory: i64,
@@ -416,9 +414,7 @@ pub struct AccountLimits {
 }
 
 /// returns current statistics about the account's `JetStream` usage.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AccountStats {
     pub memory: u64,
     pub storage: u64,
@@ -505,9 +501,7 @@ pub struct ClusterInfo {
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SequencePair {
     /// How far along the consumer has progressed
     pub consumer_seq: u64,
@@ -516,9 +510,7 @@ pub struct SequencePair {
 }
 
 /// for getting next messages for pull based consumers.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct NextRequest {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,

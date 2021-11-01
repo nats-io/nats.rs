@@ -79,10 +79,7 @@ impl Message {
     /// server acks your ack, use the `double_ack` method instead.
     ///
     /// Does not check whether this message has already been double-acked.
-    pub fn ack_kind(
-        &self,
-        ack_kind: crate::jetstream::AckKind,
-    ) -> io::Result<()> {
+    pub fn ack_kind(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         self.respond(ack_kind)
     }
 
@@ -91,10 +88,7 @@ impl Message {
     /// See `AckKind` documentation for details of what each variant means.
     ///
     /// Returns immediately if this message has already been double-acked.
-    pub fn double_ack(
-        &self,
-        ack_kind: crate::jetstream::AckKind,
-    ) -> io::Result<()> {
+    pub fn double_ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         if self.double_acked.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -120,19 +114,12 @@ impl Message {
                 continue;
             }
             let (sid, receiver) = sub_ret?;
-            let sub = crate::Subscription::new(
-                sid,
-                ack_reply.to_string(),
-                receiver,
-                self.client.clone(),
-            );
+            let sub =
+                crate::Subscription::new(sid, ack_reply.to_string(), receiver, self.client.clone());
 
-            let pub_ret = self.client.publish(
-                original_reply,
-                Some(&ack_reply),
-                None,
-                ack_kind.as_ref(),
-            );
+            let pub_ret =
+                self.client
+                    .publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -152,9 +139,7 @@ impl Message {
     /// Returns `None` if this is not
     /// a `JetStream` message with headers
     /// set.
-    pub fn jetstream_message_info(
-        &self,
-    ) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
+    pub fn jetstream_message_info(&self) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
 

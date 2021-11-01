@@ -55,8 +55,7 @@ fn async_subscription_drop() -> io::Result<()> {
                 .await?;
             sub.next()
                 .or(async {
-                    smol::Timer::after(std::time::Duration::from_millis(1))
-                        .await;
+                    smol::Timer::after(std::time::Duration::from_millis(1)).await;
                     None
                 })
                 .await;
