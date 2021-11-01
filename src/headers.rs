@@ -7,6 +7,10 @@ use std::{
 
 use log::trace;
 
+const VERSION_LINE: &str = "NATS/1.0";
+pub const HEADER_STATUS: &str = "Status";
+pub const HEADER_DESCRIPTION: &str = "Description";
+
 /// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Headers {
@@ -115,14 +119,14 @@ impl TryFrom<&[u8]> for Headers {
             let mut parts = line.splitn(3, ' ');
 
             if let Some(v) = parts.next() {
-                if !v.starts_with("NATS/1.0") {
+                if !v.starts_with(VERSION_LINE) {
                     return parse_error("version line does not begin with NATS/");
                 }
             }
 
             if let Some(v) = parts.next() {
                 let entry = inner
-                    .entry("Status".to_string())
+                    .entry(HEADER_STATUS.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());
@@ -130,7 +134,7 @@ impl TryFrom<&[u8]> for Headers {
 
             if let Some(v) = parts.next() {
                 let entry = inner
-                    .entry("Description".to_string())
+                    .entry(HEADER_DESCRIPTION.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());
@@ -192,7 +196,7 @@ mod try_from {
         let headers = Headers::try_from("NATS/1.0 503".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&"Status".to_string()),
+            headers.inner.get(&HEADER_STATUS.to_string()),
             Some(&HashSet::from_iter(vec!["503".to_string(),]))
         );
     }
@@ -202,12 +206,12 @@ mod try_from {
         let headers = Headers::try_from("NATS/1.0 503 no-responders".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&"Status".to_string()),
+            headers.inner.get(&HEADER_STATUS.to_string()),
             Some(&HashSet::from_iter(vec!["503".to_string()]))
         );
 
         assert_eq!(
-            headers.inner.get(&"Description".to_string()),
+            headers.inner.get(&HEADER_DESCRIPTION.to_string()),
             Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
         );
     }
