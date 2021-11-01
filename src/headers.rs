@@ -20,6 +20,12 @@ use std::{
 
 use log::trace;
 
+const HEADER_LINE: &str = "NATS/1.0";
+const HEADER_LINE_LEN: usize = HEADER_LINE.len();
+
+pub const STATUS_HEADER: &str = "Status";
+pub const DESCRIPTION_HEADER: &str = "Description";
+
 /// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Headers {
@@ -113,14 +119,6 @@ fn parse_error<T, E: AsRef<str>>(e: E) -> std::io::Result<T> {
     ))
 }
 
-// Header status processing.
-const HDR_PRE: &str = "NATS/1.0";
-const HDR_PRE_END: usize = HDR_PRE.len();
-
-// Public
-pub const STATUS_HDR: &str = "Status";
-pub const DESC_HDR: &str = "Description";
-
 impl TryFrom<&[u8]> for Headers {
     type Error = std::io::Error;
 
@@ -133,24 +131,26 @@ impl TryFrom<&[u8]> for Headers {
         };
 
         if let Some(line) = lines.next() {
-            if !line.starts_with(HDR_PRE) {
-                return parse_error("version line does not begin with NATS/");
+            if !line.starts_with(HEADER_LINE) {
+                return parse_error("version line does not begin with NATS/1.0");
             }
-            // Check for an inline status and optional description.
-            if line.len() > HDR_PRE_END {
-                let status_line = &line[HDR_PRE_END..];
-                let mut parts: Vec<&str> = status_line.split_whitespace().collect();
-                let code = parts.pop().unwrap();
-                let entry = inner
-                    .entry(STATUS_HDR.to_string())
-                    .or_insert_with(HashSet::default);
-                entry.insert(code.to_string());
-                // Optional description.
-                if let Some(description) = parts.pop() {
+
+            if line.len() > HEADER_LINE_LEN {
+                let status_line = &line[HEADER_LINE_LEN..];
+                let mut parts = status_line.split_whitespace();
+
+                if let Some(status) = parts.next() {
                     let entry = inner
-                        .entry(DESC_HDR.to_string())
+                        .entry(STATUS_HEADER.to_string())
                         .or_insert_with(HashSet::default);
-                    entry.insert(description.to_string());
+                    entry.insert(status.to_string());
+
+                    if let Some(description) = parts.next() {
+                        let entry = inner
+                            .entry(DESCRIPTION_HEADER.to_string())
+                            .or_insert_with(HashSet::default);
+                        entry.insert(description.to_string());
+                    }
                 }
             }
         } else {
@@ -198,5 +198,58 @@ impl Headers {
         }
         buf.extend_from_slice(b"\r\n");
         buf
+    }
+}
+
+#[cfg(test)]
+mod try_from {
+    use super::*;
+
+    #[test]
+    fn inline_status() {
+        // With single spacing.
+        let headers = Headers::try_from("NATS/1.0 503".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&STATUS_HEADER.to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string(),]))
+        );
+
+        // With double spacing.
+        let headers = Headers::try_from("NATS/1.0  503".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&STATUS_HEADER.to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string(),]))
+        );
+    }
+
+    #[test]
+    fn inline_status_with_description() {
+        // With single spacing
+        let headers = Headers::try_from("NATS/1.0 503 no-responders".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&STATUS_HEADER.to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&DESCRIPTION_HEADER.to_string()),
+            Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+        );
+
+        // With double spacing.
+        let headers = Headers::try_from("NATS/1.0  503  no-responders".as_bytes()).unwrap();
+
+        assert_eq!(
+            headers.inner.get(&STATUS_HEADER.to_string()),
+            Some(&HashSet::from_iter(vec!["503".to_string()]))
+        );
+
+        assert_eq!(
+            headers.inner.get(&DESCRIPTION_HEADER.to_string()),
+            Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+        );
     }
 }

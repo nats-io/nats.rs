@@ -74,12 +74,12 @@ impl Message {
 
     // Helper for detecting no responders response.
     pub(crate) fn is_no_responders(&self) -> bool {
-        use crate::headers::STATUS_HDR;
+        use crate::headers::STATUS_HEADER;
         if !self.data.is_empty() {
             return false;
         }
         if let Some(hdrs) = &self.headers {
-            if let Some(set) = hdrs.get(STATUS_HDR) {
+            if let Some(set) = hdrs.get(STATUS_HEADER) {
                 if set.get("503").is_some() {
                     return true;
                 }
