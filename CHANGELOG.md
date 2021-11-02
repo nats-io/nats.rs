@@ -1,3 +1,25 @@
+# 0.16.0
+
+### Added
+- Added support for header status and no responders to requests (#219)
+- Added support for username and password as part of the url (#216)
+- Added support for client side periodic pings
+
+### Changed
+- Bumped MSRV to 1.52.0
+
+### Removed
+- Use of IntervalTree for client side de-dupe for JetStream consumers
+- Serialized used of test servers, tests can now run in parallel
+
+### Improved
+- Better handling of write errors and server disconnects as part of client side ping support
+- Better handling of message headers
+
+### Complete Changes
+
+https://github.com/nats-io/nats.rs/compare/v0.15.2...v0.16.0
+
 # 0.15.2
 
 # Bug Fixes
