@@ -120,7 +120,7 @@ fn parse_error<T, E: AsRef<str>>(e: E) -> std::io::Result<T> {
 }
 
 fn is_continuation(c: char) -> bool {
-    return c == ' ' || c == '\t';
+    c == ' ' || c == '\t'
 }
 
 impl TryFrom<&[u8]> for Headers {
@@ -173,7 +173,7 @@ impl TryFrom<&[u8]> for Headers {
 
                 let mut s = String::from(v.trim());
                 while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)) {
-                    s.push_str(" ");
+                    s.push(' ');
                     s.push_str(v.trim());
                 }
 
