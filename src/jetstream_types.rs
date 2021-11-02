@@ -135,6 +135,11 @@ pub struct ConsumerConfig {
     /// this consumer.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_ack_pending: i64,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub flow_control: bool,
+    // Idle heartbeat in nanoseconds.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub idle_heartbeat: i64, // TODO(caspervonb) type as Duration
 }
 
 impl From<&ConsumerConfig> for ConsumerConfig {

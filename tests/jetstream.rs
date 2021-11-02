@@ -2,6 +2,8 @@ use std::io;
 
 mod util;
 use nats::jetstream::*;
+use std::collections::HashSet;
+use std::iter::{FromIterator, IntoIterator};
 pub use util::*;
 
 #[test]
@@ -164,4 +166,46 @@ fn jetstream_libdoc_test() {
         consumer.process_batch(batch_size, |msg| Ok(msg.data.len()));
     let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
     let _sizes: Vec<usize> = flipped.unwrap();
+}
+
+#[test]
+fn jetstream_idle_heartbeat() {
+    let (_s, nc) = run_basic_jetstream();
+
+    let stream = nc
+        .create_stream(StreamConfig {
+            name: "stream".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let mut consumer = nc
+        .create_consumer(
+            "stream",
+            &ConsumerConfig {
+                deliver_subject: Some("subject".to_string()),
+                durable_name: Some("consumer".to_string()),
+                idle_heartbeat: 200000000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    consumer
+        .process(|message| {
+            let headers = message.headers.as_ref().unwrap();
+
+            assert_eq!(
+                headers.inner.get(&"Status".to_string()),
+                Some(&HashSet::from_iter(vec!["100".to_string()]))
+            );
+
+            assert_eq!(
+                headers.inner.get(&"Description".to_string()),
+                Some(&HashSet::from_iter(vec!["Idle Heartbeat".to_string()]))
+            );
+
+            Ok(())
+        })
+        .unwrap();
 }
