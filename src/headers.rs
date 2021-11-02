@@ -139,21 +139,30 @@ impl TryFrom<&[u8]> for Headers {
                 return parse_error("version line does not begin with NATS/1.0");
             }
 
-            if line.len() > HEADER_LINE_LEN {
-                let status_line = &line[HEADER_LINE_LEN..];
-                let mut parts = status_line.split_whitespace();
+            if let Some(slice) = line.get(HEADER_LINE_LEN..).map(|s| s.trim()) {
+                match slice.split_once(' ') {
+                    Some((status, description)) => {
+                        if !status.is_empty() {
+                            let entry = inner
+                                .entry(STATUS_HEADER.to_string())
+                                .or_insert_with(HashSet::default);
+                            entry.insert(status.trim().to_string());
+                        }
 
-                if let Some(status) = parts.next() {
-                    let entry = inner
-                        .entry(STATUS_HEADER.to_string())
-                        .or_insert_with(HashSet::default);
-                    entry.insert(status.to_string());
-
-                    if let Some(description) = parts.next() {
-                        let entry = inner
-                            .entry(DESCRIPTION_HEADER.to_string())
-                            .or_insert_with(HashSet::default);
-                        entry.insert(description.to_string());
+                        if !description.is_empty() {
+                            let entry = inner
+                                .entry(DESCRIPTION_HEADER.to_string())
+                                .or_insert_with(HashSet::default);
+                            entry.insert(description.trim().to_string());
+                        }
+                    }
+                    None => {
+                        if !slice.is_empty() {
+                            let entry = inner
+                                .entry(STATUS_HEADER.to_string())
+                                .or_insert_with(HashSet::default);
+                            entry.insert(slice.to_string());
+                        }
                     }
                 }
             }
@@ -220,48 +229,48 @@ mod try_from {
     #[test]
     fn inline_status() {
         // With single spacing.
-        let headers = Headers::try_from("NATS/1.0 503".as_bytes()).unwrap();
+        let headers = Headers::try_from("NATS/1.0 100".as_bytes()).unwrap();
 
         assert_eq!(
             headers.inner.get(&STATUS_HEADER.to_string()),
-            Some(&HashSet::from_iter(vec!["503".to_string(),]))
+            Some(&HashSet::from_iter(vec!["100".to_string(),]))
         );
 
         // With double spacing.
-        let headers = Headers::try_from("NATS/1.0  503".as_bytes()).unwrap();
+        let headers = Headers::try_from("NATS/1.0  100".as_bytes()).unwrap();
 
         assert_eq!(
             headers.inner.get(&STATUS_HEADER.to_string()),
-            Some(&HashSet::from_iter(vec!["503".to_string(),]))
+            Some(&HashSet::from_iter(vec!["100".to_string(),]))
         );
     }
 
     #[test]
     fn inline_status_with_description() {
         // With single spacing
-        let headers = Headers::try_from("NATS/1.0 503 no-responders".as_bytes()).unwrap();
+        let headers = Headers::try_from("NATS/1.0 100 Idle Heartbeat".as_bytes()).unwrap();
 
         assert_eq!(
             headers.inner.get(&STATUS_HEADER.to_string()),
-            Some(&HashSet::from_iter(vec!["503".to_string()]))
+            Some(&HashSet::from_iter(vec!["100".to_string()]))
         );
 
         assert_eq!(
             headers.inner.get(&DESCRIPTION_HEADER.to_string()),
-            Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+            Some(&HashSet::from_iter(vec!["Idle Heartbeat".to_string()]))
         );
 
         // With double spacing.
-        let headers = Headers::try_from("NATS/1.0  503  no-responders".as_bytes()).unwrap();
+        let headers = Headers::try_from("NATS/1.0  100  Idle Heartbeat".as_bytes()).unwrap();
 
         assert_eq!(
             headers.inner.get(&STATUS_HEADER.to_string()),
-            Some(&HashSet::from_iter(vec!["503".to_string()]))
+            Some(&HashSet::from_iter(vec!["100".to_string()]))
         );
 
         assert_eq!(
             headers.inner.get(&DESCRIPTION_HEADER.to_string()),
-            Some(&HashSet::from_iter(vec!["no-responders".to_string()]))
+            Some(&HashSet::from_iter(vec!["Idle Heartbeat".to_string()]))
         );
     }
 
