@@ -528,7 +528,7 @@ impl NatsClient {
     }
 
     fn api_prefix(&self) -> &str {
-        &self.0.client.options.jetstream_prefix
+        &self.0.client.options.jetstream.api_prefix
     }
 }
 
@@ -854,6 +854,6 @@ impl Consumer {
     }
 
     fn api_prefix(&self) -> &str {
-        &self.nc.0.client.options.jetstream_prefix
+        &self.nc.0.client.options.jetstream.api_prefix
     }
 }

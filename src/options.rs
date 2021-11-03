@@ -23,6 +23,74 @@ use crate::auth_utils;
 use crate::secure_wipe::SecureString;
 use crate::Connection;
 
+/// `JetStream` options
+#[allow(clippy::module_name_repetitions)]
+pub struct JetStreamOptions {
+    pub(crate) api_prefix: String,
+}
+
+impl fmt::Debug for JetStreamOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(&"api_prefix", &self.api_prefix)
+            .finish()
+    }
+}
+
+impl Default for JetStreamOptions {
+    fn default() -> JetStreamOptions {
+        JetStreamOptions {
+            api_prefix: "$JS.API.".to_string(),
+        }
+    }
+}
+
+impl JetStreamOptions {
+    /// `Options` for `JetStream` operations.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let options = nats::JetStreamOptions::new();
+    /// ```
+    pub fn new() -> JetStreamOptions {
+        JetStreamOptions::default()
+    }
+
+    /// Set a custom `JetStream` API prefix.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let options = nats::JetStreamOptions::new()
+    ///     .api_prefix("some_exported_prefix".to_string());
+    /// ```
+    pub fn api_prefix(mut self, mut api_prefix: String) -> Self {
+        if !api_prefix.ends_with('.') {
+            api_prefix.push('.');
+        }
+
+        self.api_prefix = api_prefix;
+        self
+    }
+
+    /// Set a custom `JetStream` API prefix from a domain.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let options = nats::JetStreamOptions::new()
+    ///   .domain("some_domain");
+    /// ```
+    pub fn domain(self, domain: &str) -> Self {
+        if domain.is_empty() {
+            self.api_prefix("".to_string())
+        } else {
+            self.api_prefix(format!("$JS.{}.API", domain))
+        }
+    }
+}
+
 /// Connect options.
 pub struct Options {
     pub(crate) auth: AuthStyle,
@@ -40,7 +108,7 @@ pub struct Options {
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
-    pub(crate) jetstream_prefix: String,
+    pub(crate) jetstream: JetStreamOptions,
 }
 
 impl fmt::Debug for Options {
@@ -80,7 +148,7 @@ impl Default for Options {
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
-            jetstream_prefix: "$JS.API.".to_string(),
+            jetstream: JetStreamOptions::default(),
             tls_client_config: crate::rustls::ClientConfig::default(),
         }
     }
@@ -501,37 +569,23 @@ impl Options {
         self
     }
 
-    /// Set a custom `JetStream` API prefix. This is useful
-    /// when using `JetStream` through exports/imports.
+    /// Set `JetStream` options
     ///
     /// # Example
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
-    ///     .jetstream_api_prefix("some_exported_prefix".to_string())
+    ///     .jetstream(nats::JetStreamOptions::new()
+    ///         .api_prefix("some_exported_prefix".to_string())
+    ///     )
     ///     .connect("demo.nats.io")?;
     /// nc.drain().unwrap();
     /// # Ok(())
     /// # }
-    /// ```
-    pub fn jetstream_api_prefix(mut self, mut jetstream_prefix: String) -> Self {
-        if !jetstream_prefix.ends_with('.') {
-            jetstream_prefix.push('.');
-        }
-
-        self.jetstream_prefix = jetstream_prefix;
+    pub fn jetstream(mut self, jetstream: JetStreamOptions) -> Self {
+        self.jetstream = jetstream;
         self
-    }
-
-    /// Set a custom `JetStream` API prefix from a domain.
-    ///
-    pub fn jetstream_api_prefix_from_domain(self, domain: &str) -> Self {
-        if domain.is_empty() {
-            self.jetstream_api_prefix("".to_string())
-        } else {
-            self.jetstream_api_prefix(format!("$JS.{}.API", domain))
-        }
     }
 
     /// Set a callback to be executed when the client has been
