@@ -439,6 +439,10 @@ pub(crate) struct AccountStats {
 pub(crate) struct PubAck {
     pub stream: String,
     pub seq: u64,
+    // TODO(caspervonb) using String::is_empty as default for String is still unstable.
+    // Use `is_default` once that is no longer gated for strings.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
     #[serde(default, skip_serializing_if = "is_default")]
     pub duplicate: bool,
 }
