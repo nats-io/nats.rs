@@ -524,6 +524,16 @@ impl Options {
         self
     }
 
+    /// Set a custom `JetStream` API prefix from a domain.
+    ///
+    pub fn jetstream_api_prefix_from_domain(self, domain: &str) -> Self {
+        if domain.is_empty() {
+            self.jetstream_api_prefix("".to_string())
+        } else {
+            self.jetstream_api_prefix(format!("$JS.{}.API", domain))
+        }
+    }
+
     /// Set a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
