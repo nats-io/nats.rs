@@ -1,4 +1,4 @@
-use std::io;
+use std::{collections::HashSet, io, iter::FromIterator, time::Duration};
 
 mod util;
 use nats::jetstream;
@@ -46,7 +46,208 @@ fn jetstream_account_not_enabled() {
 }
 
 #[test]
-fn jetstream_add_stream_and_consumer() -> io::Result<()> {
+fn jetstream_publish() {
+    let (_s, nc, js) = run_basic_jetstream();
+
+    // Create the stream using our client API.
+    js.add_stream(StreamConfig {
+        name: "TEST".to_string(),
+        subjects: Some(vec![
+            "test".to_string(),
+            "foo".to_string(),
+            "bar".to_string(),
+        ]),
+        ..Default::default()
+    })
+    .unwrap();
+
+    // Lookup the stream for testing.
+    js.stream_info("TEST").unwrap();
+
+    let msg = b"Hello JS";
+
+    // Basic publish like NATS core.
+    let ack = js.publish("foo", &msg).unwrap();
+    assert_eq!(ack.stream, "TEST");
+    assert_eq!(ack.sequence, 1);
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 1);
+
+    // Test stream expectation.
+    let err = js
+        .publish_with_options(
+            "foo",
+            &msg,
+            &PublishOptions {
+                expected_stream: Some("ORDERS".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+
+    let err = err
+        .into_inner()
+        .expect("should be able to convert error into inner")
+        .downcast::<jetstream::Error>()
+        .expect("should be able to downcast into error")
+        .to_owned();
+
+    assert_eq!(err.error_code(), jetstream::ErrorCode::StreamNotMatch);
+
+    // Test last sequence expectation.
+    let err = js
+        .publish_with_options(
+            "foo",
+            &msg,
+            &PublishOptions {
+                expected_last_sequence: Some(10),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+
+    let err = err
+        .into_inner()
+        .expect("should be able to convert error into inner")
+        .downcast::<jetstream::Error>()
+        .expect("should be able to downcast into error")
+        .to_owned();
+
+    assert_eq!(
+        err.error_code(),
+        jetstream::ErrorCode::StreamWrongLastSequence
+    );
+
+    // Messages should have been rejected
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 1);
+
+    // Send in a stream with a message id
+    let ack = js
+        .publish_with_options(
+            "foo",
+            &msg,
+            &PublishOptions {
+                id: Some("ZZZ".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(ack.stream, "TEST");
+    assert_eq!(ack.sequence, 2);
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 2);
+
+    // Send in the same message with same message id.
+    let ack = js
+        .publish_with_options(
+            "foo",
+            &msg,
+            &PublishOptions {
+                id: Some("ZZZ".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(ack.stream, "TEST");
+    assert_eq!(ack.duplicate, true);
+    assert_eq!(ack.sequence, 2);
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 2);
+
+    // Now try to send one in with the wrong last msgId.
+    let err = js
+        .publish_with_options(
+            "foo",
+            msg,
+            &PublishOptions {
+                expected_last_msg_id: Some("AAA".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+
+    let err = err
+        .into_inner()
+        .expect("should be able to convert error into inner")
+        .downcast::<jetstream::Error>()
+        .expect("should be able to downcast into error")
+        .to_owned();
+
+    assert_eq!(err.error_code(), jetstream::ErrorCode::StreamWrongLastMsgId);
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 2);
+
+    // Make sure expected sequence works.
+    let err = js
+        .publish_with_options(
+            "foo",
+            msg,
+            &PublishOptions {
+                expected_last_sequence: Some(22),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+
+    let err = err
+        .into_inner()
+        .expect("should be able to convert error into inner")
+        .downcast::<jetstream::Error>()
+        .expect("should be able to downcast into error")
+        .to_owned();
+
+    assert_eq!(
+        err.error_code(),
+        jetstream::ErrorCode::StreamWrongLastSequence
+    );
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 2);
+
+    let ack = js
+        .publish_with_options(
+            "foo",
+            msg,
+            &PublishOptions {
+                expected_last_sequence: Some(2),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(ack.stream, "TEST");
+    assert_eq!(ack.sequence, 3);
+    assert_eq!(js.stream_info("TEST").unwrap().state.messages, 3);
+
+    // Test expected last subject sequence.
+    // Just make sure that we set the header.
+    let sub = nc.subscribe("test").unwrap();
+
+    js.publish_with_options(
+        "test",
+        msg,
+        &PublishOptions {
+            expected_last_subject_sequence: Some(1),
+            ..Default::default()
+        },
+    )
+    .ok();
+
+    let msg = sub.next_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(
+        msg.headers
+            .unwrap()
+            .inner
+            .get("Nats-Expected-Last-Subject-Sequence")
+            .unwrap(),
+        &HashSet::from_iter(vec!["1".to_string()])
+    );
+}
+
+#[test]
+fn jetstream_create_stream_and_consumer() -> io::Result<()> {
     let (_s, _nc, js) = run_basic_jetstream();
     js.add_stream("stream1")?;
     js.add_consumer("stream1", "consumer1")?;

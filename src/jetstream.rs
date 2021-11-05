@@ -170,7 +170,7 @@
 //! ```
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     convert::TryFrom,
     error, fmt,
     fmt::Debug,
@@ -183,7 +183,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 pub use crate::jetstream_types::*;
 
-use crate::{Connection, Message};
+use crate::{headers, headers::Headers, Connection, Message};
 
 /// `JetStream` options
 #[derive(Clone)]
@@ -608,7 +608,130 @@ impl JetStream {
         Self { nc, options }
     }
 
-    /// Adds new stream to `JetStream`.
+    /// Publishes a message to `JetStream`
+    pub fn publish(&self, subject: &str, data: impl AsRef<[u8]>) -> io::Result<PublishAck> {
+        self.publish_with_options_or_headers(subject, None, None, data)
+    }
+
+    /// Publishes a message to `JetStream` with the given options.
+    pub fn publish_with_options(
+        &self,
+        subject: &str,
+        data: impl AsRef<[u8]>,
+        options: &PublishOptions,
+    ) -> io::Result<PublishAck> {
+        self.publish_with_options_or_headers(subject, Some(options), None, data)
+    }
+
+    /// Publishes a `Message` to `JetStream`.
+    pub fn publish_message(&self, message: &Message) -> io::Result<PublishAck> {
+        self.publish_with_options_or_headers(
+            &message.subject,
+            None,
+            message.headers.as_ref(),
+            &message.data,
+        )
+    }
+
+    /// Publishes a `Message` to `JetStream` with the given options.
+    pub fn publish_message_with_options(
+        &self,
+        message: &Message,
+        options: &PublishOptions,
+    ) -> io::Result<PublishAck> {
+        self.publish_with_options_or_headers(
+            &message.subject,
+            Some(options),
+            message.headers.as_ref(),
+            &message.data,
+        )
+    }
+
+    /// Publishes a message to `JetStream` with the given options and/or headers.
+    pub(crate) fn publish_with_options_or_headers(
+        &self,
+        subject: &str,
+        maybe_options: Option<&PublishOptions>,
+        maybe_headers: Option<&Headers>,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<PublishAck> {
+        let maybe_headers = if let Some(options) = maybe_options {
+            let mut headers = maybe_headers.map_or_else(Headers::default, Headers::clone);
+
+            if let Some(v) = options.id.as_ref() {
+                let entry = headers
+                    .inner
+                    .entry(headers::NATS_MSG_ID.to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
+            }
+
+            if let Some(v) = options.expected_last_msg_id.as_ref() {
+                let entry = headers
+                    .inner
+                    .entry(headers::NATS_EXPECTED_LAST_MSG_ID.to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
+            }
+
+            if let Some(v) = options.expected_stream.as_ref() {
+                let entry = headers
+                    .inner
+                    .entry(headers::NATS_EXPECTED_STREAM.to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
+            }
+
+            if let Some(v) = options.expected_last_sequence.as_ref() {
+                let entry = headers
+                    .inner
+                    .entry(headers::NATS_EXPECTED_LAST_SEQUENCE.to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
+            }
+
+            if let Some(v) = options.expected_last_subject_sequence.as_ref() {
+                let entry = headers
+                    .inner
+                    .entry(headers::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
+                    .or_insert_with(HashSet::default);
+
+                entry.insert(v.to_string());
+            }
+
+            Some(headers)
+        } else {
+            maybe_headers.cloned()
+        };
+
+        let maybe_timeout = maybe_options.and_then(|options| options.timeout);
+
+        let res_msg = self.nc.request_with_headers_or_timeout(
+            subject,
+            maybe_headers.as_ref(),
+            maybe_timeout,
+            msg,
+        )?;
+
+        let res: ApiResponse<PublishAck> = serde_json::de::from_slice(&res_msg.data)?;
+        match res {
+            ApiResponse::Ok(pub_ack) => Ok(pub_ack),
+            ApiResponse::Err { error, .. } => {
+                log::error!(
+                    "failed to parse API response: {:?}",
+                    std::str::from_utf8(&res_msg.data)
+                );
+
+                Err(io::Error::new(ErrorKind::Other, error))
+            }
+        }
+    }
+
+    /// Create a `JetStream` stream.
     pub fn add_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,

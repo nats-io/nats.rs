@@ -26,6 +26,12 @@ const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 pub const STATUS_HEADER: &str = "Status";
 pub const DESCRIPTION_HEADER: &str = "Description";
 
+pub const NATS_MSG_ID: &str = "Nats-Msg-Id";
+pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
+pub const NATS_EXPECTED_LAST_MSG_ID: &str = "Nats-Expected-Last-Msg-Id";
+pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
+pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
+
 /// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Headers {

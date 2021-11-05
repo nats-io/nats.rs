@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -435,14 +435,20 @@ pub(crate) struct AccountStats {
     pub limits: AccountLimits,
 }
 
+/// `PublishAck` is an acknowledgement received after successfully publishing a message.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub(crate) struct PubAck {
+pub struct PublishAck {
+    /// Name of stream the message was published to.
     pub stream: String,
-    pub seq: u64,
+    /// Sequence number the message was published in.
+    #[serde(rename = "seq")]
+    pub sequence: u64,
+    /// Domain the message was published to
     // TODO(caspervonb) using String::is_empty as default for String is still unstable.
     // Use `is_default` once that is no longer gated for strings.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
+    /// True if the published message was determined to be a duplicate, false otherwise.
     #[serde(default, skip_serializing_if = "is_default")]
     pub duplicate: bool,
 }
@@ -565,15 +571,19 @@ pub(crate) struct SubOpts {
 
 /// Options for publishing
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub(crate) struct PubOpts {
-    pub ttl: i64,
-    pub id: String,
-    // Expected last msgId
-    pub lid: String,
-    // Expected stream name
-    pub str: String,
-    // Expected last sequence
-    pub seq: u64,
+pub struct PublishOptions {
+    /// Duration to wait before timing out
+    pub timeout: Option<Duration>,
+    /// Message id
+    pub id: Option<String>,
+    /// Expected last message id
+    pub expected_last_msg_id: Option<String>,
+    /// Expected stream name
+    pub expected_stream: Option<String>,
+    /// Expected last sequence
+    pub expected_last_sequence: Option<u64>,
+    /// Expected last subject sequence
+    pub expected_last_subject_sequence: Option<u64>,
 }
 
 /// contains info about the `JetStream` usage from the current account.
