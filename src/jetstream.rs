@@ -20,10 +20,11 @@
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("my_server::4222")?;
+//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
 //!
 //! // create_stream converts a str into a
 //! // default `StreamConfig`.
-//! nc.create_stream("my_stream")?;
+//! js.create_stream("my_stream")?;
 //!
 //! # Ok(()) }
 //! ```
@@ -35,8 +36,9 @@
 //! use nats::jetstream::{StreamConfig, StorageType};
 //!
 //! let nc = nats::connect("my_server::4222")?;
+//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
 //!
-//! nc.create_stream(StreamConfig {
+//! js.create_stream(StreamConfig {
 //!     name: "my_memory_stream".to_string(),
 //!     max_bytes: 5 * 1024 * 1024 * 1024,
 //!     storage: StorageType::Memory,
@@ -51,10 +53,11 @@
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("my_server::4222")?;
+//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
 //!
-//! nc.create_stream("my_stream")?;
+//! js.create_stream("my_stream")?;
 //!
-//! let consumer: nats::jetstream::Consumer = nc.create_consumer("my_stream", "my_consumer")?;
+//! let consumer: nats::jetstream::Consumer = js.create_consumer("my_stream", "my_consumer")?;
 //!
 //! # Ok(()) }
 //! ```
@@ -66,10 +69,11 @@
 //! use nats::jetstream::{AckPolicy, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
+//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
 //!
-//! nc.create_stream("my_stream")?;
+//! js.create_stream("my_stream")?;
 //!
-//! let consumer: nats::jetstream::Consumer = nc.create_consumer("my_stream", ConsumerConfig {
+//! let consumer: nats::jetstream::Consumer = js.create_consumer("my_stream", ConsumerConfig {
 //!     durable_name: Some("my_consumer".to_string()),
 //!     deliver_subject: Some("my_push_consumer_subject".to_string()),
 //!     ack_policy: AckPolicy::All,
@@ -87,14 +91,15 @@
 //! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
+//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
 //!
-//! let consumer_res = Consumer::existing(nc.clone(), "my_stream", "non-existent_consumer");
+//! let consumer_res = Consumer::existing(js.clone(), "my_stream", "non-existent_consumer");
 //!
 //! // trying to use this consumer will fail because it hasn't been created yet
 //! assert!(consumer_res.is_err());
 //!
 //! // this will create the consumer if it does not exist already
-//! let consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
+//! let consumer = Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer")?;
 //! # Ok(()) }
 //! ```
 //!
@@ -105,9 +110,10 @@
 //! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
+//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
 //!
 //! // this will create the consumer if it does not exist already.
-//! let mut consumer = Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer")?;
+//! let mut consumer = Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer")?;
 //!
 //! // The `Consumer::process` method executes a closure
 //! // on both push- and pull-based consumers, and if
@@ -177,9 +183,10 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 pub use crate::jetstream_types::*;
 
-use crate::{Connection as NatsClient, Message};
+use crate::{Connection, Message};
 
 /// `JetStream` options
+#[derive(Clone)]
 pub struct JetStreamOptions {
     pub(crate) api_prefix: String,
 }
@@ -527,7 +534,7 @@ struct PagedResponse<T> {
 /// An iterator over paged `JetStream` API operations.
 #[derive(Debug)]
 pub struct PagedIterator<'a, T> {
-    manager: &'a NatsClient,
+    manager: &'a JetStream,
     subject: String,
     offset: i64,
     items: VecDeque<T>,
@@ -583,7 +590,19 @@ where
     }
 }
 
-impl NatsClient {
+/// A context for performing `JetStream` operations.
+#[derive(Clone, Debug)]
+pub struct JetStream {
+    nc: Connection,
+    options: JetStreamOptions,
+}
+
+impl JetStream {
+    /// Create a new `JetStream` context.
+    pub fn new(nc: Connection, options: JetStreamOptions) -> Self {
+        Self { nc, options }
+    }
+
     /// Create a `JetStream` stream.
     pub fn create_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
@@ -823,7 +842,7 @@ impl NatsClient {
     where
         Res: DeserializeOwned,
     {
-        let res_msg = self.request(subject, req)?;
+        let res_msg = self.nc.request(subject, req)?;
         let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
@@ -839,14 +858,14 @@ impl NatsClient {
     }
 
     fn api_prefix(&self) -> &str {
-        &self.0.client.options.jetstream.api_prefix
+        &self.options.api_prefix
     }
 }
 
 /// `JetStream` reliable consumption functionality.
 pub struct Consumer {
     /// The underlying NATS client
-    pub nc: NatsClient,
+    pub js: JetStream,
 
     /// The stream that this `Consumer` is interested in
     pub stream: String,
@@ -870,15 +889,15 @@ impl Consumer {
     /// `ConsumerInfo` that may have been returned
     /// from the `nats::Connection::list_consumers`
     /// iterator.
-    pub fn from_consumer_info(ci: ConsumerInfo, nc: NatsClient) -> io::Result<Consumer> {
-        Consumer::existing::<String, ConsumerConfig>(nc, ci.stream_name, ci.config)
+    pub fn from_consumer_info(ci: ConsumerInfo, js: JetStream) -> io::Result<Consumer> {
+        Consumer::existing::<String, ConsumerConfig>(js, ci.stream_name, ci.config)
     }
 
     /// Instantiate a `JetStream` `Consumer`. Performs a check to see if the consumer
     /// already exists, and creates it if not. If you want to use an existing
     /// `Consumer` without this check and creation, use the `Consumer::existing`
     /// method.
-    pub fn create_or_open<S, C>(nc: NatsClient, stream: S, cfg: C) -> io::Result<Consumer>
+    pub fn create_or_open<S, C>(js: JetStream, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -888,22 +907,22 @@ impl Consumer {
 
         if let Some(ref durable_name) = cfg.durable_name {
             // attempt to create a durable config if it does not yet exist
-            let consumer_info = nc.consumer_info(&stream, durable_name);
+            let consumer_info = js.consumer_info(&stream, durable_name);
             if let Err(e) = consumer_info {
                 if e.kind() == std::io::ErrorKind::Other {
-                    nc.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+                    js.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
                 }
             }
         } else {
             // ephemeral consumer
-            nc.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+            js.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
         }
 
-        Consumer::existing::<String, ConsumerConfig>(nc, stream, cfg)
+        Consumer::existing::<String, ConsumerConfig>(js, stream, cfg)
     }
 
     /// Use an existing `JetStream` `Consumer`
-    pub fn existing<S, C>(nc: NatsClient, stream: S, cfg: C) -> io::Result<Consumer>
+    pub fn existing<S, C>(js: JetStream, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -912,13 +931,13 @@ impl Consumer {
         let cfg = ConsumerConfig::from(cfg);
 
         let push_subscriber = if let Some(ref deliver_subject) = cfg.deliver_subject {
-            Some(nc.subscribe(deliver_subject)?)
+            Some(js.nc.subscribe(deliver_subject)?)
         } else {
             None
         };
 
         Ok(Consumer {
-            nc,
+            js,
             stream,
             cfg,
             push_subscriber,
@@ -966,12 +985,12 @@ impl Consumer {
 
             let subject = format!(
                 "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.api_prefix(),
+                self.js.api_prefix(),
                 self.stream,
                 self.cfg.durable_name.as_ref().unwrap()
             );
 
-            let sub = match self.nc.request_multi(&subject, batch_size.to_string()) {
+            let sub = match self.js.nc.request_multi(&subject, batch_size.to_string()) {
                 Ok(sub) => sub,
                 Err(e) => return vec![Err(e)],
             };
@@ -1054,12 +1073,12 @@ impl Consumer {
 
             let subject = format!(
                 "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.api_prefix(),
+                self.js.api_prefix(),
                 self.stream,
                 self.cfg.durable_name.as_ref().unwrap()
             );
 
-            self.nc.request(&subject, AckKind::Ack)?
+            self.js.nc.request(&subject, AckKind::Ack)?
         };
 
         let ret = f(&next)?;
@@ -1094,12 +1113,12 @@ impl Consumer {
 
             let subject = format!(
                 "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.api_prefix(),
+                self.js.api_prefix(),
                 self.stream,
                 self.cfg.durable_name.as_ref().unwrap()
             );
 
-            self.nc.request_timeout(&subject, b"", self.timeout)?
+            self.js.nc.request_timeout(&subject, b"", self.timeout)?
         };
 
         let ret = f(&next)?;
@@ -1155,16 +1174,12 @@ impl Consumer {
 
         let subject = format!(
             "{}CONSUMER.MSG.NEXT.{}.{}",
-            self.api_prefix(),
+            self.js.api_prefix(),
             self.stream,
             self.cfg.durable_name.as_ref().unwrap()
         );
 
         let req = serde_json::ser::to_vec(&next_request).unwrap();
-        self.nc.request_multi(&subject, &req)
-    }
-
-    fn api_prefix(&self) -> &str {
-        &self.nc.0.client.options.jetstream.api_prefix
+        self.js.nc.request_multi(&subject, &req)
     }
 }

@@ -10,8 +10,9 @@ pub use util::*;
 fn jetstream_not_enabled() {
     let s = util::run_basic_server();
     let nc = nats::connect(&s.client_url()).unwrap();
+    let js = JetStream::new(nc, JetStreamOptions::default());
 
-    let err = nc.account_info().unwrap_err();
+    let err = js.account_info().unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::Other);
 
     let err = err
@@ -28,8 +29,9 @@ fn jetstream_not_enabled() {
 fn jetstream_account_not_enabled() {
     let s = util::run_server("tests/configs/jetstream_account_not_enabled.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
+    let js = JetStream::new(nc, JetStreamOptions::default());
 
-    let err = nc.account_info().unwrap_err();
+    let err = js.account_info().unwrap_err();
     println!("{:?}", err);
     assert_eq!(err.kind(), io::ErrorKind::Other);
 
@@ -45,26 +47,26 @@ fn jetstream_account_not_enabled() {
 
 #[test]
 fn jetstream_create_stream_and_consumer() -> io::Result<()> {
-    let (_s, nc) = run_basic_jetstream();
-    nc.create_stream("stream1")?;
-    nc.create_consumer("stream1", "consumer1")?;
+    let (_s, _nc, js) = run_basic_jetstream();
+    js.create_stream("stream1")?;
+    js.create_consumer("stream1", "consumer1")?;
     Ok(())
 }
 
 #[test]
 fn jetstream_queue_process() -> io::Result<()> {
-    let (_s, nc) = run_basic_jetstream();
+    let (_s, nc, js) = run_basic_jetstream();
 
-    let _ = nc.delete_stream("qtest1");
+    let _ = js.delete_stream("qtest1");
 
-    nc.create_stream(StreamConfig {
+    js.create_stream(StreamConfig {
         name: "qtest1".to_string(),
         retention: RetentionPolicy::WorkQueue,
         storage: StorageType::File,
         ..Default::default()
     })?;
 
-    let mut consumer1 = nc.create_consumer(
+    let mut consumer1 = js.create_consumer(
         "qtest1",
         ConsumerConfig {
             max_deliver: 5,
@@ -91,20 +93,20 @@ fn jetstream_queue_process() -> io::Result<()> {
 
 #[test]
 fn jetstream_basics() -> io::Result<()> {
-    let (_s, nc) = run_basic_jetstream();
+    let (_s, nc, js) = run_basic_jetstream();
 
-    let _ = nc.delete_stream("test1");
-    let _ = nc.delete_stream("test2");
+    let _ = js.delete_stream("test1");
+    let _ = js.delete_stream("test2");
 
-    nc.create_stream(StreamConfig {
+    js.create_stream(StreamConfig {
         name: "test1".to_string(),
         retention: RetentionPolicy::WorkQueue,
         ..Default::default()
     })?;
 
-    nc.create_stream("test2")?;
-    nc.stream_info("test2")?;
-    nc.create_consumer("test2", "consumer1")?;
+    js.create_stream("test2")?;
+    js.stream_info("test2")?;
+    js.create_consumer("test2", "consumer1")?;
 
     let consumer2_cfg = ConsumerConfig {
         durable_name: Some("consumer2".to_string()),
@@ -112,22 +114,22 @@ fn jetstream_basics() -> io::Result<()> {
         deliver_subject: Some("consumer2_ds".to_string()),
         ..Default::default()
     };
-    nc.create_consumer("test2", &consumer2_cfg)?;
-    nc.consumer_info("test2", "consumer1")?;
+    js.create_consumer("test2", &consumer2_cfg)?;
+    js.consumer_info("test2", "consumer1")?;
 
     for i in 1..=1000 {
         nc.publish("test2", format!("{}", i))?;
     }
 
-    assert_eq!(nc.stream_info("test2")?.state.messages, 1000);
+    assert_eq!(js.stream_info("test2")?.state.messages, 1000);
 
-    let mut consumer1 = Consumer::existing(nc.clone(), "test2", "consumer1")?;
+    let mut consumer1 = Consumer::existing(js.clone(), "test2", "consumer1")?;
 
     for _ in 1..=1000 {
         consumer1.process(|_msg| Ok(()))?;
     }
 
-    let mut consumer2 = Consumer::existing(nc.clone(), "test2", consumer2_cfg)?;
+    let mut consumer2 = Consumer::existing(js.clone(), "test2", consumer2_cfg)?;
 
     let mut count = 0;
     while count != 1000 {
@@ -143,31 +145,31 @@ fn jetstream_basics() -> io::Result<()> {
 
     // sequence numbers start with 1
     for i in 1..=500 {
-        nc.delete_message("test2", i)?;
+        js.delete_message("test2", i)?;
     }
 
-    assert_eq!(nc.stream_info("test2")?.state.messages, 500);
+    assert_eq!(js.stream_info("test2")?.state.messages, 500);
 
-    nc.create_consumer("test2", "consumer3")?;
+    js.create_consumer("test2", "consumer3")?;
 
-    Consumer::existing(nc.clone(), "test2", "consumer3")?;
+    Consumer::existing(js.clone(), "test2", "consumer3")?;
 
     // cleanup
-    let streams: io::Result<Vec<StreamInfo>> = nc.list_streams().collect();
+    let streams: io::Result<Vec<StreamInfo>> = js.list_streams().collect();
 
     for stream in streams? {
         let consumers: io::Result<Vec<ConsumerInfo>> =
-            nc.list_consumers(&stream.config.name)?.collect();
+            js.list_consumers(&stream.config.name)?.collect();
 
         for consumer in consumers? {
-            nc.delete_consumer(&stream.config.name, &consumer.name)?;
+            js.delete_consumer(&stream.config.name, &consumer.name)?;
         }
 
-        nc.purge_stream(&stream.config.name)?;
+        js.purge_stream(&stream.config.name)?;
 
-        assert_eq!(nc.stream_info(&stream.config.name)?.state.messages, 0);
+        assert_eq!(js.stream_info(&stream.config.name)?.state.messages, 0);
 
-        nc.delete_stream(&stream.config.name)?;
+        js.delete_stream(&stream.config.name)?;
     }
 
     Ok(())
@@ -177,16 +179,16 @@ fn jetstream_basics() -> io::Result<()> {
 fn jetstream_libdoc_test() {
     use nats::jetstream::Consumer;
 
-    let (_s, nc) = run_basic_jetstream();
+    let (_s, nc, js) = run_basic_jetstream();
 
-    nc.create_stream("my_stream").unwrap();
+    js.create_stream("my_stream").unwrap();
     nc.publish("my_stream", "1").unwrap();
     nc.publish("my_stream", "2").unwrap();
     nc.publish("my_stream", "3").unwrap();
     nc.publish("my_stream", "4").unwrap();
 
     let mut consumer =
-        Consumer::create_or_open(nc, "my_stream", "existing_or_created_consumer").unwrap();
+        Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer").unwrap();
 
     // set this very high for CI
     consumer.timeout = std::time::Duration::from_millis(1500);
