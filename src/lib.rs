@@ -234,8 +234,8 @@ use std::{
 };
 
 pub use headers::Headers;
+pub use jetstream::JetStreamOptions;
 pub use message::Message;
-pub use options::JetStreamOptions;
 pub use options::Options;
 pub use subscription::Subscription;
 
