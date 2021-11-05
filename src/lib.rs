@@ -449,20 +449,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        // Publish a request.
-        let reply = self.new_inbox();
-        let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
-
-        // Wait for the response.
-        if let Some(msg) = sub.next() {
-            if msg.is_no_responders() {
-                return Err(Error::new(ErrorKind::NotFound, "no responders"));
-            }
-            Ok(msg)
-        } else {
-            Err(ErrorKind::ConnectionReset.into())
-        }
+        self.request_with_headers_or_timeout(subject, None, None, msg)
     }
 
     /// Publish a message on the given subject as a request and receive the
@@ -484,13 +471,38 @@ impl Connection {
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
+        self.request_with_headers_or_timeout(subject, None, Some(timeout), msg)
+    }
+
+    fn request_with_headers_or_timeout(
+        &self,
+        subject: &str,
+        maybe_headers: Option<&Headers>,
+        maybe_timeout: Option<Duration>,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<Message> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), maybe_headers, msg)?;
 
-        // Wait for the response.
-        sub.next_timeout(timeout)
+        // Wait for the response
+        let result = if let Some(timeout) = maybe_timeout {
+            sub.next_timeout(timeout)
+        } else if let Some(msg) = sub.next() {
+            Ok(msg)
+        } else {
+            Err(ErrorKind::ConnectionReset.into())
+        };
+
+        // Check for no responder status.
+        if let Ok(msg) = result.as_ref() {
+            if msg.is_no_responders() {
+                return Err(Error::new(ErrorKind::NotFound, "no responders"));
+            }
+        }
+
+        result
     }
 
     /// Publish a message on the given subject as a request and allow multiple
