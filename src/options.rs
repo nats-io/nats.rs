@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::auth_utils;
-use crate::jetstream::JetStreamOptions;
 use crate::secure_wipe::SecureString;
 use crate::Connection;
 
@@ -41,7 +40,6 @@ pub struct Options {
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
-    pub(crate) jetstream: JetStreamOptions,
 }
 
 impl fmt::Debug for Options {
@@ -81,7 +79,6 @@ impl Default for Options {
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
-            jetstream: JetStreamOptions::default(),
             tls_client_config: crate::rustls::ClientConfig::default(),
         }
     }
@@ -499,25 +496,6 @@ impl Options {
         F: Fn() + Send + Sync + 'static,
     {
         self.reconnect_callback = Callback(Some(Box::new(cb)));
-        self
-    }
-
-    /// Set `JetStream` options
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
-    ///     .jetstream(nats::JetStreamOptions::new()
-    ///         .api_prefix("some_exported_prefix".to_string())
-    ///     )
-    ///     .connect("demo.nats.io")?;
-    /// nc.drain().unwrap();
-    /// # Ok(())
-    /// # }
-    pub fn jetstream(mut self, jetstream: JetStreamOptions) -> Self {
-        self.jetstream = jetstream;
         self
     }
 
