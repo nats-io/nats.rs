@@ -10,7 +10,7 @@ pub use util::*;
 fn jetstream_not_enabled() {
     let s = util::run_basic_server();
     let nc = nats::connect(&s.client_url()).unwrap();
-    let js = JetStream::new(nc, JetStreamOptions::default());
+    let js = nats::jetstream::new(nc);
 
     let err = js.account_info().unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::Other);
@@ -29,7 +29,7 @@ fn jetstream_not_enabled() {
 fn jetstream_account_not_enabled() {
     let s = util::run_server("tests/configs/jetstream_account_not_enabled.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
-    let js = JetStream::new(nc, JetStreamOptions::default());
+    let js = nats::jetstream::new(nc);
 
     let err = js.account_info().unwrap_err();
     println!("{:?}", err);

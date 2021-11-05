@@ -20,7 +20,7 @@
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
+//! let js = nats::jetstream::new(nc);
 //!
 //! // create_stream converts a str into a
 //! // default `StreamConfig`.
@@ -36,7 +36,7 @@
 //! use nats::jetstream::{StreamConfig, StorageType};
 //!
 //! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
+//! let js = nats::jetstream::new(nc);
 //!
 //! js.create_stream(StreamConfig {
 //!     name: "my_memory_stream".to_string(),
@@ -53,7 +53,7 @@
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
+//! let js = nats::jetstream::new(nc);
 //!
 //! js.create_stream("my_stream")?;
 //!
@@ -69,7 +69,7 @@
 //! use nats::jetstream::{AckPolicy, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
+//! let js = nats::jetstream::new(nc);
 //!
 //! js.create_stream("my_stream")?;
 //!
@@ -91,7 +91,7 @@
 //! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
+//! let js = nats::jetstream::new(nc);
 //!
 //! let consumer_res = Consumer::existing(js.clone(), "my_stream", "non-existent_consumer");
 //!
@@ -110,7 +110,7 @@
 //! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::JetStream::new(nc, nats::jetstream::JetStreamOptions::default());
+//! let js = nats::jetstream::new(nc);
 //!
 //! // this will create the consumer if it does not exist already.
 //! let mut consumer = Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer")?;
@@ -1182,4 +1182,10 @@ impl Consumer {
         let req = serde_json::ser::to_vec(&next_request).unwrap();
         self.js.nc.request_multi(&subject, &req)
     }
+}
+
+/// Creates a new `JetStream` context using the given `Connection` and default options.
+///
+pub fn new(nc: Connection) -> JetStream {
+    JetStream::new(nc, JetStreamOptions::default())
 }
