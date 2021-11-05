@@ -257,6 +257,11 @@ impl JetStreamOptions {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 enum ApiResponse<T> {
+    // Note:
+    // Serde will try to match the data against each variant in order and the first one that
+    // deserializes successfully is the one returned.
+    //
+    // Therefore the error case must come first, otherwise it can be ignored.
     Err { r#type: String, error: Error },
     Ok(T),
 }
