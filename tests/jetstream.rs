@@ -49,7 +49,7 @@ fn jetstream_account_not_enabled() {
 fn jetstream_create_stream_and_consumer() -> io::Result<()> {
     let (_s, _nc, js) = run_basic_jetstream();
     js.create_stream("stream1")?;
-    js.create_consumer("stream1", "consumer1")?;
+    js.add_consumer("stream1", "consumer1")?;
     Ok(())
 }
 
@@ -66,7 +66,7 @@ fn jetstream_queue_process() -> io::Result<()> {
         ..Default::default()
     })?;
 
-    let mut consumer1 = js.create_consumer(
+    let mut consumer1 = js.add_consumer(
         "qtest1",
         ConsumerConfig {
             max_deliver: 5,
@@ -106,7 +106,7 @@ fn jetstream_basics() -> io::Result<()> {
 
     js.create_stream("test2")?;
     js.stream_info("test2")?;
-    js.create_consumer("test2", "consumer1")?;
+    js.add_consumer("test2", "consumer1")?;
 
     let consumer2_cfg = ConsumerConfig {
         durable_name: Some("consumer2".to_string()),
@@ -114,7 +114,7 @@ fn jetstream_basics() -> io::Result<()> {
         deliver_subject: Some("consumer2_ds".to_string()),
         ..Default::default()
     };
-    js.create_consumer("test2", &consumer2_cfg)?;
+    js.add_consumer("test2", &consumer2_cfg)?;
     js.consumer_info("test2", "consumer1")?;
 
     for i in 1..=1000 {
@@ -123,13 +123,13 @@ fn jetstream_basics() -> io::Result<()> {
 
     assert_eq!(js.stream_info("test2")?.state.messages, 1000);
 
-    let mut consumer1 = Consumer::existing(js.clone(), "test2", "consumer1")?;
+    let mut consumer1 = js.existing("test2", "consumer1")?;
 
     for _ in 1..=1000 {
         consumer1.process(|_msg| Ok(()))?;
     }
 
-    let mut consumer2 = Consumer::existing(js.clone(), "test2", consumer2_cfg)?;
+    let mut consumer2 = js.existing("test2", consumer2_cfg)?;
 
     let mut count = 0;
     while count != 1000 {
@@ -150,9 +150,9 @@ fn jetstream_basics() -> io::Result<()> {
 
     assert_eq!(js.stream_info("test2")?.state.messages, 500);
 
-    js.create_consumer("test2", "consumer3")?;
+    js.add_consumer("test2", "consumer3")?;
 
-    Consumer::existing(js.clone(), "test2", "consumer3")?;
+    js.existing("test2", "consumer3")?;
 
     // cleanup
     let streams: io::Result<Vec<StreamInfo>> = js.list_streams().collect();
@@ -177,8 +177,6 @@ fn jetstream_basics() -> io::Result<()> {
 
 #[test]
 fn jetstream_libdoc_test() {
-    use nats::jetstream::Consumer;
-
     let (_s, nc, js) = run_basic_jetstream();
 
     js.create_stream("my_stream").unwrap();
@@ -187,8 +185,9 @@ fn jetstream_libdoc_test() {
     nc.publish("my_stream", "3").unwrap();
     nc.publish("my_stream", "4").unwrap();
 
-    let mut consumer =
-        Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer").unwrap();
+    let mut consumer = js
+        .create_or_bind("my_stream", "existing_or_created_consumer")
+        .unwrap();
 
     // set this very high for CI
     consumer.timeout = std::time::Duration::from_millis(1500);
