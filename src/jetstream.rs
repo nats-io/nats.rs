@@ -166,8 +166,9 @@
 use std::{
     collections::VecDeque,
     convert::TryFrom,
+    error, fmt,
     fmt::Debug,
-    io::{self, Error, ErrorKind},
+    io::{self, ErrorKind},
     time::Duration,
 };
 
@@ -182,15 +183,28 @@ use crate::{Connection as NatsClient, Message};
 #[serde(untagged)]
 enum ApiResponse<T> {
     Ok(T),
-    Err { r#type: String, error: ApiError },
+    Err { r#type: String, error: Error },
 }
 
-/// `ApiError` is included in all Api responses if there was an error.
+/// `Error` type returned from an API response when an error occurs.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
-struct ApiError {
+pub struct Error {
     code: usize,
     description: Option<String>,
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            fmt,
+            "{} (api error {})",
+            self.description.as_ref().unwrap_or(&"unknown".to_string()),
+            self.code
+        )
+    }
+}
+
+impl error::Error for Error {}
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct PagedRequest {
@@ -277,7 +291,7 @@ impl NatsClient {
     {
         let cfg: StreamConfig = stream_config.into();
         if cfg.name.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -290,7 +304,7 @@ impl NatsClient {
     /// Update a `JetStream` stream.
     pub fn update_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
         if cfg.name.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -330,7 +344,7 @@ impl NatsClient {
     {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -350,7 +364,7 @@ impl NatsClient {
     pub fn stream_info<S: AsRef<str>>(&self, stream: S) -> io::Result<StreamInfo> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -363,7 +377,7 @@ impl NatsClient {
     pub fn purge_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<PurgeResponse> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -380,7 +394,7 @@ impl NatsClient {
     ) -> io::Result<bool> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -401,7 +415,7 @@ impl NatsClient {
     pub fn delete_stream<S: AsRef<str>>(&self, stream: S) -> io::Result<bool> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -421,7 +435,7 @@ impl NatsClient {
         let config = ConsumerConfig::from(cfg);
         let stream = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -458,14 +472,14 @@ impl NatsClient {
     {
         let stream = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
         let consumer = consumer.as_ref();
         if consumer.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the consumer name must not be empty",
             ));
@@ -490,7 +504,7 @@ impl NatsClient {
     {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
@@ -518,11 +532,8 @@ impl NatsClient {
                     "failed to parse API response: {:?}",
                     std::str::from_utf8(&res_msg.data)
                 );
-                if let Some(desc) = error.description {
-                    Err(Error::new(ErrorKind::Other, desc))
-                } else {
-                    Err(Error::new(ErrorKind::Other, "unknown"))
-                }
+
+                Err(io::Error::new(io::ErrorKind::Other, error))
             }
         }
     }
@@ -646,7 +657,7 @@ impl Consumer {
             ps
         } else {
             if self.cfg.durable_name.is_none() {
-                return vec![Err(Error::new(
+                return vec![Err(io::Error::new(
                     ErrorKind::InvalidInput,
                     "process and process_batch are only usable from \
                     Pull-based Consumers if there is a durable_name set",
@@ -734,7 +745,7 @@ impl Consumer {
             ps.next().unwrap()
         } else {
             if self.cfg.durable_name.is_none() {
-                return Err(Error::new(
+                return Err(io::Error::new(
                     ErrorKind::InvalidInput,
                     "process and process_batch are only usable from \
                         Pull-based Consumers if there is a durable_name set",
@@ -774,7 +785,7 @@ impl Consumer {
             ps.next_timeout(self.timeout)?
         } else {
             if self.cfg.durable_name.is_none() {
-                return Err(Error::new(
+                return Err(io::Error::new(
                     ErrorKind::InvalidInput,
                     "process and process_batch are only usable from \
                         Pull-based Consumers if there is a a durable_name set",
@@ -814,7 +825,7 @@ impl Consumer {
         if let Some(ret) = ret_opt {
             Ok(ret)
         } else {
-            Err(Error::new(
+            Err(io::Error::new(
                 ErrorKind::BrokenPipe,
                 "The nats client is shutting down.",
             ))
@@ -827,7 +838,7 @@ impl Consumer {
     /// `NextRequest` for more information about the options.
     pub fn pull_opt(&mut self, next_request: NextRequest) -> io::Result<crate::Subscription> {
         if self.cfg.durable_name.is_none() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "this method is only usable from \
                 Pull-based Consumers with a durable_name set",
@@ -835,7 +846,7 @@ impl Consumer {
         }
 
         if self.cfg.deliver_subject.is_some() {
-            return Err(Error::new(
+            return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "this method is only usable from \
                 Pull-based Consumers with a deliver_subject set to None",
