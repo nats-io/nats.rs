@@ -57,7 +57,7 @@
 //!
 //! js.create_stream("my_stream")?;
 //!
-//! let consumer: nats::jetstream::Consumer = js.create_consumer("my_stream", "my_consumer")?;
+//! let consumer: nats::jetstream::Consumer = js.add_consumer("my_stream", "my_consumer")?;
 //!
 //! # Ok(()) }
 //! ```
@@ -73,7 +73,7 @@
 //!
 //! js.create_stream("my_stream")?;
 //!
-//! let consumer: nats::jetstream::Consumer = js.create_consumer("my_stream", ConsumerConfig {
+//! let consumer: nats::jetstream::Consumer = js.add_consumer("my_stream", ConsumerConfig {
 //!     durable_name: Some("my_consumer".to_string()),
 //!     deliver_subject: Some("my_push_consumer_subject".to_string()),
 //!     ack_policy: AckPolicy::All,
@@ -83,8 +83,8 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Consumers can also be created on-the-fly using `Consumer::create_or_open`, and later used with
-//! `Consumer::existing` if you do not wish to auto-create them.
+//! Consumers can also be created on-the-fly using `JetStream`'s `create_or_bind`, and later used with
+//! `existing` if you do not wish to auto-create them.
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -93,13 +93,13 @@
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
-//! let consumer_res = Consumer::existing(js.clone(), "my_stream", "non-existent_consumer");
+//! let consumer_res = js.existing("my_stream", "non-existent_consumer");
 //!
 //! // trying to use this consumer will fail because it hasn't been created yet
 //! assert!(consumer_res.is_err());
 //!
 //! // this will create the consumer if it does not exist already
-//! let consumer = Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer")?;
+//! let consumer = js.create_or_bind("my_stream", "existing_or_created_consumer")?;
 //! # Ok(()) }
 //! ```
 //!
@@ -113,7 +113,7 @@
 //! let js = nats::jetstream::new(nc);
 //!
 //! // this will create the consumer if it does not exist already.
-//! let mut consumer = Consumer::create_or_open(js, "my_stream", "existing_or_created_consumer")?;
+//! let mut consumer = js.create_or_bind("my_stream", "existing_or_created_consumer")?;
 //!
 //! // The `Consumer::process` method executes a closure
 //! // on both push- and pull-based consumers, and if
@@ -745,8 +745,40 @@ impl JetStream {
             .map(|dr| dr.success)
     }
 
+    /// Instantiate a `JetStream` `Consumer` from an existing
+    /// `ConsumerInfo` that may have been returned
+    /// from the `nats::Connection::list_consumers`
+    /// iterator.
+    pub fn from_consumer_info(&self, ci: ConsumerInfo) -> io::Result<Consumer> {
+        self.existing::<String, ConsumerConfig>(ci.stream_name, ci.config)
+    }
+
+    /// Use an existing `JetStream` `Consumer`
+    pub fn existing<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
+    where
+        S: AsRef<str>,
+        ConsumerConfig: From<C>,
+    {
+        let stream = stream.as_ref().to_string();
+        let cfg = ConsumerConfig::from(cfg);
+
+        let push_subscriber = if let Some(ref deliver_subject) = cfg.deliver_subject {
+            Some(self.nc.subscribe(deliver_subject)?)
+        } else {
+            None
+        };
+
+        Ok(Consumer {
+            js: self.to_owned(),
+            stream,
+            cfg,
+            push_subscriber,
+            timeout: Duration::from_millis(5),
+        })
+    }
+
     /// Create a `JetStream` consumer.
-    pub fn create_consumer<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
+    pub fn add_consumer<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
@@ -780,7 +812,35 @@ impl JetStream {
 
         let _info: ConsumerInfo = self.js_request(&subject, &ser_req)?;
 
-        Consumer::existing::<&str, ConsumerConfig>(self.clone(), stream, config)
+        self.existing::<&str, ConsumerConfig>(stream, config)
+    }
+
+    /// Instantiate a `JetStream` `Consumer`. Performs a check to see if the consumer
+    /// already exists, and creates it if not. If you want to use an existing
+    /// `Consumer` without this check and creation, use the `existing`
+    /// method.
+    pub fn create_or_bind<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
+    where
+        S: AsRef<str>,
+        ConsumerConfig: From<C>,
+    {
+        let stream = stream.as_ref().to_string();
+        let cfg = ConsumerConfig::from(cfg);
+
+        if let Some(ref durable_name) = cfg.durable_name {
+            // attempt to create a durable config if it does not yet exist
+            let consumer_info = self.consumer_info(&stream, durable_name);
+            if let Err(e) = consumer_info {
+                if e.kind() == std::io::ErrorKind::Other {
+                    self.add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+                }
+            }
+        } else {
+            // ephemeral consumer
+            self.add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
+        }
+
+        self.existing::<String, ConsumerConfig>(stream, cfg)
     }
 
     /// Delete a `JetStream` consumer.
@@ -885,66 +945,6 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    /// Instantiate a `JetStream` `Consumer` from an existing
-    /// `ConsumerInfo` that may have been returned
-    /// from the `nats::Connection::list_consumers`
-    /// iterator.
-    pub fn from_consumer_info(ci: ConsumerInfo, js: JetStream) -> io::Result<Consumer> {
-        Consumer::existing::<String, ConsumerConfig>(js, ci.stream_name, ci.config)
-    }
-
-    /// Instantiate a `JetStream` `Consumer`. Performs a check to see if the consumer
-    /// already exists, and creates it if not. If you want to use an existing
-    /// `Consumer` without this check and creation, use the `Consumer::existing`
-    /// method.
-    pub fn create_or_open<S, C>(js: JetStream, stream: S, cfg: C) -> io::Result<Consumer>
-    where
-        S: AsRef<str>,
-        ConsumerConfig: From<C>,
-    {
-        let stream = stream.as_ref().to_string();
-        let cfg = ConsumerConfig::from(cfg);
-
-        if let Some(ref durable_name) = cfg.durable_name {
-            // attempt to create a durable config if it does not yet exist
-            let consumer_info = js.consumer_info(&stream, durable_name);
-            if let Err(e) = consumer_info {
-                if e.kind() == std::io::ErrorKind::Other {
-                    js.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
-                }
-            }
-        } else {
-            // ephemeral consumer
-            js.create_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
-        }
-
-        Consumer::existing::<String, ConsumerConfig>(js, stream, cfg)
-    }
-
-    /// Use an existing `JetStream` `Consumer`
-    pub fn existing<S, C>(js: JetStream, stream: S, cfg: C) -> io::Result<Consumer>
-    where
-        S: AsRef<str>,
-        ConsumerConfig: From<C>,
-    {
-        let stream = stream.as_ref().to_string();
-        let cfg = ConsumerConfig::from(cfg);
-
-        let push_subscriber = if let Some(ref deliver_subject) = cfg.deliver_subject {
-            Some(js.nc.subscribe(deliver_subject)?)
-        } else {
-            None
-        };
-
-        Ok(Consumer {
-            js,
-            stream,
-            cfg,
-            push_subscriber,
-            timeout: Duration::from_millis(5),
-        })
-    }
-
     /// Process a batch of messages. If `AckPolicy::All` is set,
     /// this will send a single acknowledgement at the end of
     /// the batch.
