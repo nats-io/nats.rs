@@ -1,8 +1,47 @@
 use std::io;
 
 mod util;
+use nats::jetstream;
 use nats::jetstream::*;
 pub use util::*;
+
+#[test]
+#[ignore]
+fn jetstream_not_enabled() {
+    let s = util::run_basic_server();
+    let nc = nats::connect(&s.client_url()).unwrap();
+
+    let err = nc.account_info().unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+
+    let err = err
+        .into_inner()
+        .expect("should be able to convert error into inner")
+        .downcast::<jetstream::Error>()
+        .expect("should be able to downcast into error")
+        .to_owned();
+
+    assert_eq!(err.error_code(), jetstream::ErrorCode::NotEnabled);
+}
+
+#[test]
+fn jetstream_account_not_enabled() {
+    let s = util::run_server("tests/configs/jetstream_account_not_enabled.conf");
+    let nc = nats::connect(&s.client_url()).unwrap();
+
+    let err = nc.account_info().unwrap_err();
+    println!("{:?}", err);
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+
+    let err = err
+        .into_inner()
+        .expect("should be able to convert error into inner")
+        .downcast::<jetstream::Error>()
+        .expect("should be able to downcast into jetstream::Error")
+        .to_owned();
+
+    assert_eq!(err.error_code(), jetstream::ErrorCode::NotEnabledForAccount);
+}
 
 #[test]
 fn jetstream_create_stream_and_consumer() -> io::Result<()> {
