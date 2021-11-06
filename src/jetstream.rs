@@ -262,7 +262,7 @@ enum ApiResponse<T> {
     // deserializes successfully is the one returned.
     //
     // Therefore the error case must come first, otherwise it can be ignored.
-    Err { r#type: String, error: Error },
+    Err { error: Error },
     Ok(T),
 }
 
