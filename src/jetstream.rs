@@ -22,14 +22,14 @@
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
-//! // create_stream converts a str into a
+//! // add_stream converts a str into a
 //! // default `StreamConfig`.
-//! js.create_stream("my_stream")?;
+//! js.add_stream("my_stream")?;
 //!
 //! # Ok(()) }
 //! ```
 //!
-//! Create a new stream with specific options set:
+//! Add a new stream with specific options set:
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +38,7 @@
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
-//! js.create_stream(StreamConfig {
+//! js.add_stream(StreamConfig {
 //!     name: "my_memory_stream".to_string(),
 //!     max_bytes: 5 * 1024 * 1024 * 1024,
 //!     storage: StorageType::Memory,
@@ -55,7 +55,7 @@
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
-//! js.create_stream("my_stream")?;
+//! js.add_stream("my_stream")?;
 //!
 //! let consumer: nats::jetstream::Consumer = js.add_consumer("my_stream", "my_consumer")?;
 //!
@@ -71,7 +71,7 @@
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
-//! js.create_stream("my_stream")?;
+//! js.add_stream("my_stream")?;
 //!
 //! let consumer: nats::jetstream::Consumer = js.add_consumer("my_stream", ConsumerConfig {
 //!     durable_name: Some("my_consumer".to_string()),
@@ -603,8 +603,8 @@ impl JetStream {
         Self { nc, options }
     }
 
-    /// Create a `JetStream` stream.
-    pub fn create_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
+    /// Adds new stream to `JetStream`.
+    pub fn add_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,
     {

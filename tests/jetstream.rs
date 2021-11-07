@@ -46,9 +46,9 @@ fn jetstream_account_not_enabled() {
 }
 
 #[test]
-fn jetstream_create_stream_and_consumer() -> io::Result<()> {
+fn jetstream_add_stream_and_consumer() -> io::Result<()> {
     let (_s, _nc, js) = run_basic_jetstream();
-    js.create_stream("stream1")?;
+    js.add_stream("stream1")?;
     js.add_consumer("stream1", "consumer1")?;
     Ok(())
 }
@@ -59,7 +59,7 @@ fn jetstream_queue_process() -> io::Result<()> {
 
     let _ = js.delete_stream("qtest1");
 
-    js.create_stream(StreamConfig {
+    js.add_stream(StreamConfig {
         name: "qtest1".to_string(),
         retention: RetentionPolicy::WorkQueue,
         storage: StorageType::File,
@@ -98,13 +98,13 @@ fn jetstream_basics() -> io::Result<()> {
     let _ = js.delete_stream("test1");
     let _ = js.delete_stream("test2");
 
-    js.create_stream(StreamConfig {
+    js.add_stream(StreamConfig {
         name: "test1".to_string(),
         retention: RetentionPolicy::WorkQueue,
         ..Default::default()
     })?;
 
-    js.create_stream("test2")?;
+    js.add_stream("test2")?;
     js.stream_info("test2")?;
     js.add_consumer("test2", "consumer1")?;
 
@@ -179,7 +179,7 @@ fn jetstream_basics() -> io::Result<()> {
 fn jetstream_libdoc_test() {
     let (_s, nc, js) = run_basic_jetstream();
 
-    js.create_stream("my_stream").unwrap();
+    js.add_stream("my_stream").unwrap();
     nc.publish("my_stream", "1").unwrap();
     nc.publish("my_stream", "2").unwrap();
     nc.publish("my_stream", "3").unwrap();
