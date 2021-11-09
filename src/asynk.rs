@@ -92,12 +92,15 @@ use std::fmt;
 use std::io;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::time::Duration;
 
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
+use crate::client;
+use crate::client::Client;
 use crate::Headers;
 
 /// Connect to a NATS server at the given url.
@@ -362,7 +365,7 @@ impl Subscription {
     }
 }
 
-/// A message received on a subject.
+/// A message wrapped in a struct with access to Client and all relevant methods
 #[derive(Clone)]
 pub struct Message {
     /// The subject this message came from.
@@ -380,7 +383,7 @@ pub struct Message {
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]
-    pub client: crate::Client,
+    pub client: Client,
 
     /// Whether this message has already been successfully double-acked
     /// using `JetStream`.
@@ -388,8 +391,8 @@ pub struct Message {
     pub double_acked: Arc<AtomicBool>,
 }
 
-impl From<crate::Message> for Message {
-    fn from(sync: crate::Message) -> Message {
+impl From<client::Message> for Message {
+    fn from(sync: client::Message) -> Message {
         Message {
             subject: sync.subject,
             reply: sync.reply,
@@ -401,7 +404,33 @@ impl From<crate::Message> for Message {
     }
 }
 
+/// Implements only Into, as we would loose Client doing the transformation other way around
+#[allow(clippy::from_over_into)]
+impl Into<crate::Message> for Message {
+    fn into(self) -> crate::Message {
+        crate::Message {
+            subject: self.subject,
+            reply: self.reply,
+            data: self.data,
+            headers: self.headers,
+        }
+    }
+}
+
 impl Message {
+    /// transforms raw Message into Message with Client injected
+    #[allow(dead_code)] // temporary, as it will be used internally by any mothod allowing user to pass Raw Message.
+    pub(crate) fn from_message(client: Client, message: Message) -> Message {
+        Message {
+            subject: message.subject,
+            reply: message.reply,
+            data: message.data,
+            headers: message.headers,
+            client,
+            double_acked: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// Respond to a request message.
     pub async fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
         match self.reply.as_ref() {
@@ -429,7 +458,36 @@ impl fmt::Debug for Message {
             .field("headers", &self.headers)
             .field("reply", &self.reply)
             .field("length", &self.data.len())
+            .field("double_ack", &self.double_acked)
             .finish()
+    }
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut body = format!("[{} bytes]", self.data.len());
+        if let Ok(str) = std::str::from_utf8(&self.data) {
+            body = str.to_string();
+        }
+        if let Some(reply) = &self.reply {
+            write!(
+                f,
+                "Message {{\n  subject: \"{}\",\n  reply: \"{}\",\n  data: \
+                 \"{}\"\n  double_ack: \"{}\"\n}}",
+                self.subject,
+                reply,
+                body,
+                self.double_acked.load(Ordering::Acquire)
+            )
+        } else {
+            write!(
+                f,
+                "Message {{\n  subject: \"{}\",\n  data: \"{}\"\n  double_ack: \"{}\"\n}}",
+                self.subject,
+                body,
+                self.double_acked.load(Ordering::Acquire)
+            )
+        }
     }
 }
 
