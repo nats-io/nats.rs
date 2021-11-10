@@ -24,6 +24,8 @@ use crate::{
     header::{self, HeaderMap},
 };
 
+/// A predicate used to preprocess messages as they arrive over the wire.
+pub(crate) type MessagePreprocessor = Box<dyn Fn(&Message) -> bool + Send + Sync>;
 pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 
 /// A message received on a subject.
@@ -110,6 +112,56 @@ impl Message {
                 }
             }
         }
+        false
+    }
+
+    // Helper for detecting flow control messages.
+    pub(crate) fn is_flow_control(&self) -> bool {
+        if !self.data.is_empty() {
+            return false;
+        }
+
+        if let Some(headers) = &self.headers {
+            if let Some(set) = headers.get(header::STATUS) {
+                if set.get("100").is_none() {
+                    return false;
+                }
+            }
+
+            if let Some(set) = headers.get(header::DESCRIPTION) {
+                if set.get("Flow Control").is_some() {
+                    return true;
+                }
+
+                if set.get("FlowControl Request").is_some() {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    // Helper for detecting idle heartbeat messages.
+    pub(crate) fn is_idle_heartbeat(&self) -> bool {
+        if !self.data.is_empty() {
+            return false;
+        }
+
+        if let Some(headers) = &self.headers {
+            if let Some(set) = headers.get(header::STATUS) {
+                if set.get("100").is_none() {
+                    return false;
+                }
+            }
+
+            if let Some(set) = headers.get(header::DESCRIPTION) {
+                if set.get("Idle Heartbeat").is_some() {
+                    return true;
+                }
+            }
+        }
+
         false
     }
 

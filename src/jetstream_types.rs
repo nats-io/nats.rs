@@ -11,11 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, UNIX_EPOCH};
-
-use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
 use chrono::{DateTime as ChronoDateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// A UTC time
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +41,15 @@ pub(crate) struct DeleteResponse {
 pub(crate) struct CreateConsumerRequest {
     pub stream_name: String,
     pub config: ConsumerConfig,
+}
+
+/// Indicates if ownership of a consumer is local or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ConsumerOwnership {
+    /// Local consumer handled by subscriptions.
+    Yes,
+    /// External consumer, lifetime is handled by the user.
+    No,
 }
 
 /// Configuration for consumers. From a high level, the
@@ -98,12 +107,18 @@ pub struct ConsumerConfig {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A short description of the purpose of this consumer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Deliver group to use.
+    pub deliver_group: Option<String>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
     /// after this sequence number.
     #[serde(default, skip_serializing_if = "is_default")]
-    pub opt_start_seq: i64,
+    pub opt_start_seq: u64,
     /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
     /// after this time.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -111,8 +126,8 @@ pub struct ConsumerConfig {
     /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub ack_wait: i64,
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub ack_wait: Duration,
     /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_deliver: i64,
@@ -123,7 +138,7 @@ pub struct ConsumerConfig {
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
-    pub rate_limit: i64,
+    pub rate_limit: u64,
     /// What percentage of acknowledgements should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
@@ -135,6 +150,15 @@ pub struct ConsumerConfig {
     /// this consumer.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_ack_pending: i64,
+    /// Only deliver headers without payloads.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub headers_only: bool,
+    /// Enable flow control messages
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub flow_control: bool,
+    /// Enable idle heartbeat messages
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub idle_heartbeat: Duration,
 }
 
 impl From<&ConsumerConfig> for ConsumerConfig {
@@ -170,14 +194,15 @@ pub struct StreamConfig {
     pub discard: DiscardPolicy,
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub subjects: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subjects: Vec<String>,
     /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
     pub retention: RetentionPolicy,
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
     pub max_consumers: i32,
     /// Maximum age of any message in the stream, expressed in nanoseconds
-    pub max_age: i64,
+    #[serde(with = "serde_nanos")]
+    pub max_age: Duration,
     /// The largest message that will be accepted by the Stream
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_msg_size: i32,
@@ -296,6 +321,10 @@ pub enum DeliverPolicy {
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime = 4,
+    /// `LastPerSubject` will start the consumer with the last message
+    /// for all subjects received.
+    #[serde(rename = "last_per_subject")]
+    LastPerSubject = 5,
 }
 
 impl Default for DeliverPolicy {
@@ -517,6 +546,9 @@ pub struct ConsumerInfo {
     pub num_pending: u64,
     /// Information about the consumer's cluster
     pub cluster: ClusterInfo,
+    /// Indicates if any client is connected and receiving messages from a push consumer
+    #[serde(default)]
+    pub push_bound: bool,
 }
 
 /// Information about the consumer's associated `JetStream` cluster
@@ -537,13 +569,13 @@ pub struct SequencePair {
 
 /// for getting next messages for pull based consumers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct NextRequest {
+pub(crate) struct NextRequest {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub expires: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<usize>,
     /// This optionally causes the server not to store this pending request at all, but when there are no
     /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
     /// can know when you reached the end of the stream for example. A 409 is returned if the
@@ -553,27 +585,219 @@ pub struct NextRequest {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub(crate) struct StreamRequest {
+pub(crate) struct StreamNamesRequest {
     #[serde(default, skip_serializing_if = "is_default")]
     pub subject: String,
 }
 
-/// options for subscription
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub(crate) struct SubOpts {
-    // For attaching.
-    pub stream: String,
-    pub consumer: String,
-    // For pull based consumers, batch size for pull
-    pub pull: usize,
-    // For manual ack
-    pub mack: bool,
-    // For creating or updating.
-    pub cfg: ConsumerConfig,
+pub(crate) struct StreamNamesResponse {
+    pub streams: Vec<String>,
+}
+
+/// Options for subscription
+#[derive(Debug, Default, Clone)]
+pub struct SubscribeOptions {
+    // For consumer binding:
+    pub(crate) bind_only: bool,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) consumer_name: Option<String>,
+
+    // For consumer configuration:
+    pub(crate) ordered: bool,
+    pub(crate) ack_policy: Option<AckPolicy>,
+    pub(crate) ack_wait: Option<Duration>,
+    pub(crate) replay_policy: Option<ReplayPolicy>,
+    pub(crate) deliver_policy: Option<DeliverPolicy>,
+    pub(crate) deliver_subject: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) durable_name: Option<String>,
+    pub(crate) sample_frequency: Option<u8>,
+    pub(crate) idle_heartbeat: Option<Duration>,
+    pub(crate) max_ack_pending: Option<i64>,
+    pub(crate) max_deliver: Option<i64>,
+    pub(crate) max_waiting: Option<i64>,
+    pub(crate) opt_start_seq: Option<u64>,
+    pub(crate) opt_start_time: Option<DateTime>,
+    pub(crate) flow_control: Option<bool>,
+    pub(crate) rate_limit: Option<u64>,
+    pub(crate) headers_only: Option<bool>,
+}
+
+impl SubscribeOptions {
+    /// Creates a new set of default subscription options
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Binds to an existing consumer from a stream without attempting to create one.
+    pub fn bind(stream_name: String, consumer_name: String) -> Self {
+        Self {
+            stream_name: Some(stream_name),
+            consumer_name: Some(consumer_name),
+            bind_only: true,
+            ..Default::default()
+        }
+    }
+
+    /// Creates an ordered fifo (first-in-first-out) subscription.
+    pub fn ordered() -> Self {
+        Self {
+            ordered: true,
+            ..Self::default()
+        }
+    }
+
+    /// Binds the consumer to a stream explicitly based on a name.
+    ///
+    /// When a stream name is not specified, the subject is used as a way to find the stream name.
+    /// This is done by making a request to the server to get list of stream names that have a filter the subject.
+    /// To avoid the stream lookup, provide the stream name with this function.
+    pub fn bind_stream(stream_name: String) -> Self {
+        Self {
+            stream_name: Some(stream_name),
+            ..Default::default()
+        }
+    }
+
+    /// Sets the description used for the created consumer.
+    pub fn description(mut self, description: String) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    /// Sets the durable name for the created consumer.
+    pub fn durable_name(mut self, consumer: String) -> Self {
+        self.durable_name = Some(consumer);
+        self
+    }
+
+    /// Configures the consumer to receive all the messages from a Stream.
+    pub fn deliver_all(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::All);
+        self
+    }
+
+    /// Configures the consumer to receive messages
+    /// starting with the latest one.
+    pub fn deliver_last(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::Last);
+        self
+    }
+
+    /// Configures the consumer to receive messages
+    /// starting with the latest one for each filtered subject.
+    pub fn deliver_last_per_subject(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::LastPerSubject);
+        self
+    }
+
+    /// Configures the consumer to receive messages
+    /// published after the subscription.
+    pub fn deliver_new(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::New);
+        self
+    }
+
+    /// Configures a Consumer to receive
+    /// messages from a start sequence.
+    pub fn deliver_by_start_sequence(mut self, seq: u64) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::ByStartSeq);
+        self.opt_start_seq = Some(seq);
+        self
+    }
+
+    /// Configures the consumer to receive
+    /// messages from a start time.
+    pub fn deliver_by_start_time(mut self, time: DateTime) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::ByStartTime);
+        self.opt_start_time = Some(time);
+
+        self
+    }
+
+    /// Require no acks for delivered messages.
+    pub fn ack_none(mut self) -> Self {
+        self.ack_policy = Some(AckPolicy::None);
+        self
+    }
+
+    /// When acking a sequence number, this implicitly acks all sequences
+    /// below this one as well.
+    pub fn ack_all(mut self) -> Self {
+        self.ack_policy = Some(AckPolicy::All);
+        self
+    }
+
+    /// Requires ack or nack for all messages.
+    pub fn ack_explicit(mut self) -> Self {
+        self.ack_policy = Some(AckPolicy::Explicit);
+        self
+    }
+
+    /// Sets the number of redeliveries for a message.
+    pub fn max_deliver(mut self, n: i64) -> Self {
+        self.max_deliver = Some(n);
+        self
+    }
+
+    /// Sets the number of outstanding acks that are allowed before
+    /// message delivery is halted.
+    pub fn max_ack_pending(mut self, n: i64) -> Self {
+        self.max_ack_pending = Some(n);
+        self
+    }
+
+    /// Replays the messages at the original speed.
+    pub fn replay_original(mut self) -> Self {
+        self.replay_policy = Some(ReplayPolicy::Original);
+        self
+    }
+
+    /// Replays the messages as fast as possible.
+    pub fn replay_instant(mut self) -> Self {
+        self.replay_policy = Some(ReplayPolicy::Instant);
+        self
+    }
+
+    /// The bits per second rate limit applied to the push consumer.
+    pub fn rate_limit(mut self, n: u64) -> Self {
+        self.rate_limit = Some(n);
+        self
+    }
+    /// Specifies the consumer deliver subject.
+    ///
+    /// This option is used only in situations where the consumer does not exist
+    /// and a creation request is sent to the server.
+    ///
+    /// If not provided, an inbox will be selected.
+    pub fn deliver_subject(mut self, subject: String) -> Self {
+        self.deliver_subject = Some(subject);
+        self
+    }
+
+    /// Instruct the consumer to only deliver headers and no payloads.
+    pub fn headers_only(mut self) -> Self {
+        self.headers_only = Some(true);
+        self
+    }
+
+    /// Enables flow control
+    pub fn enable_flow_control(mut self) -> Self {
+        self.flow_control = Some(true);
+        self
+    }
+
+    /// Enables hearbeat messages to be sent.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn idle_heartbeat(mut self, interval: Duration) -> Self {
+        self.idle_heartbeat = Some(interval);
+        self
+    }
 }
 
 /// Options for publishing
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct PublishOptions {
     /// Duration to wait before timing out
     pub timeout: Option<Duration>,

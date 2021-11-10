@@ -198,6 +198,7 @@ mod auth_utils;
 mod client;
 mod connect;
 mod connector;
+mod jetstream_push_subscription;
 mod jetstream_types;
 mod message;
 mod options;
@@ -330,7 +331,7 @@ impl ServerInfo {
 
 /// A NATS connection.
 #[derive(Clone, Debug)]
-pub struct Connection(Arc<Inner>);
+pub struct Connection(pub(crate) Arc<Inner>);
 
 #[derive(Clone, Debug)]
 struct Inner {
