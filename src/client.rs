@@ -26,7 +26,7 @@ use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
 use crate::connector::{Connector, NatsStream};
-use crate::message::Message;
+use crate::message::{Message, MessagePreprocessor};
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{header::HeaderMap, inject_delay, inject_io_failure, Options, ServerInfo};
 
@@ -82,6 +82,7 @@ struct Subscription {
     subject: String,
     queue_group: Option<String>,
     messages: channel::Sender<Message>,
+    preprocess: MessagePreprocessor,
 }
 
 /// A NATS client.
@@ -392,6 +393,7 @@ impl Client {
                 subject: subject.to_string(),
                 queue_group: queue_group.map(ToString::to_string),
                 messages: sender,
+                preprocess: Box::new(|_| false),
             },
         );
 
@@ -400,6 +402,57 @@ impl Client {
         drop(write);
 
         Ok((sid, receiver))
+    }
+
+    /// Resubscribes an existing subscription by unsubscribing from the old subject and subscribing
+    /// to the new subject returning a new sid while retaining the existing channel receiver.
+    pub(crate) fn resubscribe(&self, old_sid: u64, subject: &str) -> io::Result<u64> {
+        // Inject random delays when testing.
+        inject_delay();
+
+        let mut write = self.state.write.lock();
+        let mut read = self.state.read.lock();
+
+        let subscription = read
+            .subscriptions
+            .remove(&old_sid)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "subscription not found"))?;
+
+        // Send an UNSUB and SUB messages.
+        if let Some(writer) = write.writer.as_mut() {
+            proto::encode(
+                writer,
+                ClientOp::Unsub {
+                    sid: old_sid,
+                    max_msgs: None,
+                },
+            )?;
+        }
+
+        // Generate a subject ID.
+        let new_sid = write.next_sid;
+        write.next_sid += 1;
+
+        let queue_group = subscription.queue_group.clone();
+        read.subscriptions.insert(new_sid, subscription);
+
+        if let Some(writer) = write.writer.as_mut() {
+            proto::encode(
+                writer,
+                ClientOp::Sub {
+                    sid: new_sid,
+                    subject,
+                    queue_group: queue_group.as_deref(),
+                },
+            )?;
+            write.flush_kicker.try_send(()).ok();
+        }
+
+        // NB see locking protocol for state.write and state.read
+        drop(read);
+        drop(write);
+
+        Ok(new_sid)
     }
 
     /// Unsubscribes from a subject.
@@ -431,6 +484,30 @@ impl Client {
         // NB see locking protocol for state.write and state.read
         drop(read);
         drop(write);
+
+        Ok(())
+    }
+
+    /// Sets the message preprocessor for a subscription.
+    ///
+    /// This predicate is called afer a message arrives and before it is queued up to subscription
+    /// channel.
+    ///
+    /// If the predicate returns true the message is considered consumed and is not queued on the
+    /// channel.
+    pub(crate) fn set_preprocessor(
+        &self,
+        sid: u64,
+        preprocess: MessagePreprocessor,
+    ) -> io::Result<()> {
+        let mut read = self.state.read.lock();
+
+        if let Some(subscription) = read.subscriptions.get_mut(&sid) {
+            subscription.preprocess = preprocess;
+        }
+
+        // NB see locking protocol for state.write and state.read
+        drop(read);
 
         Ok(())
     }
@@ -779,6 +856,13 @@ impl Client {
                             double_acked: Default::default(),
                         };
 
+                        // Preprocess and drop the message from the buffer if it the predicate
+                        // returns true
+                        let preprocess = &subscription.preprocess;
+                        if preprocess(&msg) {
+                            continue;
+                        }
+
                         // Send a message or drop it if the channel is
                         // disconnected or full.
                         subscription.messages.try_send(msg).ok();
@@ -803,6 +887,13 @@ impl Client {
                             client: Some(self.clone()),
                             double_acked: Default::default(),
                         };
+
+                        // Preprocess and drop the message from the buffer if it the predicate
+                        // returns true
+                        let preprocess = &subscription.preprocess;
+                        if preprocess(&msg) {
+                            continue;
+                        }
 
                         // Send a message or drop it if the channel is
                         // disconnected or full.

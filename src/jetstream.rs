@@ -29,7 +29,7 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Add a new stream with specific options set:
+//! Create a new stream with configuration:
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,7 +48,7 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Create and use a new default consumer (defaults to Pull-based, see the docs for [`ConsumerConfig`](struct.ConsumerConfig.html) for how this influences behavior)
+//! Create a new consumer:
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,131 +56,64 @@
 //! let js = nats::jetstream::new(nc);
 //!
 //! js.add_stream("my_stream")?;
-//!
-//! let consumer: nats::jetstream::Consumer = js.add_consumer("my_stream", "my_consumer")?;
+//! js.add_consumer("my_stream", "my_consumer")?;
 //!
 //! # Ok(()) }
 //! ```
 //!
-//! Create and use a new push-based consumer with batched acknowledgements
+//! Create a new consumer with configuration:
 //!
 //! ```no_run
+//! use nats::jetstream::{ ConsumerConfig };
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::{AckPolicy, ConsumerConfig};
-//!
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
 //! js.add_stream("my_stream")?;
-//!
-//! let consumer: nats::jetstream::Consumer = js.add_consumer("my_stream", ConsumerConfig {
-//!     durable_name: Some("my_consumer".to_string()),
-//!     deliver_subject: Some("my_push_consumer_subject".to_string()),
-//!     ack_policy: AckPolicy::All,
-//!     ..Default::default()
+//! js.add_consumer("my_stream", ConsumerConfig {
+//!   deliver_subject: Some("my_deliver_subject".to_string()),
+//!   durable_name: Some("my_durable_consumer".to_string()),
+//!   ..Default::default()
 //! })?;
 //!
 //! # Ok(()) }
 //! ```
 //!
-//! Consumers can also be created on-the-fly using `JetStream`'s `create_or_bind`, and later used with
-//! `existing` if you do not wish to auto-create them.
+//! Create a new subscription:
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
-//!
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
-//! let consumer_res = js.existing("my_stream", "non-existent_consumer");
-//!
-//! // trying to use this consumer will fail because it hasn't been created yet
-//! assert!(consumer_res.is_err());
-//!
-//! // this will create the consumer if it does not exist already
-//! let consumer = js.create_or_bind("my_stream", "existing_or_created_consumer")?;
-//! # Ok(()) }
-//! ```
-//!
-//! Consumers may be used for processing messages individually, with timeouts, or in batches:
-//!
-//! ```no_run
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::{AckPolicy, Consumer, ConsumerConfig};
-//!
-//! let nc = nats::connect("my_server::4222")?;
-//! let js = nats::jetstream::new(nc);
-//!
-//! // this will create the consumer if it does not exist already.
-//! let mut consumer = js.create_or_bind("my_stream", "existing_or_created_consumer")?;
-//!
-//! // The `Consumer::process` method executes a closure
-//! // on both push- and pull-based consumers, and if
-//! // the closure returns `Ok` then the message is acked.
-//! // If no message is available, it will wait forever
-//! // for one to arrive.
-//! let msg_data_len: usize = consumer.process(|msg| {
-//!     println!("got message {:?}", msg);
-//!     Ok(msg.data.len())
-//! })?;
-//!
-//! // Similar to `Consumer::process` except wait until the
-//! // consumer's `timeout` field for the message to arrive.
-//! // This can and should be set manually, as it has a low
-//! // default of 5ms.
-//! let msg_data_len: usize = consumer.process_timeout(|msg| {
-//!     println!("got message {:?}", msg);
-//!     Ok(msg.data.len())
-//! })?;
-//!
-//! // For consumers operating with `AckPolicy::All`, batch
-//! // processing can provide nice throughput optimizations.
-//! // `Consumer::process_batch` will wait indefinitely for
-//! // the first message in a batch, then process
-//! // more messages until the configured timeout is expired.
-//! // It will batch acks if running with `AckPolicy::All`.
-//! // If there is an error with acking, the last item in the
-//! // returned `Vec` will be the io error. Terminates early
-//! // without acking if the closure returns an `Err`, which
-//! // is included in the final element of the `Vec`. If a
-//! // Timeout happens before the batch size is reached, then
-//! // there will be no errors included in the response `Vec`.
-//! let batch_size = 128;
-//! let results: Vec<std::io::Result<usize>> = consumer.process_batch(batch_size, |msg| {
-//!     println!("got message {:?}", msg);
-//!     Ok(msg.data.len())
-//! });
-//! let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
-//! let sizes: Vec<usize> = flipped?;
-//!
-//! // For lower-level control for use cases that are not
-//! // well-served by the high-level process* methods,
-//! // there are a number of lower level primitives that
-//! // can be used, such as `Consumer::pull` for pull-based
-//! // consumers and `Message::ack` for manually acking things:
-//! let msg = consumer.pull()?;
-//!
-//! // --- process message ---
-//!
-//! // tell the server the message has been processed
-//! msg.ack()?;
+//! js.add_stream("my_stream")?;
+//! let subscription = js.subscribe("my_stream")?;
 //!
 //! # Ok(()) }
 //! ```
-
+//! This will attempt to bind to an existing consumer if it exists, otherwise it will create a new
+//! internally managed consumer resource that gets destroyed when the subscription is dropped.
+//!
 use std::{
     collections::{HashSet, VecDeque},
     convert::TryFrom,
     error, fmt,
     fmt::Debug,
     io::{self, ErrorKind},
-    time::Duration,
+    sync::atomic::Ordering,
 };
+
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
+
+// TODO re-organize this into a jetstream directory
+pub use crate::jetstream_push_subscription::PushSubscription;
 pub use crate::jetstream_types::*;
 
 use crate::{
@@ -601,14 +534,17 @@ where
 /// A context for performing `JetStream` operations.
 #[derive(Clone, Debug)]
 pub struct JetStream {
-    nc: Connection,
-    options: JetStreamOptions,
+    pub(crate) connection: Connection,
+    pub(crate) options: JetStreamOptions,
 }
 
 impl JetStream {
     /// Create a new `JetStream` context.
-    pub fn new(nc: Connection, options: JetStreamOptions) -> Self {
-        Self { nc, options }
+    pub fn new(connection: Connection, options: JetStreamOptions) -> Self {
+        Self {
+            connection,
+            options,
+        }
     }
 
     /// Publishes a message to `JetStream`
@@ -713,7 +649,7 @@ impl JetStream {
 
         let maybe_timeout = maybe_options.and_then(|options| options.timeout);
 
-        let res_msg = self.nc.request_with_headers_or_timeout(
+        let res_msg = self.connection.request_with_headers_or_timeout(
             subject,
             maybe_headers.as_ref(),
             maybe_timeout,
@@ -734,33 +670,706 @@ impl JetStream {
         }
     }
 
+    /// Create an ephemeral push consumer subscription.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// # context.add_stream("ephemeral");
+    /// # context.publish("ephemeral", "hello");
+    /// #    
+    /// let subscription = context.subscribe("ephemeral")?;
+    /// println!("Received message {:?}", subscription.next());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn subscribe(&self, subject: &str) -> io::Result<PushSubscription> {
+        self.do_push_subscribe(subject, None, None)
+    }
+
+    /// Creates a push consumer subscription with options.
+    ///
+    /// If said consumer is named and already exists, this will attempt to bind this consumer to
+    /// that one, else will attempt to create a new internally managed consumer resource.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use nats::jetstream::{ SubscribeOptions };
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// # let js = nats::jetstream::new(nc);
+    /// let sub = js.subscribe_with_options("foo", &SubscribeOptions::bind("existing_stream".to_string(), "existing_consumer".to_string()))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn subscribe_with_options(
+        &self,
+        subject: &str,
+        options: &SubscribeOptions,
+    ) -> io::Result<PushSubscription> {
+        self.do_push_subscribe(subject, None, Some(options))
+    }
+
+    /// Creates a push-based consumer subscription with a queue group.
+    /// The queue group will be used as the durable name.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// # context.add_stream("queue");
+    /// let subscription = context.queue_subscribe("queue", "queue_group")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<PushSubscription> {
+        self.do_push_subscribe(subject, Some(queue), None)
+    }
+
+    /// Creates a push-based consumer subscription with a queue group and options.
+    ///
+    /// If a durable name is not set within the options provided options then the queue group will
+    /// be used as the durable name.
+    ///
+    pub fn queue_subscribe_with_options(
+        &self,
+        subject: &str,
+        queue: &str,
+        options: &SubscribeOptions,
+    ) -> io::Result<PushSubscription> {
+        self.do_push_subscribe(subject, Some(queue), Some(options))
+    }
+
+    fn do_push_subscribe(
+        &self,
+        subject: &str,
+        maybe_queue: Option<&str>,
+        maybe_options: Option<&SubscribeOptions>,
+    ) -> io::Result<PushSubscription> {
+        // If no stream name is specified the subject cannot be empty.
+        if subject.is_empty()
+            && maybe_options
+                .map(|options| options.stream_name.as_ref())
+                .is_none()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Subject required",
+            ));
+        }
+
+        let wants_idle_heartbeat =
+            maybe_options.map_or(false, |options| options.idle_heartbeat.is_some());
+
+        let wants_flow_control =
+            maybe_options.map_or(false, |options| options.flow_control.is_some());
+
+        if maybe_queue.is_some() {
+            // Queue subscriber cannot have idle heartbeats
+            if wants_idle_heartbeat {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "queue subscription doesn't support idle heartbeat",
+                ));
+            }
+
+            // Nor flow control since messages will randomly dispatched to members.
+            if wants_flow_control {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "queue subscription doesn't support flow control",
+                ));
+            }
+        };
+
+        // Checks specific to ordered consumers.
+        if let Some(options) = maybe_options.filter(|options| options.ordered) {
+            // Check for queue subscription.
+            if maybe_queue.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "queues not be set for an ordered consumer",
+                ));
+            }
+
+            // Check for durable name
+            if options.durable_name.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "durable name can not be set for an ordered consumer",
+                ));
+            }
+
+            // Check for bound consumers.
+            if options.consumer_name.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "can not bind existing consumer for an ordered consumer",
+                ));
+            }
+
+            // Check for ack policy.
+            if options.ack_policy.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "ack policy can not be set for an ordered consumer",
+                ));
+            }
+
+            // Check for max deliver.
+            if options.max_deliver.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "max deliver can not be set for an ordered consumer",
+                ));
+            }
+
+            // Check for deliver subject (we pick our own).
+            if options.deliver_subject.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "deliver subject can not be set for an ordered consumer",
+                ));
+            }
+        }
+
+        let process_consumer_info = |info: ConsumerInfo| {
+            // Make sure this new subject matches or is a subset.
+            if !info.config.filter_subject.is_empty() && subject != info.config.filter_subject {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "subject does not match consumer",
+                ));
+            }
+
+            if let Some(deliver_group) = info.config.deliver_group.as_ref() {
+                if let Some(queue) = maybe_queue {
+                    if deliver_group != queue {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "cannot create a queue subscription {} for a consumer with a deliver group {}",
+                                queue, deliver_group
+                            ),
+                        ));
+                    }
+                } else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "cannot create a subscription for a consumer with a deliver group {}",
+                            deliver_group
+                        ),
+                    ));
+                }
+            } else {
+                // Prevent an user from attempting to create a queue subscription on
+                // a consumer that was not created with a deliver group.
+                if maybe_queue.is_some() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "cannot create a queue subscription for a consumer without a deliver group",
+                    ));
+                }
+
+                // Need to reject a non queue subscription to a non queue consumer if the consumer
+                // is already bound.
+                if maybe_queue.is_some() && info.push_bound {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "consumer is already bound to a subscription",
+                    ));
+                }
+            }
+
+            // Check for configuration mismatches.
+            if let Some(options) = maybe_options {
+                if options.durable_name.is_some()
+                    && options.durable_name != info.config.durable_name
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests durable name to be {:?}, but consumer's value is {:?}", options.durable_name, info.config.durable_name
+                    )));
+                }
+
+                if options.description.is_some() && options.description != info.config.description {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests description to be {:?}, but consumer's value is {:?}", options.description, info.config.description
+                    )));
+                }
+
+                if options.deliver_policy.is_some()
+                    && options.deliver_policy.unwrap() != info.config.deliver_policy
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests deliver policy to be {:?}, but consumer's value is {:?}", options.deliver_policy, info.config.deliver_policy
+                    )));
+                }
+
+                if options.opt_start_seq.is_some()
+                    && options.opt_start_seq.unwrap() != info.config.opt_start_seq
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests optional start sequence to be {:?}, but consumer's value is {:?}", options.opt_start_seq, info.config.opt_start_seq
+                    )));
+                }
+
+                if options.opt_start_time.is_some()
+                    && options.opt_start_time != info.config.opt_start_time
+                {
+                    return Err(io::Error::new(
+                       io::ErrorKind::Other,
+                       format!("configuration requests optional start time to be {:?}, but consumer's value is {:?}", options.opt_start_time, info.config.opt_start_time
+                   )));
+                }
+
+                if options.ack_policy.is_some()
+                    && options.ack_policy.unwrap() != info.config.ack_policy
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests ack policy to be {:?}, but consumer's value is {:?}", options.ack_policy, info.config.ack_policy
+                    )));
+                }
+
+                if options.ack_wait.is_some() && options.ack_wait.unwrap() != info.config.ack_wait {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests ack wait to be {:?}, but consumer's value is {:?}", options.ack_wait, info.config.ack_wait
+                    )));
+                }
+
+                if options.max_deliver.is_some()
+                    && options.max_deliver.unwrap() != info.config.max_deliver
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests max deliver to be {:?}, but consumer's value is {:?}", options.max_deliver, info.config.max_deliver
+                    )));
+                }
+
+                if options.replay_policy.is_some()
+                    && options.replay_policy.unwrap() != info.config.replay_policy
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests replay policy to be {:?}, but consumer's value is {:?}", options.replay_policy, info.config.replay_policy
+                    )));
+                }
+
+                if options.rate_limit.is_some()
+                    && options.rate_limit.unwrap() != info.config.rate_limit
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests rate limit to be {:?}, but consumer's value is {:?}", options.rate_limit, info.config.rate_limit
+                    )));
+                }
+
+                if options.sample_frequency.is_some()
+                    && options.sample_frequency.unwrap() != info.config.sample_frequency
+                {
+                    return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("configuration requests sample frequency to be {:?}, but consumer's value is {:?}", options.sample_frequency, info.config.sample_frequency
+                    )));
+                }
+
+                if options.max_waiting.is_some()
+                    && options.max_waiting.unwrap() != info.config.max_waiting
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests max waiting to be {:?}, but consumer's value is {:?}", options.max_waiting, info.config.max_waiting
+                    )));
+                }
+
+                if options.max_ack_pending.is_some()
+                    && options.max_ack_pending.unwrap() != info.config.max_ack_pending
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests max ack pending to be {:?}, but consumer's value is {:?}", options.max_ack_pending, info.config.max_ack_pending
+                    )));
+                }
+
+                // For flow control, we want to fail if the user explicit wanted it, but
+                // it is not set in the existing consumer. If it is not asked by the user,
+                // the library still handles it and so no reason to fail.
+                if options.flow_control.is_some() && !info.config.flow_control {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests flow control to be {:?}, but consumer's value is {:?}", options.flow_control, info.config.flow_control
+                    )));
+                }
+
+                if options.idle_heartbeat.is_some()
+                    && options.idle_heartbeat.unwrap() != info.config.idle_heartbeat
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("configuration requests heartbeat to be {:?}, but consumer's value is {:?}", options.idle_heartbeat, info.config.idle_heartbeat
+                    )));
+                }
+            }
+
+            Ok(info)
+        };
+
+        // Find the stream mapped to the subject if not bound to a stream already.
+        let stream_name = maybe_options
+            .and_then(|options| options.stream_name.to_owned())
+            .map_or_else(|| self.stream_name_by_subject(subject), Ok)?;
+
+        // Figure out if we have a consumer name
+        let maybe_durable_name = maybe_options
+            .and_then(|options| options.durable_name.as_deref())
+            .or(maybe_queue);
+
+        let maybe_consumer_name = maybe_options
+            .and_then(|options| options.consumer_name.as_deref())
+            .or(maybe_durable_name);
+
+        // If we do have a consumer name, we can lookup the consumer we should attach to first
+        let bind_only = maybe_options.map_or(false, |options| options.bind_only);
+        let maybe_consumer_info = if let Some(consumer_name) = maybe_consumer_name {
+            let consumer_info_result = self
+                .consumer_info(&stream_name, &consumer_name)
+                .and_then(process_consumer_info);
+
+            match consumer_info_result {
+                Ok(info) => Some(info),
+                Err(err) => {
+                    // We only care about protocol errors
+                    if err.kind() != io::ErrorKind::Other {
+                        return Err(err);
+                    }
+
+                    // If we're binding we can't recover from this we so return early.
+                    if bind_only {
+                        if let Some(inner) = err.into_inner() {
+                            if let Ok(err) = inner.downcast::<Error>() {
+                                if err.error_code() == ErrorCode::ConsumerNotFound {
+                                    return Err(io::Error::new(io::ErrorKind::Other, err));
+                                }
+                            }
+                        }
+                    }
+
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Create our consumer configuration out here so it can be re-used for matching
+        let is_ordered = maybe_options.map_or(false, |options| options.ordered);
+        let consumer_config = {
+            let mut config = if let Some(options) = maybe_options {
+                ConsumerConfig {
+                    ack_policy: options.ack_policy.unwrap_or_default(),
+                    ack_wait: options.ack_wait.unwrap_or_default(),
+                    deliver_policy: options.deliver_policy.unwrap_or_default(),
+                    deliver_subject: options.deliver_subject.clone(),
+                    description: options.description.clone(),
+                    durable_name: options.durable_name.clone(),
+                    flow_control: options.flow_control.unwrap_or_default(),
+                    headers_only: options.headers_only.unwrap_or_default(),
+                    idle_heartbeat: options.idle_heartbeat.unwrap_or_default(),
+                    max_ack_pending: options.max_ack_pending.unwrap_or_default(),
+                    max_deliver: options.max_deliver.unwrap_or_default(),
+                    max_waiting: options.max_waiting.unwrap_or_default(),
+                    opt_start_seq: options.opt_start_seq.unwrap_or_default(),
+                    opt_start_time: options.opt_start_time,
+                    rate_limit: options.rate_limit.unwrap_or_default(),
+                    replay_policy: options.replay_policy.unwrap_or_default(),
+                    sample_frequency: options.sample_frequency.unwrap_or_default(),
+                    ..Default::default()
+                }
+            } else {
+                ConsumerConfig::default()
+            };
+
+            // Do filtering always, server will clear as needed.
+            config.filter_subject = subject.to_string();
+
+            // Pass the queue to the consumer config
+            if let Some(queue) = maybe_queue {
+                if config.durable_name.is_none() {
+                    config.durable_name = Some(queue.to_owned());
+                }
+
+                config.deliver_group = Some(queue.to_owned());
+            }
+
+            // Create a subject if there is not one.
+            if config.deliver_subject.is_none() {
+                config.deliver_subject = Some(self.connection.new_inbox());
+            }
+
+            // If we're ordered, configuration must be a certain way.
+            if is_ordered {
+                config.flow_control = true;
+                config.ack_policy = AckPolicy::None;
+                config.max_deliver = 1;
+                config.ack_wait = Duration::from_nanos(1_000_000);
+
+                if config.idle_heartbeat.is_zero() {
+                    config.idle_heartbeat = ORDERED_IDLE_HEARTBEAT;
+                }
+            }
+
+            config
+        };
+
+        // Figure out our deliver subject
+        let deliver_subject = maybe_consumer_info
+            .as_ref()
+            .and_then(|consumer_info| consumer_info.config.deliver_subject.clone())
+            .or_else(|| consumer_config.deliver_subject.clone())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    "must use pull subscribe to bind to pull based consumer",
+                )
+            })?;
+
+        // Create a subscription with that subject.
+        let (mut sid, mut receiver) = self
+            .connection
+            .0
+            .client
+            .subscribe(&deliver_subject, maybe_queue)?;
+
+        // If we don't have a consumer yet we try to create one here.
+        // If that fails try to bind once before giving up.
+        let (consumer_info, consumer_ownership) = match maybe_consumer_info {
+            Some(consumer_info) => (consumer_info, ConsumerOwnership::No),
+            None => match self.add_consumer(&stream_name, &consumer_config) {
+                Ok(consumer_info) => (consumer_info, ConsumerOwnership::Yes),
+                Err(err) => {
+                    // We won't be using this subscription, remove it.
+                    self.connection.0.client.unsubscribe(sid)?;
+
+                    // If this isn't a protocol error we can return without trying anything else.
+                    if err.kind() != io::ErrorKind::Other {
+                        return Err(err);
+                    }
+
+                    if let Some(inner) = err.into_inner() {
+                        if let Ok(err) = inner.downcast::<Error>() {
+                            if err.error_code() != ErrorCode::ConsumerNameExist {
+                                return Err(io::Error::new(io::ErrorKind::Other, err));
+                            }
+                        }
+                    }
+
+                    let consumer_name = maybe_consumer_name
+                        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "stream not found"))?;
+
+                    let consumer_info = self
+                        .consumer_info(&stream_name, &consumer_name)
+                        .and_then(process_consumer_info)?;
+
+                    let deliver_subject = consumer_info
+                        .config
+                        .deliver_subject
+                        .as_ref()
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                "must use pull subscribe to bind to pull based consumer",
+                            )
+                        })?;
+
+                    // Create a new subscription with the new subject.
+                    let (new_sid, new_receiver) = self
+                        .connection
+                        .0
+                        .client
+                        .subscribe(deliver_subject, maybe_queue)?;
+
+                    sid = new_sid;
+                    receiver = new_receiver;
+
+                    (consumer_info, ConsumerOwnership::No)
+                }
+            },
+        };
+
+        let has_idle_heartbeat = !consumer_info.config.idle_heartbeat.is_zero();
+        let has_flow_control = consumer_info.config.flow_control;
+
+        // Now create our push subscription
+        let push_subscription = PushSubscription::new(
+            sid,
+            consumer_info,
+            consumer_ownership,
+            receiver,
+            self.clone(),
+        );
+
+        // Handle sequence mismatch, etc.
+        if is_ordered || has_idle_heartbeat || has_flow_control {
+            // Sequences for gap detection
+
+            let context = self.clone();
+            let sequence_pair = Arc::new(Mutex::new(SequencePair {
+                consumer_seq: 0,
+                stream_seq: 0,
+            }));
+
+            // We use a filter to intercept messages before they're pushed onto the channel so that we
+            // can process messages as soon as they arrive.
+            let push_subscription = push_subscription.clone();
+            let sequence_pair_clone = sequence_pair.clone();
+
+            let handle_consumer_mismatch = move |start_seq: u64| {
+                let stream_name = stream_name.clone();
+                let context = context.clone();
+                let push_subscription = push_subscription.clone();
+                let consumer_config = consumer_config.clone();
+                let sequence_pair = sequence_pair_clone.clone();
+
+                thread::spawn(move || {
+                    // Replace the subscription with a new delivery subject
+                    let deliver_subject = context.connection.new_inbox();
+                    let result = context.connection.0.client.resubscribe(
+                        push_subscription.0.sid.load(Ordering::Relaxed),
+                        &deliver_subject,
+                    );
+
+                    if let Ok(sid) = result {
+                        // Then change the subscription id for unsubscription
+                        push_subscription.0.sid.store(sid, Ordering::Relaxed);
+
+                        let mut consumer_config = consumer_config.clone();
+                        consumer_config.deliver_subject = Some(deliver_subject);
+                        consumer_config.deliver_policy = DeliverPolicy::ByStartSeq;
+                        consumer_config.opt_start_seq = start_seq;
+
+                        context.add_consumer(stream_name, consumer_config).ok();
+
+                        // Reset the consumer sequence counter
+                        let mut info = sequence_pair.lock().unwrap();
+                        info.consumer_seq = 0;
+                    }
+                });
+
+                // We're resetting so return false to make the filter drop the message.
+                false
+            };
+
+            let context = self.clone();
+            self.connection.0.client.set_preprocessor(
+                sid,
+                Box::new(move |message| {
+                    if let Ok(mut info) = sequence_pair.try_lock() {
+                        // Filter out flow control
+                        if message.is_flow_control() {
+                            return true;
+                        }
+
+                        // Track and respond to idle heartbeats
+                        if message.is_idle_heartbeat() {
+                            let maybe_consumer_stalled = message
+                                .headers
+                                .as_ref()
+                                .and_then(|headers| {
+                                    headers
+                                        .get(header::NATS_CONSUMER_STALLED)
+                                        .map(|set| set.iter().cloned().next())
+                                })
+                                .flatten();
+
+                            if let Some(consumer_stalled) = maybe_consumer_stalled {
+                                context.connection.try_publish_with_reply_or_headers(
+                                    &consumer_stalled,
+                                    None,
+                                    None,
+                                    b"",
+                                );
+                            }
+
+                            let maybe_consumer_seq = message
+                                .headers
+                                .as_ref()
+                                .and_then(|headers| {
+                                    headers
+                                        .get(header::NATS_LAST_CONSUMER)
+                                        .map(|set| set.iter().cloned().next())
+                                })
+                                .flatten();
+
+                            if let Some(consumer_seq) = maybe_consumer_seq {
+                                let consumer_seq = consumer_seq.parse::<u64>().unwrap();
+                                if consumer_seq != info.consumer_seq {
+                                    return handle_consumer_mismatch(info.stream_seq + 1);
+                                }
+                            }
+
+                            return true;
+                        }
+
+                        // Track messages for sequence mismatches.
+                        if let Some(message_info) = message.jetstream_message_info() {
+                            if message_info.consumer_seq != info.consumer_seq + 1 {
+                                return handle_consumer_mismatch(info.stream_seq + 1);
+                            }
+
+                            info.stream_seq = message_info.stream_seq;
+                            info.consumer_seq = message_info.consumer_seq;
+                        }
+
+                        return false;
+                    }
+
+                    false
+                }),
+            )?;
+        }
+
+        Ok(push_subscription)
+    }
+
     /// Create a `JetStream` stream.
     pub fn add_stream<S>(&self, stream_config: S) -> io::Result<StreamInfo>
     where
         StreamConfig: From<S>,
     {
-        let cfg: StreamConfig = stream_config.into();
-        if cfg.name.is_empty() {
+        let config: StreamConfig = stream_config.into();
+        if config.name.is_empty() {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("{}STREAM.CREATE.{}", self.api_prefix(), cfg.name);
-        let req = serde_json::ser::to_vec(&cfg)?;
+        let subject: String = format!("{}STREAM.CREATE.{}", self.api_prefix(), config.name);
+        let req = serde_json::ser::to_vec(&config)?;
         self.js_request(&subject, &req)
     }
 
     /// Update a `JetStream` stream.
-    pub fn update_stream(&self, cfg: &StreamConfig) -> io::Result<StreamInfo> {
-        if cfg.name.is_empty() {
+    pub fn update_stream(&self, config: &StreamConfig) -> io::Result<StreamInfo> {
+        if config.name.is_empty() {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("{}STREAM.UPDATE.{}", self.api_prefix(), cfg.name);
-        let req = serde_json::ser::to_vec(&cfg)?;
+        let subject: String = format!("{}STREAM.UPDATE.{}", self.api_prefix(), config.name);
+        let req = serde_json::ser::to_vec(&config)?;
         self.js_request(&subject, &req)
     }
 
@@ -774,6 +1383,16 @@ impl JetStream {
             items: Default::default(),
             done: false,
         }
+    }
+
+    fn stream_name_by_subject(&self, subject: &str) -> io::Result<String> {
+        let req = serde_json::ser::to_vec(&StreamNamesRequest {
+            subject: subject.to_string(),
+        })?;
+
+        let subject = format!("{}STREAM.NAMES", self.api_prefix());
+        self.js_request::<StreamNamesResponse>(&subject, &req)
+            .map(|res| res.streams.first().unwrap().to_string())
     }
 
     /// List all `JetStream` streams.
@@ -876,45 +1495,13 @@ impl JetStream {
             .map(|dr| dr.success)
     }
 
-    /// Instantiate a `JetStream` `Consumer` from an existing
-    /// `ConsumerInfo` that may have been returned
-    /// from the `nats::Connection::list_consumers`
-    /// iterator.
-    pub fn from_consumer_info(&self, ci: ConsumerInfo) -> io::Result<Consumer> {
-        self.existing::<String, ConsumerConfig>(ci.stream_name, ci.config)
-    }
-
-    /// Use an existing `JetStream` `Consumer`
-    pub fn existing<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
-    where
-        S: AsRef<str>,
-        ConsumerConfig: From<C>,
-    {
-        let stream = stream.as_ref().to_string();
-        let cfg = ConsumerConfig::from(cfg);
-
-        let push_subscriber = if let Some(ref deliver_subject) = cfg.deliver_subject {
-            Some(self.nc.subscribe(deliver_subject)?)
-        } else {
-            None
-        };
-
-        Ok(Consumer {
-            js: self.to_owned(),
-            stream,
-            cfg,
-            push_subscriber,
-            timeout: Duration::from_millis(5),
-        })
-    }
-
     /// Create a `JetStream` consumer.
-    pub fn add_consumer<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
+    pub fn add_consumer<S, C>(&self, stream: S, config: C) -> io::Result<ConsumerInfo>
     where
         S: AsRef<str>,
         ConsumerConfig: From<C>,
     {
-        let config = ConsumerConfig::from(cfg);
+        let config = ConsumerConfig::from(config);
         let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(io::Error::new(
@@ -936,42 +1523,11 @@ impl JetStream {
 
         let req = CreateConsumerRequest {
             stream_name: stream.into(),
-            config: config.clone(),
+            config,
         };
 
         let ser_req = serde_json::ser::to_vec(&req)?;
-
-        let _info: ConsumerInfo = self.js_request(&subject, &ser_req)?;
-
-        self.existing::<&str, ConsumerConfig>(stream, config)
-    }
-
-    /// Instantiate a `JetStream` `Consumer`. Performs a check to see if the consumer
-    /// already exists, and creates it if not. If you want to use an existing
-    /// `Consumer` without this check and creation, use the `existing`
-    /// method.
-    pub fn create_or_bind<S, C>(&self, stream: S, cfg: C) -> io::Result<Consumer>
-    where
-        S: AsRef<str>,
-        ConsumerConfig: From<C>,
-    {
-        let stream = stream.as_ref().to_string();
-        let cfg = ConsumerConfig::from(cfg);
-
-        if let Some(ref durable_name) = cfg.durable_name {
-            // attempt to create a durable config if it does not yet exist
-            let consumer_info = self.consumer_info(&stream, durable_name);
-            if let Err(e) = consumer_info {
-                if e.kind() == std::io::ErrorKind::Other {
-                    self.add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
-                }
-            }
-        } else {
-            // ephemeral consumer
-            self.add_consumer::<&str, &ConsumerConfig>(&stream, &cfg)?;
-        }
-
-        self.existing::<String, ConsumerConfig>(stream, cfg)
+        self.js_request(&subject, &ser_req)
     }
 
     /// Delete a `JetStream` consumer.
@@ -1033,7 +1589,7 @@ impl JetStream {
     where
         Res: DeserializeOwned,
     {
-        let res_msg = self.nc.request(subject, req)?;
+        let res_msg = self.connection.request(subject, req)?;
         let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
@@ -1050,268 +1606,6 @@ impl JetStream {
 
     fn api_prefix(&self) -> &str {
         &self.options.api_prefix
-    }
-}
-
-/// `JetStream` reliable consumption functionality.
-pub struct Consumer {
-    /// The underlying NATS client
-    pub js: JetStream,
-
-    /// The stream that this `Consumer` is interested in
-    pub stream: String,
-
-    /// The backing configuration for this `Consumer`
-    pub cfg: ConsumerConfig,
-
-    /// The backing `Subscription` used if this is a
-    /// push-based consumer.
-    pub push_subscriber: Option<crate::Subscription>,
-
-    /// The amount of time that is waited before erroring
-    /// out during `process` and `process_batch`. Defaults
-    /// to 5ms, which is likely to be far too low for
-    /// workloads crossing physical sites.
-    pub timeout: Duration,
-}
-
-impl Consumer {
-    /// Process a batch of messages. If `AckPolicy::All` is set,
-    /// this will send a single acknowledgement at the end of
-    /// the batch.
-    ///
-    /// This will wait indefinitely for the first message to arrive,
-    /// but then for subsequent messages it will time out after the
-    /// `Consumer`'s configured `timeout`. If a partial batch is received,
-    /// returning the partial set of processed and acknowledged
-    /// messages.
-    ///
-    /// If the closure returns `Err`, the batch processing will stop,
-    /// and the returned vector will contain this error as the final
-    /// element. The message that caused this error will not be acknowledged
-    /// to the `JetStream` server, but all previous messages will be.
-    /// If an error is encountered while subscribing or acking messages
-    /// that may have returned `Ok` from the closure, that Ok will be
-    /// present in the returned vector but the last item in the vector
-    /// will be the encountered error. If the consumer's timeout expires
-    /// before the entire batch is processed, there will be no error
-    /// pushed to the returned `Vec`, it will just be shorter than the
-    /// specified batch size.
-    pub fn process_batch<R, F: FnMut(&Message) -> io::Result<R>>(
-        &mut self,
-        batch_size: usize,
-        mut f: F,
-    ) -> Vec<io::Result<R>> {
-        let mut _sub_opt = None;
-        let responses = if let Some(ps) = self.push_subscriber.as_ref() {
-            ps
-        } else {
-            if self.cfg.durable_name.is_none() {
-                return vec![Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "process and process_batch are only usable from \
-                    Pull-based Consumers if there is a durable_name set",
-                ))];
-            }
-
-            let subject = format!(
-                "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.js.api_prefix(),
-                self.stream,
-                self.cfg.durable_name.as_ref().unwrap()
-            );
-
-            let sub = match self.js.nc.request_multi(&subject, batch_size.to_string()) {
-                Ok(sub) => sub,
-                Err(e) => return vec![Err(e)],
-            };
-            _sub_opt = Some(sub);
-            _sub_opt.as_ref().unwrap()
-        };
-
-        let mut rets = Vec::with_capacity(batch_size);
-        let mut last = None;
-        let start = std::time::Instant::now();
-
-        let mut received = 0;
-
-        while let Some(next) = {
-            if received == 0 {
-                responses.next()
-            } else {
-                let timeout = self
-                    .timeout
-                    .checked_sub(start.elapsed())
-                    .unwrap_or_default();
-                responses.next_timeout(timeout).ok()
-            }
-        } {
-            let ret = f(&next);
-            let is_err = ret.is_err();
-            rets.push(ret);
-
-            if is_err {
-                // we will still try to ack all messages before this one
-                // if our ack policy is `All`, after breaking.
-                break;
-            } else if self.cfg.ack_policy == AckPolicy::Explicit {
-                let res = next.ack();
-                if let Err(e) = res {
-                    rets.push(Err(e));
-                }
-            }
-
-            last = Some(next);
-            received += 1;
-            if received == batch_size {
-                break;
-            }
-        }
-
-        if let Some(last) = last {
-            if self.cfg.ack_policy == AckPolicy::All {
-                let res = last.ack();
-                if let Err(e) = res {
-                    rets.push(Err(e));
-                }
-            }
-        }
-
-        rets
-    }
-
-    /// Process and acknowledge a single message, waiting indefinitely for
-    /// one to arrive.
-    ///
-    /// Does not ack the processed message if the internal closure returns an `Err`.
-    ///
-    /// Does not return an `Err` if acking the message is unsuccessful.
-    /// If you require stronger processing guarantees, you can manually call
-    /// the `double_ack` method of the argument message. If you require
-    /// both the returned `Ok` from the closure and the `Err` from a
-    /// failed ack, use `process_batch` instead.
-    pub fn process<R, F: Fn(&Message) -> io::Result<R>>(&mut self, f: F) -> io::Result<R> {
-        let next = if let Some(ps) = &self.push_subscriber {
-            ps.next().unwrap()
-        } else {
-            if self.cfg.durable_name.is_none() {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "process and process_batch are only usable from \
-                        Pull-based Consumers if there is a durable_name set",
-                ));
-            }
-
-            let subject = format!(
-                "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.js.api_prefix(),
-                self.stream,
-                self.cfg.durable_name.as_ref().unwrap()
-            );
-
-            self.js.nc.request(&subject, AckKind::Ack)?
-        };
-
-        let ret = f(&next)?;
-        if self.cfg.ack_policy != AckPolicy::None {
-            let _dont_care = next.ack();
-        }
-
-        Ok(ret)
-    }
-
-    /// Process and acknowledge a single message, waiting up to the `Consumer`'s
-    /// configured `timeout` before returning a timeout error.
-    ///
-    /// Does not ack the processed message if the internal closure returns an `Err`.
-    ///
-    /// Does not return an `Err` if acking the message is unsuccessful,
-    /// If you require stronger processing guarantees, you can manually call
-    /// the `double_ack` method of the argument message. If you require
-    /// both the returned `Ok` from the closure and the `Err` from a
-    /// failed ack, use `process_batch` instead.
-    pub fn process_timeout<R, F: Fn(&Message) -> io::Result<R>>(&mut self, f: F) -> io::Result<R> {
-        let next = if let Some(ps) = &self.push_subscriber {
-            ps.next_timeout(self.timeout)?
-        } else {
-            if self.cfg.durable_name.is_none() {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "process and process_batch are only usable from \
-                        Pull-based Consumers if there is a a durable_name set",
-                ));
-            }
-
-            let subject = format!(
-                "{}CONSUMER.MSG.NEXT.{}.{}",
-                self.js.api_prefix(),
-                self.stream,
-                self.cfg.durable_name.as_ref().unwrap()
-            );
-
-            self.js.nc.request_timeout(&subject, b"", self.timeout)?
-        };
-
-        let ret = f(&next)?;
-        if self.cfg.ack_policy != AckPolicy::None {
-            let _dont_care = next.ack();
-        }
-
-        Ok(ret)
-    }
-
-    /// For pull-based consumers (a consumer where `ConsumerConfig.deliver_subject` is `None`)
-    /// this can be used to request a single message, and wait forever for a response.
-    /// If you require specifying the batch size or using a timeout while consuming the
-    /// responses, use the `pull_opt` method below.
-    pub fn pull(&mut self) -> io::Result<Message> {
-        let ret_opt = self
-            .pull_opt(NextRequest {
-                batch: 1,
-                ..Default::default()
-            })?
-            .next();
-
-        if let Some(ret) = ret_opt {
-            Ok(ret)
-        } else {
-            Err(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "The nats client is shutting down.",
-            ))
-        }
-    }
-
-    /// For pull-based consumers (a consumer where `ConsumerConfig.deliver_subject` is `None`)
-    /// this can be used to request a configurable number of messages, as well as specify
-    /// how the server will keep track of this batch request over time. See the docs for
-    /// `NextRequest` for more information about the options.
-    pub fn pull_opt(&mut self, next_request: NextRequest) -> io::Result<crate::Subscription> {
-        if self.cfg.durable_name.is_none() {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                "this method is only usable from \
-                Pull-based Consumers with a durable_name set",
-            ));
-        }
-
-        if self.cfg.deliver_subject.is_some() {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                "this method is only usable from \
-                Pull-based Consumers with a deliver_subject set to None",
-            ));
-        }
-
-        let subject = format!(
-            "{}CONSUMER.MSG.NEXT.{}.{}",
-            self.js.api_prefix(),
-            self.stream,
-            self.cfg.durable_name.as_ref().unwrap()
-        );
-
-        let req = serde_json::ser::to_vec(&next_request).unwrap();
-        self.js.nc.request_multi(&subject, &req)
     }
 }
 

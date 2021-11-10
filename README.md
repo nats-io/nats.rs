@@ -109,7 +109,7 @@ let response = rsub.iter().take(1);
 
 ## Minimum Supported Rust Version (MSRV)
 
-The minimum supported Rust version is 1.52.0.
+The minimum supported Rust version is 1.53.0.
 
 ## Sync vs Async
 

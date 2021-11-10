@@ -43,6 +43,12 @@ pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
 /// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
 
+/// Nats-Last-Consumer
+pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
+
+/// Nats-Consumer-Stalled
+pub const NATS_CONSUMER_STALLED: &str = "Nats-Consumer-Stalled";
+
 /// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct HeaderMap {
