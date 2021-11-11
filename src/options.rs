@@ -15,12 +15,14 @@ use std::cmp;
 use std::convert::TryInto;
 use std::fmt;
 use std::io;
+use std::io::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::auth_utils;
 use crate::secure_wipe::SecureString;
+use crate::Client;
 use crate::Connection;
 
 /// Connect options.
@@ -36,6 +38,7 @@ pub struct Options {
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: crate::rustls::ClientConfig,
 
+    pub(crate) error_callback: ErrCallback,
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
@@ -55,6 +58,7 @@ impl fmt::Debug for Options {
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
+            .entry(&"error_callback", &self.error_callback)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
@@ -75,6 +79,7 @@ impl Default for Options {
             certificates: Vec::new(),
             client_cert: None,
             client_key: None,
+            error_callback: ErrCallback(None),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
@@ -457,6 +462,27 @@ impl Options {
         Connection::connect_with_options(nats_url, self)
     }
 
+    /// Set a callback to be executed when an async error from
+    /// a server has been received.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .error_callback(|err| println!("connection received an error: {}", err))
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn error_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(Error) + Send + Sync + 'static,
+    {
+        self.error_callback = ErrCallback(Some(Box::new(cb)));
+        self
+    }
+
     /// Set a callback to be executed when connectivity to
     /// a server has been lost.
     ///
@@ -665,5 +691,28 @@ pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + 
 impl ReconnectDelayCallback {
     pub fn call(&self, reconnects: usize) -> Duration {
         self.0(reconnects)
+    }
+}
+
+pub(crate) struct ErrCallback(Option<Box<dyn Fn(Error) + Send + Sync + 'static>>);
+impl ErrCallback {
+    pub fn call(&self, client: &Client, err: Error) {
+        if let Some(callback) = self.0.as_ref() {
+            callback(err);
+        } else {
+            let si = client.server_info();
+            eprintln!("{} on connection [{}]", err, si.client_id);
+        }
+    }
+}
+
+impl fmt::Debug for ErrCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(
+                &"error_callback",
+                if self.0.is_some() { &"set" } else { &"unset" },
+            )
+            .finish()
     }
 }
