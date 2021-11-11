@@ -38,7 +38,7 @@ pub struct Options {
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: crate::rustls::ClientConfig,
 
-    pub(crate) error_callback: ErrCallback,
+    pub(crate) error_callback: ErrorCallback,
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
@@ -79,7 +79,7 @@ impl Default for Options {
             certificates: Vec::new(),
             client_cert: None,
             client_key: None,
-            error_callback: ErrCallback(None),
+            error_callback: ErrorCallback(None),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
@@ -479,7 +479,7 @@ impl Options {
     where
         F: Fn(Error) + Send + Sync + 'static,
     {
-        self.error_callback = ErrCallback(Some(Box::new(cb)));
+        self.error_callback = ErrorCallback(Some(Box::new(cb)));
         self
     }
 
@@ -694,8 +694,8 @@ impl ReconnectDelayCallback {
     }
 }
 
-pub(crate) struct ErrCallback(Option<Box<dyn Fn(Error) + Send + Sync + 'static>>);
-impl ErrCallback {
+pub(crate) struct ErrorCallback(Option<Box<dyn Fn(Error) + Send + Sync + 'static>>);
+impl ErrorCallback {
     pub fn call(&self, client: &Client, err: Error) {
         if let Some(callback) = self.0.as_ref() {
             callback(err);
@@ -706,7 +706,7 @@ impl ErrCallback {
     }
 }
 
-impl fmt::Debug for ErrCallback {
+impl fmt::Debug for ErrorCallback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_map()
             .entry(
