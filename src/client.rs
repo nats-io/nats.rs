@@ -802,7 +802,10 @@ impl Client {
                 }
 
                 ServerOp::Err(msg) => {
-                    return Err(Error::new(ErrorKind::Other, msg));
+                    connector
+                        .get_options()
+                        .error_callback
+                        .call(self, Error::new(ErrorKind::Other, msg));
                 }
 
                 ServerOp::Unknown(line) => {
