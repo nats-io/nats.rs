@@ -72,8 +72,8 @@ impl Message {
         }
     }
 
-    // Helper for detecting no responders response.
-    pub(crate) fn is_no_responders(&self) -> bool {
+    /// Determine if the message is a no responders response from the server.
+    pub fn is_no_responders(&self) -> bool {
         use crate::headers::STATUS_HEADER;
         if !self.data.is_empty() {
             return false;
