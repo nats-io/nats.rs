@@ -117,6 +117,8 @@ The Rust ecosystem has a diverse set of options for async programming. This clie
 
 The async interface provided by this library is implemented as just a thin wrapper around its sync interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
 
+<em>*NOTE:* This crate uses thread pool from [blocking crate](https://crates.io/crates/blocking/1.1.0). By default it limits number of threads to 500. It can be ovverided by setting `BLOCKING_MAX_THREADS` environment variable and set between 1 and 10000. Be careful when spinning a lot async operations, as it may drain the thread pool and block foverer until it's reworked</em>
+
 ## Features
 The following is a list of features currently supported and planned for the near future.
 
