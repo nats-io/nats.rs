@@ -29,7 +29,7 @@ split-debuginfo = "unpacked"
 [dependencies]
 base64 = "0.13.0"
 base64-url = "1.4.10"
-blocking = "1.0.2"
+blocking = "1.1.0"
 crossbeam-channel = "0.5.1"
 fastrand = "1.5.0"
 itoa = "0.4.7"
