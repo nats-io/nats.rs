@@ -194,6 +194,9 @@ pub struct StreamConfig {
     /// The owner of the template associated with this stream.
     #[serde(default, skip_serializing_if = "is_default")]
     pub template_owner: String,
+    /// Indicates the stream is sealed and cannot be modified in any way
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub sealed: bool,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
