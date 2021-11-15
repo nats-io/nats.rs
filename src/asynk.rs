@@ -88,21 +88,19 @@
 //! # std::io::Result::Ok(()) });
 //! ```
 
-use std::{
-    fmt, io,
-    net::IpAddr,
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::fmt;
+use std::io;
+use std::net::IpAddr;
+use std::path::Path;
+use std::sync::atomic::Ordering;
+use std::sync::{atomic::AtomicBool, Arc};
+use std::time::Duration;
 
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::client::{self, Client};
+use crate::client;
+use crate::client::Client;
 use crate::Headers;
 
 /// Connect to a NATS server at the given url.
