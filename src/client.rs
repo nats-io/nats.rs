@@ -766,7 +766,7 @@ impl Client {
                             reply: reply_to,
                             data: payload,
                             headers: None,
-                            client: self.clone(),
+                            client: Some(self.clone()),
                             double_acked: Default::default(),
                         };
 
@@ -791,7 +791,7 @@ impl Client {
                             reply: reply_to,
                             data: payload,
                             headers: Some(headers),
-                            client: self.clone(),
+                            client: Some(self.clone()),
                             double_acked: Default::default(),
                         };
 
