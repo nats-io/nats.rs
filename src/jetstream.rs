@@ -183,7 +183,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 pub use crate::jetstream_types::*;
 
-use crate::{headers, headers::Headers, message::Message, Connection};
+use crate::{headers, headers::Headers, Connection, Message};
 
 /// `JetStream` options
 #[derive(Clone)]
@@ -1143,7 +1143,7 @@ impl Consumer {
                 responses.next_timeout(timeout).ok()
             }
         } {
-            let ret = f(&next.clone().into());
+            let ret = f(&next);
             let is_err = ret.is_err();
             rets.push(ret);
 
@@ -1209,7 +1209,7 @@ impl Consumer {
             self.js.nc.request(&subject, AckKind::Ack)?
         };
 
-        let ret = f(&next.to_owned().into())?;
+        let ret = f(&next)?;
         if self.cfg.ack_policy != AckPolicy::None {
             let _dont_care = next.ack();
         }
@@ -1249,7 +1249,7 @@ impl Consumer {
             self.js.nc.request_timeout(&subject, b"", self.timeout)?
         };
 
-        let ret = f(&next.to_owned().into())?;
+        let ret = f(&next)?;
         if self.cfg.ack_policy != AckPolicy::None {
             let _dont_care = next.ack();
         }
@@ -1261,7 +1261,7 @@ impl Consumer {
     /// this can be used to request a single message, and wait forever for a response.
     /// If you require specifying the batch size or using a timeout while consuming the
     /// responses, use the `pull_opt` method below.
-    pub fn pull(&mut self) -> io::Result<crate::client::Message> {
+    pub fn pull(&mut self) -> io::Result<Message> {
         let ret_opt = self
             .pull_opt(NextRequest {
                 batch: 1,
