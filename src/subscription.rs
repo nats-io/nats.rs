@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use crossbeam_channel as channel;
 
-use crate::client::{self, Client};
+use crate::client::Client;
+use crate::message::Message;
 
 #[derive(Debug)]
 struct Inner {
@@ -29,7 +30,7 @@ struct Inner {
     pub(crate) subject: String,
 
     /// MSG operations received from the server.
-    pub(crate) messages: channel::Receiver<client::Message>,
+    pub(crate) messages: channel::Receiver<Message>,
 
     /// Client associated with subscription.
     pub(crate) client: Client,
@@ -51,7 +52,7 @@ impl Subscription {
     pub(crate) fn new(
         sid: u64,
         subject: String,
-        messages: channel::Receiver<client::Message>,
+        messages: channel::Receiver<Message>,
         client: Client,
     ) -> Subscription {
         Subscription(Arc::new(Inner {
@@ -86,7 +87,7 @@ impl Subscription {
     /// }
     /// # }
     /// ```
-    pub fn receiver(&self) -> &channel::Receiver<client::Message> {
+    pub fn receiver(&self) -> &channel::Receiver<Message> {
         &self.0.messages
     }
 
@@ -103,7 +104,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn next(&self) -> Option<client::Message> {
+    pub fn next(&self) -> Option<Message> {
         self.0.messages.recv().ok()
     }
 
@@ -122,7 +123,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn try_next(&self) -> Option<client::Message> {
+    pub fn try_next(&self) -> Option<Message> {
         self.0.messages.try_recv().ok()
     }
 
@@ -138,7 +139,7 @@ impl Subscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn next_timeout(&self, timeout: Duration) -> io::Result<client::Message> {
+    pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
         match self.0.messages.recv_timeout(timeout) {
             Ok(msg) => Ok(msg),
             Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
@@ -236,7 +237,7 @@ impl Subscription {
     /// ```
     pub fn with_handler<F>(self, handler: F) -> Handler
     where
-        F: Fn(client::Message) -> io::Result<()> + Send + 'static,
+        F: Fn(Message) -> io::Result<()> + Send + 'static,
     {
         // This will allow us to not have to capture the return. When it is
         // dropped it will not unsubscribe from the server.
@@ -339,7 +340,7 @@ impl Subscription {
 }
 
 impl IntoIterator for Subscription {
-    type Item = client::Message;
+    type Item = Message;
     type IntoIter = IntoIter;
 
     fn into_iter(self) -> IntoIter {
@@ -348,7 +349,7 @@ impl IntoIterator for Subscription {
 }
 
 impl<'a> IntoIterator for &'a Subscription {
-    type Item = client::Message;
+    type Item = Message;
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Iter<'a> {
@@ -387,7 +388,7 @@ pub struct TryIter<'a> {
 }
 
 impl<'a> Iterator for TryIter<'a> {
-    type Item = client::Message;
+    type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
         self.subscription.try_next()
     }
@@ -399,7 +400,7 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = client::Message;
+    type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
         self.subscription.next()
     }
@@ -411,7 +412,7 @@ pub struct IntoIter {
 }
 
 impl Iterator for IntoIter {
-    type Item = client::Message;
+    type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
         self.subscription.next()
     }
@@ -426,7 +427,7 @@ pub struct TimeoutIter<'a> {
 }
 
 impl<'a> Iterator for TimeoutIter<'a> {
-    type Item = client::Message;
+    type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
         self.subscription.next_timeout(self.to).ok()
     }

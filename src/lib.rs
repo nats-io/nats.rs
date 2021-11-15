@@ -448,7 +448,7 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<client::Message> {
+    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         self.request_with_headers_or_timeout(subject, None, None, msg)
     }
 
@@ -470,7 +470,7 @@ impl Connection {
         subject: &str,
         msg: impl AsRef<[u8]>,
         timeout: Duration,
-    ) -> io::Result<client::Message> {
+    ) -> io::Result<Message> {
         self.request_with_headers_or_timeout(subject, None, Some(timeout), msg)
     }
 
@@ -480,7 +480,7 @@ impl Connection {
         maybe_headers: Option<&Headers>,
         maybe_timeout: Option<Duration>,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<client::Message> {
+    ) -> io::Result<Message> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
