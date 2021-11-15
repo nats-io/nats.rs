@@ -11,18 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt,
-    io::{self, prelude::*, BufReader, BufWriter, Error, ErrorKind},
-    mem,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::collections::{HashMap, VecDeque};
+use std::fmt;
+use std::io::prelude::*;
+use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
+use std::mem;
+use std::sync::Arc;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
 use crossbeam_channel::RecvTimeoutError;
@@ -950,7 +948,7 @@ impl From<crate::asynk::Message> for Message {
 }
 
 impl Message {
-    /// transforms raw Message into `client::Message` with Client injected
+    /// transforms raw Message into client::Message with Client injected
     #[allow(dead_code)] // temporary, as it will be used internally by any mothod allowing user to pass Raw Message.
     pub(crate) fn from_message(client: Client, message: Message) -> Message {
         Message {
