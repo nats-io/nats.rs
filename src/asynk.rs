@@ -380,7 +380,7 @@ pub struct Message {
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]
-    pub client: crate::Client,
+    pub client: Option<crate::client::Client>,
 
     /// Whether this message has already been successfully double-acked
     /// using `JetStream`.
@@ -402,22 +402,50 @@ impl From<crate::Message> for Message {
 }
 
 impl Message {
+    /// Creates new empty `Message`, without a Client.
+    /// Useful for passing `Message` data or creating `Message` instance without caring about `Client`,
+    /// but cannot be used on it's own for associated methods as those require `Client` injected into `Message`
+    /// and will error without it.
+    pub fn new(
+        subject: &str,
+        reply: Option<&str>,
+        data: impl AsRef<[u8]>,
+        headers: Option<Headers>,
+    ) -> Message {
+        Message {
+            subject: subject.to_string(),
+            reply: reply.map(String::from),
+            data: data.as_ref().to_vec(),
+            headers,
+            ..Default::default()
+        }
+    }
+
     /// Respond to a request message.
     pub async fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match self.reply.as_ref() {
-            None => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "no reply subject available",
-            )),
-            Some(reply) => {
-                if let Some(res) = self.client.try_publish(reply, None, None, msg.as_ref()) {
-                    return res;
-                }
-                let reply = reply.to_string();
-                let msg = msg.as_ref().to_vec();
-                let client = self.client.clone();
-                unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
-            }
+        let reply = self.reply.clone().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "No reply subject to reply to")
+        })?;
+        let client = self.client.clone().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "no client present in message")
+        })?;
+        if let Some(res) = client.try_publish(reply.as_str(), None, None, msg.as_ref()) {
+            return res;
+        }
+        let msg = msg.as_ref().to_vec();
+        unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
+    }
+}
+
+impl Default for Message {
+    fn default() -> Message {
+        Message {
+            subject: String::from(""),
+            reply: None,
+            data: Vec::new(),
+            headers: None,
+            client: None,
+            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 }

@@ -39,7 +39,7 @@ pub struct Message {
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]
-    pub client: Client,
+    pub client: Option<Client>,
 
     /// Whether this message has already been successfully double-acked
     /// using `JetStream`.
@@ -61,15 +61,38 @@ impl From<crate::asynk::Message> for Message {
 }
 
 impl Message {
+    /// Creates new empty `Message`, without a Client.
+    /// Useful for passing `Message` data or creating `Message` instance without caring about `Client`,
+    /// but cannot be used on it's own for associated methods as those require `Client` injected into `Message`
+    /// and will error without it.
+    pub fn new(
+        subject: &str,
+        reply: Option<&str>,
+        data: impl AsRef<[u8]>,
+        headers: Option<Headers>,
+    ) -> Message {
+        Message {
+            subject: subject.to_string(),
+            reply: reply.map(String::from),
+            data: data.as_ref().to_vec(),
+            headers,
+            ..Default::default()
+        }
+    }
+
     /// Respond to a request message.
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match self.reply.as_ref() {
-            None => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "no reply subject available",
-            )),
-            Some(reply) => self.client.publish(reply, None, None, msg.as_ref()),
-        }
+        let reply = self.reply.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "No reply subject to reply to")
+        })?;
+        let client = self.client.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "no connected client to reply with",
+            )
+        })?;
+        client.publish(reply.as_str(), None, None, msg.as_ref())?;
+        Ok(())
     }
 
     /// Determine if the message is a no responders response from the server.
@@ -131,24 +154,29 @@ impl Message {
             Some(original_reply) => original_reply,
         };
         let mut retries = 0;
+        let client = self.client.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "no connected client to reply with",
+            )
+        })?;
+
         loop {
             retries += 1;
             if retries == 2 {
                 log::warn!("double_ack is retrying until the server connection is reestablished");
             }
             let ack_reply = format!("_INBOX.{}", nuid::next());
-            let sub_ret = self.client.subscribe(&ack_reply, None);
+            let sub_ret = client.subscribe(&ack_reply, None);
             if sub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
             }
             let (sid, receiver) = sub_ret?;
             let sub =
-                crate::Subscription::new(sid, ack_reply.to_string(), receiver, self.client.clone());
+                crate::Subscription::new(sid, ack_reply.to_string(), receiver, client.clone());
 
-            let pub_ret =
-                self.client
-                    .publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
+            let pub_ret = client.publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -291,6 +319,19 @@ impl Message {
             })
         } else {
             None
+        }
+    }
+}
+
+impl Default for Message {
+    fn default() -> Message {
+        Message {
+            subject: String::from(""),
+            reply: None,
+            data: Vec::new(),
+            headers: None,
+            client: None,
+            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 }
