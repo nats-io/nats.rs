@@ -19,7 +19,9 @@ use std::{
     },
 };
 
-use crate::{client::Client, Headers};
+
+use crate::{Headers, client::Client, jetstream_types::AckKind};
+
 
 /// A message received on a subject.
 #[derive(Clone)]
@@ -98,9 +100,9 @@ impl Message {
     /// double-acked.
     pub fn ack(&self) -> io::Result<()> {
         if self.double_acked.load(Ordering::Acquire) {
-            return Ok(());
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "message already acked"));
         }
-        self.respond(b"")
+        self.respond(AckKind::Ack) 
     }
 
     /// Acknowledge a `JetStream` message. See `AckKind` documentation for
@@ -117,50 +119,29 @@ impl Message {
     /// See `AckKind` documentation for details of what each variant means.
     ///
     /// Returns immediately if this message has already been double-acked.
-    pub fn double_ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
+    pub fn ack_sync(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         if self.double_acked.load(Ordering::Acquire) {
-            return Ok(());
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "message already acked"));
         }
-        let original_reply = match self.reply.as_ref() {
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "No reply subject available (not a JetStream message)",
-                ))
-            }
-            Some(original_reply) => original_reply,
-        };
-        let mut retries = 0;
-        loop {
-            retries += 1;
-            if retries == 2 {
-                log::warn!("double_ack is retrying until the server connection is reestablished");
-            }
-            let ack_reply = format!("_INBOX.{}", nuid::next());
-            let sub_ret = self.client.subscribe(&ack_reply, None);
-            if sub_ret.is_err() {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-            let (sid, receiver) = sub_ret?;
-            let sub =
-                crate::Subscription::new(sid, ack_reply.to_string(), receiver, self.client.clone());
+        let original_reply = self.reply.as_ref().ok_or_else(|| io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "No reply subject available (not a JetStream message)",
+        ))?;
 
-            let pub_ret =
-                self.client
-                    .publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
-            if pub_ret.is_err() {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-            if sub
-                .next_timeout(std::time::Duration::from_millis(100))
-                .is_ok()
-            {
-                self.double_acked.store(true, Ordering::Release);
-                return Ok(());
-            }
+        let ack_reply = format!("_INBOX.{}", nuid::next());
+        let (sid, receiver) = self.client.subscribe(&ack_reply, None)?;
+
+        let sub =
+            crate::Subscription::new(sid, ack_reply.to_string(), receiver, self.client.clone());
+
+        self.client
+                .publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref())?;
+        sub.next().ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "error while retriving ack confirmation"))?;
+        match ack_kind {
+                AckKind::Ack | AckKind::Nak | AckKind::Next | AckKind::Term => self.double_acked.store(true, Ordering::Release),
+                _ => ()
         }
+        Ok(())
     }
 
     /// Returns the `JetStream` message ID
