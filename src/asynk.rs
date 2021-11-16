@@ -429,7 +429,7 @@ impl Message {
         let client = self.client.as_ref().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotConnected,
-                "no connected client to reply with",
+                crate::message::MESSAGE_NOT_BOUND,
             )
         })?;
         if let Some(res) = client.try_publish(reply.as_str(), None, None, msg.as_ref()) {
