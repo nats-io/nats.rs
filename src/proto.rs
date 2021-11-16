@@ -17,7 +17,7 @@ use std::io::{self, Error, ErrorKind};
 use std::str::{self, FromStr};
 
 use crate::connect::ConnectInfo;
-use crate::{inject_io_failure, Headers, ServerInfo};
+use crate::{header::HeaderMap, inject_io_failure, ServerInfo};
 
 /// A protocol operation sent by the server.
 #[derive(Debug)]
@@ -37,7 +37,7 @@ pub(crate) enum ServerOp {
     /// bytes>\r\n<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
     Hmsg {
         subject: String,
-        headers: Headers,
+        headers: HeaderMap,
         sid: u64,
         reply_to: Option<String>,
         payload: Vec<u8>,
@@ -264,7 +264,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         header_payload.resize(num_header_bytes as usize, 0_u8);
         stream.read_exact(&mut header_payload[..])?;
 
-        let headers = Headers::try_from(&*header_payload)?;
+        let headers = HeaderMap::try_from(&*header_payload)?;
 
         // Read the payload.
         let mut payload = Vec::new();
@@ -309,7 +309,7 @@ pub(crate) enum ClientOp<'a> {
     Hpub {
         subject: &'a str,
         reply_to: Option<&'a str>,
-        headers: &'a Headers,
+        headers: &'a HeaderMap,
         payload: &'a [u8],
     },
 

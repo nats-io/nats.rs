@@ -23,23 +23,34 @@ use log::trace;
 const HEADER_LINE: &str = "NATS/1.0";
 const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 
-pub const STATUS_HEADER: &str = "Status";
-pub const DESCRIPTION_HEADER: &str = "Description";
+/// Status
+pub const STATUS: &str = "Status";
+/// Description
+pub const DESCRIPTION: &str = "Description";
 
+/// Nats-Msg-Id
 pub const NATS_MSG_ID: &str = "Nats-Msg-Id";
+
+/// Nats-Expected-Stream
 pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
+
+/// Nats-Expected-Last-Msg-Id
 pub const NATS_EXPECTED_LAST_MSG_ID: &str = "Nats-Expected-Last-Msg-Id";
+
+/// Nats-Expected-Last-Sequence
 pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
+
+/// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
 
 /// A multi-map from header name to a set of values for that header
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Headers {
+pub struct HeaderMap {
     /// A multi-map from header name to a set of values for that header
     pub inner: HashMap<String, HashSet<String>>,
 }
 
-impl FromIterator<(String, String)> for Headers {
+impl FromIterator<(String, String)> for HeaderMap {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = (String, String)>,
@@ -49,11 +60,11 @@ impl FromIterator<(String, String)> for Headers {
             let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
-        Headers { inner }
+        HeaderMap { inner }
     }
 }
 
-impl<'a> FromIterator<(&'a String, &'a String)> for Headers {
+impl<'a> FromIterator<(&'a String, &'a String)> for HeaderMap {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = (&'a String, &'a String)>,
@@ -65,11 +76,11 @@ impl<'a> FromIterator<(&'a String, &'a String)> for Headers {
             let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
-        Headers { inner }
+        HeaderMap { inner }
     }
 }
 
-impl<'a> FromIterator<&'a (&'a String, &'a String)> for Headers {
+impl<'a> FromIterator<&'a (&'a String, &'a String)> for HeaderMap {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = &'a (&'a String, &'a String)>,
@@ -81,11 +92,11 @@ impl<'a> FromIterator<&'a (&'a String, &'a String)> for Headers {
             let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
-        Headers { inner }
+        HeaderMap { inner }
     }
 }
 
-impl<'a> FromIterator<(&'a str, &'a str)> for Headers {
+impl<'a> FromIterator<(&'a str, &'a str)> for HeaderMap {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = (&'a str, &'a str)>,
@@ -97,11 +108,11 @@ impl<'a> FromIterator<(&'a str, &'a str)> for Headers {
             let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
-        Headers { inner }
+        HeaderMap { inner }
     }
 }
 
-impl<'a> FromIterator<&'a (&'a str, &'a str)> for Headers {
+impl<'a> FromIterator<&'a (&'a str, &'a str)> for HeaderMap {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = &'a (&'a str, &'a str)>,
@@ -113,7 +124,7 @@ impl<'a> FromIterator<&'a (&'a str, &'a str)> for Headers {
             let entry = inner.entry(k).or_insert_with(HashSet::default);
             entry.insert(v);
         }
-        Headers { inner }
+        HeaderMap { inner }
     }
 }
 
@@ -129,7 +140,7 @@ fn is_continuation(c: char) -> bool {
     c == ' ' || c == '\t'
 }
 
-impl TryFrom<&[u8]> for Headers {
+impl TryFrom<&[u8]> for HeaderMap {
     type Error = std::io::Error;
 
     fn try_from(buf: &[u8]) -> std::io::Result<Self> {
@@ -150,14 +161,14 @@ impl TryFrom<&[u8]> for Headers {
                     Some((status, description)) => {
                         if !status.is_empty() {
                             let entry = inner
-                                .entry(STATUS_HEADER.to_string())
+                                .entry(STATUS.to_string())
                                 .or_insert_with(HashSet::default);
                             entry.insert(status.trim().to_string());
                         }
 
                         if !description.is_empty() {
                             let entry = inner
-                                .entry(DESCRIPTION_HEADER.to_string())
+                                .entry(DESCRIPTION.to_string())
                                 .or_insert_with(HashSet::default);
                             entry.insert(description.trim().to_string());
                         }
@@ -165,7 +176,7 @@ impl TryFrom<&[u8]> for Headers {
                     None => {
                         if !slice.is_empty() {
                             let entry = inner
-                                .entry(STATUS_HEADER.to_string())
+                                .entry(STATUS.to_string())
                                 .or_insert_with(HashSet::default);
                             entry.insert(slice.to_string());
                         }
@@ -198,11 +209,11 @@ impl TryFrom<&[u8]> for Headers {
             }
         }
 
-        Ok(Headers { inner })
+        Ok(HeaderMap { inner })
     }
 }
 
-impl Deref for Headers {
+impl Deref for HeaderMap {
     type Target = HashMap<String, HashSet<String>>;
 
     fn deref(&self) -> &Self::Target {
@@ -210,7 +221,7 @@ impl Deref for Headers {
     }
 }
 
-impl Headers {
+impl HeaderMap {
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         // `<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
         let mut buf = vec![];
@@ -235,18 +246,18 @@ mod try_from {
     #[test]
     fn inline_status() {
         // With single spacing.
-        let headers = Headers::try_from("NATS/1.0 100".as_bytes()).unwrap();
+        let headers = HeaderMap::try_from("NATS/1.0 100".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&STATUS_HEADER.to_string()),
+            headers.inner.get(&STATUS.to_string()),
             Some(&HashSet::from_iter(vec!["100".to_string(),]))
         );
 
         // With double spacing.
-        let headers = Headers::try_from("NATS/1.0  100".as_bytes()).unwrap();
+        let headers = HeaderMap::try_from("NATS/1.0  100".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&STATUS_HEADER.to_string()),
+            headers.inner.get(&STATUS.to_string()),
             Some(&HashSet::from_iter(vec!["100".to_string(),]))
         );
     }
@@ -254,41 +265,41 @@ mod try_from {
     #[test]
     fn inline_status_with_description() {
         // With single spacing
-        let headers = Headers::try_from("NATS/1.0 100 Idle Heartbeat".as_bytes()).unwrap();
+        let headers = HeaderMap::try_from("NATS/1.0 100 Idle Heartbeat".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&STATUS_HEADER.to_string()),
+            headers.inner.get(&STATUS.to_string()),
             Some(&HashSet::from_iter(vec!["100".to_string()]))
         );
 
         assert_eq!(
-            headers.inner.get(&DESCRIPTION_HEADER.to_string()),
+            headers.inner.get(&DESCRIPTION.to_string()),
             Some(&HashSet::from_iter(vec!["Idle Heartbeat".to_string()]))
         );
 
         // With double spacing.
-        let headers = Headers::try_from("NATS/1.0  100  Idle Heartbeat".as_bytes()).unwrap();
+        let headers = HeaderMap::try_from("NATS/1.0  100  Idle Heartbeat".as_bytes()).unwrap();
 
         assert_eq!(
-            headers.inner.get(&STATUS_HEADER.to_string()),
+            headers.inner.get(&STATUS.to_string()),
             Some(&HashSet::from_iter(vec!["100".to_string()]))
         );
 
         assert_eq!(
-            headers.inner.get(&DESCRIPTION_HEADER.to_string()),
+            headers.inner.get(&DESCRIPTION.to_string()),
             Some(&HashSet::from_iter(vec!["Idle Heartbeat".to_string()]))
         );
     }
 
     #[test]
     fn malformed_line() {
-        let error = Headers::try_from("NATS/1.0 200\r\n\nX-Test-A a\r\n".as_bytes()).unwrap_err();
+        let error = HeaderMap::try_from("NATS/1.0 200\r\n\nX-Test-A a\r\n".as_bytes()).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[test]
     fn empty_lines() {
-        let headers = Headers::try_from(
+        let headers = HeaderMap::try_from(
             "NATS/1.0 200\r\n\nX-Test-A: a\r\n\nX-Test-B: b\r\n\nX-Test-C: c\r\n\n".as_bytes(),
         )
         .unwrap();
@@ -311,7 +322,7 @@ mod try_from {
 
     #[test]
     fn single_line() {
-        let headers = Headers::try_from(
+        let headers = HeaderMap::try_from(
             "NATS/1.0 200\r\nAccept-Encoding: json\r\nAuthorization: s3cr3t\r\n".as_bytes(),
         )
         .unwrap();
@@ -330,7 +341,7 @@ mod try_from {
     #[test]
     fn multi_line_with_tabs() {
         let headers =
-            Headers::try_from("NATS/1.0 200\r\nX-Test: one,\r\n\ttwo,\r\n\tthree\r\n".as_bytes())
+            HeaderMap::try_from("NATS/1.0 200\r\nX-Test: one,\r\n\ttwo,\r\n\tthree\r\n".as_bytes())
                 .unwrap();
 
         assert_eq!(
@@ -342,7 +353,7 @@ mod try_from {
     #[test]
     fn multi_line_with_spaces() {
         let headers =
-            Headers::try_from("NATS/1.0 200\r\nX-Test: one,\r\n two,\r\n three\r\n".as_bytes())
+            HeaderMap::try_from("NATS/1.0 200\r\nX-Test: one,\r\n two,\r\n three\r\n".as_bytes())
                 .unwrap();
 
         assert_eq!(

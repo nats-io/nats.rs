@@ -98,7 +98,7 @@ use std::time::Duration;
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::Headers;
+use crate::header::HeaderMap;
 
 /// Connect to a NATS server at the given url.
 ///
@@ -275,7 +275,7 @@ impl Connection {
         &self,
         subject: &str,
         reply: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         if let Some(res) = self
@@ -286,7 +286,7 @@ impl Connection {
         }
         let subject = subject.to_string();
         let reply = reply.map(str::to_owned);
-        let headers = headers.map(Headers::clone);
+        let headers = headers.map(HeaderMap::clone);
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         unblock(move || {
@@ -376,7 +376,7 @@ pub struct Message {
     pub data: Vec<u8>,
 
     /// Optional headers associated with this `Message`.
-    pub headers: Option<Headers>,
+    pub headers: Option<HeaderMap>,
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]

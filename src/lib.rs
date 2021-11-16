@@ -164,7 +164,6 @@
     clippy::match_same_arms,
     clippy::maybe_infinite_iter,
     clippy::mem_forget,
-    clippy::module_name_repetitions,
     clippy::needless_borrow,
     clippy::needless_continue,
     clippy::needless_pass_by_value,
@@ -188,7 +187,8 @@
     clippy::match_like_matches_macro,
     clippy::await_holding_lock,
     clippy::shadow_reuse,
-    clippy::wildcard_enum_match_arm
+    clippy::wildcard_enum_match_arm,
+    clippy::module_name_repetitions
 )]
 
 /// Async-enabled NATS client.
@@ -198,13 +198,15 @@ mod auth_utils;
 mod client;
 mod connect;
 mod connector;
-mod headers;
 mod jetstream_types;
 mod message;
 mod options;
 mod proto;
 mod secure_wipe;
 mod subscription;
+
+/// Header constants and types.
+pub mod header;
 
 /// `JetStream` stream management and consumers.
 pub mod jetstream;
@@ -227,13 +229,16 @@ fn inject_io_failure() -> io::Result<()> {
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
 
+#[doc(hidden)]
+#[deprecated(since = "0.17.0", note = "this has been moved to `header::HeaderMap`.")]
+pub type Headers = HeaderMap;
+
 use std::{
     io::{self, Error, ErrorKind},
     sync::Arc,
     time::{Duration, Instant},
 };
 
-pub use headers::Headers;
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
@@ -248,6 +253,7 @@ pub use rustls;
 pub use connect::ConnectInfo;
 
 use client::Client;
+use header::HeaderMap;
 use options::AuthStyle;
 use secure_wipe::{SecureString, SecureVec};
 
@@ -477,7 +483,7 @@ impl Connection {
     fn request_with_headers_or_timeout(
         &self,
         subject: &str,
-        maybe_headers: Option<&Headers>,
+        maybe_headers: Option<&HeaderMap>,
         maybe_timeout: Option<Duration>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<Message> {
@@ -716,7 +722,7 @@ impl Connection {
         &self,
         subject: &str,
         reply: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         self.0.client.publish(subject, reply, headers, msg.as_ref())
@@ -752,7 +758,7 @@ impl Connection {
         &self,
         subject: &str,
         reply: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> Option<io::Result<()>> {
         self.0
