@@ -87,12 +87,13 @@ impl Server {
 pub fn run_server(cfg: &str) -> Server {
     let id = nuid::next();
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let sd = env::temp_dir().join(format!("store-dir-{}", id));
+    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
     let mut cmd = Command::new("nats-server");
-    cmd.env("SD", sd)
+    cmd.arg("--store_dir")
+        .arg(store_dir.as_path().to_str().unwrap())
         .arg("-p")
         .arg("-1")
         .arg("-l")
