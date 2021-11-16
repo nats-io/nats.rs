@@ -21,6 +21,8 @@ use std::{
 
 use crate::{client::Client, Headers};
 
+pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
+
 /// A message received on a subject.
 #[derive(Clone)]
 pub struct Message {
@@ -85,12 +87,10 @@ impl Message {
         let reply = self.reply.as_ref().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "No reply subject to reply to")
         })?;
-        let client = self.client.as_ref().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotConnected,
-                "no connected client to reply with",
-            )
-        })?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, MESSAGE_NOT_BOUND))?;
         client.publish(reply.as_str(), None, None, msg.as_ref())?;
         Ok(())
     }
@@ -154,12 +154,10 @@ impl Message {
             Some(original_reply) => original_reply,
         };
         let mut retries = 0;
-        let client = self.client.as_ref().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotConnected,
-                "no connected client to reply with",
-            )
-        })?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, MESSAGE_NOT_BOUND))?;
 
         loop {
             retries += 1;
