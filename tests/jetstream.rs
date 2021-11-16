@@ -406,3 +406,26 @@ fn jetstream_libdoc_test() {
     let flipped: std::io::Result<Vec<usize>> = results.into_iter().collect();
     let _sizes: Vec<usize> = flipped.unwrap();
 }
+
+#[test]
+fn jetstream_acks_tests() {
+    let (_s, nc, js) = run_basic_jetstream();
+    js.add_stream("my_stream").unwrap();
+    let mut consumer = js
+    .create_or_bind("my_stream", "consumer")
+    .unwrap();
+    nc.publish("my_stream", "1").unwrap();
+    nc.publish("my_stream", "2").unwrap();
+    let msg = consumer.pull().unwrap();
+    msg.ack().unwrap();
+    msg.ack().expect_err("should return error on multiple ack()");
+
+    let msg = consumer.pull().unwrap();
+    // we should be able to `AckKind::Progress` how many times we like
+    msg.ack_kind(AckKind::Progress).unwrap();
+    msg.ack_kind(AckKind::Progress).unwrap();
+    // but on every other ack dpulication, we should error
+    msg.ack_sync(AckKind::Ack).unwrap();
+    msg.ack_sync(AckKind::Ack).expect_err("should return error on multiple ack()");
+}
+

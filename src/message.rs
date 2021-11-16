@@ -99,10 +99,7 @@ impl Message {
     /// Returns immediately if this message has already been
     /// double-acked.
     pub fn ack(&self) -> io::Result<()> {
-        if self.double_acked.load(Ordering::Acquire) {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "message already acked"));
-        }
-        self.respond(AckKind::Ack) 
+        self.ack_kind(AckKind::Ack)
     }
 
     /// Acknowledge a `JetStream` message. See `AckKind` documentation for
@@ -111,7 +108,15 @@ impl Message {
     ///
     /// Does not check whether this message has already been double-acked.
     pub fn ack_kind(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
-        self.respond(ack_kind)
+        if self.double_acked.load(Ordering::Acquire) {
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "message already acked"));
+        }
+        self.respond(ack_kind)?;
+        match ack_kind {
+            AckKind::Ack | AckKind::Nak | AckKind::Next | AckKind::Term => self.double_acked.store(true, Ordering::Release),
+            _ => ()
+        }
+        Ok(())
     }
 
     /// Acknowledge a `JetStream` message and wait for acknowledgement from the server
