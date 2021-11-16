@@ -28,7 +28,7 @@ use parking_lot::Mutex;
 use crate::connector::{Connector, NatsStream};
 use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
-use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
+use crate::{header::HeaderMap, inject_delay, inject_io_failure, Options, ServerInfo};
 
 const BUF_CAPACITY: usize = 32 * 1024;
 
@@ -440,7 +440,7 @@ impl Client {
         &self,
         subject: &str,
         reply_to: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: &[u8],
     ) -> io::Result<()> {
         // Inject random delays when testing.
@@ -514,7 +514,7 @@ impl Client {
         &self,
         subject: &str,
         reply_to: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: &[u8],
     ) -> Option<io::Result<()>> {
         // Check if the client is closed.

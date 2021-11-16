@@ -183,7 +183,10 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 pub use crate::jetstream_types::*;
 
-use crate::{headers, headers::Headers, Connection, Message};
+use crate::{
+    header::{self, HeaderMap},
+    Connection, Message,
+};
 
 /// `JetStream` options
 #[derive(Clone)]
@@ -652,16 +655,16 @@ impl JetStream {
         &self,
         subject: &str,
         maybe_options: Option<&PublishOptions>,
-        maybe_headers: Option<&Headers>,
+        maybe_headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<PublishAck> {
         let maybe_headers = if let Some(options) = maybe_options {
-            let mut headers = maybe_headers.map_or_else(Headers::default, Headers::clone);
+            let mut headers = maybe_headers.map_or_else(HeaderMap::default, HeaderMap::clone);
 
             if let Some(v) = options.id.as_ref() {
                 let entry = headers
                     .inner
-                    .entry(headers::NATS_MSG_ID.to_string())
+                    .entry(header::NATS_MSG_ID.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());
@@ -670,7 +673,7 @@ impl JetStream {
             if let Some(v) = options.expected_last_msg_id.as_ref() {
                 let entry = headers
                     .inner
-                    .entry(headers::NATS_EXPECTED_LAST_MSG_ID.to_string())
+                    .entry(header::NATS_EXPECTED_LAST_MSG_ID.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());
@@ -679,7 +682,7 @@ impl JetStream {
             if let Some(v) = options.expected_stream.as_ref() {
                 let entry = headers
                     .inner
-                    .entry(headers::NATS_EXPECTED_STREAM.to_string())
+                    .entry(header::NATS_EXPECTED_STREAM.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());
@@ -688,7 +691,7 @@ impl JetStream {
             if let Some(v) = options.expected_last_sequence.as_ref() {
                 let entry = headers
                     .inner
-                    .entry(headers::NATS_EXPECTED_LAST_SEQUENCE.to_string())
+                    .entry(header::NATS_EXPECTED_LAST_SEQUENCE.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());
@@ -697,7 +700,7 @@ impl JetStream {
             if let Some(v) = options.expected_last_subject_sequence.as_ref() {
                 let entry = headers
                     .inner
-                    .entry(headers::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
+                    .entry(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
                     .or_insert_with(HashSet::default);
 
                 entry.insert(v.to_string());

@@ -19,7 +19,10 @@ use std::{
     },
 };
 
-use crate::{client::Client, Headers};
+use crate::{
+    client::Client,
+    header::{self, HeaderMap},
+};
 
 pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 
@@ -37,7 +40,7 @@ pub struct Message {
     pub data: Vec<u8>,
 
     /// Optional headers associated with this `Message`.
-    pub headers: Option<Headers>,
+    pub headers: Option<HeaderMap>,
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]
@@ -97,12 +100,11 @@ impl Message {
 
     /// Determine if the message is a no responders response from the server.
     pub fn is_no_responders(&self) -> bool {
-        use crate::headers::STATUS_HEADER;
         if !self.data.is_empty() {
             return false;
         }
         if let Some(hdrs) = &self.headers {
-            if let Some(set) = hdrs.get(STATUS_HEADER) {
+            if let Some(set) = hdrs.get(header::STATUS) {
                 if set.get("503").is_some() {
                     return true;
                 }
