@@ -423,15 +423,21 @@ impl Message {
 
     /// Respond to a request message.
     pub async fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        let reply = self.reply.clone().ok_or_else(|| {
+        let reply = self.reply.as_ref().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "No reply subject to reply to")
         })?;
-        let client = self.client.clone().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "no client present in message")
+        let client = self.client.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "no connected client to reply with",
+            )
         })?;
         if let Some(res) = client.try_publish(reply.as_str(), None, None, msg.as_ref()) {
             return res;
         }
+        // clone only if we have to move the data to the thread
+        let client = client.clone();
+        let reply = reply.to_owned();
         let msg = msg.as_ref().to_vec();
         unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
     }
