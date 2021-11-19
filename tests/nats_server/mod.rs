@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -84,7 +84,7 @@ impl Server {
 }
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
-pub fn run_server(cfg: &str) -> Server {
+pub fn run_server(cfg: &str) -> io::Result<Server> {
     let id = nuid::next();
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
     let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
@@ -104,21 +104,21 @@ pub fn run_server(cfg: &str) -> Server {
         cmd.arg("-c").arg(path.join(cfg));
     }
 
-    let child = cmd.spawn().unwrap();
+    let child = cmd.spawn()?;
 
-    Server { child, logfile }
+    Ok(Server { child, logfile })
 }
 
 /// Starts a local basic NATS server that gets stopped and cleaned up on drop.
-pub fn run_basic_server() -> Server {
+pub fn run_basic_server() -> io::Result<Server> {
     run_server("")
 }
 
 // Helper function to return server and client.
-pub fn run_basic_jetstream() -> (Server, Connection, JetStream) {
-    let s = run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+pub fn run_basic_jetstream() -> io::Result<(Server, Connection, JetStream)> {
+    let s = run_server("tests/configs/jetstream.conf")?;
+    let nc = nats::connect(&s.client_url())?;
     let js = JetStream::new(nc.clone(), JetStreamOptions::default());
 
-    (s, nc, js)
+    Ok((s, nc, js))
 }
