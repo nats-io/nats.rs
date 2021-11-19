@@ -6,7 +6,7 @@ pub use nats_server::*;
 
 #[test]
 fn basic_tls() -> io::Result<()> {
-    let s = nats_server::run_server("tests/configs/tls.conf").unwrap();
+    let s = nats_server::run_with_config("tests/configs/tls.conf").unwrap();
 
     assert!(nats::connect("nats://127.0.0.1").is_err());
 

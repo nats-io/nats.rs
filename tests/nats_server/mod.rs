@@ -6,13 +6,11 @@ use std::{env, fs};
 use std::{thread, time::Duration};
 
 use lazy_static::lazy_static;
-use nats::jetstream::{JetStream, JetStreamOptions};
-use nats::Connection;
 use regex::Regex;
 
 pub struct Server {
     child: Child,
-    logfile: PathBuf,
+    log_file: PathBuf,
 }
 
 lazy_static! {
@@ -20,24 +18,53 @@ lazy_static! {
     static ref CLIENT_RE: Regex = Regex::new(r#".+\sclient connections on\s+(\S+)"#).unwrap();
 }
 
+struct ServerOptions {
+    config_file: Option<String>,
+}
+
 impl Drop for Server {
     fn drop(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
         // Remove log if present.
-        if let Ok(log) = fs::read_to_string(self.logfile.as_os_str()) {
+        if let Ok(log) = fs::read_to_string(self.log_file.as_os_str()) {
             // Check if we had JetStream running and if so cleanup the storage directory.
             if let Some(caps) = SD_RE.captures(&log) {
                 let sd = caps.get(1).map_or("", |m| m.as_str());
                 fs::remove_dir_all(sd).ok();
             }
             // Remove Logfile.
-            fs::remove_file(self.logfile.as_os_str()).ok();
+            fs::remove_file(self.log_file.as_os_str()).ok();
         }
     }
 }
 
 impl Server {
+    fn run(options: ServerOptions) -> io::Result<Self> {
+        let id = nuid::next();
+        let log_file = env::temp_dir().join(format!("nats-server-{}.log", id));
+        let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
+
+        // Always use dynamic ports so tests can run in parallel.
+        // Create env for a storage directory for jetstream.
+        let mut cmd = Command::new("nats-server");
+
+        cmd.arg("--store_dir")
+            .arg(store_dir.as_path().to_str().unwrap())
+            .arg("--port")
+            .arg("-1")
+            .arg("--log")
+            .arg(log_file.as_os_str());
+
+        if let Some(config_file) = options.config_file {
+            cmd.arg("--config").arg(config_file);
+        }
+
+        let child = cmd.spawn()?;
+
+        Ok(Server { child, log_file })
+    }
+
     // Grab client url.
     // Helpful when dynamically allocating ports with -1.
     pub fn client_url(&self) -> String {
@@ -68,7 +95,7 @@ impl Server {
         // We may need to wait for log to be present.
         // Wait up to 2s. (20 * 100ms)
         for _ in 0..20 {
-            match fs::read_to_string(self.logfile.as_os_str()) {
+            match fs::read_to_string(self.log_file.as_os_str()) {
                 Ok(l) => {
                     if let Some(cre) = CLIENT_RE.captures(&l) {
                         return cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1");
@@ -84,41 +111,13 @@ impl Server {
 }
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
-pub fn run_server(cfg: &str) -> io::Result<Server> {
-    let id = nuid::next();
-    let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
-
-    // Always use dynamic ports so tests can run in parallel.
-    // Create env for a storage directory for jetstream.
-    let mut cmd = Command::new("nats-server");
-    cmd.arg("--store_dir")
-        .arg(store_dir.as_path().to_str().unwrap())
-        .arg("-p")
-        .arg("-1")
-        .arg("-l")
-        .arg(logfile.as_os_str());
-
-    if cfg != "" {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        cmd.arg("-c").arg(path.join(cfg));
-    }
-
-    let child = cmd.spawn()?;
-
-    Ok(Server { child, logfile })
+pub fn run_with_config(config_file: &str) -> io::Result<Server> {
+    Server::run(ServerOptions {
+        config_file: Some(config_file.to_string()),
+    })
 }
 
 /// Starts a local basic NATS server that gets stopped and cleaned up on drop.
-pub fn run_basic_server() -> io::Result<Server> {
-    run_server("")
-}
-
-// Helper function to return server and client.
-pub fn run_basic_jetstream() -> io::Result<(Server, Connection, JetStream)> {
-    let s = run_server("tests/configs/jetstream.conf")?;
-    let nc = nats::connect(&s.client_url())?;
-    let js = JetStream::new(nc.clone(), JetStreamOptions::default());
-
-    Ok((s, nc, js))
+pub fn run() -> io::Result<Server> {
+    Server::run(ServerOptions { config_file: None })
 }

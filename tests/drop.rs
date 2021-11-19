@@ -6,7 +6,7 @@ pub use nats_server::*;
 
 #[test]
 fn drop_flushes() -> io::Result<()> {
-    let s = nats_server::run_basic_server();
+    let s = nats_server::run().unwrap();
 
     let nc1 = nats::connect(&s.client_url())?;
     let nc2 = nats::connect(&s.client_url())?;
@@ -25,7 +25,7 @@ fn drop_flushes() -> io::Result<()> {
 
 #[test]
 fn two_connections() -> io::Result<()> {
-    let s = nats_server::run_basic_server();
+    let s = nats_server::run().unwrap();
 
     let nc1 = nats::connect(&s.client_url())?;
     let nc2 = nc1.clone();
@@ -41,7 +41,7 @@ fn two_connections() -> io::Result<()> {
 
 #[test]
 fn async_subscription_drop() -> io::Result<()> {
-    let s = nats_server::run_basic_server();
+    let s = nats_server::run().unwrap();
 
     smol::block_on(async {
         let nc = nats::asynk::connect(&s.client_url()).await?;

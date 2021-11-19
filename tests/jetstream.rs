@@ -8,7 +8,7 @@ pub use nats_server::*;
 #[test]
 #[ignore]
 fn jetstream_not_enabled() {
-    let s = nats_server::run_basic_server().unwrap();
+    let s = nats_server::run().unwrap();
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -27,7 +27,8 @@ fn jetstream_not_enabled() {
 
 #[test]
 fn jetstream_account_not_enabled() {
-    let s = nats_server::run_server("tests/configs/jetstream_account_not_enabled.conf").unwrap();
+    let s =
+        nats_server::run_with_config("tests/configs/jetstream_account_not_enabled.conf").unwrap();
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -47,7 +48,9 @@ fn jetstream_account_not_enabled() {
 
 #[test]
 fn jetstream_publish() {
-    let (_s, nc, js) = run_basic_jetstream().unwrap();
+    let s = nats_server::run_with_config("tests/configs/jetstream.conf").unwrap();
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = nats::jetstream::new(nc.to_owned());
 
     // Create the stream using our client API.
     js.add_stream(StreamConfig {
@@ -248,7 +251,10 @@ fn jetstream_publish() {
 
 #[test]
 fn jetstream_create_stream_and_consumer() -> io::Result<()> {
-    let (_s, _nc, js) = run_basic_jetstream().unwrap();
+    let s = nats_server::run_with_config("tests/configs/jetstream.conf").unwrap();
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = nats::jetstream::new(nc.to_owned());
+
     js.add_stream("stream1")?;
     js.add_consumer("stream1", "consumer1")?;
     Ok(())
@@ -256,7 +262,9 @@ fn jetstream_create_stream_and_consumer() -> io::Result<()> {
 
 #[test]
 fn jetstream_queue_process() -> io::Result<()> {
-    let (_s, nc, js) = run_basic_jetstream().unwrap();
+    let s = nats_server::run_with_config("tests/configs/jetstream.conf").unwrap();
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = nats::jetstream::new(nc.to_owned());
 
     let _ = js.delete_stream("qtest1");
 
@@ -294,7 +302,9 @@ fn jetstream_queue_process() -> io::Result<()> {
 
 #[test]
 fn jetstream_basics() -> io::Result<()> {
-    let (_s, nc, js) = run_basic_jetstream().unwrap();
+    let s = nats_server::run_with_config("tests/configs/jetstream.conf").unwrap();
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = nats::jetstream::new(nc.to_owned());
 
     let _ = js.delete_stream("test1");
     let _ = js.delete_stream("test2");
@@ -378,7 +388,9 @@ fn jetstream_basics() -> io::Result<()> {
 
 #[test]
 fn jetstream_libdoc_test() {
-    let (_s, nc, js) = run_basic_jetstream().unwrap();
+    let s = nats_server::run_with_config("tests/configs/jetstream.conf").unwrap();
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = nats::jetstream::new(nc.to_owned());
 
     js.add_stream("my_stream").unwrap();
     nc.publish("my_stream", "1").unwrap();

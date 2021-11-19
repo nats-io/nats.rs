@@ -7,7 +7,7 @@ pub use nats_server::*;
 
 #[test]
 fn pub_perms() {
-    let s = nats_server::run_server("tests/configs/perms.conf").unwrap();
+    let s = nats_server::run_with_config("tests/configs/perms.conf").unwrap();
 
     let (dtx, drx) = bounded(1);
     let (etx, erx) = bounded(1);
@@ -35,7 +35,7 @@ fn pub_perms() {
 
 #[test]
 fn sub_perms() {
-    let s = nats_server::run_server("tests/configs/perms.conf").unwrap();
+    let s = nats_server::run_with_config("tests/configs/perms.conf").unwrap();
 
     let (dtx, drx) = bounded(1);
     let (etx, erx) = bounded(1);
