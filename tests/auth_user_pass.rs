@@ -1,9 +1,9 @@
-mod util;
-pub use util::*;
+mod nats_server;
+pub use nats_server::*;
 
 #[test]
 fn basic_user_pass_auth() {
-    let s = util::run_server("tests/configs/user_pass.conf");
+    let s = nats_server::run_server("tests/configs/user_pass.conf");
 
     assert!(nats::connect(&s.client_url()).is_err());
 

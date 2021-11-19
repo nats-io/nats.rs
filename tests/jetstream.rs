@@ -1,14 +1,14 @@
 use std::{collections::HashSet, io, iter::FromIterator, time::Duration};
 
-mod util;
+mod nats_server;
 use nats::jetstream;
 use nats::jetstream::*;
-pub use util::*;
+pub use nats_server::*;
 
 #[test]
 #[ignore]
 fn jetstream_not_enabled() {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -27,7 +27,7 @@ fn jetstream_not_enabled() {
 
 #[test]
 fn jetstream_account_not_enabled() {
-    let s = util::run_server("tests/configs/jetstream_account_not_enabled.conf");
+    let s = nats_server::run_server("tests/configs/jetstream_account_not_enabled.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 

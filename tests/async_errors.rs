@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use crossbeam_channel::bounded;
 
-mod util;
-pub use util::*;
+mod nats_server;
+pub use nats_server::*;
 
 #[test]
 fn pub_perms() {
-    let s = util::run_server("tests/configs/perms.conf");
+    let s = nats_server::run_server("tests/configs/perms.conf");
 
     let (dtx, drx) = bounded(1);
     let (etx, erx) = bounded(1);
@@ -35,7 +35,7 @@ fn pub_perms() {
 
 #[test]
 fn sub_perms() {
-    let s = util::run_server("tests/configs/perms.conf");
+    let s = nats_server::run_server("tests/configs/perms.conf");
 
     let (dtx, drx) = bounded(1);
     let (etx, erx) = bounded(1);
