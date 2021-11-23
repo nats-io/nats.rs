@@ -83,6 +83,11 @@ impl Server {
     }
 }
 
+pub fn set_lame_duck_mode() {
+    let mut cmd = Command::new("nats-server");
+    cmd.arg("--signal").arg("ldm").spawn().unwrap();
+}
+
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server(cfg: &str) -> Server {
     let id = nuid::next();

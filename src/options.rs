@@ -43,6 +43,7 @@ pub struct Options {
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
+    pub(crate) lame_duck_callback: Callback,
 }
 
 impl fmt::Debug for Options {
@@ -63,6 +64,7 @@ impl fmt::Debug for Options {
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
+            .entry(&"lame_duck_callback", &self.lame_duck_callback)
             .finish()
     }
 }
@@ -84,6 +86,7 @@ impl Default for Options {
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
+            lame_duck_callback: Callback(None),
             tls_client_config: crate::rustls::ClientConfig::default(),
         }
     }
@@ -545,6 +548,28 @@ impl Options {
         F: Fn() + Send + Sync + 'static,
     {
         self.close_callback = Callback(Some(Box::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed when the server enters lame duck mode.
+    /// Can be set to enable letting user know that client will be soon evicted.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .lame_duck_callback(|| println!("server entered lame duck mode"))
+    ///     .connect("demo.nats.io")?;
+    /// nc.drain().unwrap();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn lame_duck_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.lame_duck_callback = Callback(Some(Box::new(cb)));
         self
     }
 
