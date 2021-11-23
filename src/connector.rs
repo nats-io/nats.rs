@@ -286,6 +286,7 @@ impl Connector {
             verbose: false,
             lang: crate::LANG.to_string(),
             version: crate::VERSION.to_string(),
+            protocol: crate::connect::Protocol::Dynamic,
             user: None,
             pass: None,
             auth_token: None,

@@ -297,6 +297,8 @@ pub struct ServerInfo {
     pub client_ip: String,
     /// Whether the server supports headers.
     pub headers: bool,
+    /// Whether server goes into lame duck mode.
+    pub lame_duck_mode: bool,
 }
 
 impl ServerInfo {
@@ -321,6 +323,7 @@ impl ServerInfo {
                 .collect(),
             client_ip: obj["client_ip"].take_string().unwrap_or_default(),
             headers: obj["headers"].as_bool().unwrap_or(false),
+            lame_duck_mode: obj["ldm"].as_bool().unwrap_or(false),
         })
     }
 }

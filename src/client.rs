@@ -590,6 +590,7 @@ impl Client {
             let use_backoff = !first_connect;
             // Make a connection to the server.
             let (server_info, stream) = connector.connect(use_backoff)?;
+            self.process_info(&server_info, &connector);
 
             let reader = BufReader::with_capacity(BUF_CAPACITY, stream.clone());
             let writer = BufWriter::with_capacity(BUF_CAPACITY, stream);
@@ -685,6 +686,13 @@ impl Client {
         Ok(())
     }
 
+    // processes action need to be performed based on retrieved server info.
+    fn process_info(&self, server_info: &ServerInfo, connector: &Connector) {
+        if server_info.lame_duck_mode {
+            connector.get_options().lame_duck_callback.call();
+        }
+    }
+
     /// Updates our last activity from the server.
     fn update_activity(&self) {
         let mut read = self.state.read.lock();
@@ -710,6 +718,7 @@ impl Client {
                     for url in &server_info.connect_urls {
                         connector.add_url(url).ok();
                     }
+                    self.process_info(&server_info, connector);
                     *self.server_info.lock() = server_info;
                 }
 
