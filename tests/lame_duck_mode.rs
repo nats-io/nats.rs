@@ -5,6 +5,7 @@ use crossbeam_channel::bounded;
 pub use util::*;
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore)]
 fn lame_duck_mode() {
     let (ltx, lrx) = bounded(1);
 
