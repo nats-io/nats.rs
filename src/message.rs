@@ -74,7 +74,7 @@ impl Message {
         subject: &str,
         reply: Option<&str>,
         data: impl AsRef<[u8]>,
-        headers: Option<Headers>,
+        headers: Option<HeaderMap>,
     ) -> Message {
         Message {
             subject: subject.to_string(),
