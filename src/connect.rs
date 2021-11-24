@@ -53,11 +53,7 @@ pub struct ConnectInfo {
     /// Sending 1 indicates that the client supports dynamic reconfiguration
     /// of cluster topology changes by asynchronously receiving INFO messages
     /// with known servers it can reconnect to.
-<<<<<<< HEAD
     pub protocol: Protocol,
-=======
-    pub protocol: u8,
->>>>>>> d829084 (Add missing protocol field in CONNECT)
 
     /// Indicates whether the client requires an SSL connection.
     pub tls_required: bool,
@@ -95,11 +91,7 @@ impl ConnectInfo {
             echo: self.echo,
             lang: self.lang.clone(),
             version: self.version.clone(),
-<<<<<<< HEAD
             protocol: self.protocol as u8,
-=======
-            protocol: self.protocol,
->>>>>>> d829084 (Add missing protocol field in CONNECT)
             tls_required: self.tls_required,
             headers: self.headers,
             no_responders: self.no_responders,
