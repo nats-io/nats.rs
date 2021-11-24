@@ -286,11 +286,7 @@ impl Connector {
             verbose: false,
             lang: crate::LANG.to_string(),
             version: crate::VERSION.to_string(),
-<<<<<<< HEAD
             protocol: crate::connect::Protocol::Dynamic,
-=======
-            protocol: 1,
->>>>>>> d829084 (Add missing protocol field in CONNECT)
             user: None,
             pass: None,
             auth_token: None,
