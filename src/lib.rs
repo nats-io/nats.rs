@@ -170,9 +170,6 @@
     clippy::non_ascii_literal,
     clippy::path_buf_push_overwrite,
     clippy::print_stdout,
-    clippy::shadow_reuse,
-    clippy::shadow_same,
-    clippy::shadow_unrelated,
     clippy::single_match_else,
     clippy::string_add,
     clippy::string_add_assign,
@@ -188,6 +185,7 @@
     clippy::await_holding_lock,
     clippy::shadow_reuse,
     clippy::shadow_same,
+    clippy::shadow_unrelated,
     clippy::wildcard_enum_match_arm,
     clippy::module_name_repetitions
 )]
