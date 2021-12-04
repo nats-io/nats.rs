@@ -24,8 +24,8 @@ use crate::{
     header::{self, HeaderMap},
 };
 
-/// A predicate used to preprocess messages as they arrive over the wire.
-pub(crate) type MessagePreprocessor = Box<dyn Fn(&Message) -> bool + Send + Sync>;
+use chrono::*;
+
 pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 
 /// A message received on a subject.
@@ -339,9 +339,8 @@ impl Message {
                 stream_seq: try_parse!(),
                 consumer_seq: try_parse!(),
                 published: {
-                    let nanos: u64 = try_parse!();
-                    let offset = std::time::Duration::from_nanos(nanos);
-                    std::time::UNIX_EPOCH + offset
+                    let nanos: i64 = try_parse!();
+                    Utc.timestamp_nanos(nanos)
                 },
                 pending: try_parse!(),
                 token: if n_tokens >= 9 {
@@ -362,9 +361,8 @@ impl Message {
                 stream_seq: try_parse!(),
                 consumer_seq: try_parse!(),
                 published: {
-                    let nanos: u64 = try_parse!();
-                    let offset = std::time::Duration::from_nanos(nanos);
-                    std::time::UNIX_EPOCH + offset
+                    let nanos: i64 = try_parse!();
+                    Utc.timestamp_nanos(nanos)
                 },
                 pending: try_parse!(),
                 token: None,

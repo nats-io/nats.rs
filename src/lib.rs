@@ -187,6 +187,7 @@
     clippy::match_like_matches_macro,
     clippy::await_holding_lock,
     clippy::shadow_reuse,
+    clippy::shadow_same,
     clippy::wildcard_enum_match_arm,
     clippy::module_name_repetitions
 )]
@@ -198,6 +199,7 @@ mod auth_utils;
 mod client;
 mod connect;
 mod connector;
+mod jetstream_kv;
 mod jetstream_push_subscription;
 mod jetstream_types;
 mod message;
@@ -240,6 +242,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use lazy_static::lazy_static;
+use regex::Regex;
+
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
@@ -261,6 +266,10 @@ use secure_wipe::{SecureString, SecureVec};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
+
+lazy_static! {
+    static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
+}
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -611,6 +620,35 @@ impl Connection {
         let start = Instant::now();
         self.flush()?;
         Ok(start.elapsed())
+    }
+
+    /// Returns true if the version is compatible with the version components.
+    pub fn is_server_compatible_version(&self, major: i64, minor: i64, patch: i64) -> bool {
+        let server_info = self.0.client.server_info();
+        let server_version_captures = VERSION_RE.captures(&server_info.version).unwrap();
+        let server_major = server_version_captures
+            .get(1)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_minor = server_version_captures
+            .get(2)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_patch = server_version_captures
+            .get(3)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        if server_major < major
+            || (server_major == major && server_minor < minor)
+            || (server_major == major && server_minor == minor && server_patch < patch)
+        {
+            return false;
+        }
+
+        true
     }
 
     /// Returns the client IP as known by the server.
