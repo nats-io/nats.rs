@@ -25,6 +25,7 @@ const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 
 /// Status
 pub const STATUS: &str = "Status";
+
 /// Description
 pub const DESCRIPTION: &str = "Description";
 

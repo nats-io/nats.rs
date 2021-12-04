@@ -27,7 +27,7 @@ use crate::DEFAULT_FLUSH_TIMEOUT;
 #[derive(Debug)]
 pub(crate) struct Inner {
     /// Subscription ID.
-    pub(crate) sid: AtomicU64,
+    pub(crate) sid: Arc<AtomicU64>,
 
     /// MSG operations received from the server.
     pub(crate) messages: channel::Receiver<Message>,
@@ -74,14 +74,14 @@ pub struct PushSubscription(pub(crate) Arc<Inner>);
 impl PushSubscription {
     /// Creates a subscription.
     pub(crate) fn new(
-        sid: u64,
+        sid: Arc<AtomicU64>,
         consumer_info: ConsumerInfo,
         consumer_ownership: ConsumerOwnership,
         messages: channel::Receiver<Message>,
         context: JetStream,
     ) -> PushSubscription {
         PushSubscription(Arc::new(Inner {
-            sid: AtomicU64::new(sid),
+            sid,
             stream: consumer_info.stream_name,
             consumer: consumer_info.name,
             consumer_ack_policy: consumer_info.config.ack_policy,

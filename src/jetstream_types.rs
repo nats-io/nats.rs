@@ -12,18 +12,101 @@
 // limitations under the License.
 
 use std::time::Duration;
-use std::time::UNIX_EPOCH;
 
-use chrono::{DateTime as ChronoDateTime, Utc};
+use crate::header::HeaderMap;
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
+use std::io;
 
 /// A UTC time
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct DateTime(pub ChronoDateTime<Utc>);
+pub type DateTime = chrono::DateTime<chrono::Utc>;
 
-impl Default for DateTime {
-    fn default() -> DateTime {
-        DateTime(UNIX_EPOCH.into())
+#[derive(Serialize)]
+pub(crate) struct StreamMessageGetRequest {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub seq: Option<u64>,
+
+    #[serde(default, rename = "last_by_subj", skip_serializing_if = "is_default")]
+    pub last_by_subject: Option<String>,
+}
+
+/// A raw stream message in the representation it is stored.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RawStreamMessage {
+    /// Subject of the message.
+    #[serde(rename = "subject")]
+    pub subject: String,
+
+    /// Sequence of the message.
+    #[serde(rename = "seq")]
+    pub sequence: u64,
+
+    /// Data of the mssage.
+    #[serde(default, rename = "data")]
+    pub data: String,
+
+    /// Raw header string, if any.
+    #[serde(default, rename = "hdrs")]
+    pub headers: Option<String>,
+
+    /// The time the message was published.
+    #[serde(rename = "time")]
+    pub time: DateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct StreamMessageGetResponse {
+    #[serde(rename = "type")]
+    pub kind: String,
+
+    #[serde(rename = "message")]
+    pub message: RawStreamMessage,
+}
+
+/// A message stored in a stream.
+#[derive(Debug, Clone)]
+pub struct StreamMessage {
+    /// Subject of the message.
+    pub subject: String,
+    /// Sequence of the message
+    pub sequence: u64,
+    /// HeaderMap that were sent with the mesage, if any.
+    pub headers: Option<HeaderMap>,
+    /// Payload of the message.
+    pub data: Vec<u8>,
+    /// Date and time the message was published.
+    pub time: DateTime,
+}
+
+impl TryFrom<RawStreamMessage> for StreamMessage {
+    type Error = std::io::Error;
+
+    fn try_from(raw_message: RawStreamMessage) -> Result<StreamMessage, Self::Error> {
+        let maybe_headers = if let Some(raw_headers) = raw_message.headers {
+            let decoded_headers = match base64::decode(raw_headers) {
+                Ok(data) => data,
+                Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
+            };
+
+            let headers = HeaderMap::try_from(decoded_headers.as_slice())?;
+
+            Some(headers)
+        } else {
+            None
+        };
+
+        let decoded_data = match base64::decode(&raw_message.data) {
+            Ok(data) => data,
+            Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
+        };
+
+        Ok(StreamMessage {
+            subject: raw_message.subject,
+            sequence: raw_message.sequence,
+            headers: maybe_headers,
+            data: decoded_data,
+            time: raw_message.time,
+        })
     }
 }
 
@@ -117,8 +200,8 @@ pub struct ConsumerConfig {
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
     /// after this sequence number.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub opt_start_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opt_start_seq: Option<u64>,
     /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
     /// after this time.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -222,6 +305,22 @@ pub struct StreamConfig {
     /// Indicates the stream is sealed and cannot be modified in any way
     #[serde(default, skip_serializing_if = "is_default")]
     pub sealed: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    /// A short description of the purpose of this stream.
+    pub description: Option<String>,
+    #[serde(
+        default,
+        rename = "allow_rollup_hdrs",
+        skip_serializing_if = "is_default"
+    )]
+    /// Indicates if rollups will be allowed or not.
+    pub allow_rollup: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    /// Indicates deletes will be denied or not.
+    pub deny_delete: bool,
+    /// Indicates if purges will be denied or not.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub deny_purge: bool,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -244,7 +343,7 @@ impl From<&str> for StreamConfig {
 }
 
 /// Shows config and current state for this stream.
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
     /// The configuration associated with this stream
     pub config: StreamConfig,
@@ -274,13 +373,13 @@ pub struct JetStreamMessageInfo<'a> {
     /// the number of messages known by the server to be pending to this consumer
     pub pending: u64,
     /// the time that this message was received by the server from its publisher
-    pub published: std::time::SystemTime,
+    pub published: DateTime,
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
 }
 
 /// information about the given stream.
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct StreamState {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -521,7 +620,7 @@ impl AsRef<[u8]> for AckKind {
 }
 
 /// Information about a consumer
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConsumerInfo {
     /// The stream being consumed
     pub stream_name: String,

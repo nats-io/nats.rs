@@ -32,7 +32,6 @@ fn jetstream_account_not_enabled() {
     let js = nats::jetstream::new(nc);
 
     let err = js.account_info().unwrap_err();
-    println!("{:?}", err);
     assert_eq!(err.kind(), io::ErrorKind::Other);
 
     let err = err
@@ -479,18 +478,17 @@ fn jetstream_ordered() {
     js.stream_info("TEST").unwrap();
 
     let sub = js
-        .subscribe_with_options("foo", &SubscribeOptions::ordered())
+        .subscribe_with_options("foo", &SubscribeOptions::ordered().deliver_all())
         .unwrap();
 
     let info = sub.consumer_info().unwrap();
     assert!(info.config.flow_control);
 
-    let n = 500;
-    for i in 0..n {
+    for i in 0..250 {
         js.publish("foo", (i as i64).to_be_bytes()).unwrap();
     }
 
-    for i in 0..n {
+    for i in 0..250 {
         let message = sub.next().unwrap();
         assert_eq!(message.data, (i as i64).to_be_bytes());
     }
