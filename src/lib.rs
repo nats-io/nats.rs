@@ -198,6 +198,7 @@ mod client;
 mod connect;
 mod connector;
 mod jetstream_kv;
+mod jetstream_object;
 mod jetstream_push_subscription;
 mod jetstream_types;
 mod message;
