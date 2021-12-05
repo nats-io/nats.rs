@@ -115,6 +115,7 @@ const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
 // TODO re-organize this into a jetstream directory
 pub use crate::jetstream_kv::*;
+pub use crate::jetstream_object::*;
 pub use crate::jetstream_push_subscription::PushSubscription;
 pub use crate::jetstream_types::*;
 
@@ -1457,6 +1458,29 @@ impl JetStream {
         }
         let subject = format!("{}STREAM.PURGE.{}", self.api_prefix(), stream);
         self.js_request(&subject, b"")
+    }
+
+    /// Purge stream messages matching a subject.
+    pub fn purge_stream_subject<S: AsRef<str>>(
+        &self,
+        stream: S,
+        filter_subject: &str,
+    ) -> io::Result<PurgeResponse> {
+        let stream: &str = stream.as_ref();
+        if stream.is_empty() {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "the stream name must not be empty",
+            ));
+        }
+
+        let subject = format!("{}STREAM.PURGE.{}", self.api_prefix(), stream);
+        let request = serde_json::to_vec(&PurgeRequest {
+            filter: Some(filter_subject.to_string()),
+            ..Default::default()
+        })?;
+
+        self.js_request(&subject, &request)
     }
 
     /// Get a message from a stream.
