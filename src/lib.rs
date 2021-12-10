@@ -232,6 +232,11 @@ fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }
 
+// comment out until we reach MSRV 1.54.0
+// #[doc = include_str!("../docs/migration-guide-0.17.0.md")]
+// #[derive(Copy, Clone)]
+// pub struct Migration0170;
+
 #[doc(hidden)]
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
