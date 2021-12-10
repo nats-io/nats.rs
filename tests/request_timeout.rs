@@ -37,10 +37,6 @@ fn request_timeout() {
         },
     )
     .unwrap();
-    // for __ in 0..100 {
-    //     js.publish("foo", b"data").unwrap();
-    //     println!("published message");
-    // }
 
     let consumer = js
         .pull_subscribe_with_options(
@@ -52,13 +48,13 @@ fn request_timeout() {
     std::thread::spawn(move || {
         for __ in 0..2 {
             js.publish("foo", b"data").unwrap();
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(300));
         }
     });
     // set the expiration of request so only first message can keep up.
     consumer
         .request_batch(BatchOptions {
-            expires: Some(Duration::from_millis(50).as_nanos() as usize),
+            expires: Some(Duration::from_millis(200).as_nanos() as usize),
             batch: 2,
             no_wait: false,
         })
