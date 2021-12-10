@@ -1,3 +1,45 @@
+# 0.17.0
+## Overview
+
+This release brings a lot of changes and refactors among which the highlights are:
+* A complete rewrite of the JetStream API with a new subscription interface
+* Improvements of JetStream internals
+* Key-Value Store support
+* Object Store support
+
+## Breaking Changes
+* Introduce a `JetStream` type by @caspervonb in https://github.com/nats-io/nats.rs/pull/247
+* Move Consumer Management to JetStream by @Jarema in https://github.com/nats-io/nats.rs/pull/250
+* Re-work JetStream consumer interface by @caspervonb in https://github.com/nats-io/nats.rs/pull/252
+* Rename create_stream to add_stream by @Jarema in https://github.com/nats-io/nats.rs/pull/251
+* Change return type of add_consumer to `ConsumerInfo` by @caspervonb in https://github.com/nats-io/nats.rs/pull/252
+
+## Added
+* Add header module by @caspervonb in https://github.com/nats-io/nats.rs/pull/260
+* Implement key-value store by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+* Implement object store by @caspervonb in https://github.com/nats-io/nats.rs/pull/269
+* Lame duck mode support by @Jarema in https://github.com/nats-io/nats.rs/pull/265
+* Add domain field to `PubAck` by @caspervonb in https://github.com/nats-io/nats.rs/pull/243
+* Add support for JetStream publishing by @caspervonb in https://github.com/nats-io/nats.rs/pull/248
+* Add `error_callback` by @derekcollison in https://github.com/nats-io/nats.rs/pull/253
+* Add `get_message` to JetStream context by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+* Add `get_last_message` to JetStream context  by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+
+## Changed
+* Allow for inline header description with spaces by @caspervonb in https://github.com/nats-io/nats.rs/pull/241
+* Allow setting a jetstream api prefix from a domain by @caspervonb in https://github.com/nats-io/nats.rs/pull/244
+* Have Client in Message as Option by @Jarema in https://github.com/nats-io/nats.rs/pull/258
+* Bump MSRV to 1.53.0
+
+## Minor
+* Reduce allocations in `Headers::try_from` by @caspervonb in https://github.com/nats-io/nats.rs/pull/238
+* Improve error handling by @caspervonb in https://github.com/nats-io/nats.rs/pull/249
+* Some additions.. by @derekcollison in https://github.com/nats-io/nats.rs/pull/253
+* Bump blocking crate by @Jarema in https://github.com/nats-io/nats.rs/pull/255
+* Add `sealed` field to `jetstream::StreamConfig` by @caspervonb in https://github.com/nats-io/nats.rs/pull/256
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/v0.16.0...v0.17.0
+
 # 0.16.0
 
 ### Added
