@@ -247,7 +247,7 @@ use regex::Regex;
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
-pub use subscription::Subscription;
+pub use subscription::{Handler, Subscription};
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
