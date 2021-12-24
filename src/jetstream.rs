@@ -115,7 +115,9 @@ const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
 // TODO re-organize this into a jetstream directory
 pub use crate::jetstream_kv::*;
+pub use crate::jetstream_kv::Watch as KvWatch;
 pub use crate::jetstream_object::*;
+pub use crate::jetstream_object::Watch as ObjectWatch;
 pub use crate::jetstream_push_subscription::PushSubscription;
 pub use crate::jetstream_types::*;
 
