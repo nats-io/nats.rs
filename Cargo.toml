@@ -14,6 +14,11 @@ categories = ["network-programming", "api-bindings"]
 
 [features]
 fault_injection = []
+unstable = []
+
+[package.metadata.docs.rs]
+features = ["unstable"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [badges]
 maintenance = { status = "actively-developed" }
