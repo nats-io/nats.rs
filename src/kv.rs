@@ -108,7 +108,7 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -166,7 +166,7 @@ impl JetStream {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -242,7 +242,7 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// use nats::jetstream::KeyValueConfig;
+    /// use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -321,7 +321,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -383,7 +383,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -418,7 +418,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -452,7 +452,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -489,7 +489,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -533,7 +533,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -577,7 +577,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -628,7 +628,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -673,7 +673,7 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::KeyValueConfig;
+    /// # use nats::kv::KeyValueConfig;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
