@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Support for Key Value Store.
+//! This feature is experimental and the API may change.
+
 use std::io;
 use std::time::Duration;
 
@@ -24,7 +27,7 @@ use std::collections::HashSet;
 
 /// Configuration values for key value stores.
 #[derive(Debug, Default)]
-pub struct KeyValueConfig {
+pub struct Config {
     /// Name of the bucket
     pub bucket: String,
     /// Human readable description.
@@ -55,7 +58,7 @@ const ROLLUP_SUBJECT: &str = "sub";
 
 /// Describes what kind of operation and entry represents
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum KeyValueOperation {
+pub enum Operation {
     /// A value was put into the bucket
     Put,
     /// A value was deleted from a bucket
@@ -65,23 +68,23 @@ pub enum KeyValueOperation {
 }
 
 // Helper to extract key value operation from message headers
-fn kv_operation_from_maybe_headers(maybe_headers: Option<&HeaderMap>) -> KeyValueOperation {
+fn kv_operation_from_maybe_headers(maybe_headers: Option<&HeaderMap>) -> Operation {
     if let Some(headers) = maybe_headers {
         if let Some(set) = headers.get(KV_OPERATION) {
             if set.get(KV_OPERATION_DELETE).is_some() {
-                return KeyValueOperation::Delete;
+                return Operation::Delete;
             }
 
             if set.get(KV_OPERATION_PURGE).is_some() {
-                return KeyValueOperation::Purge;
+                return Operation::Purge;
             }
         }
     }
 
-    KeyValueOperation::Put
+    Operation::Put
 }
 
-fn kv_operation_from_stream_message(message: &StreamMessage) -> KeyValueOperation {
+fn kv_operation_from_stream_message(message: &StreamMessage) -> Operation {
     kv_operation_from_maybe_headers(message.headers.as_ref())
 }
 
@@ -108,12 +111,12 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// context.create_key_value(&KeyValueConfig {
+    /// context.create_key_value(&Config {
     ///   bucket: "key_value".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -124,7 +127,7 @@ impl JetStream {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn key_value(&self, bucket: &str) -> io::Result<KeyValueStore> {
+    pub fn key_value(&self, bucket: &str) -> io::Result<Store> {
         if !self.connection.is_server_compatible_version(2, 6, 2) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -153,7 +156,7 @@ impl JetStream {
 
         let prefix = format!("$KV.{}.", bucket);
 
-        Ok(KeyValueStore {
+        Ok(Store {
             name: bucket.to_string(),
             stream_name,
             prefix,
@@ -166,12 +169,12 @@ impl JetStream {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_key_value(&KeyValueConfig {
+    /// let bucket = context.create_key_value(&Config {
     ///   bucket: "create_key_value".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -180,7 +183,7 @@ impl JetStream {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn create_key_value(&self, config: &KeyValueConfig) -> io::Result<KeyValueStore> {
+    pub fn create_key_value(&self, config: &Config) -> io::Result<Store> {
         if !self.connection.is_server_compatible_version(2, 6, 2) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -229,7 +232,7 @@ impl JetStream {
             ..Default::default()
         })?;
 
-        Ok(KeyValueStore {
+        Ok(Store {
             name: config.bucket.to_string(),
             stream_name: stream_info.config.name,
             prefix: format!("$KV.{}.", config.bucket),
@@ -242,12 +245,12 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// use nats::kv::KeyValueConfig;
+    /// use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "delete_key_value".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -279,7 +282,7 @@ impl JetStream {
 
 /// An entry in a key-value bucket.
 #[derive(Debug, Clone)]
-pub struct KeyValueEntry {
+pub struct Entry {
     /// Name of the bucket the entry is in.
     pub bucket: String,
     /// The key that was retrieved.
@@ -293,24 +296,24 @@ pub struct KeyValueEntry {
     /// The time the data was put in the bucket.
     pub created: DateTime,
     /// The kind of operation that caused this entry.
-    pub operation: KeyValueOperation,
+    pub operation: Operation,
 }
 
 /// A key value store
 #[derive(Debug, Clone)]
-pub struct KeyValueStore {
+pub struct Store {
     name: String,
     stream_name: String,
     prefix: String,
     context: JetStream,
 }
 
-impl KeyValueStore {
+impl Store {
     /// Returns the status of the bucket
-    pub fn status(&self) -> io::Result<KeyValueBucketStatus> {
+    pub fn status(&self) -> io::Result<BucketStatus> {
         let info = self.context.stream_info(&self.stream_name)?;
 
-        Ok(KeyValueBucketStatus {
+        Ok(BucketStatus {
             bucket: self.name.to_string(),
             info,
         })
@@ -321,12 +324,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "entry".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -340,7 +343,7 @@ impl KeyValueStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn entry(&self, key: &str) -> io::Result<Option<KeyValueEntry>> {
+    pub fn entry(&self, key: &str) -> io::Result<Option<Entry>> {
         if !is_valid_key(key) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid key"));
         }
@@ -352,7 +355,7 @@ impl KeyValueStore {
         match self.context.get_last_message(&self.stream_name, &subject) {
             Ok(message) => {
                 let operation = kv_operation_from_stream_message(&message);
-                let entry = KeyValueEntry {
+                let entry = Entry {
                     bucket: self.name.clone(),
                     key: key.to_string(),
                     value: message.data,
@@ -383,12 +386,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "get".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -405,7 +408,7 @@ impl KeyValueStore {
     pub fn get(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
         match self.entry(key) {
             Ok(Some(entry)) => match entry.operation {
-                KeyValueOperation::Put => Ok(Some(entry.value)),
+                Operation::Put => Ok(Some(entry.value)),
                 _ => Ok(None),
             },
             Ok(None) => Ok(None),
@@ -418,12 +421,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "get".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -452,12 +455,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "create".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -476,7 +479,7 @@ impl KeyValueStore {
 
         // Check if the last entry is a delete marker
         if let Ok(Some(entry)) = self.entry(key) {
-            if entry.operation != KeyValueOperation::Put {
+            if entry.operation != Operation::Put {
                 return self.update(key, &value, entry.revision);
             }
         }
@@ -489,12 +492,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "update".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -533,12 +536,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "delete".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -577,12 +580,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "purge".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -628,12 +631,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_key_value(&KeyValueConfig {
+    /// # let bucket = context.create_key_value(&Config {
     /// #  bucket: "keys".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -673,12 +676,12 @@ impl KeyValueStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::kv::KeyValueConfig;
+    /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_key_value(&KeyValueConfig {
+    /// let bucket = context.create_key_value(&Config {
     ///   bucket: "history_iter".to_string(),
     ///   history: 2,
     ///   ..Default::default()
@@ -778,7 +781,7 @@ impl Iterator for Keys {
                 // We are only interested in unique current keys from subjects so we skip delete
                 // and purge markers.
                 let operation = kv_operation_from_maybe_headers(message.headers.as_ref());
-                if operation != KeyValueOperation::Put {
+                if operation != Operation::Put {
                     return self.next();
                 }
 
@@ -801,7 +804,7 @@ pub struct History {
 }
 
 impl Iterator for History {
-    type Item = KeyValueEntry;
+    type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
@@ -823,7 +826,7 @@ impl Iterator for History {
                         .map(|s| s.to_string())
                         .unwrap();
 
-                    Some(KeyValueEntry {
+                    Some(Entry {
                         bucket: self.bucket.clone(),
                         key,
                         value: message.data.clone(),
@@ -850,7 +853,7 @@ pub struct Watch {
 }
 
 impl Iterator for Watch {
-    type Item = KeyValueEntry;
+    type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.subscription.next() {
@@ -864,7 +867,7 @@ impl Iterator for Watch {
                         .map(|s| s.to_string())
                         .unwrap();
 
-                    Some(KeyValueEntry {
+                    Some(Entry {
                         bucket: self.bucket.clone(),
                         key,
                         value: message.data.clone(),
@@ -883,12 +886,12 @@ impl Iterator for Watch {
 }
 
 /// Represents status information about a key value store bucket
-pub struct KeyValueBucketStatus {
+pub struct BucketStatus {
     info: StreamInfo,
     bucket: String,
 }
 
-impl KeyValueBucketStatus {
+impl BucketStatus {
     /// The name of the bucket
     pub fn bucket(&self) -> &String {
         &self.bucket

@@ -115,6 +115,7 @@
 //! # Ok(()) }
 //! ```
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(
     feature = "fault_injection",
@@ -210,7 +211,11 @@ pub mod header;
 
 /// `JetStream` stream management and consumers.
 pub mod jetstream;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
 pub mod kv;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
 pub mod object_store;
 
 #[cfg(feature = "fault_injection")]
