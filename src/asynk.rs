@@ -99,6 +99,7 @@ use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::header::HeaderMap;
+use crate::IntoServerList;
 
 /// Connect to a NATS server at the given url.
 ///
@@ -108,7 +109,10 @@ use crate::header::HeaderMap;
 /// let nc = nats::asynk::connect("demo.nats.io").await?;
 /// # std::io::Result::Ok(()) });
 /// ```
-pub async fn connect(nats_url: &str) -> io::Result<Connection> {
+pub async fn connect<I>(nats_url: I) -> io::Result<Connection>
+where
+    I: IntoServerList,
+{
     Options::new().connect(nats_url).await
 }
 
@@ -733,9 +737,12 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub async fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let nats_url = nats_url.to_string();
-        let conn = unblock(move || self.inner.connect(&nats_url)).await?;
+    pub async fn connect<I>(self, nats_url: I) -> io::Result<Connection>
+    where
+        I: IntoServerList,
+    {
+        let servers = nats_url.into_server_list()?;
+        let conn = unblock(move || self.inner.connect(servers)).await?;
         Ok(Connection::new(conn))
     }
 

@@ -44,7 +44,7 @@ fn async_subscription_drop() -> io::Result<()> {
     let s = util::run_basic_server();
 
     smol::block_on(async {
-        let nc = nats::asynk::connect(&s.client_url()).await?;
+        let nc = nats::asynk::connect(s.client_url()).await?;
 
         let inbox = nc.new_inbox();
 
