@@ -24,6 +24,7 @@ use crate::auth_utils;
 use crate::secure_wipe::SecureString;
 use crate::Client;
 use crate::Connection;
+use crate::IntoServerList;
 
 /// Connect options.
 pub struct Options {
@@ -456,37 +457,33 @@ impl Options {
         self
     }
 
-    /// Establish a `Connection` with a NATS server.
+    /// Establish a `Connection` with one or more NATS servers.
     ///
-    /// Multiple servers may be specified by separating
-    /// them with commas.
+    /// To pass more than one URL check out the the documentation of [`crate::connect()`].
+    ///
+    /// **Note:** If an URL provides username and password, e.g. `nats://derek:s3cr3t!@demo.nats.io`,
+    /// it will override the username and password set by the [`Options`]. Be aware that providing
+    /// credentials in the URL is not safe and should not be used in production.
     ///
     /// # Example
     ///
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// let options = nats::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     ///
-    /// In the below case, the second server is configured
-    /// to use TLS but the first one is not. Using the
-    /// `tls_required` method can ensure that all
-    /// servers are connected to with TLS, if that is
-    /// your intention.
-    ///
+    /// In the below case, the second server is configured to use TLS but the first one is not.
+    /// Using the [`Options::tls_required()`] method can ensure that all servers are connected
+    /// to with TLS, if that is your intention.
     ///
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// let options = nats::Options::new();
     /// let nc = options.connect("nats://demo.nats.io:4222,tls://demo.nats.io:4443")?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        Connection::connect_with_options(nats_url, self)
+    pub fn connect<I: IntoServerList>(self, nats_urls: I) -> io::Result<Connection> {
+        Connection::connect_with_options(nats_urls, self)
     }
 
     /// Set a callback to be executed when an async error from

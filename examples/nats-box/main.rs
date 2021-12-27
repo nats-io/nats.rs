@@ -9,7 +9,7 @@ use structopt::{clap::ArgGroup, StructOpt};
 struct Cli {
     /// NATS server
     #[structopt(long, short, default_value = "demo.nats.io")]
-    server: String,
+    server: nats::ServerAddress,
 
     /// User Credentials File
     #[structopt(long = "creds", group = "auth")]
@@ -51,7 +51,7 @@ fn main() -> CliResult {
         .with_name("nats-box rust example")
         .disconnect_callback(|| println!("Disconnected"))
         .reconnect_callback(|| println!("Reconnected"))
-        .connect(&args.server)?;
+        .connect(args.server)?;
 
     match args.cmd {
         Command::Pub { subject, msg } => {

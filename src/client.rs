@@ -25,7 +25,7 @@ use crossbeam_channel as channel;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
-use crate::connector::{Connector, NatsStream};
+use crate::connector::{Connector, NatsStream, ServerAddress};
 use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{header::HeaderMap, inject_delay, inject_io_failure, Options, ServerInfo};
@@ -112,7 +112,7 @@ pub struct Client {
 
 impl Client {
     /// Creates a new client that will begin connecting in the background.
-    pub(crate) fn connect(url: &str, options: Options) -> io::Result<Client> {
+    pub(crate) fn connect(urls: Vec<ServerAddress>, options: Options) -> io::Result<Client> {
         // A channel for coordinating flushes.
         let (flush_kicker, flush_wanted) = channel::bounded(1);
 
@@ -148,7 +148,7 @@ impl Client {
 
         // Connector for creating the initial connection and reconnecting when
         // it is broken.
-        let connector = Connector::new(url, options.clone())?;
+        let connector = Connector::new(urls, options.clone())?;
 
         // Spawn the client thread responsible for:
         // - Maintaining a connection to the server and reconnecting when it is
@@ -804,7 +804,7 @@ impl Client {
             match op {
                 ServerOp::Info(server_info) => {
                     for url in &server_info.connect_urls {
-                        connector.add_url(url).ok();
+                        connector.add_server(url.parse()?);
                     }
                     self.process_info(&server_info, connector);
                     *self.server_info.lock() = server_info;
