@@ -163,10 +163,20 @@ pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
         &PrivateKey,
     )?;
     if keys.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "no keys found in the client key file",
-        ));
+        let mut keys = extract(
+            path,
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----END RSA PRIVATE KEY-----",
+            &PrivateKey,
+        )?;
+        
+        if keys.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no keys found in the client key file",
+            ));
+        }
+        Ok(keys.remove(0))
     }
     Ok(keys.remove(0))
 }
