@@ -175,8 +175,9 @@ pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
                 io::ErrorKind::InvalidData,
                 "no keys found in the client key file",
             ));
+        } else {
+            return Ok(keys.remove(0));
         }
-        Ok(keys.remove(0))
     }
     Ok(keys.remove(0))
 }
