@@ -639,6 +639,28 @@ impl Options {
         }
     }
 
+    /// Select option to enable reconnect with backoff
+    /// on first failed connection attempt.
+    /// The reconnect logic with `max_reconnects` and the
+    /// `reconnect_delay_callback` will be specified the same
+    /// as before but will be invoked on the first failed
+    /// connection attempt.
+    ///
+    /// # Example
+    /// ```
+    /// # smol::block_on(async {
+    /// let nc = nats::asynk::Options::new()
+    ///     .retry_on_failed_connect()
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # std::io::Result::Ok(()) });
+    /// ```
+    pub fn retry_on_failed_connect(self) -> Options {
+        Options {
+            inner: self.inner.retry_on_failed_connect(),
+        }
+    }
+
     /// Set the maximum number of reconnect attempts.
     /// If no servers remain that are under this threshold,
     /// then no further reconnect shall be attempted.

@@ -673,8 +673,9 @@ impl Client {
         let mut first_connect = true;
 
         loop {
-            // Don't use backoff on first connect.
-            let use_backoff = !first_connect;
+            //  Don't use backoff on first connect unless retry_on_failed_connect is set to true.
+            let use_backoff = self.options.retry_on_failed_connect || !first_connect;
+
             // Make a connection to the server.
             let (server_info, stream) = connector.connect(use_backoff)?;
             self.process_info(&server_info, &connector);
