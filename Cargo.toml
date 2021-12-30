@@ -48,6 +48,7 @@ parking_lot = "0.11.1"
 regex = { version = "1.5.4", default-features = false, features = ["std", "unicode-perl"] }
 rustls = "0.19.1"
 rustls-native-certs = "0.5.0"
+rustls-pemfile = "0.2.1"
 webpki = "0.21.0"
 serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.64"
