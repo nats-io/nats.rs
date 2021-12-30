@@ -20,11 +20,12 @@ fn basic_tls() -> io::Result<()> {
         )
         .connect(&s.client_url())?;
 
+    // test scenario where rootCA, client certificate and client key are all in one .pem file
     nats::Options::with_user_pass("derek", "porkchop")
-        .add_root_certificate(path.join("tests/configs/certs/rootCA.pem"))
+        .add_root_certificate(path.join("tests/configs/certs/client-all.pem"))
         .client_cert(
-            path.join("tests/configs/certs/client-cert.pem"),
-            path.join("tests/configs/certs/client-key.pem"),
+            path.join("tests/configs/certs/client-all.pem"),
+            path.join("tests/configs/certs/client-all.pem"),
         )
         .connect(&s.client_url())?;
 
