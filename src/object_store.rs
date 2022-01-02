@@ -281,7 +281,7 @@ impl Object {
 impl io::Read for Object {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if !self.remaining_bytes.is_empty() {
-            let len = cmp::max(buffer.len(), self.remaining_bytes.len());
+            let len = cmp::min(buffer.len(), self.remaining_bytes.len());
             buffer.copy_from_slice(&self.remaining_bytes[..len]);
 
             if self.remaining_bytes.len() > len {
@@ -296,7 +296,7 @@ impl io::Read for Object {
 
             let maybe_message = self.subscription.try_next();
             if let Some(message) = maybe_message {
-                let len = cmp::max(buffer.len(), message.data.len());
+                let len = cmp::min(buffer.len(), message.data.len());
                 buffer.copy_from_slice(&message.data[..len]);
 
                 if message.data.len() > len {
@@ -484,7 +484,7 @@ impl ObjectStore {
         Ok(object_info)
     }
 
-    /// Get an existing objecto by name.
+    /// Get an existing object by name.
     ///
     /// # Example
     ///
@@ -503,8 +503,8 @@ impl ObjectStore {
     /// let bytes = vec![0, 1, 2, 3, 4];
     /// let info = bucket.put("foo", &mut bytes.as_slice())?;
     ///
-    /// let mut Result = Vec::new();
-    /// bucket.get("foo").unwrap().read_to_end(&mut Result)?;
+    /// let mut result = Vec::new();
+    /// bucket.get("foo").unwrap().read_to_end(&mut result)?;
     ///
     /// # context.delete_object_store("get")?;
     /// # Ok(())
