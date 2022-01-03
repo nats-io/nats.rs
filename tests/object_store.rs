@@ -12,7 +12,6 @@
 // limitations under the License.
 
 #![cfg(feature = "unstable")]
-
 use rand::prelude::*;
 use std::io::Read;
 
@@ -35,6 +34,7 @@ fn object_random() {
 
     let mut rng = rand::thread_rng();
     let mut bytes = Vec::with_capacity(16 * 1024 * 1024 + 22);
+    bytes.resize(16 * 1024 * 1024 + 22, 0);
     rng.try_fill_bytes(&mut bytes).unwrap();
 
     bucket.put("FOO", &mut bytes.as_slice()).unwrap();
@@ -49,6 +49,7 @@ fn object_random() {
     assert_eq!(result, bytes);
 
     let mut bytes = Vec::with_capacity(16 * 1024 * 1024 + 22);
+    bytes.resize(16 * 1024 * 1024 + 22, 0);
     rng.try_fill_bytes(&mut bytes).unwrap();
     bucket.put("FOO", &mut bytes.as_slice()).unwrap();
 
