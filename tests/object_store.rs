@@ -12,7 +12,9 @@
 // limitations under the License.
 
 #![cfg(feature = "unstable")]
+
 use rand::prelude::*;
+use std::io::Read;
 
 mod util;
 
@@ -23,7 +25,7 @@ fn object_random() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_object_store(&nats::object_store::ObjectStoreConfig {
+        .create_object_store(&nats::object_store::Config {
             bucket: "OBJECTS".to_string(),
             ..Default::default()
         })
@@ -33,9 +35,9 @@ fn object_random() {
 
     let mut rng = rand::thread_rng();
     let mut bytes = Vec::with_capacity(16 * 1024 * 1024 + 22);
-    rng.try_fill_bytes(&mut bytes);
+    rng.try_fill_bytes(&mut bytes).unwrap();
 
-    bucket.put("FOO", &mut bytes.as_slice());
+    bucket.put("FOO", &mut bytes.as_slice()).unwrap();
 
     let object_info = bucket.info("FOO").unwrap();
     assert!(!object_info.nuid.is_empty());
@@ -108,7 +110,7 @@ fn object_sealed() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_object_store(&nats::object_store::ObjectStoreConfig {
+        .create_object_store(&nats::object_store::Config {
             bucket: "OBJECTS".to_string(),
             ..Default::default()
         })
@@ -127,7 +129,7 @@ fn object_delete() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_object_store(&nats::object_store::ObjectStoreConfig {
+        .create_object_store(&nats::object_store::Config {
             bucket: "OBJECTS".to_string(),
             ..Default::default()
         })
@@ -154,7 +156,7 @@ fn object_multiple_delete() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_object_store(&nats::object_store::ObjectStoreConfig {
+        .create_object_store(&nats::object_store::Config {
             bucket: "2OD".to_string(),
             ..Default::default()
         })
@@ -186,7 +188,7 @@ fn object_names() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_object_store(&nats::object_store::ObjectStoreConfig {
+        .create_object_store(&nats::object_store::Config {
             bucket: "NAMES".to_string(),
             ..Default::default()
         })
@@ -213,7 +215,7 @@ fn object_watch() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_object_store(&nats::object_store::ObjectStoreConfig {
+        .create_object_store(&nats::object_store::Config {
             bucket: "WATCH".to_string(),
             ..Default::default()
         })

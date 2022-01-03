@@ -54,7 +54,7 @@ jobs:
           RUST_BACKTRACE: 1
         run: |
           rustup update
-          cargo test
+          cargo test --features=unstable
 
   test_fault-injection:
     name: test (fault-injection)
