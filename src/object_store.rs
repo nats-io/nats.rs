@@ -259,7 +259,7 @@ pub struct Object {
     info: ObjectInfo,
     subscription: PushSubscription,
     remaining_bytes: Vec<u8>,
-    skip_next: bool,
+    has_pending_messages: bool,
 }
 
 impl Object {
@@ -268,7 +268,7 @@ impl Object {
             subscription,
             info,
             remaining_bytes: Vec::new(),
-            skip_next: false,
+            has_pending_messages: true,
         }
     }
 
@@ -279,36 +279,30 @@ impl Object {
 }
 
 impl io::Read for Object {
+    /// Read the data chunks for a given Object from attached subscription and copy it to provided buffer.
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        // read data accumulated in remaining bytes into the buffer.
         if !self.remaining_bytes.is_empty() {
             let len = cmp::min(buffer.len(), self.remaining_bytes.len());
-            buffer.copy_from_slice(&self.remaining_bytes[..len]);
-
-            if self.remaining_bytes.len() > len {
-                self.remaining_bytes = self.remaining_bytes[len..].to_vec();
-            }
-
+            buffer[..len].copy_from_slice(&self.remaining_bytes[..len]);
+            self.remaining_bytes = self.remaining_bytes[len..].to_vec();
             return Ok(len);
         }
 
-        if self.skip_next {
-            self.skip_next = false;
-
-            let maybe_message = self.subscription.try_next();
+        // fetch messages from subject.
+        // Run at each `read` call until there are no more pending messages for a given Object.
+        if self.has_pending_messages {
+            let maybe_message = self.subscription.next();
             if let Some(message) = maybe_message {
                 let len = cmp::min(buffer.len(), message.data.len());
-                buffer.copy_from_slice(&message.data[..len]);
-
-                if message.data.len() > len {
-                    self.remaining_bytes.extend_from_slice(&message.data[len..]);
-                }
+                buffer[..len].copy_from_slice(&message.data[..len]);
+                self.remaining_bytes.extend_from_slice(&message.data[len..]);
 
                 if let Some(message_info) = message.jetstream_message_info() {
                     if message_info.pending == 0 {
-                        self.skip_next = true;
+                        self.has_pending_messages = false;
                     }
                 }
-
                 return Ok(len);
             }
         }
