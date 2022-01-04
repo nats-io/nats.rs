@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Support for Object Store.
+//! This feature is experimental and the API may change.
+
 use crate::header::HeaderMap;
 use crate::jetstream::JetStream;
 use crate::jetstream_push_subscription::PushSubscription;
@@ -52,7 +55,7 @@ fn sanitize_object_name(object_name: &str) -> String {
 
 /// Configuration values for object store buckets.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ObjectStoreConfig {
+pub struct Config {
     /// Name of the storage bucket.
     pub bucket: String,
     /// A short description of the purpose of this storage bucket.
@@ -71,12 +74,12 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// let bucket = context.create_object_store(&Config {
     ///   bucket: "create_object_store".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -85,7 +88,7 @@ impl JetStream {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn create_object_store(&self, config: &ObjectStoreConfig) -> io::Result<ObjectStore> {
+    pub fn create_object_store(&self, config: &Config) -> io::Result<ObjectStore> {
         if !self.connection.is_server_compatible_version(2, 6, 2) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -125,12 +128,12 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// context.create_object_store(&ObjectStoreConfig {
+    /// context.create_object_store(&Config {
     ///   bucket: "object_store".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -167,12 +170,12 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// use nats::jetstream::ObjectStoreConfig;
+    /// use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// # let bucket = context.create_object_store(&Config {
     /// #  bucket: "delete_object_store".to_string(),
     /// #  ..Default::default()
     /// # })?;
@@ -325,12 +328,12 @@ impl ObjectStore {
     /// # Examples
     ///
     /// ```
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// let bucket = context.create_object_store(&Config {
     ///   bucket: "info".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -383,12 +386,12 @@ impl ObjectStore {
     /// # Example
     ///
     /// ```
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// let bucket = context.create_object_store(&Config {
     ///   bucket: "put".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -487,12 +490,12 @@ impl ObjectStore {
     ///
     /// ```
     /// use std::io::Read;
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// let bucket = context.create_object_store(&Config {
     ///   bucket: "get".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -527,12 +530,12 @@ impl ObjectStore {
     ///
     /// ```
     /// use std::io::Read;
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// let bucket = context.create_object_store(&Config {
     ///   bucket: "delete".to_string(),
     ///   ..Default::default()
     /// })?;
@@ -587,12 +590,12 @@ impl ObjectStore {
     ///
     /// ```no_run
     /// use std::io::Read;
-    /// # use nats::jetstream::ObjectStoreConfig;
+    /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// let bucket = context.create_object_store(&ObjectStoreConfig {
+    /// let bucket = context.create_object_store(&Config {
     ///   bucket: "watch".to_string(),
     ///   ..Default::default()
     /// })?;

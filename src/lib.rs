@@ -115,6 +115,7 @@
 //! # Ok(()) }
 //! ```
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(
     feature = "fault_injection",
@@ -197,8 +198,6 @@ mod auth_utils;
 mod client;
 mod connect;
 mod connector;
-mod jetstream_kv;
-mod jetstream_object;
 mod jetstream_push_subscription;
 mod jetstream_types;
 mod message;
@@ -212,6 +211,12 @@ pub mod header;
 
 /// `JetStream` stream management and consumers.
 pub mod jetstream;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+pub mod kv;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+pub mod object_store;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -252,7 +257,7 @@ use regex::Regex;
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
-pub use subscription::Subscription;
+pub use subscription::{Handler, Subscription};
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations

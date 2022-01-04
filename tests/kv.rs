@@ -1,4 +1,3 @@
-// Copyright 2021 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -11,9 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(feature = "unstable")]
 mod util;
 
-use nats::jetstream::*;
+use nats::jetstream::StreamConfig;
+
+use nats::kv::*;
 
 #[test]
 fn key_value_entry() {
@@ -22,7 +24,7 @@ fn key_value_entry() {
     let context = nats::jetstream::new(client);
 
     let kv = context
-        .create_key_value(&nats::jetstream::KeyValueConfig {
+        .create_key_value(&nats::kv::Config {
             bucket: "ENTRY".to_string(),
             history: 5,
             max_age: std::time::Duration::from_secs(3600),
@@ -48,7 +50,7 @@ fn key_value_entry() {
     kv.delete("foo").unwrap();
 
     let entry = kv.entry("foo").unwrap().unwrap();
-    assert_eq!(entry.operation, KeyValueOperation::Delete);
+    assert_eq!(entry.operation, Operation::Delete);
 
     let value = kv.get("foo").unwrap();
     assert_eq!(value, None);
@@ -79,7 +81,7 @@ fn key_value_short_history() {
     let context = nats::jetstream::new(client);
 
     let kv = context
-        .create_key_value(&nats::jetstream::KeyValueConfig {
+        .create_key_value(&nats::kv::Config {
             bucket: "HISTORY".to_string(),
             history: 5,
             ..Default::default()
@@ -106,7 +108,7 @@ fn key_value_long_history() {
     let context = nats::jetstream::new(client);
 
     let kv = context
-        .create_key_value(&nats::jetstream::KeyValueConfig {
+        .create_key_value(&nats::kv::Config {
             bucket: "HISTORY".to_string(),
             history: 25,
             ..Default::default()
@@ -133,7 +135,7 @@ fn key_value_watch() {
     let context = nats::jetstream::new(client);
 
     let kv = context
-        .create_key_value(&nats::jetstream::KeyValueConfig {
+        .create_key_value(&nats::kv::Config {
             bucket: "WATCH".to_string(),
             history: 10,
             ..Default::default()
@@ -156,7 +158,7 @@ fn key_value_watch() {
 
     kv.delete("foo").unwrap();
     let entry = watch.next().unwrap();
-    assert_eq!(entry.operation, KeyValueOperation::Delete);
+    assert_eq!(entry.operation, Operation::Delete);
 
     drop(watch);
 }
@@ -168,7 +170,7 @@ fn key_value_bind() {
     let context = nats::jetstream::new(client);
 
     context
-        .create_key_value(&KeyValueConfig {
+        .create_key_value(&Config {
             bucket: "WATCH".to_string(),
             ..Default::default()
         })
@@ -197,7 +199,7 @@ fn key_value_delete() {
     let context = nats::jetstream::new(client);
 
     context
-        .create_key_value(&KeyValueConfig {
+        .create_key_value(&Config {
             bucket: "TEST".to_string(),
             ..Default::default()
         })
@@ -216,7 +218,7 @@ fn key_value_purge() {
     let context = nats::jetstream::new(client);
 
     let bucket = context
-        .create_key_value(&KeyValueConfig {
+        .create_key_value(&Config {
             bucket: "FOO".to_string(),
             history: 10,
             ..Default::default()
@@ -234,7 +236,7 @@ fn key_value_purge() {
     let entries = bucket.history("foo").unwrap();
     assert_eq!(entries.into_iter().count(), 3);
 
-    bucket.purge("foo");
+    bucket.purge("foo").unwrap();
 
     let value = bucket.get("foo").unwrap();
     assert_eq!(value, None);
@@ -250,7 +252,7 @@ fn key_value_keys() {
     let context = nats::jetstream::new(client);
 
     let kv = context
-        .create_key_value(&KeyValueConfig {
+        .create_key_value(&Config {
             bucket: "KVS".to_string(),
             history: 2,
             ..Default::default()
