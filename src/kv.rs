@@ -865,7 +865,7 @@ impl Iterator for Watch {
                         .subject
                         .strip_prefix(&self.prefix)
                         .map(|s| s.to_string())
-                        .unwrap();
+                        .unwrap_or("".to_string());
 
                     Some(Entry {
                         bucket: self.bucket.clone(),
