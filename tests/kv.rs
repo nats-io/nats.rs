@@ -141,6 +141,45 @@ fn key_value_watch() {
             ..Default::default()
         })
         .unwrap();
+    let mut watch = kv.watch("foo.>").unwrap();
+
+    // check if we get only foo.bar watch event.
+    kv.create("foo", b"ignored").unwrap();
+    kv.put("foo.bar", b"lorem").unwrap();
+    let entry = watch.next().unwrap();
+    assert_eq!(entry.key, "foo.bar".to_string());
+    assert_eq!(entry.value, b"lorem");
+    // expect revision 2, instead of 1 as two values were put.
+    assert_eq!(entry.revision, 2);
+
+    // check if we only get foo.bar.z events
+    kv.put("foo", b"ignored").unwrap();
+    kv.put("foo.bar.z", b"ipsum").unwrap();
+    let entry = watch.next().unwrap();
+    assert_eq!(entry.key, "foo.bar.z".to_string());
+    assert_eq!(entry.value, b"ipsum");
+    // expect revision 4, as two values were inserted.
+    assert_eq!(entry.revision, 4);
+
+    kv.delete("foo").unwrap();
+    kv.delete("foo.bar").unwrap();
+    let entry = watch.next().unwrap();
+    assert_eq!(entry.operation, Operation::Delete);
+}
+
+#[test]
+fn key_value_watch_all() {
+    let server = util::run_server("tests/configs/jetstream.conf");
+    let client = nats::connect(&server.client_url()).unwrap();
+    let context = nats::jetstream::new(client);
+
+    let kv = context
+        .create_key_value(&nats::kv::Config {
+            bucket: "WATCH".to_string(),
+            history: 10,
+            ..Default::default()
+        })
+        .unwrap();
 
     // create second Store to see if
     // https://github.com/nats-io/nats.rs/issues/286 is still affecting our codebase.
@@ -153,7 +192,7 @@ fn key_value_watch() {
         })
         .unwrap();
 
-    let mut watch = kv.watch().unwrap();
+    let mut watch = kv.watch_all().unwrap();
 
     // create some data in second Store to see if `watch` will catch this data and panic.
     skv.create("foo", b"loren").unwrap();

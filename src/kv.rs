@@ -727,8 +727,13 @@ impl Store {
     }
 
     /// Returns an iterator which iterates over each entry as they happen.
-    pub fn watch(&self) -> io::Result<Watch> {
-        let subject = format!("{}>", self.prefix);
+    pub fn watch_all(&self) -> io::Result<Watch> {
+        self.watch(">")
+    }
+
+    /// Returns an iterator which iterates over each entry for specific key pattern as they happen.
+    pub fn watch<T: AsRef<str>>(&self, key: T) -> io::Result<Watch> {
+        let subject = format!("{}{}", self.prefix, key.as_ref());
         let subscription = self.context.subscribe_with_options(
             subject.as_str(),
             &SubscribeOptions::ordered()
