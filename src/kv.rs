@@ -728,10 +728,9 @@ impl Store {
 
     /// Returns an iterator which iterates over each entry as they happen.
     pub fn watch(&self) -> io::Result<Watch> {
-        let subject = ">";
-
+        let subject = format!("{}>", self.prefix);
         let subscription = self.context.subscribe_with_options(
-            subject,
+            subject.as_str(),
             &SubscribeOptions::ordered()
                 .deliver_last_per_subject()
                 .enable_flow_control()
@@ -768,11 +767,9 @@ impl Iterator for Keys {
 
         match self.subscription.next() {
             Some(message) => {
-                // println!("{:?}", &message);
                 // If there are no more pending messages we'll stop after delivering the key
                 // derived from this message.
                 if let Some(info) = message.jetstream_message_info() {
-                    // println!("{:?}", &info);
                     if info.pending == 0 {
                         self.done = true;
                     }

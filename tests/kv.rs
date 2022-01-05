@@ -142,8 +142,23 @@ fn key_value_watch() {
         })
         .unwrap();
 
+    // create second Store to see if
+    // https://github.com/nats-io/nats.rs/issues/286 is still affecting our codebase.
+    // It was causing one store being able to read data from another.
+    let skv = context
+        .create_key_value(&nats::kv::Config {
+            bucket: "TEST_CONFLICT".to_string(),
+            history: 10,
+            ..Default::default()
+        })
+        .unwrap();
+
     let mut watch = kv.watch().unwrap();
 
+    // create some data in second Store to see if `watch` will catch this data and panic.
+    skv.create("foo", b"loren").unwrap();
+
+    // test watch
     kv.create("foo", b"lorem").unwrap();
     let entry = watch.next().unwrap();
     assert_eq!(entry.key, "foo".to_string());
