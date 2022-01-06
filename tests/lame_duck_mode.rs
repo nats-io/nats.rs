@@ -15,7 +15,7 @@ fn lame_duck_mode() {
         .connect(s.client_url().as_str())
         .expect("could not connect to the server");
     let _sub = nc.subscribe("foo").unwrap();
-    set_lame_duck_mode();
+    set_lame_duck_mode(&s);
     let r = lrx.recv_timeout(Duration::from_millis(500));
     assert!(r.is_ok(), "expected lame duck response, got nothing");
 }

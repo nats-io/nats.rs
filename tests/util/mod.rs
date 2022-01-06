@@ -13,6 +13,7 @@ use regex::Regex;
 pub struct Server {
     child: Child,
     logfile: PathBuf,
+    pidfile: PathBuf,
 }
 
 lazy_static! {
@@ -81,11 +82,21 @@ impl Server {
         }
         panic!("no client addr info");
     }
+
+    pub fn client_pid(&self) -> usize {
+        String::from_utf8(fs::read(self.pidfile.clone()).unwrap())
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
 }
 
-pub fn set_lame_duck_mode() {
+pub fn set_lame_duck_mode(s: &Server) {
     let mut cmd = Command::new("nats-server");
-    cmd.arg("--signal").arg("ldm").spawn().unwrap();
+    cmd.arg("--signal")
+        .arg(format!("ldm={}", s.client_pid()))
+        .spawn()
+        .unwrap();
 }
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
@@ -93,6 +104,7 @@ pub fn run_server(cfg: &str) -> Server {
     let id = nuid::next();
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
     let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
+    let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
@@ -102,7 +114,9 @@ pub fn run_server(cfg: &str) -> Server {
         .arg("-p")
         .arg("-1")
         .arg("-l")
-        .arg(logfile.as_os_str());
+        .arg(logfile.as_os_str())
+        .arg("-P")
+        .arg(pidfile.as_os_str());
 
     if cfg != "" {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -111,7 +125,11 @@ pub fn run_server(cfg: &str) -> Server {
 
     let child = cmd.spawn().unwrap();
 
-    Server { child, logfile }
+    Server {
+        child,
+        logfile,
+        pidfile,
+    }
 }
 
 /// Starts a local basic NATS server that gets stopped and cleaned up on drop.
