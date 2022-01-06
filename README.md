@@ -16,8 +16,8 @@
 
 ## Motivation
 
-Rust may be the most interesting new language the NATS ecosystem has seen. We
-believe this client will have a large impact on NATS, distributed systems, and
+Rust may be one the most interesting new languages the NATS ecosystem has seen.
+We believe this client will have a large impact on NATS, distributed systems, and
 embedded and IoT environments. With Rust we wanted to be as idiomatic as we
 could be and lean into the strengths of the language. We moved many things that
 would have been runtime checks and errors to the compiler, most notably options
@@ -109,13 +109,15 @@ let response = rsub.iter().take(1);
 
 ## Minimum Supported Rust Version (MSRV)
 
-The minimum supported Rust version is 1.51.0.
+The minimum supported Rust version is 1.53.0.
 
 ## Sync vs Async
 
 The Rust ecosystem has a diverse set of options for async programming. This client library can be used with any async runtime out of the box, such as async-std and tokio.
 
 The async interface provided by this library is implemented as just a thin wrapper around its sync interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
+
+<em>*NOTE:* This crate uses thread pool from [blocking crate](https://crates.io/crates/blocking/1.1.0). By default it limits number of threads to 500. It can be ovverided by setting `BLOCKING_MAX_THREADS` environment variable and set between 1 and 10000. Be careful when spinning a lot async operations, as it may drain the thread pool and block foverer until it's reworked</em>
 
 ## Features
 The following is a list of features currently supported and planned for the near future.
@@ -134,7 +136,7 @@ The following is a list of features currently supported and planned for the near
 * [x] Header Support
 
 ### Miscellaneous TODOs
-* [ ] Ping timer
+* [X] Ping timer
 * [X] msg.respond
 * [X] Drain mode
 * [ ] COW for received messages

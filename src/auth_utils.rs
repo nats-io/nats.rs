@@ -1,5 +1,18 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::fs;
-use std::io::{self, prelude::*};
+use std::io::{self, BufReader, ErrorKind};
 use std::path::Path;
 
 use nkeys::KeyPair;
@@ -31,17 +44,14 @@ pub(crate) fn jwt_kp(contents: &str) -> io::Result<(SecureString, KeyPair)> {
         )
     })?;
 
-    let kp = KeyPair::from_seed(&nkey)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let kp =
+        KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok((jwt, kp))
 }
 
 /// Signs nonce using a credentials file.
-pub(crate) fn sign_nonce(
-    nonce: &[u8],
-    key_pair: &KeyPair,
-) -> io::Result<SecureString> {
+pub(crate) fn sign_nonce(nonce: &[u8], key_pair: &KeyPair) -> io::Result<SecureString> {
     // Use the nkey to sign the nonce.
     let sig = key_pair
         .sign(nonce)
@@ -86,78 +96,40 @@ fn parse_decorated_nkey(contents: &str) -> Option<SecureString> {
     Some(SecureString::from(capture[1].to_string()))
 }
 
-/// Extract and decode all PEM sections from `rd`, which begin with `start_mark`
-/// and end with `end_mark`.  Apply the functor `f` to each decoded buffer,
-/// and return a Vec of `f`'s return values.
-fn extract<A>(
-    path: &Path,
-    start_mark: &str,
-    end_mark: &str,
-    f: &dyn Fn(Vec<u8>) -> A,
-) -> io::Result<Vec<A>> {
-    let contents = fs::read(path)?;
-    let mut rd = io::Cursor::new(contents);
-
-    let mut ders = Vec::new();
-    let mut b64buf = String::new();
-    let mut take_base64 = false;
-
-    let mut raw_line = Vec::<u8>::new();
-    loop {
-        raw_line.clear();
-        let len = rd
-            .read_until(b'\n', &mut raw_line)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-
-        if len == 0 {
-            return Ok(ders);
-        }
-        let line = String::from_utf8_lossy(&raw_line);
-
-        if line.starts_with(start_mark) {
-            take_base64 = true;
-            continue;
-        }
-
-        if line.starts_with(end_mark) {
-            take_base64 = false;
-            let der = base64::decode(&b64buf).map_err(|err| {
-                io::Error::new(io::ErrorKind::InvalidData, err)
-            })?;
-            ders.push(f(der));
-            b64buf = String::new();
-            continue;
-        }
-
-        if take_base64 {
-            b64buf.push_str(line.trim());
-        }
-    }
-}
-
 /// Loads client certificates from a `.pem` file.
+/// If the pem file is found, but does not contain any certificates, it will return
+/// empty set of Certificates, not error.
+/// Can be used to parse only client certificates from .pem file containing both client key and certs.
 pub(crate) fn load_certs(path: &Path) -> io::Result<Vec<Certificate>> {
-    extract(
-        path,
-        "-----BEGIN CERTIFICATE-----",
-        "-----END CERTIFICATE-----",
-        &|v| Certificate(v),
-    )
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let certs = rustls_pemfile::certs(&mut reader)?
+        .iter()
+        .map(|v| Certificate(v.clone()))
+        .collect();
+    Ok(certs)
 }
 
 /// Loads client key from a `.pem` file.
+/// Can be used to parse only client key from .pem file containing both client key and certs.
 pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
-    let mut keys = extract(
-        path,
-        "-----BEGIN PRIVATE KEY-----",
-        "-----END PRIVATE KEY-----",
-        &|v| PrivateKey(v),
-    )?;
-    if keys.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "no keys found in the client key file",
-        ));
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    loop {
+        let cert = rustls_pemfile::read_one(&mut reader)?;
+        match cert {
+            Some(rustls_pemfile::Item::RSAKey(key)) | Some(rustls_pemfile::Item::PKCS8Key(key)) => {
+                return Ok(PrivateKey(key))
+            }
+            // if public key is found, don't error, just skip it and hope to find client key next.
+            Some(rustls_pemfile::Item::X509Certificate(_)) => {}
+            None => break,
+        }
     }
-    Ok(keys.remove(0))
+
+    Err(io::Error::new(
+        ErrorKind::NotFound,
+        "could not find client key in the path",
+    ))
 }

@@ -1,21 +1,36 @@
-use std::collections::{HashMap, VecDeque};
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::io::prelude::*;
 use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
 use std::mem;
 use std::sync::Arc;
+
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
+use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
 use crate::connector::{Connector, NatsStream};
 use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
-use crate::{inject_delay, inject_io_failure, Headers, Options, ServerInfo};
+use crate::{header::HeaderMap, inject_delay, inject_io_failure, Options, ServerInfo};
 
-const BUF_CAPACITY: usize = 128 * 1024;
+const BUF_CAPACITY: usize = 32 * 1024;
 
 /// Client state.
 ///
@@ -26,6 +41,12 @@ const BUF_CAPACITY: usize = 128 * 1024;
 struct State {
     write: Mutex<WriteState>,
     read: Mutex<ReadState>,
+    meta: Mutex<MetaState>,
+}
+
+struct MetaState {
+    /// Set of subjects that are currently muted.
+    mutes: HashSet<u64>,
 }
 
 struct WriteState {
@@ -54,13 +75,23 @@ struct ReadState {
 
     /// Expected pongs and their notification channels.
     pongs: VecDeque<channel::Sender<()>>,
+
+    /// Tracks the last activity from the server.
+    last_active: Instant,
+
+    /// Used for client side monitoring of connection health.
+    pings_out: u8,
 }
+
+/// A predicate used to preprocess messages for a subscription as they arrive over the wire.
+pub(crate) type Preprocessor = Box<dyn Fn(u64, &Message) -> bool + Send + Sync>;
 
 /// A registered subscription.
 struct Subscription {
     subject: String,
     queue_group: Option<String>,
     messages: channel::Sender<Message>,
+    preprocess: Preprocessor,
 }
 
 /// A NATS client.
@@ -83,7 +114,7 @@ impl Client {
     /// Creates a new client that will begin connecting in the background.
     pub(crate) fn connect(url: &str, options: Options) -> io::Result<Client> {
         // A channel for coordinating flushes.
-        let (flush_kicker, dirty) = channel::bounded(1);
+        let (flush_kicker, flush_wanted) = channel::bounded(1);
 
         // Channels for coordinating initial connect.
         let (run_sender, run_receiver) = channel::bounded(1);
@@ -92,6 +123,9 @@ impl Client {
         // The client state.
         let client = Client {
             state: Arc::new(State {
+                meta: Mutex::new(MetaState {
+                    mutes: HashSet::new(),
+                }),
                 write: Mutex::new(WriteState {
                     writer: None,
                     flush_kicker,
@@ -101,6 +135,8 @@ impl Client {
                 read: Mutex::new(ReadState {
                     subscriptions: HashMap::new(),
                     pongs: VecDeque::from(vec![pong_sender]),
+                    last_active: Instant::now(),
+                    pings_out: 0,
                 }),
             }),
             server_info: Arc::new(Mutex::new(ServerInfo::default())),
@@ -151,27 +187,80 @@ impl Client {
         thread::spawn({
             let client = client.clone();
             move || {
+                // Track last flush/write time.
+                const MIN_FLUSH_BETWEEN: Duration = Duration::from_millis(5);
+
+                // Handle recv timeouts and check if we should send a PING.
+                // TODO(dlc) - Make configurable.
+                const PING_INTERVAL: Duration = Duration::from_secs(2 * 60);
+                const MAX_PINGS_OUT: u8 = 2;
+
+                let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
+
                 // Wait until at least one message is buffered.
-                while dirty.recv().is_ok() {
-                    let start = Instant::now();
-                    // Flush the writer.
-                    let mut write = client.state.write.lock();
-                    if let Some(writer) = write.writer.as_mut() {
-                        let res = writer.flush();
+                loop {
+                    match flush_wanted.recv_timeout(PING_INTERVAL) {
+                        Ok(_) => {
+                            let since = last.elapsed();
+                            if since < MIN_FLUSH_BETWEEN {
+                                thread::sleep(MIN_FLUSH_BETWEEN - since);
+                            }
 
-                        // If flushing fails, disconnect.
-                        if res.is_err() {
-                            // NB see locking protocol for state.write and state.read
-                            write.writer = None;
-
+                            // Flush the writer.
+                            let mut write = client.state.write.lock();
                             let mut read = client.state.read.lock();
-                            read.pongs.clear();
+
+                            if let Some(writer) = write.writer.as_mut() {
+                                let res = writer.flush();
+                                last = Instant::now();
+                                // If flushing fails, disconnect.
+                                if res.is_err() {
+                                    writer.get_ref().shutdown();
+                                    write.writer = None;
+                                    read.pongs.clear();
+                                }
+                            }
+
+                            // NB see locking protocol for state.write and state.read
+                            drop(read);
+                            drop(write);
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            let mut write = client.state.write.lock();
+                            let mut read = client.state.read.lock();
+
+                            if read.pings_out >= MAX_PINGS_OUT {
+                                if let Some(writer) = write.writer.as_mut() {
+                                    writer.get_ref().shutdown();
+                                }
+                                write.writer = None;
+                                read.pongs.clear();
+                            } else if read.last_active.elapsed() > PING_INTERVAL {
+                                read.pings_out += 1;
+                                read.pongs.push_back(write.flush_kicker.clone());
+                                // Send out a PING here.
+                                if let Some(mut writer) = write.writer.as_mut() {
+                                    // Ok to ignore errors here.
+                                    proto::encode(&mut writer, ClientOp::Ping).ok();
+                                    let res = writer.flush();
+                                    if res.is_err() {
+                                        // NB see locking protocol for state.write and state.read
+                                        writer.get_ref().shutdown();
+                                        write.writer = None;
+                                        read.pongs.clear();
+                                    }
+                                }
+                            }
+
+                            // NB see locking protocol for state.write and state.read
+                            drop(read);
+                            drop(write);
+                        }
+                        _ => {
+                            // Any other err break and exit.
+                            break;
                         }
                     }
-                    drop(write);
-
-                    // Wait a little bit before flushing again.
-                    thread::sleep(start.elapsed() * 9);
                 }
             }
         });
@@ -180,7 +269,7 @@ impl Client {
     }
 
     /// Retrieves server info as received by the most recent connection.
-    pub(crate) fn server_info(&self) -> ServerInfo {
+    pub fn server_info(&self) -> ServerInfo {
         self.server_info.lock().clone()
     }
 
@@ -225,9 +314,7 @@ impl Client {
         // Wait until the PONG operation is received.
         match pong.recv() {
             Ok(()) => Ok(()),
-            Err(_) => {
-                Err(Error::new(ErrorKind::ConnectionReset, "flush failed"))
-            }
+            Err(_) => Err(Error::new(ErrorKind::ConnectionReset, "flush failed")),
         }
     }
 
@@ -247,8 +334,7 @@ impl Client {
                 // Send an UNSUB message and ignore errors.
                 if let Some(writer) = write.writer.as_mut() {
                     let max_msgs = None;
-                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs })
-                        .ok();
+                    proto::encode(writer, ClientOp::Unsub { sid, max_msgs }).ok();
                     write.flush_kicker.try_send(()).ok();
                 }
             }
@@ -291,7 +377,16 @@ impl Client {
         subject: &str,
         queue_group: Option<&str>,
     ) -> io::Result<(u64, channel::Receiver<Message>)> {
-        // Inject random delays when testing.
+        self.subscribe_with_preprocessor(subject, queue_group, Box::new(|_, _| false))
+    }
+
+    /// Subscribe to a subject with a message preprocessor.
+    pub(crate) fn subscribe_with_preprocessor(
+        &self,
+        subject: &str,
+        queue_group: Option<&str>,
+        message_processor: Preprocessor,
+    ) -> io::Result<(u64, channel::Receiver<Message>)> {
         inject_delay();
 
         let mut write = self.state.write.lock();
@@ -323,6 +418,7 @@ impl Client {
                 subject: subject.to_string(),
                 queue_group: queue_group.map(ToString::to_string),
                 messages: sender,
+                preprocess: message_processor,
             },
         );
 
@@ -331,6 +427,66 @@ impl Client {
         drop(write);
 
         Ok((sid, receiver))
+    }
+
+    /// Marks a subscription as muted.
+    pub(crate) fn mute(&self, sid: u64) -> io::Result<bool> {
+        let mut meta = self.state.meta.lock();
+        Ok(meta.mutes.insert(sid))
+    }
+
+    /// Resubscribes an existing subscription by unsubscribing from the old subject and subscribing
+    /// to the new subject returning a new sid while retaining the existing channel receiver.
+    pub(crate) fn resubscribe(&self, old_sid: u64, new_subject: &str) -> io::Result<u64> {
+        // Inject random delays when testing.
+        inject_delay();
+
+        let mut write = self.state.write.lock();
+        let mut read = self.state.read.lock();
+
+        // Check if the client is closed.
+        self.check_shutdown()?;
+
+        let subscription = read
+            .subscriptions
+            .remove(&old_sid)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "subscription not found"))?;
+
+        // Generate a subject ID.
+        let new_sid = write.next_sid;
+        write.next_sid += 1;
+
+        // Send an UNSUB and SUB messages.
+        if let Some(writer) = write.writer.as_mut() {
+            proto::encode(
+                writer,
+                ClientOp::Unsub {
+                    sid: old_sid,
+                    max_msgs: None,
+                },
+            )?;
+        }
+
+        let queue_group = subscription.queue_group.clone();
+        read.subscriptions.insert(new_sid, subscription);
+
+        if let Some(writer) = write.writer.as_mut() {
+            proto::encode(
+                writer,
+                ClientOp::Sub {
+                    sid: new_sid,
+                    subject: new_subject,
+                    queue_group: queue_group.as_deref(),
+                },
+            )?;
+            write.flush_kicker.try_send(()).ok();
+        }
+
+        // NB see locking protocol for state.write and state.read
+        drop(read);
+        drop(write);
+
+        Ok(new_sid)
     }
 
     /// Unsubscribes from a subject.
@@ -371,7 +527,7 @@ impl Client {
         &self,
         subject: &str,
         reply_to: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: &[u8],
     ) -> io::Result<()> {
         // Inject random delays when testing.
@@ -445,7 +601,7 @@ impl Client {
         &self,
         subject: &str,
         reply_to: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: &[u8],
     ) -> Option<io::Result<()>> {
         // Check if the client is closed.
@@ -456,8 +612,7 @@ impl Client {
         // Estimate how many bytes the message will consume when written into
         // the stream. We must make a conservative guess: it's okay to
         // overestimate but not to underestimate.
-        let mut estimate =
-            1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
+        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
         if let Some(headers) = headers {
             estimate += headers
                 .iter()
@@ -485,8 +640,7 @@ impl Client {
         match write.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                let res = proto::encode(&mut write.buffer, op)
-                    .and_then(|_| write.buffer.flush());
+                let res = proto::encode(&mut write.buffer, op).and_then(|_| write.buffer.flush());
                 Some(res)
             }
             Some(mut writer) => {
@@ -519,10 +673,12 @@ impl Client {
         let mut first_connect = true;
 
         loop {
-            // Don't use backoff on first connect.
-            let use_backoff = !first_connect;
+            //  Don't use backoff on first connect unless retry_on_failed_connect is set to true.
+            let use_backoff = self.options.retry_on_failed_connect || !first_connect;
+
             // Make a connection to the server.
             let (server_info, stream) = connector.connect(use_backoff)?;
+            self.process_info(&server_info, &connector);
 
             let reader = BufReader::with_capacity(BUF_CAPACITY, stream.clone());
             let writer = BufWriter::with_capacity(BUF_CAPACITY, stream);
@@ -541,6 +697,11 @@ impl Client {
                     self.state.write.lock().writer = None;
                 }
             }
+
+            // Clear our pings_out.
+            let mut read = self.state.read.lock();
+            read.pings_out = 0;
+            drop(read);
 
             // Inject random delays when testing.
             inject_delay();
@@ -613,12 +774,21 @@ impl Client {
         Ok(())
     }
 
+    // processes action need to be performed based on retrieved server info.
+    fn process_info(&self, server_info: &ServerInfo, connector: &Connector) {
+        if server_info.lame_duck_mode {
+            connector.get_options().lame_duck_callback.call();
+        }
+    }
+
+    /// Updates our last activity from the server.
+    fn update_activity(&self) {
+        let mut read = self.state.read.lock();
+        read.last_active = Instant::now();
+    }
+
     /// Reads messages from the server and dispatches them to subscribers.
-    fn dispatch(
-        &self,
-        mut reader: impl BufRead,
-        connector: &mut Connector,
-    ) -> io::Result<()> {
+    fn dispatch(&self, mut reader: impl BufRead, connector: &mut Connector) -> io::Result<()> {
         // Handle operations received from the server.
         while let Some(op) = proto::decode(&mut reader)? {
             // Inject random delays when testing.
@@ -628,11 +798,15 @@ impl Client {
                 break;
             }
 
+            // Track activity.
+            self.update_activity();
+
             match op {
                 ServerOp::Info(server_info) => {
                     for url in &server_info.connect_urls {
                         connector.add_url(url).ok();
                     }
+                    self.process_info(&server_info, connector);
                     *self.server_info.lock() = server_info;
                 }
 
@@ -658,6 +832,9 @@ impl Client {
                     let write = self.state.write.lock();
                     let mut read = self.state.read.lock();
 
+                    // Clear any outstanding pings.
+                    read.pings_out = 0;
+
                     if write.writer.is_some() {
                         // Take the next expected PONG and complete it by
                         // sending a message.
@@ -677,6 +854,11 @@ impl Client {
                     reply_to,
                     payload,
                 } => {
+                    // Ignore muted subscriptions
+                    if self.state.meta.lock().mutes.get(&sid).is_some() {
+                        continue;
+                    }
+
                     let read = self.state.read.lock();
 
                     // Send the message to matching subscription.
@@ -686,13 +868,20 @@ impl Client {
                             reply: reply_to,
                             data: payload,
                             headers: None,
-                            client: self.clone(),
+                            client: Some(self.clone()),
                             double_acked: Default::default(),
                         };
 
+                        // Preprocess and drop the message from the buffer if it the predicate
+                        // returns true
+                        let preprocess = &subscription.preprocess;
+                        if preprocess(sid, &msg) {
+                            continue;
+                        }
+
                         // Send a message or drop it if the channel is
                         // disconnected or full.
-                        subscription.messages.try_send(msg).ok();
+                        subscription.messages.send(msg).unwrap();
                     }
                 }
 
@@ -703,8 +892,12 @@ impl Client {
                     reply_to,
                     payload,
                 } => {
-                    let read = self.state.read.lock();
+                    // Ignore muted subscriptions
+                    if self.state.meta.lock().mutes.get(&sid).is_some() {
+                        continue;
+                    }
 
+                    let read = self.state.read.lock();
                     // Send the message to matching subscription.
                     if let Some(subscription) = read.subscriptions.get(&sid) {
                         let msg = Message {
@@ -712,18 +905,28 @@ impl Client {
                             reply: reply_to,
                             data: payload,
                             headers: Some(headers),
-                            client: self.clone(),
+                            client: Some(self.clone()),
                             double_acked: Default::default(),
                         };
 
+                        // Preprocess and drop the message from the buffer if it the predicate
+                        // returns true
+                        let preprocess = &subscription.preprocess;
+                        if preprocess(sid, &msg) {
+                            continue;
+                        }
+
                         // Send a message or drop it if the channel is
                         // disconnected or full.
-                        subscription.messages.try_send(msg).ok();
+                        subscription.messages.send(msg).unwrap();
                     }
                 }
 
                 ServerOp::Err(msg) => {
-                    return Err(Error::new(ErrorKind::Other, msg));
+                    connector
+                        .get_options()
+                        .error_callback
+                        .call(self, Error::new(ErrorKind::Other, msg));
                 }
 
                 ServerOp::Unknown(line) => {
@@ -731,7 +934,6 @@ impl Client {
                 }
             }
         }
-
         // The stream of operation is broken, meaning the connection was lost.
         Err(ErrorKind::ConnectionReset.into())
     }

@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::{
     fmt, io,
     sync::{
@@ -6,7 +19,14 @@ use std::{
     },
 };
 
-use crate::{client::Client, Headers};
+use crate::{
+    client::Client,
+    header::{self, HeaderMap},
+};
+
+use chrono::*;
+
+pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 
 /// A message received on a subject.
 #[derive(Clone)]
@@ -22,11 +42,11 @@ pub struct Message {
     pub data: Vec<u8>,
 
     /// Optional headers associated with this `Message`.
-    pub headers: Option<Headers>,
+    pub headers: Option<HeaderMap>,
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]
-    pub client: Client,
+    pub client: Option<Client>,
 
     /// Whether this message has already been successfully double-acked
     /// using `JetStream`.
@@ -48,15 +68,101 @@ impl From<crate::asynk::Message> for Message {
 }
 
 impl Message {
+    /// Creates new empty `Message`, without a Client.
+    /// Useful for passing `Message` data or creating `Message` instance without caring about `Client`,
+    /// but cannot be used on it's own for associated methods as those require `Client` injected into `Message`
+    /// and will error without it.
+    pub fn new(
+        subject: &str,
+        reply: Option<&str>,
+        data: impl AsRef<[u8]>,
+        headers: Option<HeaderMap>,
+    ) -> Message {
+        Message {
+            subject: subject.to_string(),
+            reply: reply.map(String::from),
+            data: data.as_ref().to_vec(),
+            headers,
+            ..Default::default()
+        }
+    }
+
     /// Respond to a request message.
     pub fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match self.reply.as_ref() {
-            None => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "no reply subject available",
-            )),
-            Some(reply) => self.client.publish(reply, None, None, msg.as_ref()),
+        let reply = self.reply.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "No reply subject to reply to")
+        })?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, MESSAGE_NOT_BOUND))?;
+        client.publish(reply.as_str(), None, None, msg.as_ref())?;
+        Ok(())
+    }
+
+    /// Determine if the message is a no responders response from the server.
+    pub fn is_no_responders(&self) -> bool {
+        if !self.data.is_empty() {
+            return false;
         }
+        if let Some(hdrs) = &self.headers {
+            if let Some(set) = hdrs.get(header::STATUS) {
+                if set.get("503").is_some() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // Helper for detecting flow control messages.
+    pub(crate) fn is_flow_control(&self) -> bool {
+        if !self.data.is_empty() {
+            return false;
+        }
+
+        if let Some(headers) = &self.headers {
+            if let Some(set) = headers.get(header::STATUS) {
+                if set.get("100").is_none() {
+                    return false;
+                }
+            }
+
+            if let Some(set) = headers.get(header::DESCRIPTION) {
+                if set.get("Flow Control").is_some() {
+                    return true;
+                }
+
+                if set.get("FlowControl Request").is_some() {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    // Helper for detecting idle heartbeat messages.
+    pub(crate) fn is_idle_heartbeat(&self) -> bool {
+        if !self.data.is_empty() {
+            return false;
+        }
+
+        if let Some(headers) = &self.headers {
+            if let Some(set) = headers.get(header::STATUS) {
+                if set.get("100").is_none() {
+                    return false;
+                }
+            }
+
+            if let Some(set) = headers.get(header::DESCRIPTION) {
+                if set.get("Idle Heartbeat").is_some() {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Acknowledge a `JetStream` message with a default acknowledgement.
@@ -79,10 +185,7 @@ impl Message {
     /// server acks your ack, use the `double_ack` method instead.
     ///
     /// Does not check whether this message has already been double-acked.
-    pub fn ack_kind(
-        &self,
-        ack_kind: crate::jetstream::AckKind,
-    ) -> io::Result<()> {
+    pub fn ack_kind(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         self.respond(ack_kind)
     }
 
@@ -91,10 +194,7 @@ impl Message {
     /// See `AckKind` documentation for details of what each variant means.
     ///
     /// Returns immediately if this message has already been double-acked.
-    pub fn double_ack(
-        &self,
-        ack_kind: crate::jetstream::AckKind,
-    ) -> io::Result<()> {
+    pub fn double_ack(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
         if self.double_acked.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -108,31 +208,27 @@ impl Message {
             Some(original_reply) => original_reply,
         };
         let mut retries = 0;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, MESSAGE_NOT_BOUND))?;
+
         loop {
             retries += 1;
             if retries == 2 {
                 log::warn!("double_ack is retrying until the server connection is reestablished");
             }
             let ack_reply = format!("_INBOX.{}", nuid::next());
-            let sub_ret = self.client.subscribe(&ack_reply, None);
+            let sub_ret = client.subscribe(&ack_reply, None);
             if sub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
             }
             let (sid, receiver) = sub_ret?;
-            let sub = crate::Subscription::new(
-                sid,
-                ack_reply.to_string(),
-                receiver,
-                self.client.clone(),
-            );
+            let sub =
+                crate::Subscription::new(sid, ack_reply.to_string(), receiver, client.clone());
 
-            let pub_ret = self.client.publish(
-                original_reply,
-                Some(&ack_reply),
-                None,
-                ack_kind.as_ref(),
-            );
+            let pub_ret = client.publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -152,9 +248,8 @@ impl Message {
     /// Returns `None` if this is not
     /// a `JetStream` message with headers
     /// set.
-    pub fn jetstream_message_info(
-        &self,
-    ) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
+    #[allow(clippy::eval_order_dependence)]
+    pub fn jetstream_message_info(&self) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
 
@@ -244,9 +339,8 @@ impl Message {
                 stream_seq: try_parse!(),
                 consumer_seq: try_parse!(),
                 published: {
-                    let nanos: u64 = try_parse!();
-                    let offset = std::time::Duration::from_nanos(nanos);
-                    std::time::UNIX_EPOCH + offset
+                    let nanos: i64 = try_parse!();
+                    Utc.timestamp_nanos(nanos)
                 },
                 pending: try_parse!(),
                 token: if n_tokens >= 9 {
@@ -267,15 +361,27 @@ impl Message {
                 stream_seq: try_parse!(),
                 consumer_seq: try_parse!(),
                 published: {
-                    let nanos: u64 = try_parse!();
-                    let offset = std::time::Duration::from_nanos(nanos);
-                    std::time::UNIX_EPOCH + offset
+                    let nanos: i64 = try_parse!();
+                    Utc.timestamp_nanos(nanos)
                 },
                 pending: try_parse!(),
                 token: None,
             })
         } else {
             None
+        }
+    }
+}
+
+impl Default for Message {
+    fn default() -> Message {
+        Message {
+            subject: String::from(""),
+            reply: None,
+            data: Vec::new(),
+            headers: None,
+            client: None,
+            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 }

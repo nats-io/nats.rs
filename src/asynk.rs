@@ -98,7 +98,7 @@ use std::time::Duration;
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::Headers;
+use crate::header::HeaderMap;
 
 /// Connect to a NATS server at the given url.
 ///
@@ -124,11 +124,7 @@ impl Connection {
     }
 
     /// Publishes a message.
-    pub async fn publish(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    pub async fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
             .await
     }
@@ -140,12 +136,10 @@ impl Connection {
         reply: &str,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        if let Some(res) = self.inner.try_publish_with_reply_or_headers(
-            subject,
-            Some(reply),
-            None,
-            &msg,
-        ) {
+        if let Some(res) =
+            self.inner
+                .try_publish_with_reply_or_headers(subject, Some(reply), None, &msg)
+        {
             return res;
         }
         let subject = subject.to_string();
@@ -161,11 +155,7 @@ impl Connection {
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<Message> {
+    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         let subject = subject.to_string();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
@@ -184,9 +174,7 @@ impl Connection {
         let subject = subject.to_string();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
-        let msg =
-            unblock(move || inner.request_timeout(&subject, msg, timeout))
-                .await?;
+        let msg = unblock(move || inner.request_timeout(&subject, msg, timeout)).await?;
         Ok(msg.into())
     }
 
@@ -223,16 +211,11 @@ impl Connection {
     }
 
     /// Creates a queue subscription.
-    pub async fn queue_subscribe(
-        &self,
-        subject: &str,
-        queue: &str,
-    ) -> io::Result<Subscription> {
+    pub async fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
         let subject = subject.to_string();
         let queue = queue.to_string();
         let inner = self.inner.clone();
-        let inner =
-            unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
+        let inner = unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
@@ -292,7 +275,7 @@ impl Connection {
         &self,
         subject: &str,
         reply: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         if let Some(res) = self
@@ -303,16 +286,11 @@ impl Connection {
         }
         let subject = subject.to_string();
         let reply = reply.map(str::to_owned);
-        let headers = headers.map(Headers::clone);
+        let headers = headers.map(HeaderMap::clone);
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         unblock(move || {
-            inner.publish_with_reply_or_headers(
-                &subject,
-                reply.as_deref(),
-                headers.as_ref(),
-                msg,
-            )
+            inner.publish_with_reply_or_headers(&subject, reply.as_deref(), headers.as_ref(), msg)
         })
         .await
     }
@@ -398,11 +376,11 @@ pub struct Message {
     pub data: Vec<u8>,
 
     /// Optional headers associated with this `Message`.
-    pub headers: Option<Headers>,
+    pub headers: Option<HeaderMap>,
 
     /// Client for publishing on the reply subject.
     #[doc(hidden)]
-    pub client: crate::Client,
+    pub client: Option<crate::client::Client>,
 
     /// Whether this message has already been successfully double-acked
     /// using `JetStream`.
@@ -424,27 +402,56 @@ impl From<crate::Message> for Message {
 }
 
 impl Message {
+    /// Creates new empty `Message`, without a Client.
+    /// Useful for passing `Message` data or creating `Message` instance without caring about `Client`,
+    /// but cannot be used on it's own for associated methods as those require `Client` injected into `Message`
+    /// and will error without it.
+    pub fn new(
+        subject: &str,
+        reply: Option<&str>,
+        data: impl AsRef<[u8]>,
+        headers: Option<HeaderMap>,
+    ) -> Message {
+        Message {
+            subject: subject.to_string(),
+            reply: reply.map(String::from),
+            data: data.as_ref().to_vec(),
+            headers,
+            ..Default::default()
+        }
+    }
+
     /// Respond to a request message.
     pub async fn respond(&self, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        match self.reply.as_ref() {
-            None => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "no reply subject available",
-            )),
-            Some(reply) => {
-                if let Some(res) =
-                    self.client.try_publish(reply, None, None, msg.as_ref())
-                {
-                    return res;
-                }
-                let reply = reply.to_string();
-                let msg = msg.as_ref().to_vec();
-                let client = self.client.clone();
-                unblock(move || {
-                    client.publish(&reply, None, None, msg.as_ref())
-                })
-                .await
-            }
+        let reply = self.reply.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "No reply subject to reply to")
+        })?;
+        let client = self.client.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                crate::message::MESSAGE_NOT_BOUND,
+            )
+        })?;
+        if let Some(res) = client.try_publish(reply.as_str(), None, None, msg.as_ref()) {
+            return res;
+        }
+        // clone only if we have to move the data to the thread
+        let client = client.clone();
+        let reply = reply.to_owned();
+        let msg = msg.as_ref().to_vec();
+        unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
+    }
+}
+
+impl Default for Message {
+    fn default() -> Message {
+        Message {
+            subject: String::from(""),
+            reply: None,
+            data: Vec::new(),
+            headers: None,
+            client: None,
+            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -592,11 +599,7 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub fn client_cert(
-        self,
-        cert: impl AsRef<Path>,
-        key: impl AsRef<Path>,
-    ) -> Options {
+    pub fn client_cert(self, cert: impl AsRef<Path>, key: impl AsRef<Path>) -> Options {
         Options {
             inner: self.inner.client_cert(cert, key),
         }
@@ -636,6 +639,28 @@ impl Options {
         }
     }
 
+    /// Select option to enable reconnect with backoff
+    /// on first failed connection attempt.
+    /// The reconnect logic with `max_reconnects` and the
+    /// `reconnect_delay_callback` will be specified the same
+    /// as before but will be invoked on the first failed
+    /// connection attempt.
+    ///
+    /// # Example
+    /// ```
+    /// # smol::block_on(async {
+    /// let nc = nats::asynk::Options::new()
+    ///     .retry_on_failed_connect()
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # std::io::Result::Ok(()) });
+    /// ```
+    pub fn retry_on_failed_connect(self) -> Options {
+        Options {
+            inner: self.inner.retry_on_failed_connect(),
+        }
+    }
+
     /// Set the maximum number of reconnect attempts.
     /// If no servers remain that are under this threshold,
     /// then no further reconnect shall be attempted.
@@ -652,10 +677,7 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub fn max_reconnects<T: Into<Option<usize>>>(
-        self,
-        max_reconnects: T,
-    ) -> Options {
+    pub fn max_reconnects<T: Into<Option<usize>>>(self, max_reconnects: T) -> Options {
         Options {
             inner: self.inner.max_reconnects(max_reconnects),
         }
@@ -676,10 +698,7 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub fn reconnect_buffer_size(
-        self,
-        reconnect_buffer_size: usize,
-    ) -> Options {
+    pub fn reconnect_buffer_size(self, reconnect_buffer_size: usize) -> Options {
         Options {
             inner: self.inner.reconnect_buffer_size(reconnect_buffer_size),
         }

@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.15.2"
+version = "0.16.0"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
@@ -14,6 +14,11 @@ categories = ["network-programming", "api-bindings"]
 
 [features]
 fault_injection = []
+unstable = []
+
+[package.metadata.docs.rs]
+features = ["unstable"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [badges]
 maintenance = { status = "actively-developed" }
@@ -29,11 +34,12 @@ split-debuginfo = "unpacked"
 [dependencies]
 base64 = "0.13.0"
 base64-url = "1.4.10"
-blocking = "1.0.2"
+blocking = "1.1.0"
 crossbeam-channel = "0.5.1"
 fastrand = "1.5.0"
 itoa = "0.4.7"
 json = "0.12.4"
+lazy_static = "1.4.0"
 log = "0.4.14"
 nkeys = "0.1.0"
 nuid = "0.3.0"
@@ -42,12 +48,16 @@ parking_lot = "0.11.1"
 regex = { version = "1.5.4", default-features = false, features = ["std", "unicode-perl"] }
 rustls = "0.19.1"
 rustls-native-certs = "0.5.0"
+rustls-pemfile = "0.2.1"
 webpki = "0.21.0"
 serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.64"
+serde_nanos = "0.1.1"
+serde_repr = "0.1.7"
 chrono = { version = "0.4.19", features = ["serde"] }
 memchr = "2.4.0"
 thiserror = "1.0"
+url = "2.2.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.98"
@@ -56,10 +66,10 @@ libc = "0.2.98"
 winapi = { version = "0.3.9", features = ["winsock2"] }
 
 [dev-dependencies]
-criterion = "0.3.4"
+rand = "0.8.4"
+criterion = { version ="0.3.5", features = ["html_reports"] }
 env_logger = "0.9.0"
 historian = "4.0.4"
-lazy_static = "1.4.0"
 nats_test_server = { path = "nats_test_server" }
 quicli = "0.4.0"
 smol = "1.2.5"

@@ -1,13 +1,28 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::cmp;
 use std::convert::TryInto;
 use std::fmt;
 use std::io;
+use std::io::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::auth_utils;
 use crate::secure_wipe::SecureString;
+use crate::Client;
 use crate::Connection;
 
 /// Connect options.
@@ -15,6 +30,7 @@ pub struct Options {
     pub(crate) auth: AuthStyle,
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
+    pub(crate) retry_on_failed_connect: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
     pub(crate) tls_required: bool,
@@ -23,11 +39,12 @@ pub struct Options {
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: crate::rustls::ClientConfig,
 
+    pub(crate) error_callback: ErrorCallback,
     pub(crate) disconnect_callback: Callback,
     pub(crate) reconnect_callback: Callback,
     pub(crate) reconnect_delay_callback: ReconnectDelayCallback,
     pub(crate) close_callback: Callback,
-    pub(crate) jetstream_prefix: String,
+    pub(crate) lame_duck_callback: Callback,
 }
 
 impl fmt::Debug for Options {
@@ -36,6 +53,7 @@ impl fmt::Debug for Options {
             .entry(&"auth", &self.auth)
             .entry(&"name", &self.name)
             .entry(&"no_echo", &self.no_echo)
+            .entry(&"retry_on_failed_connect", &self.retry_on_failed_connect)
             .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"tls_required", &self.tls_required)
@@ -43,10 +61,12 @@ impl fmt::Debug for Options {
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
+            .entry(&"error_callback", &self.error_callback)
             .entry(&"disconnect_callback", &self.disconnect_callback)
             .entry(&"reconnect_callback", &self.reconnect_callback)
             .entry(&"reconnect_delay_callback", &"set")
             .entry(&"close_callback", &self.close_callback)
+            .entry(&"lame_duck_callback", &self.lame_duck_callback)
             .finish()
     }
 }
@@ -57,17 +77,19 @@ impl Default for Options {
             auth: AuthStyle::NoAuth,
             name: None,
             no_echo: false,
+            retry_on_failed_connect: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
             tls_required: false,
             certificates: Vec::new(),
             client_cert: None,
             client_key: None,
+            error_callback: ErrorCallback(None),
             disconnect_callback: Callback(None),
             reconnect_callback: Callback(None),
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
-            jetstream_prefix: "$JS.API.".to_string(),
+            lame_duck_callback: Callback(None),
             tls_client_config: crate::rustls::ClientConfig::default(),
         }
     }
@@ -106,7 +128,7 @@ impl Options {
     /// `Options` for establishing a new NATS `Connection`.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let options = nats::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
@@ -120,7 +142,7 @@ impl Options {
     /// Authenticate with NATS using a token.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::with_token("t0k3n!")
     ///     .connect("demo.nats.io")?;
@@ -137,7 +159,7 @@ impl Options {
     /// Authenticate with NATS using a username and password.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!")
     ///     .connect("demo.nats.io")?;
@@ -222,9 +244,7 @@ impl Options {
         Ok(Options {
             auth: AuthStyle::Credentials {
                 jwt_cb: { Arc::new(move || Ok(jwt.clone())) },
-                sig_cb: {
-                    Arc::new(move |nonce| auth_utils::sign_nonce(nonce, &kp))
-                },
+                sig_cb: { Arc::new(move |nonce| auth_utils::sign_nonce(nonce, &kp)) },
             },
             ..Default::default()
         })
@@ -254,9 +274,7 @@ impl Options {
         Options {
             auth: AuthStyle::Credentials {
                 jwt_cb: Arc::new(move || jwt_cb().map(|s| s.into())),
-                sig_cb: Arc::new(move |nonce| {
-                    Ok(base64_url::encode(&sig_cb(nonce)).into())
-                }),
+                sig_cb: Arc::new(move |nonce| Ok(base64_url::encode(&sig_cb(nonce)).into())),
             },
             ..Default::default()
         }
@@ -304,11 +322,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn client_cert(
-        mut self,
-        cert: impl AsRef<Path>,
-        key: impl AsRef<Path>,
-    ) -> Options {
+    pub fn client_cert(mut self, cert: impl AsRef<Path>, key: impl AsRef<Path>) -> Options {
         self.client_cert = Some(cert.as_ref().to_owned());
         self.client_key = Some(key.as_ref().to_owned());
         self
@@ -343,10 +357,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tls_client_config(
-        mut self,
-        tls_client_config: crate::rustls::ClientConfig,
-    ) -> Options {
+    pub fn tls_client_config(mut self, tls_client_config: crate::rustls::ClientConfig) -> Options {
         self.tls_client_config = tls_client_config;
         self
     }
@@ -383,6 +394,27 @@ impl Options {
         self
     }
 
+    /// Select option to enable reconnect with backoff
+    /// on first failed connection attempt.
+    /// The reconnect logic with `max_reconnects` and the
+    /// `reconnect_delay_callback` will be specified the same
+    /// as before but will be invoked on the first failed
+    /// connection attempt.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .retry_on_failed_connect()
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn retry_on_failed_connect(mut self) -> Options {
+        self.retry_on_failed_connect = true;
+        self
+    }
+
     /// Set the maximum number of reconnect attempts.
     /// If no servers remain that are under this threshold,
     /// then no further reconnect shall be attempted.
@@ -399,10 +431,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn max_reconnects<T: Into<Option<usize>>>(
-        mut self,
-        max_reconnects: T,
-    ) -> Options {
+    pub fn max_reconnects<T: Into<Option<usize>>>(mut self, max_reconnects: T) -> Options {
         self.max_reconnects = max_reconnects.into();
         self
     }
@@ -422,10 +451,7 @@ impl Options {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn reconnect_buffer_size(
-        mut self,
-        reconnect_buffer_size: usize,
-    ) -> Options {
+    pub fn reconnect_buffer_size(mut self, reconnect_buffer_size: usize) -> Options {
         self.reconnect_buffer_size = reconnect_buffer_size;
         self
     }
@@ -461,6 +487,27 @@ impl Options {
     /// ```
     pub fn connect(self, nats_url: &str) -> io::Result<Connection> {
         Connection::connect_with_options(nats_url, self)
+    }
+
+    /// Set a callback to be executed when an async error from
+    /// a server has been received.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .error_callback(|err| println!("connection received an error: {}", err))
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn error_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(Error) + Send + Sync + 'static,
+    {
+        self.error_callback = ErrorCallback(Some(Box::new(cb)));
+        self
     }
 
     /// Set a callback to be executed when connectivity to
@@ -505,32 +552,6 @@ impl Options {
         self
     }
 
-    /// Set a custom `JetStream` API prefix. This is useful
-    /// when using `JetStream` through exports/imports.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
-    ///     .jetstream_api_prefix("some_exported_prefix".to_string())
-    ///     .connect("demo.nats.io")?;
-    /// nc.drain().unwrap();
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn jetstream_api_prefix(
-        mut self,
-        mut jetstream_prefix: String,
-    ) -> Self {
-        if !jetstream_prefix.ends_with('.') {
-            jetstream_prefix.push('.');
-        }
-
-        self.jetstream_prefix = jetstream_prefix;
-        self
-    }
-
     /// Set a callback to be executed when the client has been
     /// closed due to exhausting reconnect retries to known servers
     /// or by completing a drain request.
@@ -551,6 +572,28 @@ impl Options {
         F: Fn() + Send + Sync + 'static,
     {
         self.close_callback = Callback(Some(Box::new(cb)));
+        self
+    }
+
+    /// Set a callback to be executed when the server enters lame duck mode.
+    /// Can be set to enable letting user know that client will be soon evicted.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// let nc = nats::Options::new()
+    ///     .lame_duck_callback(|| println!("server entered lame duck mode"))
+    ///     .connect("demo.nats.io")?;
+    /// nc.drain().unwrap();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn lame_duck_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.lame_duck_callback = Callback(Some(Box::new(cb)));
         self
     }
 
@@ -660,9 +703,7 @@ impl fmt::Debug for AuthStyle {
             AuthStyle::UserPass(user, pass) => {
                 f.debug_tuple("Token").field(user).field(pass).finish()
             }
-            AuthStyle::Credentials { .. } => {
-                f.debug_struct("Credentials").finish()
-            }
+            AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
             AuthStyle::NKey { .. } => f.debug_struct("NKey").finish(),
         }
     }
@@ -695,11 +736,32 @@ impl fmt::Debug for Callback {
     }
 }
 
-pub(crate) struct ReconnectDelayCallback(
-    Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
-);
+pub(crate) struct ReconnectDelayCallback(Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>);
 impl ReconnectDelayCallback {
     pub fn call(&self, reconnects: usize) -> Duration {
         self.0(reconnects)
+    }
+}
+
+pub(crate) struct ErrorCallback(Option<Box<dyn Fn(Error) + Send + Sync + 'static>>);
+impl ErrorCallback {
+    pub fn call(&self, client: &Client, err: Error) {
+        if let Some(callback) = self.0.as_ref() {
+            callback(err);
+        } else {
+            let si = client.server_info();
+            eprintln!("{} on connection [{}]", err, si.client_id);
+        }
+    }
+}
+
+impl fmt::Debug for ErrorCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(
+                &"error_callback",
+                if self.0.is_some() { &"set" } else { &"unset" },
+            )
+            .finish()
     }
 }

@@ -1,16 +1,112 @@
-use std::time::UNIX_EPOCH;
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
+use std::time::Duration;
+
+use crate::header::HeaderMap;
 use serde::{Deserialize, Serialize};
-
-use chrono::{DateTime as ChronoDateTime, Utc};
+use std::convert::TryFrom;
+use std::io;
 
 /// A UTC time
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct DateTime(pub ChronoDateTime<Utc>);
+pub type DateTime = chrono::DateTime<chrono::Utc>;
 
-impl Default for DateTime {
-    fn default() -> DateTime {
-        DateTime(UNIX_EPOCH.into())
+#[derive(Serialize)]
+pub(crate) struct StreamMessageGetRequest {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub seq: Option<u64>,
+
+    #[serde(default, rename = "last_by_subj", skip_serializing_if = "is_default")]
+    pub last_by_subject: Option<String>,
+}
+
+/// A raw stream message in the representation it is stored.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RawStreamMessage {
+    /// Subject of the message.
+    #[serde(rename = "subject")]
+    pub subject: String,
+
+    /// Sequence of the message.
+    #[serde(rename = "seq")]
+    pub sequence: u64,
+
+    /// Data of the mssage.
+    #[serde(default, rename = "data")]
+    pub data: String,
+
+    /// Raw header string, if any.
+    #[serde(default, rename = "hdrs")]
+    pub headers: Option<String>,
+
+    /// The time the message was published.
+    #[serde(rename = "time")]
+    pub time: DateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct StreamMessageGetResponse {
+    #[serde(rename = "type")]
+    pub kind: String,
+
+    #[serde(rename = "message")]
+    pub message: RawStreamMessage,
+}
+
+/// A message stored in a stream.
+#[derive(Debug, Clone)]
+pub struct StreamMessage {
+    /// Subject of the message.
+    pub subject: String,
+    /// Sequence of the message
+    pub sequence: u64,
+    /// HeaderMap that were sent with the mesage, if any.
+    pub headers: Option<HeaderMap>,
+    /// Payload of the message.
+    pub data: Vec<u8>,
+    /// Date and time the message was published.
+    pub time: DateTime,
+}
+
+impl TryFrom<RawStreamMessage> for StreamMessage {
+    type Error = std::io::Error;
+
+    fn try_from(raw_message: RawStreamMessage) -> Result<StreamMessage, Self::Error> {
+        let maybe_headers = if let Some(raw_headers) = raw_message.headers {
+            let decoded_headers = match base64::decode(raw_headers) {
+                Ok(data) => data,
+                Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
+            };
+
+            let headers = HeaderMap::try_from(decoded_headers.as_slice())?;
+
+            Some(headers)
+        } else {
+            None
+        };
+
+        let decoded_data = match base64::decode(&raw_message.data) {
+            Ok(data) => data,
+            Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
+        };
+
+        Ok(StreamMessage {
+            subject: raw_message.subject,
+            sequence: raw_message.sequence,
+            headers: maybe_headers,
+            data: decoded_data,
+            time: raw_message.time,
+        })
     }
 }
 
@@ -28,6 +124,15 @@ pub(crate) struct DeleteResponse {
 pub(crate) struct CreateConsumerRequest {
     pub stream_name: String,
     pub config: ConsumerConfig,
+}
+
+/// Indicates if ownership of a consumer is local or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ConsumerOwnership {
+    /// Local consumer handled by subscriptions.
+    Yes,
+    /// External consumer, lifetime is handled by the user.
+    No,
 }
 
 /// Configuration for consumers. From a high level, the
@@ -85,12 +190,18 @@ pub struct ConsumerConfig {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A short description of the purpose of this consumer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Deliver group to use.
+    pub deliver_group: Option<String>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
     /// after this sequence number.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub opt_start_seq: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opt_start_seq: Option<u64>,
     /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
     /// after this time.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -98,8 +209,8 @@ pub struct ConsumerConfig {
     /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub ack_wait: i64,
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub ack_wait: Duration,
     /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_deliver: i64,
@@ -110,7 +221,7 @@ pub struct ConsumerConfig {
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
-    pub rate_limit: i64,
+    pub rate_limit: u64,
     /// What percentage of acknowledgements should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
@@ -122,6 +233,15 @@ pub struct ConsumerConfig {
     /// this consumer.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_ack_pending: i64,
+    /// Only deliver headers without payloads.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub headers_only: bool,
+    /// Enable flow control messages
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub flow_control: bool,
+    /// Enable idle heartbeat messages
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub idle_heartbeat: Duration,
 }
 
 impl From<&ConsumerConfig> for ConsumerConfig {
@@ -157,14 +277,15 @@ pub struct StreamConfig {
     pub discard: DiscardPolicy,
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub subjects: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subjects: Vec<String>,
     /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
     pub retention: RetentionPolicy,
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
     pub max_consumers: i32,
     /// Maximum age of any message in the stream, expressed in nanoseconds
-    pub max_age: i64,
+    #[serde(with = "serde_nanos")]
+    pub max_age: Duration,
     /// The largest message that will be accepted by the Stream
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_msg_size: i32,
@@ -181,6 +302,25 @@ pub struct StreamConfig {
     /// The owner of the template associated with this stream.
     #[serde(default, skip_serializing_if = "is_default")]
     pub template_owner: String,
+    /// Indicates the stream is sealed and cannot be modified in any way
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub sealed: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    /// A short description of the purpose of this stream.
+    pub description: Option<String>,
+    #[serde(
+        default,
+        rename = "allow_rollup_hdrs",
+        skip_serializing_if = "is_default"
+    )]
+    /// Indicates if rollups will be allowed or not.
+    pub allow_rollup: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    /// Indicates deletes will be denied or not.
+    pub deny_delete: bool,
+    /// Indicates if purges will be denied or not.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub deny_purge: bool,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -203,7 +343,7 @@ impl From<&str> for StreamConfig {
 }
 
 /// Shows config and current state for this stream.
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
     /// The configuration associated with this stream
     pub config: StreamConfig,
@@ -233,13 +373,13 @@ pub struct JetStreamMessageInfo<'a> {
     /// the number of messages known by the server to be pending to this consumer
     pub pending: u64,
     /// the time that this message was received by the server from its publisher
-    pub published: std::time::SystemTime,
+    pub published: DateTime,
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
 }
 
 /// information about the given stream.
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct StreamState {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -280,6 +420,10 @@ pub enum DeliverPolicy {
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime = 4,
+    /// `LastPerSubject` will start the consumer with the last message
+    /// for all subjects received.
+    #[serde(rename = "last_per_subject")]
+    LastPerSubject = 5,
 }
 
 impl Default for DeliverPolicy {
@@ -330,6 +474,22 @@ impl Default for ReplayPolicy {
     fn default() -> ReplayPolicy {
         ReplayPolicy::Instant
     }
+}
+
+/// The payload used to generate a purge request.
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+pub struct PurgeRequest {
+    /// Purge up to but not including sequence.
+    #[serde(default, rename = "seq", skip_serializing_if = "is_default")]
+    pub sequence: Option<u64>,
+
+    /// Subject to match against messages for the purge command.
+    #[serde(default, rename = "filter", skip_serializing_if = "is_default")]
+    pub filter: Option<String>,
+
+    /// Number of messages to keep.
+    #[serde(default, rename = "filter", skip_serializing_if = "is_default")]
+    pub keep: Option<u64>,
 }
 
 /// The response generated by trying ot purge a stream.
@@ -401,9 +561,7 @@ impl Default for StorageType {
 }
 
 /// Various limits imposed on a particular account.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct AccountLimits {
     /// Maximum memory for this account (-1 if no limit)
     pub max_memory: i64,
@@ -416,9 +574,7 @@ pub struct AccountLimits {
 }
 
 /// returns current statistics about the account's `JetStream` usage.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AccountStats {
     pub memory: u64,
     pub storage: u64,
@@ -426,10 +582,20 @@ pub(crate) struct AccountStats {
     pub limits: AccountLimits,
 }
 
+/// `PublishAck` is an acknowledgement received after successfully publishing a message.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub(crate) struct PubAck {
+pub struct PublishAck {
+    /// Name of stream the message was published to.
     pub stream: String,
-    pub seq: u64,
+    /// Sequence number the message was published in.
+    #[serde(rename = "seq")]
+    pub sequence: u64,
+    /// Domain the message was published to
+    // TODO(caspervonb) using String::is_empty as default for String is still unstable.
+    // Use `is_default` once that is no longer gated for strings.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    /// True if the published message was determined to be a duplicate, false otherwise.
     #[serde(default, skip_serializing_if = "is_default")]
     pub duplicate: bool,
 }
@@ -470,7 +636,7 @@ impl AsRef<[u8]> for AckKind {
 }
 
 /// Information about a consumer
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConsumerInfo {
     /// The stream being consumed
     pub stream_name: String,
@@ -495,6 +661,9 @@ pub struct ConsumerInfo {
     pub num_pending: u64,
     /// Information about the consumer's cluster
     pub cluster: ClusterInfo,
+    /// Indicates if any client is connected and receiving messages from a push consumer
+    #[serde(default)]
+    pub push_bound: bool,
 }
 
 /// Information about the consumer's associated `JetStream` cluster
@@ -505,9 +674,7 @@ pub struct ClusterInfo {
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SequencePair {
     /// How far along the consumer has progressed
     pub consumer_seq: u64,
@@ -516,16 +683,14 @@ pub struct SequencePair {
 }
 
 /// for getting next messages for pull based consumers.
-#[derive(
-    Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq,
-)]
-pub struct NextRequest {
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NextRequest {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub expires: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<usize>,
     /// This optionally causes the server not to store this pending request at all, but when there are no
     /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
     /// can know when you reached the end of the stream for example. A 409 is returned if the
@@ -535,36 +700,232 @@ pub struct NextRequest {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub(crate) struct StreamRequest {
+pub(crate) struct StreamNamesRequest {
     #[serde(default, skip_serializing_if = "is_default")]
     pub subject: String,
 }
 
-/// options for subscription
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub(crate) struct SubOpts {
-    // For attaching.
-    pub stream: String,
-    pub consumer: String,
-    // For pull based consumers, batch size for pull
-    pub pull: usize,
-    // For manual ack
-    pub mack: bool,
-    // For creating or updating.
-    pub cfg: ConsumerConfig,
+pub(crate) struct StreamNamesResponse {
+    pub streams: Vec<String>,
+}
+
+/// Options for subscription
+#[derive(Debug, Default, Clone)]
+pub struct SubscribeOptions {
+    // For consumer binding:
+    pub(crate) bind_only: bool,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) consumer_name: Option<String>,
+
+    // For consumer configuration:
+    pub(crate) ordered: bool,
+    pub(crate) ack_policy: Option<AckPolicy>,
+    pub(crate) ack_wait: Option<Duration>,
+    pub(crate) replay_policy: Option<ReplayPolicy>,
+    pub(crate) deliver_policy: Option<DeliverPolicy>,
+    pub(crate) deliver_subject: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) durable_name: Option<String>,
+    pub(crate) sample_frequency: Option<u8>,
+    pub(crate) idle_heartbeat: Option<Duration>,
+    pub(crate) max_ack_pending: Option<i64>,
+    pub(crate) max_deliver: Option<i64>,
+    pub(crate) max_waiting: Option<i64>,
+    pub(crate) opt_start_seq: Option<u64>,
+    pub(crate) opt_start_time: Option<DateTime>,
+    pub(crate) flow_control: Option<bool>,
+    pub(crate) rate_limit: Option<u64>,
+    pub(crate) headers_only: Option<bool>,
+}
+
+impl SubscribeOptions {
+    /// Creates a new set of default subscription options
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Binds to an existing consumer from a stream without attempting to create one.
+    pub fn bind(stream_name: String, consumer_name: String) -> Self {
+        Self {
+            stream_name: Some(stream_name),
+            consumer_name: Some(consumer_name),
+            bind_only: true,
+            ..Default::default()
+        }
+    }
+
+    /// Creates an ordered fifo (first-in-first-out) subscription.
+    pub fn ordered() -> Self {
+        Self {
+            ordered: true,
+            ..Self::default()
+        }
+    }
+
+    /// Binds the consumer to a stream explicitly based on a name.
+    ///
+    /// When a stream name is not specified, the subject is used as a way to find the stream name.
+    /// This is done by making a request to the server to get list of stream names that have a filter the subject.
+    /// To avoid the stream lookup, provide the stream name with this function.
+    pub fn bind_stream(stream_name: String) -> Self {
+        Self {
+            stream_name: Some(stream_name),
+            ..Default::default()
+        }
+    }
+
+    /// Sets the description used for the created consumer.
+    pub fn description(mut self, description: String) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    /// Sets the durable name for the created consumer.
+    pub fn durable_name(mut self, consumer: String) -> Self {
+        self.durable_name = Some(consumer);
+        self
+    }
+
+    /// Configures the consumer to receive all the messages from a Stream.
+    pub fn deliver_all(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::All);
+        self
+    }
+
+    /// Configures the consumer to receive messages
+    /// starting with the latest one.
+    pub fn deliver_last(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::Last);
+        self
+    }
+
+    /// Configures the consumer to receive messages
+    /// starting with the latest one for each filtered subject.
+    pub fn deliver_last_per_subject(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::LastPerSubject);
+        self
+    }
+
+    /// Configures the consumer to receive messages
+    /// published after the subscription.
+    pub fn deliver_new(mut self) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::New);
+        self
+    }
+
+    /// Configures a Consumer to receive
+    /// messages from a start sequence.
+    pub fn deliver_by_start_sequence(mut self, seq: u64) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::ByStartSeq);
+        self.opt_start_seq = Some(seq);
+        self
+    }
+
+    /// Configures the consumer to receive
+    /// messages from a start time.
+    pub fn deliver_by_start_time(mut self, time: DateTime) -> Self {
+        self.deliver_policy = Some(DeliverPolicy::ByStartTime);
+        self.opt_start_time = Some(time);
+
+        self
+    }
+
+    /// Require no acks for delivered messages.
+    pub fn ack_none(mut self) -> Self {
+        self.ack_policy = Some(AckPolicy::None);
+        self
+    }
+
+    /// When acking a sequence number, this implicitly acks all sequences
+    /// below this one as well.
+    pub fn ack_all(mut self) -> Self {
+        self.ack_policy = Some(AckPolicy::All);
+        self
+    }
+
+    /// Requires ack or nack for all messages.
+    pub fn ack_explicit(mut self) -> Self {
+        self.ack_policy = Some(AckPolicy::Explicit);
+        self
+    }
+
+    /// Sets the number of redeliveries for a message.
+    pub fn max_deliver(mut self, n: i64) -> Self {
+        self.max_deliver = Some(n);
+        self
+    }
+
+    /// Sets the number of outstanding acks that are allowed before
+    /// message delivery is halted.
+    pub fn max_ack_pending(mut self, n: i64) -> Self {
+        self.max_ack_pending = Some(n);
+        self
+    }
+
+    /// Replays the messages at the original speed.
+    pub fn replay_original(mut self) -> Self {
+        self.replay_policy = Some(ReplayPolicy::Original);
+        self
+    }
+
+    /// Replays the messages as fast as possible.
+    pub fn replay_instant(mut self) -> Self {
+        self.replay_policy = Some(ReplayPolicy::Instant);
+        self
+    }
+
+    /// The bits per second rate limit applied to the push consumer.
+    pub fn rate_limit(mut self, n: u64) -> Self {
+        self.rate_limit = Some(n);
+        self
+    }
+    /// Specifies the consumer deliver subject.
+    ///
+    /// This option is used only in situations where the consumer does not exist
+    /// and a creation request is sent to the server.
+    ///
+    /// If not provided, an inbox will be selected.
+    pub fn deliver_subject(mut self, subject: String) -> Self {
+        self.deliver_subject = Some(subject);
+        self
+    }
+
+    /// Instruct the consumer to only deliver headers and no payloads.
+    pub fn headers_only(mut self) -> Self {
+        self.headers_only = Some(true);
+        self
+    }
+
+    /// Enables flow control
+    pub fn enable_flow_control(mut self) -> Self {
+        self.flow_control = Some(true);
+        self
+    }
+
+    /// Enables hearbeat messages to be sent.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn idle_heartbeat(mut self, interval: Duration) -> Self {
+        self.idle_heartbeat = Some(interval);
+        self
+    }
 }
 
 /// Options for publishing
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub(crate) struct PubOpts {
-    pub ttl: i64,
-    pub id: String,
-    // Expected last msgId
-    pub lid: String,
-    // Expected stream name
-    pub str: String,
-    // Expected last sequence
-    pub seq: u64,
+#[derive(Debug, Default, Clone)]
+pub struct PublishOptions {
+    /// Duration to wait before timing out
+    pub timeout: Option<Duration>,
+    /// Message id
+    pub id: Option<String>,
+    /// Expected last message id
+    pub expected_last_msg_id: Option<String>,
+    /// Expected stream name
+    pub expected_stream: Option<String>,
+    /// Expected last sequence
+    pub expected_last_sequence: Option<u64>,
+    /// Expected last subject sequence
+    pub expected_last_subject_sequence: Option<u64>,
 }
 
 /// contains info about the `JetStream` usage from the current account.

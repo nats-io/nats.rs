@@ -1,3 +1,16 @@
+// Copyright 2020-2021 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! A Rust client for the NATS.io ecosystem.
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
@@ -102,6 +115,7 @@
 //! # Ok(()) }
 //! ```
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(
     feature = "fault_injection",
@@ -151,16 +165,12 @@
     clippy::match_same_arms,
     clippy::maybe_infinite_iter,
     clippy::mem_forget,
-    clippy::module_name_repetitions,
     clippy::needless_borrow,
     clippy::needless_continue,
     clippy::needless_pass_by_value,
     clippy::non_ascii_literal,
     clippy::path_buf_push_overwrite,
     clippy::print_stdout,
-    clippy::shadow_reuse,
-    clippy::shadow_same,
-    clippy::shadow_unrelated,
     clippy::single_match_else,
     clippy::string_add,
     clippy::string_add_assign,
@@ -175,7 +185,10 @@
     clippy::match_like_matches_macro,
     clippy::await_holding_lock,
     clippy::shadow_reuse,
-    clippy::wildcard_enum_match_arm
+    clippy::shadow_same,
+    clippy::shadow_unrelated,
+    clippy::wildcard_enum_match_arm,
+    clippy::module_name_repetitions
 )]
 
 /// Async-enabled NATS client.
@@ -185,8 +198,6 @@ mod auth_utils;
 mod client;
 mod connect;
 mod connector;
-mod headers;
-mod jetstream_types;
 mod message;
 mod options;
 mod proto;
@@ -194,8 +205,17 @@ mod secure_wipe;
 mod subject;
 mod subscription;
 
+/// Header constants and types.
+pub mod header;
+
 /// `JetStream` stream management and consumers.
 pub mod jetstream;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+pub mod kv;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+pub mod object_store;
 
 #[cfg(feature = "fault_injection")]
 mod fault_injection;
@@ -215,17 +235,24 @@ fn inject_io_failure() -> io::Result<()> {
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
 
+#[doc(hidden)]
+#[deprecated(since = "0.17.0", note = "this has been moved to `header::HeaderMap`.")]
+pub type Headers = HeaderMap;
+
 use std::{
     io::{self, Error, ErrorKind},
     sync::Arc,
     time::{Duration, Instant},
 };
 
-pub use headers::Headers;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
 pub use subject::*;
-pub use subscription::Subscription;
+pub use subscription::{Handler, Subscription};
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -236,6 +263,7 @@ pub use rustls;
 pub use connect::ConnectInfo;
 
 use client::Client;
+use header::HeaderMap;
 use options::AuthStyle;
 use secure_wipe::{SecureString, SecureVec};
 
@@ -243,11 +271,15 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
+lazy_static! {
+    static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
+}
+
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
 #[allow(unused)]
 #[derive(Debug, Default, Clone)]
-struct ServerInfo {
+pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     pub server_id: String,
     /// Generated Server Name.
@@ -279,6 +311,8 @@ struct ServerInfo {
     pub client_ip: String,
     /// Whether the server supports headers.
     pub headers: bool,
+    /// Whether server goes into lame duck mode.
+    pub lame_duck_mode: bool,
 }
 
 impl ServerInfo {
@@ -303,13 +337,14 @@ impl ServerInfo {
                 .collect(),
             client_ip: obj["client_ip"].take_string().unwrap_or_default(),
             headers: obj["headers"].as_bool().unwrap_or(false),
+            lame_duck_mode: obj["ldm"].as_bool().unwrap_or(false),
         })
     }
 }
 
 /// A NATS connection.
 #[derive(Clone, Debug)]
-pub struct Connection(Arc<Inner>);
+pub struct Connection(pub(crate) Arc<Inner>);
 
 #[derive(Clone, Debug)]
 struct Inner {
@@ -337,10 +372,7 @@ pub fn connect(nats_url: &str) -> io::Result<Connection> {
 
 impl Connection {
     /// Connects on a URL with the given options.
-    pub(crate) fn connect_with_options(
-        url: &str,
-        options: Options,
-    ) -> io::Result<Connection> {
+    pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
         let client = Client::connect(url, options)?;
         client.flush(DEFAULT_FLUSH_TIMEOUT)?;
         Ok(Connection(Arc::new(Inner { client })))
@@ -370,11 +402,7 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn queue_subscribe(
-        &self,
-        subject: &str,
-        queue: &str,
-    ) -> io::Result<Subscription> {
+    pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
         self.do_subscribe(subject, Some(queue))
     }
 
@@ -388,11 +416,7 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn publish(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
@@ -447,23 +471,8 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<Message> {
-        // Publish a request.
-        let reply = self.new_inbox();
-        let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(
-            subject,
-            Some(reply.as_str()),
-            None,
-            msg,
-        )?;
-
-        // Wait for the response.
-        sub.next().ok_or_else(|| ErrorKind::ConnectionReset.into())
+    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+        self.request_with_headers_or_timeout(subject, None, None, msg)
     }
 
     /// Publish a message on the given subject as a request and receive the
@@ -485,18 +494,38 @@ impl Connection {
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
+        self.request_with_headers_or_timeout(subject, None, Some(timeout), msg)
+    }
+
+    fn request_with_headers_or_timeout(
+        &self,
+        subject: &str,
+        maybe_headers: Option<&HeaderMap>,
+        maybe_timeout: Option<Duration>,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<Message> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(
-            subject,
-            Some(reply.as_str()),
-            None,
-            msg,
-        )?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), maybe_headers, msg)?;
 
-        // Wait for the response.
-        sub.next_timeout(timeout)
+        // Wait for the response
+        let result = if let Some(timeout) = maybe_timeout {
+            sub.next_timeout(timeout)
+        } else if let Some(msg) = sub.next() {
+            Ok(msg)
+        } else {
+            Err(ErrorKind::ConnectionReset.into())
+        };
+
+        // Check for no responder status.
+        if let Ok(msg) = result.as_ref() {
+            if msg.is_no_responders() {
+                return Err(Error::new(ErrorKind::NotFound, "no responders"));
+            }
+        }
+
+        result
     }
 
     /// Publish a message on the given subject as a request and allow multiple
@@ -511,20 +540,11 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request_multi(
-        &self,
-        subject: &str,
-        msg: impl AsRef<[u8]>,
-    ) -> io::Result<Subscription> {
+    pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(
-            subject,
-            Some(reply.as_str()),
-            None,
-            msg,
-        )?;
+        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
 
         // Return the subscription.
         Ok(sub)
@@ -604,6 +624,35 @@ impl Connection {
         let start = Instant::now();
         self.flush()?;
         Ok(start.elapsed())
+    }
+
+    /// Returns true if the version is compatible with the version components.
+    pub fn is_server_compatible_version(&self, major: i64, minor: i64, patch: i64) -> bool {
+        let server_info = self.0.client.server_info();
+        let server_version_captures = VERSION_RE.captures(&server_info.version).unwrap();
+        let server_major = server_version_captures
+            .get(1)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_minor = server_version_captures
+            .get(2)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_patch = server_version_captures
+            .get(3)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        if server_major < major
+            || (server_major == major && server_minor < minor)
+            || (server_major == major && server_minor == minor && server_patch < patch)
+        {
+            return false;
+        }
+
+        true
     }
 
     /// Returns the client IP as known by the server.
@@ -719,7 +768,7 @@ impl Connection {
         &self,
         subject: &str,
         reply: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         self.0.client.publish(subject, reply, headers, msg.as_ref())
@@ -739,11 +788,7 @@ impl Connection {
         self.0.client.server_info.lock().max_payload
     }
 
-    fn do_subscribe(
-        &self,
-        subject: &str,
-        queue: Option<&str>,
-    ) -> io::Result<Subscription> {
+    fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
         let (sid, receiver) = self.0.client.subscribe(subject, queue)?;
         Ok(Subscription::new(
             sid,
@@ -759,7 +804,7 @@ impl Connection {
         &self,
         subject: &str,
         reply: Option<&str>,
-        headers: Option<&Headers>,
+        headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> Option<io::Result<()>> {
         self.0
