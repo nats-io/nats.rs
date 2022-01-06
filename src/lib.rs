@@ -251,7 +251,7 @@ use regex::Regex;
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
-pub use subject::*;
+pub use subject::{Error as SubjectError, Subject, SubjectBuf, Token, Tokens};
 pub use subscription::{Handler, Subscription};
 
 /// A re-export of the `rustls` crate used in this crate,
