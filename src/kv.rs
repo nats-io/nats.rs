@@ -18,8 +18,10 @@ use std::io;
 use std::time::Duration;
 
 use crate::header::{self, HeaderMap};
-use crate::jetstream::{Error, ErrorCode, JetStream, PushSubscription, SubscribeOptions};
-use crate::jetstream_types::*;
+use crate::jetstream::{
+    DateTime, Error, ErrorCode, JetStream, PushSubscription, StorageType, StreamConfig, StreamInfo,
+    StreamMessage, SubscribeOptions,
+};
 use crate::message::Message;
 use lazy_static::lazy_static;
 use regex::Regex;

@@ -15,9 +15,10 @@
 //! This feature is experimental and the API may change.
 
 use crate::header::HeaderMap;
-use crate::jetstream::JetStream;
-use crate::jetstream_push_subscription::PushSubscription;
-use crate::jetstream_types::*;
+use crate::jetstream::{
+    DateTime, DiscardPolicy, JetStream, PushSubscription, StorageType, StreamConfig,
+    SubscribeOptions,
+};
 use crate::Message;
 use chrono::Utc;
 use lazy_static::lazy_static;
