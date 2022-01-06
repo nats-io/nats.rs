@@ -5,6 +5,7 @@ use std::{fmt, str::FromStr};
 /// Wildcard matching a single [`Token`].
 pub const SINGLE_WILDCARD: Token = Token("*");
 
+/// The character marking a single wildcard
 pub const SINGLE_WILDCARD_CHAR: char = '*';
 
 /// Wildcard matching all following [`Token`]s.
@@ -12,6 +13,7 @@ pub const SINGLE_WILDCARD_CHAR: char = '*';
 /// Only valid as last token of a [`Subject`].
 pub const MULTI_WILDCARD: Token = Token(">");
 
+/// The character marking a multi wildcard
 pub const MULTI_WILDCARD_CHAR: char = '>';
 
 /// Separator of [`Token`]s.
@@ -20,7 +22,7 @@ pub const TOKEN_SEPARATOR: char = '.';
 /// Errors validating a NATS subject.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("NATS subjects only support tokens in the form of ^([0-9a-zA-Z]+ | \\* | >)$")]
+    #[error("NATS subjects's tokens are not allowed to be empty or to contain spaces or dots")]
     InvalidToken,
     #[error("The multi wildcard '>' is only allowed at the end of a subject")]
     MultiWildcardInMiddle,
@@ -53,22 +55,22 @@ impl<'s> Subject<'s> {
     // [`FromStr`] does not allow Self to borrow from the input string.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(subject: &'s str) -> Result<Self, Error> {
-        match subject {
+        let subject = match subject {
             s if s.is_empty() => Err(Error::InvalidToken),
             s if s.starts_with(TOKEN_SEPARATOR) || s.ends_with(TOKEN_SEPARATOR) => {
                 Err(Error::SeparatorAtEndOrBeginning)
             }
-            s if s[..(s.len() - 1)].contains(MULTI_WILDCARD_CHAR) => {
-                Err(Error::MultiWildcardInMiddle)
+            _ => Ok(subject)
+        }?;
+        let mut last_was_multi_wildcard = false;
+        for token in subject.split(TOKEN_SEPARATOR) {
+            if last_was_multi_wildcard {
+                return Err(Error::MultiWildcardInMiddle);
             }
-            s if s
-                .split(TOKEN_SEPARATOR)
-                .any(|t| Token::from_str(t).is_err()) =>
-            {
-                Err(Error::InvalidToken)
-            }
-            _ => Ok(Self(subject)),
+            let token = Token::from_str(token)?;
+            last_was_multi_wildcard = token == MULTI_WILDCARD;
         }
+        Ok(Self(subject))
     }
     /// The subject as `&str`.
     pub fn as_str(&self) -> &str {
@@ -110,7 +112,7 @@ impl<'s> Subject<'s> {
     ///
     /// _Note:_ You can't publish to a subject that contains a wildcard.
     pub fn contains_wildcards(&self) -> bool {
-        self.0.contains(SINGLE_WILDCARD_CHAR) | self.0.contains(MULTI_WILDCARD_CHAR)
+        self.tokens().any(|t| t.is_wildcard())
     }
 }
 
@@ -222,33 +224,28 @@ impl<'t> Token<'t> {
     // [`FromStr`] does not allow Self to borrow from the input string.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(token: &'t str) -> Result<Self, Error> {
-        match token {
-            "*" | ">" => Ok(Self(token)),
-            s if !s.is_empty()
-                && s.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') =>
-            {
-                Ok(Self(token))
-            }
-            _ => Err(Error::InvalidToken),
+        if token.is_empty() || token.chars().any(|c| c == '.' || c == ' ') {
+            Err(Error::InvalidToken)
+        } else {
+            Ok(Self(token))
         }
     }
     /// Const constructor for a token.
     ///
     /// # WARNING
     ///
-    /// An invalid token may brake assumptions of the [`Token`] type. Reassure,
-    /// that this call definitely constructs a valid token.
+    /// An invalid token may brake assumptions of the [`Token`] type. Reassure, that this call
+    /// definitely constructs a valid token.
     pub const fn new_unchecked(token: &'t str) -> Self {
-        Token(token)
+        Self(token)
     }
     /// The token as a `&str`
     pub fn as_str(&self) -> &str {
         self.as_ref()
     }
     /// Check if the token is the multi wildcard `>`.
-    pub fn is_multi_wildcard(&self) -> bool {
-        self == &MULTI_WILDCARD
+    pub fn is_wildcard(&self) -> bool {
+        *self == MULTI_WILDCARD || *self == SINGLE_WILDCARD
     }
     /// Check if two tokens match, considering wildcards.
     pub fn matches(&self, other: &Token) -> bool {
@@ -291,7 +288,7 @@ impl<'s> Iterator for Tokens<'s> {
             self.remaining_subject = rest;
             Some(Token(token))
         } else {
-            let last = std::mem::replace(&mut self.remaining_subject, "");
+            let last = std::mem::take(&mut self.remaining_subject);
             Some(Token(last))
         }
     }
@@ -306,11 +303,14 @@ mod test {
     #[test_case("" => false        ; "empty")]
     #[test_case("*" => true        ; "single wildcard")]
     #[test_case(">" => true        ; "multi wildcard")]
-    #[test_case("!" => false       ; "special char")]
-    #[test_case("á" => false       ; "non ascii")]
+    #[test_case(">>" => true        ; "double multi wildcard")]
+    #[test_case("!" => true        ; "special char")]
+    #[test_case("á" => true        ; "non ascii")]
     #[test_case("probe" => true    ; "valid name")]
-    #[test_case("pröbe" => false   ; "non alphanumeric")]
-    #[test_case("PrObE007" => true ; "wild stuff")]
+    #[test_case("pröbe" => true    ; "non alphanumeric")]
+    #[test_case("$SYS" => true     ; "system account")]
+    #[test_case("ab.cd" => false   ; "contains dot")]
+    #[test_case("ab cd" => false   ; "contains space")]
     fn validate_token(token: &str) -> bool {
         Token::from_str(token).is_ok()
     }
@@ -324,8 +324,8 @@ mod test {
     #[test_case("zzz.>.cdc" => false      ; "middle multi wildcard")]
     #[test_case("zzz.*." => false         ; "ending dot")]
     #[test_case(".dot" => false           ; "starting dot")]
-    #[test_case(">>" => false             ; "double multi wildcard")]
-    #[test_case("hi.**.no" => false       ; "double single wildcard")]
+    #[test_case(">>" => true              ; "double multi wildcard")]
+    #[test_case("hi.**.no" => true        ; "double single wildcard")]
     fn validate_subject(subject: &str) -> bool {
         Subject::from_str(subject).is_ok()
     }
