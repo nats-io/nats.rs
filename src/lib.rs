@@ -198,8 +198,6 @@ mod auth_utils;
 mod client;
 mod connect;
 mod connector;
-mod jetstream_push_subscription;
-mod jetstream_types;
 mod message;
 mod options;
 mod proto;

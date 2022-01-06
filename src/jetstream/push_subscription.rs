@@ -19,8 +19,7 @@ use std::time::Duration;
 
 use crossbeam_channel as channel;
 
-use crate::jetstream::JetStream;
-use crate::jetstream_types::*;
+use crate::jetstream::{AckPolicy, ConsumerInfo, ConsumerOwnership, JetStream};
 use crate::message::Message;
 use crate::DEFAULT_FLUSH_TIMEOUT;
 
