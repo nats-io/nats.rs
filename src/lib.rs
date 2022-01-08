@@ -202,6 +202,7 @@ mod message;
 mod options;
 mod proto;
 mod secure_wipe;
+mod subject;
 mod subscription;
 
 /// Header constants and types.
