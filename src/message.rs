@@ -16,12 +16,12 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    },
+    }, str::FromStr,
 };
 
 use crate::{
     client::Client,
-    header::{self, HeaderMap},
+    header::{self, HeaderMap}, SubjectBuf, Token,
 };
 
 use chrono::*;
@@ -32,11 +32,11 @@ pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 #[derive(Clone)]
 pub struct Message {
     /// The subject this message came from.
-    pub subject: String,
+    pub subject: SubjectBuf,
 
     /// Optional reply subject that may be used for sending a response to this
     /// message.
-    pub reply: Option<String>,
+    pub reply: Option<SubjectBuf>,
 
     /// The message contents.
     pub data: Vec<u8>,
@@ -73,17 +73,18 @@ impl Message {
     /// but cannot be used on it's own for associated methods as those require `Client` injected into `Message`
     /// and will error without it.
     pub fn new(
-        subject: &str,
-        reply: Option<&str>,
-        data: impl AsRef<[u8]>,
+        subject: SubjectBuf,
+        reply: Option<SubjectBuf>,
+        data: Vec<u8>,
         headers: Option<HeaderMap>,
     ) -> Message {
         Message {
-            subject: subject.to_string(),
-            reply: reply.map(String::from),
-            data: data.as_ref().to_vec(),
+            subject,
+            reply,
+            data,
             headers,
-            ..Default::default()
+            client: None,
+            double_acked: Arc::new(AtomicBool::new(false))
         }
     }
 
@@ -96,7 +97,7 @@ impl Message {
             .client
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, MESSAGE_NOT_BOUND))?;
-        client.publish(reply.as_str(), None, None, msg.as_ref())?;
+        client.publish(&reply, None, None, msg.as_ref())?;
         Ok(())
     }
 
@@ -218,7 +219,7 @@ impl Message {
             if retries == 2 {
                 log::warn!("double_ack is retrying until the server connection is reestablished");
             }
-            let ack_reply = format!("_INBOX.{}", nuid::next());
+            let ack_reply = SubjectBuf::new_unchecked(format!("_INBOX.{}", nuid::next()));
             let sub_ret = client.subscribe(&ack_reply, None);
             if sub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -228,7 +229,7 @@ impl Message {
             let sub =
                 crate::Subscription::new(sid, ack_reply.to_string(), receiver, client.clone());
 
-            let pub_ret = client.publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
+            let pub_ret = client.publish(&original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -251,137 +252,90 @@ impl Message {
     #[allow(clippy::eval_order_dependence)]
     pub fn jetstream_message_info(&self) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
         const PREFIX: &str = "$JS.ACK.";
-        const SKIP: usize = PREFIX.len();
 
-        let mut reply: &str = self.reply.as_ref()?;
+        let reply = self.reply.as_ref()?;
+        let reply_str = reply.as_str();
 
         if !reply.starts_with(PREFIX) {
             return None;
         }
 
-        reply = &reply[SKIP..];
+        // The first two tokens `$JS.ACK` are not considered
+        let n_tokens = reply.tokens().count();
+        let mut tokens = reply.tokens().skip(2);
 
-        let mut split = reply.split('.');
-
-        // we should avoid allocating to prevent
-        // large performance degradations in
-        // parsing this.
-        let mut tokens: [Option<&str>; 10] = [None; 10];
-        let mut n_tokens = 0;
-        for each_token in &mut tokens {
-            if let Some(token) = split.next() {
-                *each_token = Some(token);
-                n_tokens += 1;
-            }
+        fn parse_next_token<'i, 's, T, E>(iter: &'i mut impl Iterator<Item = &'s Token>, reply: &'s str) -> Option<T>
+        where
+            T: FromStr<Err=E>,
+            E: fmt::Display,
+        {
+            iter.next()?.as_str().parse().map_err(|e| {
+                log::error!(
+                    "failed to parse jetstream reply \
+                    subject: {}, error: {}. Is your \
+                    nats-server up to date?",
+                    reply,
+                    e
+                );
+            }).ok()
         }
 
-        let mut token_index = 0;
-
-        macro_rules! try_parse {
-            () => {
-                match str::parse(try_parse!(str)) {
-                    Ok(parsed) => parsed,
-                    Err(e) => {
-                        log::error!(
-                            "failed to parse jetstream reply \
-                            subject: {}, error: {:?}. Is your \
-                            nats-server up to date?",
-                            reply,
-                            e
-                        );
-                        return None;
-                    }
-                }
-            };
-            (str) => {
-                if let Some(next) = tokens[token_index].take() {
-                    #[allow(unused)]
-                    {
-                        // this isn't actually unused, but it's
-                        // difficult for the compiler to infer this.
-                        token_index += 1;
-                    }
-                    next
-                } else {
-                    log::error!(
-                        "unexpectedly few tokens while parsing \
-                        jetstream reply subject: {}. Is your \
-                        nats-server up to date?",
-                        reply
-                    );
-                    return None;
-                }
-            };
-        }
-
-        // now we can try to parse the tokens to
-        // individual types. We use an if-else
-        // chain instead of a match because it
-        // produces more optimal code usually,
-        // and we want to try the 9 (11 - the first 2)
-        // case first because we expect it to
-        // be the most common. We use >= to be
-        // future-proof.
-        if n_tokens >= 9 {
+        // now we can try to parse the tokens to individual types. We use an if-else chain instead
+        // of a match because it produces more optimal code usually, and we want to try the 11 case
+        // first because we expect it to be the most common. We use >= to be future-proof.
+        if n_tokens >= 11 {
             Some(crate::jetstream::JetStreamMessageInfo {
                 domain: {
-                    let domain: &str = try_parse!(str);
+                    let domain: &str = tokens.next()?.as_str();
                     if domain == "_" {
                         None
                     } else {
                         Some(domain)
                     }
                 },
-                acc_hash: Some(try_parse!(str)),
-                stream: try_parse!(str),
-                consumer: try_parse!(str),
-                delivered: try_parse!(),
-                stream_seq: try_parse!(),
-                consumer_seq: try_parse!(),
+                acc_hash: Some(tokens.next()?.as_str()),
+                stream: tokens.next()?.as_str(),
+                consumer: tokens.next()?.as_str(),
+                delivered: parse_next_token(&mut tokens, reply_str)?,
+                stream_seq: parse_next_token(&mut tokens, reply_str)?,
+                consumer_seq: parse_next_token(&mut tokens, reply_str)?,
                 published: {
-                    let nanos: i64 = try_parse!();
+                    let nanos: i64 = parse_next_token(&mut tokens, reply_str)?;
                     Utc.timestamp_nanos(nanos)
                 },
-                pending: try_parse!(),
-                token: if n_tokens >= 9 {
-                    Some(try_parse!(str))
+                pending: parse_next_token(&mut tokens, reply_str)?,
+                token: if n_tokens >= 11 {
+                    Some(tokens.next()?.as_str())
                 } else {
                     None
                 },
             })
-        } else if n_tokens == 7 {
+        } else if n_tokens == 9 {
             // we expect this to be increasingly rare, as older
             // servers are phased out.
             Some(crate::jetstream::JetStreamMessageInfo {
                 domain: None,
                 acc_hash: None,
-                stream: try_parse!(str),
-                consumer: try_parse!(str),
-                delivered: try_parse!(),
-                stream_seq: try_parse!(),
-                consumer_seq: try_parse!(),
+                stream: tokens.next()?.as_str(),
+                consumer: tokens.next()?.as_str(),
+                delivered: parse_next_token(&mut tokens, reply_str)?,
+                stream_seq: parse_next_token(&mut tokens, reply_str)?,
+                consumer_seq: parse_next_token(&mut tokens, reply_str)?,
                 published: {
-                    let nanos: i64 = try_parse!();
+                    let nanos: i64 = parse_next_token(&mut tokens, reply_str)?;
                     Utc.timestamp_nanos(nanos)
                 },
-                pending: try_parse!(),
+                pending: parse_next_token(&mut tokens, reply_str)?,
                 token: None,
             })
         } else {
+            log::error!(
+                "unexpectedly few tokens while parsing \
+                jetstream reply subject: {}. Is your \
+                nats-server up to date?",
+                reply
+            );
             None
-        }
-    }
-}
-
-impl Default for Message {
-    fn default() -> Message {
-        Message {
-            subject: String::from(""),
-            reply: None,
-            data: Vec::new(),
-            headers: None,
-            client: None,
-            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 }

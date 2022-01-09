@@ -1,17 +1,27 @@
 //! Typed implementation of a NATS subject.
 
-use std::{fmt, str::FromStr};
+use std::{
+    fmt, 
+    str::FromStr, 
+    io, 
+    ops::Deref,
+    hash::{Hash, Hasher}, borrow::Borrow, convert::TryFrom,
+};
 
-/// Wildcard matching a single [`Token`].
-pub const SINGLE_WILDCARD: Token = Token("*");
+use serde::{Serialize, Deserialize};
+
+lazy_static::lazy_static!{
+    /// Wildcard matching a single [`Token`].
+    pub static ref SINGLE_WILDCARD: &'static Token = Token::new_unchecked("*");
+    
+    /// Wildcard matching all following [`Token`]s.
+    ///
+    /// Only valid as last token of a [`Subject`].
+    pub static ref MULTI_WILDCARD: &'static Token = Token::new_unchecked(">");
+}
 
 // /// The character marking a single wildcard
 // pub const SINGLE_WILDCARD_CHAR: char = '*';
-
-/// Wildcard matching all following [`Token`]s.
-///
-/// Only valid as last token of a [`Subject`].
-pub const MULTI_WILDCARD: Token = Token(">");
 
 /// The character marking a multi wildcard
 pub const MULTI_WILDCARD_CHAR: char = '>';
@@ -32,17 +42,27 @@ pub enum Error {
     CanNotJoin,
 }
 
+impl From<Error> for io::Error {
+    fn from(err: Error) -> Self {
+        io::Error::new(io::ErrorKind::InvalidInput, err)
+    }
+}
+
 /// A valid NATS subject.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Subject<'s>(&'s str);
+#[repr(transparent)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct Subject(str);
 
 /// An owned, valid NATS subject.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
 pub struct SubjectBuf(String);
 
 /// A valid token of a NATS [`Subject`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Token<'t>(&'t str);
+#[repr(transparent)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct Token(str);
 
 /// Iterator over a [`Subject`]'s tokens.
 #[derive(Debug, Clone)]
@@ -50,11 +70,22 @@ pub struct Tokens<'s> {
     remaining_subject: &'s str,
 }
 
-impl<'s> Subject<'s> {
+impl Subject {
+    /// Constructor for a subject.
+    ///
+    /// # WARNING
+    ///
+    /// An invalid token may brake assumptions of the [`Subject`] type. Reassure, that this call
+    /// definitely constructs a valid subject.
+    pub fn new_unchecked(sub: &str) -> &Self {
+        // Safety: Subject is #[repr(transparent)] therefore this is okay
+        unsafe { 
+            let ptr = sub as *const _ as *const Self; 
+            &*ptr
+        }
+    }
     /// Create a new, validated NATS subject.
-    // [`FromStr`] does not allow Self to borrow from the input string.
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(subject: &'s str) -> Result<Self, Error> {
+    pub fn new(subject: &str) -> Result<&Self, Error> {
         let subject = match subject {
             s if s.is_empty() => Err(Error::InvalidToken),
             s if s.starts_with(TOKEN_SEPARATOR) || s.ends_with(TOKEN_SEPARATOR) => {
@@ -67,31 +98,27 @@ impl<'s> Subject<'s> {
             if last_was_multi_wildcard {
                 return Err(Error::MultiWildcardInMiddle);
             }
-            let token = Token::from_str(token)?;
-            last_was_multi_wildcard = token == MULTI_WILDCARD;
+            let token = Token::new(token)?;
+            last_was_multi_wildcard = token == *MULTI_WILDCARD;
         }
-        Ok(Self(subject))
+        Ok(Self::new_unchecked(subject))
     }
     /// The subject as `&str`.
     pub fn as_str(&self) -> &str {
-        self.as_ref()
+        self.deref()
     }
     /// Iterate over the subject's [`Token`]s.
     pub fn tokens(&self) -> Tokens {
         self.into_iter()
     }
-    /// Get an owned version of the subject.
-    pub fn to_owned(&self) -> SubjectBuf {
-        SubjectBuf(self.0.to_owned())
-    }
     /// Check if two subjects match, considering wildcards.
-    pub fn matches(&self, other: Subject) -> bool {
+    pub fn matches(&self, other: &Subject) -> bool {
         let mut s_tokens = self.tokens();
         let mut o_tokens = other.tokens();
 
         loop {
             match (s_tokens.next(), o_tokens.next()) {
-                (Some(MULTI_WILDCARD), Some(_)) | (Some(_), Some(MULTI_WILDCARD)) => break true,
+                (Some(mw), Some(_)) | (Some(_), Some(mw)) if mw == *MULTI_WILDCARD => break true,
                 (Some(s_t), Some(o_t)) => {
                     if s_t.matches(&o_t) {
                         continue;
@@ -106,7 +133,7 @@ impl<'s> Subject<'s> {
     }
     /// Check if the subjects ends with a multi wildcard.
     pub fn ends_with_multi_wildcard(&self) -> bool {
-        self.0.ends_with(MULTI_WILDCARD_CHAR)
+        self.ends_with(MULTI_WILDCARD_CHAR)
     }
     /// Check if the subject contains any wildcards.
     ///
@@ -117,25 +144,25 @@ impl<'s> Subject<'s> {
     /// Get the nth token of the subject.
     ///
     /// Returns `None` if there are not enough tokens.
-    pub fn get(&self, idx: usize) -> Option<Token> {
+    pub fn get(&self, idx: usize) -> Option<&Token> {
         self.tokens().nth(idx)
     }
     /// Get a sub-subject from the subject.
     ///
     /// # Example
     /// ```
-    /// let sub = nats::Subject::from_str("abc.def.ghi")?;
+    /// let sub = nats::Subject::new("abc.def.ghi")?;
     /// let sub_sub = sub.sub_subject(0, 1).unwrap();
     /// assert_eq!(sub_sub.as_str(), "abc.def");
     /// # Ok::<(), nats::SubjectError>(())
     /// ```
-    pub fn sub_subject(&self, start_token: usize, end_token: usize) -> Option<Subject> {
+    pub fn sub_subject(&self, start_token: usize, end_token: usize) -> Option<&Subject> {
         let tokens_cnt = self.0.split(TOKEN_SEPARATOR).count();
         if start_token >= tokens_cnt || end_token >= tokens_cnt || start_token > end_token {
             return None;
         }
 
-        let mut separators = self.0.match_indices(TOKEN_SEPARATOR).map(|(idx, _)| idx);
+        let mut separators = self.match_indices(TOKEN_SEPARATOR).map(|(idx, _)| idx);
         let start_idx = if start_token == 0 {
             0
         } else {
@@ -144,48 +171,70 @@ impl<'s> Subject<'s> {
             separators.nth(start_token - 1)? + 1
         };
         let end_idx = if end_token == tokens_cnt - 1 {
-            self.0.len() - 1
+            self.len() - 1
         } else {
             separators.nth(end_token - start_token)? - 1
         };
 
-        Some(Subject(&self.0[start_idx..=end_idx]))
+        Some(Subject::new_unchecked(&self.0[start_idx..=end_idx]))
     }
 }
 
-impl<'s> AsRef<str> for Subject<'s> {
+impl AsRef<str> for Subject {
     fn as_ref(&self) -> &str {
-        self.0
+        self.deref()
     }
 }
 
-impl<'s> IntoIterator for &'s Subject<'s> {
-    type Item = Token<'s>;
+impl<'s> IntoIterator for &'s Subject {
+    type Item = &'s Token;
     type IntoIter = Tokens<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
         Tokens {
-            remaining_subject: self.0,
+            remaining_subject: &self.0,
         }
     }
 }
 
-impl<'s> PartialEq<&'s str> for Subject<'s> {
-    fn eq(&self, other: &&'s str) -> bool {
-        self.as_str() == *other
+impl PartialEq<str> for Subject {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
     }
 }
 
-impl<'s> fmt::Display for Subject<'s> {
+impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl Deref for Subject {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Hash for Subject {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
+impl ToOwned for Subject {
+    type Owned = SubjectBuf;
+
+    fn to_owned(&self) -> Self::Owned {
+        SubjectBuf(self.0.to_owned())
     }
 }
 
 impl SubjectBuf {
     /// Create a new, owned and validated NATS subject.
     pub fn new(subject: String) -> Result<Self, Error> {
-        Subject::from_str(&subject)?;
+        Subject::new(&subject)?;
         Ok(Self(subject))
     }
     /// Const constructor for a subject buffer without validation.
@@ -205,12 +254,8 @@ impl SubjectBuf {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-    /// Get the immutable reference type of a subject.
-    pub fn as_ref(&self) -> Subject {
-        Subject(&self.0)
-    }
     /// Check if two subjects match, considering wildcards.
-    pub fn matches(&self, other: Subject) -> bool {
+    pub fn matches(&self, other: &Subject) -> bool {
         self.as_ref().matches(other)
     }
     /// Iterate over the subject's [`Token`]s.
@@ -220,7 +265,7 @@ impl SubjectBuf {
         }
     }
     /// Append a token.
-    pub fn join(mut self, token: Token) -> Result<Self, Error> {
+    pub fn join(mut self, token: &Token) -> Result<Self, Error> {
         if self.0.ends_with(MULTI_WILDCARD_CHAR) {
             Err(Error::CanNotJoin)
         } else {
@@ -233,7 +278,7 @@ impl SubjectBuf {
     }
     /// Append a string. If the string is not a valid token an [`Error`] is returned.
     pub fn join_str(self, token: &str) -> Result<Self, Error> {
-        let token = Token::from_str(token)?;
+        let token = Token::new(token)?;
         self.join(token)
     }
     /// Check if the subject contains any wildcards.
@@ -248,13 +293,33 @@ impl FromStr for SubjectBuf {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Subject::from_str(s)?;
+        Subject::new(s)?;
         Ok(SubjectBuf(s.to_owned()))
     }
 }
 
-impl<'o> PartialEq<&'o str> for SubjectBuf {
-    fn eq(&self, other: &&'o str) -> bool {
+impl From<SubjectBuf> for String {
+    fn from(sub: SubjectBuf) -> Self {
+        sub.0
+    }
+}
+
+impl TryFrom<String> for SubjectBuf {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl PartialEq<str> for SubjectBuf {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl<'s> PartialEq<&'s str> for SubjectBuf {
+    fn eq(&self, other: &&'s str) -> bool {
         self.as_str() == *other
     }
 }
@@ -265,66 +330,100 @@ impl fmt::Display for SubjectBuf {
     }
 }
 
-impl<'t> Token<'t> {
-    /// Create a new validated token.
-    // [`FromStr`] does not allow Self to borrow from the input string.
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(token: &'t str) -> Result<Self, Error> {
-        if token.is_empty() || token.chars().any(|c| c == TOKEN_SEPARATOR || c == ' ') {
-            Err(Error::InvalidToken)
-        } else {
-            Ok(Self(token))
-        }
+impl Deref for SubjectBuf {
+    type Target = Subject;
+
+    fn deref(&self) -> &Self::Target {
+        Subject::new_unchecked(self.as_str())
     }
-    /// Const constructor for a token.
+}
+
+impl AsRef<Subject> for SubjectBuf {
+    fn as_ref(&self) -> &Subject {
+        self.deref()
+    }
+}
+
+impl Hash for SubjectBuf {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
+impl Borrow<Subject> for SubjectBuf {
+    fn borrow(&self) -> &Subject {
+        self.deref()
+    }
+}
+
+impl Token {
+    /// Constructor for a token.
     ///
     /// # WARNING
     ///
     /// An invalid token may brake assumptions of the [`Token`] type. Reassure, that this call
     /// definitely constructs a valid token.
-    pub const fn new_unchecked(token: &'t str) -> Self {
-        Self(token)
+    pub fn new_unchecked(token: &str) -> &Self {
+        // Safety: Token is #[repr(transparent)] therefore this is okay
+        unsafe { 
+            let ptr = token as *const _ as *const Self;
+            &*ptr
+        }
+    }
+    /// Create a new validated token.
+    pub fn new(token: &str) -> Result<&Self, Error> {
+        if token.is_empty() || token.chars().any(|c| c == TOKEN_SEPARATOR || c == ' ') {
+            Err(Error::InvalidToken)
+        } else {
+            Ok(Self::new_unchecked(token))
+        }
     }
     /// The token as a `&str`
     pub fn as_str(&self) -> &str {
-        self.as_ref()
+        self.deref()
     }
     /// Check if the token is the multi wildcard `>`.
     pub fn is_wildcard(&self) -> bool {
-        *self == MULTI_WILDCARD || *self == SINGLE_WILDCARD
+        self == *MULTI_WILDCARD || self == *SINGLE_WILDCARD
     }
     /// Check if two tokens match, considering wildcards.
     pub fn matches(&self, other: &Token) -> bool {
         match (self, other) {
-            (&SINGLE_WILDCARD, _)
-            | (_, &SINGLE_WILDCARD)
-            | (&MULTI_WILDCARD, _)
-            | (_, &MULTI_WILDCARD) => true,
+            (t, _)
+            | (_, t) if t == *MULTI_WILDCARD || t == *SINGLE_WILDCARD => true,
             (l, r) => l == r,
         }
     }
 }
 
-impl<'t> AsRef<str> for Token<'t> {
+impl AsRef<str> for Token {
     fn as_ref(&self) -> &str {
-        self.0
+        self.deref()
     }
 }
 
-impl<'t> PartialEq<&'t str> for Token<'t> {
-    fn eq(&self, other: &&'t str) -> bool {
-        self.as_str() == *other
+impl PartialEq<str> for Token {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
     }
 }
 
-impl<'t> fmt::Display for Token<'t> {
+impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl Deref for Token {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 impl<'s> Iterator for Tokens<'s> {
-    type Item = Token<'s>;
+    type Item = &'s Token;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining_subject.is_empty() {
@@ -332,10 +431,10 @@ impl<'s> Iterator for Tokens<'s> {
         } else if self.remaining_subject.contains(TOKEN_SEPARATOR) {
             let (token, rest) = self.remaining_subject.split_once(TOKEN_SEPARATOR)?;
             self.remaining_subject = rest;
-            Some(Token(token))
+            Some(Token::new_unchecked(token))
         } else {
             let last = std::mem::take(&mut self.remaining_subject);
-            Some(Token(last))
+            Some(Token::new_unchecked(last))
         }
     }
 }
@@ -358,7 +457,7 @@ mod test {
     #[test_case("ab.cd" => false   ; "contains dot")]
     #[test_case("ab cd" => false   ; "contains space")]
     fn validate_token(token: &str) -> bool {
-        Token::from_str(token).is_ok()
+        Token::new(token).is_ok()
     }
 
     #[test_case("" => false               ; "empty")]
@@ -373,7 +472,7 @@ mod test {
     #[test_case(">>" => true              ; "double multi wildcard")]
     #[test_case("hi.**.no" => true        ; "double single wildcard")]
     fn validate_subject(subject: &str) -> bool {
-        Subject::from_str(subject).is_ok()
+        Subject::new(subject).is_ok()
     }
 
     #[test_case("*", "abc" => true    ; "single wildcard")]
@@ -383,8 +482,8 @@ mod test {
     #[test_case("*", ">" => true      ; "mixed wildcards")]
     #[test_case("cba", "abc" => false ; "unequal tokens")]
     fn match_tokens(l: &str, r: &str) -> bool {
-        let l = Token::from_str(l).unwrap();
-        let r = Token::from_str(r).unwrap();
+        let l = Token::new(l).unwrap();
+        let r = Token::new(r).unwrap();
         l.matches(&r)
     }
 
@@ -399,8 +498,8 @@ mod test {
     #[test_case("*.>", "cba.abc.zzz" => true        ; "both wildcards")]
     #[test_case("cba.*.zzz", "cba.abc.yyy" => false ; "not matching")]
     fn match_subjects(l: &str, r: &str) -> bool {
-        let l = Subject::from_str(l).unwrap();
-        let r = Subject::from_str(r).unwrap();
+        let l = Subject::new(l).unwrap();
+        let r = Subject::new(r).unwrap();
         l.matches(r)
     }
 
@@ -432,7 +531,17 @@ mod test {
     #[test_case("abc.def.ghi", 1, 0, "" => false            ; "start before end")]
     #[test_case("abc.def.ghi.jkl", 1, 2, "def.ghi" => true  ; "two middle")]
     fn sub_subjects(subject: &str, start: usize, end: usize, expect: &str) -> bool {
-        let sub = Subject::from_str(subject).unwrap();
+        let sub = Subject::new(subject).unwrap();
         sub.sub_subject(start, end).map(|sub| sub.as_str() == expect).unwrap_or(false)
+    }
+
+    #[test]
+    fn same_hash() -> Result<(), Error> {
+        let sub = Subject::new("foo.bar")?;
+        let buf = sub.to_owned();
+        let mut map = std::collections::HashSet::new();
+        map.insert(buf);
+        assert!(map.get(sub).is_some());
+        Ok(())
     }
 }

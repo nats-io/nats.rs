@@ -14,6 +14,8 @@
 //! Support for Object Store.
 //! This feature is experimental and the API may change.
 
+mod api;
+
 use crate::header::HeaderMap;
 use crate::jetstream::{
     DateTime, DiscardPolicy, JetStream, PushSubscription, StorageType, StreamConfig,
@@ -106,8 +108,8 @@ impl JetStream {
 
         let bucket_name = config.bucket.clone();
         let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let chunk_subject = api::object_all_chunks(&bucket_name)?;
+        let meta_subject = api::object_all_meta(&bucket_name)?;
 
         self.add_stream(&StreamConfig {
             name: stream_name,
@@ -354,7 +356,7 @@ impl ObjectStore {
 
         // Grab last meta value we have.
         let stream_name = format!("OBJ_{}", &self.name);
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = api::object_meta(&self.name, &object_name)?;
 
         let message = self.context.get_last_message(&stream_name, &subject)?;
         let object_info = serde_json::from_slice::<ObjectInfo>(&message.data)?;
@@ -412,14 +414,14 @@ impl ObjectStore {
             ));
         }
 
-        // Fetch any existing object info, if ther is any for later use.
+        // Fetch any existing object info, if their is any for later use.
         let maybe_existing_object_info = match self.info(&object_name) {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
         };
 
         let object_nuid = nuid::next();
-        let chunk_subject = format!("$O.{}.C.{}", &self.name, &object_nuid);
+        let chunk_subject = api::object_chunk(&self.name, &object_nuid)?;
 
         let mut object_chunks = 0;
         let mut object_size = 0;
@@ -439,7 +441,7 @@ impl ObjectStore {
         }
 
         // Create a random subject prefixed with the object stream name.
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = api::object_meta(&self.name, &object_name)?;
         let object_info = ObjectInfo {
             name: object_name,
             description: object_meta.description,
@@ -462,7 +464,7 @@ impl ObjectStore {
 
         entry.insert(ROLLUP_SUBJECT.to_string());
 
-        let message = Message::new(&subject, None, data, Some(headers));
+        let message = Message::new(subject, None, data, Some(headers));
 
         // Publish metadata
         self.context.publish_message(&message)?;
@@ -470,7 +472,7 @@ impl ObjectStore {
         // Purge any old chunks.
         if let Some(existing_object_info) = maybe_existing_object_info {
             let stream_name = format!("OBJ_{}", self.name);
-            let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
+            let chunk_subject = api::object_chunk(&self.name, &existing_object_info.nuid)?;
 
             self.context
                 .purge_stream_subject(&stream_name, &chunk_subject)?;
@@ -511,7 +513,7 @@ impl ObjectStore {
             return self.get(&link.name);
         }
 
-        let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
+        let chunk_subject = api::object_chunk(&self.name, &object_info.nuid)?;
         let subscription = self
             .context
             .subscribe_with_options(&chunk_subject, &SubscribeOptions::ordered())?;
@@ -565,13 +567,13 @@ impl ObjectStore {
 
         entry.insert(ROLLUP_SUBJECT.to_string());
 
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
-        let message = Message::new(&subject, None, data, Some(headers));
+        let subject = api::object_meta(&self.name, &object_name)?;
+        let message = Message::new(subject, None, data, Some(headers));
 
         self.context.publish_message(&message)?;
 
         let stream_name = format!("OBJ_{}", self.name);
-        let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
+        let chunk_subject = api::object_chunk(&self.name, &object_info.nuid)?;
 
         self.context
             .purge_stream_subject(&stream_name, &chunk_subject)?;
@@ -616,7 +618,7 @@ impl ObjectStore {
     /// # }
     /// ```
     pub fn watch(&self) -> io::Result<Watch> {
-        let subject = format!("$O.{}.M.>", &self.name);
+        let subject = api::object_all_meta(&self.name)?;
         let subscription = self.context.subscribe_with_options(
             &subject,
             &SubscribeOptions::ordered().deliver_last_per_subject(),

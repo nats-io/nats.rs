@@ -382,13 +382,12 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.subscribe("foo")?;
-    /// # Ok(())
-    /// # }
+    /// let sub = nc.subscribe(Subject::new("foo")?)?;
+    /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
+    pub fn subscribe(&self, subject: &Subject) -> io::Result<Subscription> {
         self.do_subscribe(subject, None)
     }
 
@@ -396,13 +395,14 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.queue_subscribe("foo", "production")?;
-    /// # Ok(())
-    /// # }
+    /// let subject = Subject::new("foo")?;
+    /// let queue = Subject::new("production")?;
+    /// let sub = nc.queue_subscribe(subject, queue)?;
+    /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
+    pub fn queue_subscribe(&self, subject: &Subject, queue: &Subject) -> io::Result<Subscription> {
         self.do_subscribe(subject, Some(queue))
     }
 
@@ -410,13 +410,12 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// nc.publish("foo", "Hello World!")?;
-    /// # Ok(())
-    /// # }
+    /// nc.publish(Subject::new("foo")?, "Hello World!")?;
+    /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
+    pub fn publish(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
@@ -425,18 +424,18 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;
-    /// nc.publish_request("foo", &reply, "Help me!")?;
+    /// nc.publish_request(Subject::new("foo")?, reply.as_ref(), "Help me!")?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn publish_request(
         &self,
-        subject: &str,
-        reply: &str,
+        subject: &Subject,
+        reply: &Subject,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         self.0
@@ -448,15 +447,15 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}", nuid::next())
+    pub fn new_inbox(&self) -> SubjectBuf {
+        // Always produces a valid subject
+        SubjectBuf::new_unchecked(format!("_INBOX.{}", nuid::next()))
     }
 
     /// Publish a message on the given subject as a request and receive the
@@ -464,14 +463,13 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// let resp = nc.request("foo", "Help me?")?;
-    /// # Ok(())
-    /// # }
+    /// # nc.subscribe(Subject::new("foo")?)?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// let resp = nc.request(Subject::new("foo")?, "Help me?")?;
+    /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+    pub fn request(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         self.request_with_headers_or_timeout(subject, None, None, msg)
     }
 
@@ -481,16 +479,15 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// let resp = nc.request_timeout("foo", "Help me?", std::time::Duration::from_secs(2))?;
-    /// # Ok(())
-    /// # }
+    /// # nc.subscribe(Subject::new("foo")?)?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// let resp = nc.request_timeout(Subject::new("foo")?, "Help me?", std::time::Duration::from_secs(2))?;
+    /// # Ok::<(), io::Error>(())
     /// ```
     pub fn request_timeout(
         &self,
-        subject: &str,
+        subject: &Subject,
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
@@ -499,7 +496,7 @@ impl Connection {
 
     fn request_with_headers_or_timeout(
         &self,
-        subject: &str,
+        subject: &Subject,
         maybe_headers: Option<&HeaderMap>,
         maybe_timeout: Option<Duration>,
         msg: impl AsRef<[u8]>,
@@ -507,7 +504,7 @@ impl Connection {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), maybe_headers, msg)?;
+        self.publish_with_reply_or_headers(subject, Some(&reply), maybe_headers, msg)?;
 
         // Wait for the response
         let result = if let Some(timeout) = maybe_timeout {
@@ -533,18 +530,17 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// for msg in nc.request_multi("foo", "Help")?.iter().take(1) {}
-    /// # Ok(())
-    /// # }
+    /// # nc.subscribe(Subject::new("foo")?)?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// for msg in nc.request_multi(Subject::new("foo")?, "Help")?.iter().take(1) {}
+    /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn request_multi(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
+    pub fn request_multi(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
-        self.publish_with_reply_or_headers(subject, Some(reply.as_str()), None, msg)?;
+        self.publish_with_reply_or_headers(subject, Some(&reply), None, msg)?;
 
         // Return the subscription.
         Ok(sub)
@@ -721,25 +717,25 @@ impl Connection {
     /// # Example
     /// ```
     /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let received = Arc::new(AtomicBool::new(false));
     /// let received_2 = received.clone();
+    /// let subject = Subject::new("test.drain")?;
     ///
-    /// nc.subscribe("test.drain")?.with_handler(move |m| {
+    /// nc.subscribe(subject)?.with_handler(move |m| {
     ///     received_2.store(true, SeqCst);
     ///     Ok(())
     /// });
     ///
-    /// nc.publish("test.drain", "message")?;
+    /// nc.publish(subject, "message")?;
     /// nc.drain()?;
     ///
     /// # std::thread::sleep(std::time::Duration::from_secs(1));
     ///
     /// assert!(received.load(SeqCst));
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), io::Error>(())
     /// ```
     pub fn drain(&self) -> io::Result<()> {
         self.0.client.flush(DEFAULT_FLUSH_TIMEOUT)?;
@@ -751,23 +747,23 @@ impl Connection {
     ///
     /// # Example
     /// ```no_run
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.subscribe("foo.headers")?;
+    /// let subject = Subject::new("foo.headers")?;
+    /// let sub = nc.subscribe(subject)?;
     /// let headers = [("header1", "value1"),
     ///                ("header2", "value2")].iter().collect();
     /// let reply_to = None;
-    /// nc.publish_with_reply_or_headers("foo.headers", reply_to, Some(&headers), "Hello World!")?;
+    /// nc.publish_with_reply_or_headers(subject, reply_to, Some(&headers), "Hello World!")?;
     /// nc.flush()?;
     /// let message = sub.next_timeout(std::time::Duration::from_secs(2)).unwrap();
     /// assert_eq!(message.headers.unwrap().len(), 2);
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), io::Error>(())
     /// ```
     pub fn publish_with_reply_or_headers(
         &self,
-        subject: &str,
-        reply: Option<&str>,
+        subject: &Subject,
+        reply: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
@@ -788,7 +784,7 @@ impl Connection {
         self.0.client.server_info.lock().max_payload
     }
 
-    fn do_subscribe(&self, subject: &str, queue: Option<&str>) -> io::Result<Subscription> {
+    fn do_subscribe(&self, subject: &Subject, queue: Option<&Subject>) -> io::Result<Subscription> {
         let (sid, receiver) = self.0.client.subscribe(subject, queue)?;
         Ok(Subscription::new(
             sid,
@@ -802,8 +798,8 @@ impl Connection {
     #[doc(hidden)]
     pub fn try_publish_with_reply_or_headers(
         &self,
-        subject: &str,
-        reply: Option<&str>,
+        subject: &Subject,
+        reply: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> Option<io::Result<()>> {

@@ -115,13 +115,14 @@ const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
 mod push_subscription;
 mod types;
+mod api;
 
 pub use push_subscription::PushSubscription;
 pub use types::*;
 
 use crate::{
     header::{self, HeaderMap},
-    Connection, Message,
+    Connection, Message, SubjectBuf, Subject,
 };
 
 /// `JetStream` options
@@ -432,7 +433,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Returns the status code assosciated with this error
+    /// Returns the status code associated with this error
     pub fn code(&self) -> usize {
         self.code
     }
@@ -479,7 +480,7 @@ struct PagedResponse<T> {
 #[derive(Debug)]
 pub struct PagedIterator<'a, T> {
     manager: &'a JetStream,
-    subject: String,
+    subject: SubjectBuf,
     offset: i64,
     items: VecDeque<T>,
     done: bool,
@@ -551,14 +552,14 @@ impl JetStream {
     }
 
     /// Publishes a message to `JetStream`
-    pub fn publish(&self, subject: &str, data: impl AsRef<[u8]>) -> io::Result<PublishAck> {
+    pub fn publish(&self, subject: &Subject, data: impl AsRef<[u8]>) -> io::Result<PublishAck> {
         self.publish_with_options_or_headers(subject, None, None, data)
     }
 
     /// Publishes a message to `JetStream` with the given options.
     pub fn publish_with_options(
         &self,
-        subject: &str,
+        subject: &Subject,
         data: impl AsRef<[u8]>,
         options: &PublishOptions,
     ) -> io::Result<PublishAck> {
@@ -592,7 +593,7 @@ impl JetStream {
     /// Publishes a message to `JetStream` with the given options and/or headers.
     pub(crate) fn publish_with_options_or_headers(
         &self,
-        subject: &str,
+        subject: &Subject,
         maybe_options: Option<&PublishOptions>,
         maybe_headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
@@ -678,18 +679,17 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject;
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("ephemeral");
-    /// # context.publish("ephemeral", "hello");
+    /// # context.publish(Subject::new("ephemeral")?, "hello");
     /// #    
-    /// let subscription = context.subscribe("ephemeral")?;
+    /// let subscription = context.subscribe(Subject::new("ephemeral")?)?;
     /// println!("Received message {:?}", subscription.next());
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn subscribe(&self, subject: &str) -> io::Result<PushSubscription> {
+    pub fn subscribe(&self, subject: &Subject) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject, None, None)
     }
 
@@ -701,17 +701,19 @@ impl JetStream {
     /// # Example
     ///
     /// ```no_run
-    /// # use nats::jetstream::{ SubscribeOptions };
+    /// # use nats::{Subject, jetstream::{ SubscribeOptions }};
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let js = nats::jetstream::new(nc);
-    /// let sub = js.subscribe_with_options("foo", &SubscribeOptions::bind("existing_stream".to_string(), "existing_consumer".to_string()))?;
-    /// # Ok(())
-    /// # }
+    /// let sub = js.subscribe_with_options(
+    ///     Subject::new("foo")?, 
+    ///     &SubscribeOptions::bind("existing_stream".to_string(), "existing_consumer".to_string())
+    /// )?;
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn subscribe_with_options(
         &self,
-        subject: &str,
+        subject: &Subject,
         options: &SubscribeOptions,
     ) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject, None, Some(options))
@@ -723,15 +725,18 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # fn main() -> std::io::Result<()> {
+    /// # use nats::Subject
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("queue");
-    /// let subscription = context.queue_subscribe("queue", "queue_group")?;
+    /// let subscription = context.queue_subscribe(
+    ///     Subject::new("queue")?,
+    ///     Subject::new("queue_group")?
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<PushSubscription> {
+    pub fn queue_subscribe(&self, subject: &Subject, queue: &Subject) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject, Some(queue), None)
     }
 
@@ -742,8 +747,8 @@ impl JetStream {
     ///
     pub fn queue_subscribe_with_options(
         &self,
-        subject: &str,
-        queue: &str,
+        subject: &Subject,
+        queue: &Subject,
         options: &SubscribeOptions,
     ) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject, Some(queue), Some(options))
@@ -751,8 +756,8 @@ impl JetStream {
 
     fn do_push_subscribe(
         &self,
-        subject: &str,
-        maybe_queue: Option<&str>,
+        subject: &Subject,
+        maybe_queue: Option<&Subject>,
         maybe_options: Option<&SubscribeOptions>,
     ) -> io::Result<PushSubscription> {
         // If no stream name is specified the subject cannot be empty.
@@ -844,16 +849,18 @@ impl JetStream {
 
         let process_consumer_info = |info: ConsumerInfo| {
             // Make sure this new subject matches or is a subset.
-            if !info.config.filter_subject.is_empty() && subject != info.config.filter_subject {
-                return Err(io::Error::new(
+            match info.config.filter_subject.as_ref() {
+                Some(filter) if subject.matches(&filter) => {},
+                None => {},
+                Some(_) => return Err(io::Error::new(
                     io::ErrorKind::Other,
                     "subject does not match consumer",
-                ));
+                ))
             }
 
             if let Some(deliver_group) = info.config.deliver_group.as_ref() {
                 if let Some(queue) = maybe_queue {
-                    if deliver_group != queue {
+                    if !deliver_group.matches(queue) {
                         return Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!(
@@ -1037,7 +1044,7 @@ impl JetStream {
         // Figure out if we have a consumer name
         let maybe_durable_name = maybe_options
             .and_then(|options| options.durable_name.as_deref())
-            .or(maybe_queue);
+            .or_else(|| maybe_queue.map(AsRef::as_ref));
 
         let maybe_consumer_name = maybe_options
             .and_then(|options| options.consumer_name.as_deref())
@@ -1105,12 +1112,12 @@ impl JetStream {
             };
 
             // Do filtering always, server will clear as needed.
-            config.filter_subject = subject.to_string();
+            config.filter_subject = Some(subject.to_owned());
 
             // Pass the queue to the consumer config
             if let Some(queue) = maybe_queue {
                 if config.durable_name.is_none() {
-                    config.durable_name = Some(queue.to_owned());
+                    config.durable_name = Some(queue.as_str().to_owned());
                 }
 
                 config.deliver_group = Some(queue.to_owned());
@@ -1212,13 +1219,13 @@ impl JetStream {
                         .and_then(|headers| {
                             headers
                                 .get(header::NATS_CONSUMER_STALLED)
-                                .map(|set| set.iter().cloned().next())
+                                .map(|set| set.iter().next())
                         })
                         .flatten();
 
                     if let Some(consumer_stalled) = maybe_consumer_stalled {
                         context.connection.try_publish_with_reply_or_headers(
-                            &consumer_stalled,
+                            Subject::new_unchecked(consumer_stalled),
                             None,
                             None,
                             b"",
@@ -1360,7 +1367,7 @@ impl JetStream {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("{}STREAM.CREATE.{}", self.api_prefix(), config.name);
+        let subject = api::create_stream(self.api_prefix(), &config.name)?;
         let req = serde_json::ser::to_vec(&config)?;
         self.js_request(&subject, &req)
     }
@@ -1373,7 +1380,7 @@ impl JetStream {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("{}STREAM.UPDATE.{}", self.api_prefix(), config.name);
+        let subject = api::update_stream(self.api_prefix(), &config.name)?;
         let req = serde_json::ser::to_vec(&config)?;
         self.js_request(&subject, &req)
     }
@@ -1382,7 +1389,7 @@ impl JetStream {
     /// use the `list_streams` method instead.
     pub fn stream_names(&self) -> PagedIterator<'_, String> {
         PagedIterator {
-            subject: format!("{}STREAM.NAMES", self.api_prefix()),
+            subject: api::stream_names(self.api_prefix()),
             manager: self,
             offset: 0,
             items: Default::default(),
@@ -1395,7 +1402,7 @@ impl JetStream {
             subject: subject.to_string(),
         })?;
 
-        let request_subject = format!("{}STREAM.NAMES", self.api_prefix());
+        let request_subject = api::stream_names(self.api_prefix());
         self.js_request::<StreamNamesResponse>(&request_subject, &req)
             .map(|res| res.streams.first().unwrap().to_string())
     }
@@ -1403,7 +1410,7 @@ impl JetStream {
     /// List all `JetStream` streams.
     pub fn list_streams(&self) -> PagedIterator<'_, StreamInfo> {
         PagedIterator {
-            subject: format!("{}STREAM.LIST", self.api_prefix()),
+            subject: api::stream_list(self.api_prefix()),
             manager: self,
             offset: 0,
             items: Default::default(),
@@ -1423,7 +1430,7 @@ impl JetStream {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("{}CONSUMER.LIST.{}", self.api_prefix(), stream);
+        let subject = api::consumer_list(self.api_prefix(), stream);
 
         Ok(PagedIterator {
             subject,
@@ -1443,7 +1450,7 @@ impl JetStream {
                 "the stream name must not be empty",
             ));
         }
-        let subject: String = format!("{}STREAM.INFO.{}", self.api_prefix(), stream);
+        let subject = api::stream_info(self.api_prefix(), stream);
         self.js_request(&subject, b"")
     }
 
@@ -1456,7 +1463,7 @@ impl JetStream {
                 "the stream name must not be empty",
             ));
         }
-        let subject = format!("{}STREAM.PURGE.{}", self.api_prefix(), stream);
+        let subject = api::purge_stream(self.api_prefix(), stream)?;
         self.js_request(&subject, b"")
     }
 
@@ -1464,7 +1471,7 @@ impl JetStream {
     pub fn purge_stream_subject<S: AsRef<str>>(
         &self,
         stream: S,
-        filter_subject: &str,
+        filter_subject: &Subject,
     ) -> io::Result<PurgeResponse> {
         let stream: &str = stream.as_ref();
         if stream.is_empty() {
@@ -1474,9 +1481,9 @@ impl JetStream {
             ));
         }
 
-        let subject = format!("{}STREAM.PURGE.{}", self.api_prefix(), stream);
+        let subject = api::purge_stream(self.api_prefix(), stream)?;
         let request = serde_json::to_vec(&PurgeRequest {
-            filter: Some(filter_subject.to_string()),
+            filter: Some(filter_subject.to_owned()),
             ..Default::default()
         })?;
 
@@ -1493,7 +1500,7 @@ impl JetStream {
             ));
         }
 
-        let subject = format!("{}STREAM.MSG.GET.{}", self.api_prefix(), stream);
+        let subject = api::stream_get_message(self.api_prefix(), stream);
         let request = serde_json::ser::to_vec(&StreamMessageGetRequest {
             seq: Some(seq),
             last_by_subject: None,
@@ -1522,7 +1529,7 @@ impl JetStream {
             ));
         }
 
-        let subject = format!("{}STREAM.MSG.GET.{}", self.api_prefix(), stream_name);
+        let subject = api::stream_get_message(self.api_prefix(), stream_name);
         let request = serde_json::ser::to_vec(&StreamMessageGetRequest {
             seq: None,
             last_by_subject: Some(stream_subject.to_string()),
@@ -1556,7 +1563,7 @@ impl JetStream {
         })
         .unwrap();
 
-        let subject = format!("{}STREAM.MSG.DELETE.{}", self.api_prefix(), stream);
+        let subject = api::stream_delete_message(self.api_prefix(), stream);
 
         self.js_request::<DeleteResponse>(&subject, &req)
             .map(|dr| dr.success)
@@ -1572,7 +1579,7 @@ impl JetStream {
             ));
         }
 
-        let subject = format!("{}STREAM.DELETE.{}", self.api_prefix(), stream);
+        let subject = api::delete_stream(self.api_prefix(), stream)?;
         self.js_request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
     }
@@ -1592,16 +1599,15 @@ impl JetStream {
             ));
         }
 
-        let subject = if let Some(ref durable_name) = config.durable_name {
-            format!(
-                "{}CONSUMER.DURABLE.CREATE.{}.{}",
+        let subject = if let Some(consumer) = config.durable_name.as_ref() {
+            api::create_durable_consumer(
                 self.api_prefix(),
                 stream,
-                durable_name
+                consumer
             )
         } else {
-            format!("{}CONSUMER.CREATE.{}", self.api_prefix(), stream)
-        };
+            api::create_consumer(self.api_prefix(), stream)
+        }?;
 
         let req = CreateConsumerRequest {
             stream_name: stream.into(),
@@ -1633,12 +1639,11 @@ impl JetStream {
             ));
         }
 
-        let subject = format!(
-            "{}CONSUMER.DELETE.{}.{}",
+        let subject = api::delete_consumer(
             self.api_prefix(),
             stream,
             consumer
-        );
+        )?;
 
         self.js_request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)
@@ -1658,16 +1663,16 @@ impl JetStream {
             ));
         }
         let consumer: &str = consumer.as_ref();
-        let subject: String = format!("{}CONSUMER.INFO.{}.{}", self.api_prefix(), stream, consumer);
+        let subject = api::consumer_info(self.api_prefix(), stream, consumer);
         self.js_request(&subject, b"")
     }
 
     /// Query `JetStream` account information.
     pub fn account_info(&self) -> io::Result<AccountInfo> {
-        self.js_request(&format!("{}INFO", self.api_prefix()), b"")
+        self.js_request(&api::account_info(self.api_prefix()), b"")
     }
 
-    fn js_request<Res>(&self, subject: &str, req: &[u8]) -> io::Result<Res>
+    fn js_request<Res>(&self, subject: &Subject, req: &[u8]) -> io::Result<Res>
     where
         Res: DeserializeOwned,
     {

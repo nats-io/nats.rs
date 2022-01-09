@@ -98,7 +98,7 @@ use std::time::Duration;
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::header::HeaderMap;
+use crate::{Subject, SubjectBuf, header::HeaderMap};
 
 /// Connect to a NATS server at the given url.
 ///
@@ -124,7 +124,7 @@ impl Connection {
     }
 
     /// Publishes a message.
-    pub async fn publish(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<()> {
+    pub async fn publish(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<()> {
         self.publish_with_reply_or_headers(subject, None, None, msg)
             .await
     }
@@ -132,8 +132,8 @@ impl Connection {
     /// Publishes a message with a reply subject.
     pub async fn publish_request(
         &self,
-        subject: &str,
-        reply: &str,
+        subject: &Subject,
+        reply: &Subject,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         if let Some(res) =
@@ -142,21 +142,21 @@ impl Connection {
         {
             return res;
         }
-        let subject = subject.to_string();
-        let reply = reply.to_string();
+        let subject = subject.to_owned();
+        let reply = reply.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         unblock(move || inner.publish_request(&subject, &reply, msg)).await
     }
 
     /// Creates a new unique subject for receiving replies.
-    pub fn new_inbox(&self) -> String {
+    pub fn new_inbox(&self) -> SubjectBuf {
         self.inner.new_inbox()
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(&self, subject: &str, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        let subject = subject.to_string();
+    pub async fn request(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+        let subject = subject.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let msg = unblock(move || inner.request(&subject, msg)).await?;
@@ -167,11 +167,11 @@ impl Connection {
     /// timeout duration is reached
     pub async fn request_timeout(
         &self,
-        subject: &str,
+        subject: &Subject,
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        let subject = subject.to_string();
+        let subject = subject.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let msg = unblock(move || inner.request_timeout(&subject, msg, timeout)).await?;
@@ -182,10 +182,10 @@ impl Connection {
     /// response.
     pub async fn request_multi(
         &self,
-        subject: &str,
+        subject: &Subject,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<Subscription> {
-        let subject = subject.to_string();
+        let subject = subject.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
@@ -198,8 +198,8 @@ impl Connection {
     }
 
     /// Creates a subscription.
-    pub async fn subscribe(&self, subject: &str) -> io::Result<Subscription> {
-        let subject = subject.to_string();
+    pub async fn subscribe(&self, subject: &Subject) -> io::Result<Subscription> {
+        let subject = subject.to_owned();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
@@ -211,9 +211,9 @@ impl Connection {
     }
 
     /// Creates a queue subscription.
-    pub async fn queue_subscribe(&self, subject: &str, queue: &str) -> io::Result<Subscription> {
-        let subject = subject.to_string();
-        let queue = queue.to_string();
+    pub async fn queue_subscribe(&self, subject: &Subject, queue: &Subject) -> io::Result<Subscription> {
+        let subject = subject.to_owned();
+        let queue = queue.to_owned();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
@@ -271,11 +271,11 @@ impl Connection {
     }
 
     /// Publish a message which may have a reply subject or headers set.
-    pub async fn publish_with_reply_or_headers(
+    pub async fn publish_with_reply_or_headers<'s>(
         &self,
-        subject: &str,
-        reply: Option<&str>,
-        headers: Option<&HeaderMap>,
+        subject: &Subject,
+        reply: Option<&Subject>,
+        headers: Option<&'s HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         if let Some(res) = self
@@ -284,8 +284,8 @@ impl Connection {
         {
             return res;
         }
-        let subject = subject.to_string();
-        let reply = reply.map(str::to_owned);
+        let subject = subject.to_owned();
+        let reply = reply.map(ToOwned::to_owned);
         let headers = headers.map(HeaderMap::clone);
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
@@ -366,11 +366,11 @@ impl Subscription {
 #[derive(Clone)]
 pub struct Message {
     /// The subject this message came from.
-    pub subject: String,
+    pub subject: SubjectBuf,
 
     /// Optional reply subject that may be used for sending a response to this
     /// message.
-    pub reply: Option<String>,
+    pub reply: Option<SubjectBuf>,
 
     /// The message contents.
     pub data: Vec<u8>,
@@ -407,17 +407,18 @@ impl Message {
     /// but cannot be used on it's own for associated methods as those require `Client` injected into `Message`
     /// and will error without it.
     pub fn new(
-        subject: &str,
-        reply: Option<&str>,
-        data: impl AsRef<[u8]>,
+        subject: SubjectBuf,
+        reply: Option<SubjectBuf>,
+        data: Vec<u8>,
         headers: Option<HeaderMap>,
     ) -> Message {
         Message {
-            subject: subject.to_string(),
-            reply: reply.map(String::from),
-            data: data.as_ref().to_vec(),
+            subject,
+            reply,
+            data,
             headers,
-            ..Default::default()
+            client: None,
+            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -432,7 +433,7 @@ impl Message {
                 crate::message::MESSAGE_NOT_BOUND,
             )
         })?;
-        if let Some(res) = client.try_publish(reply.as_str(), None, None, msg.as_ref()) {
+        if let Some(res) = client.try_publish(&reply, None, None, msg.as_ref()) {
             return res;
         }
         // clone only if we have to move the data to the thread
@@ -440,19 +441,6 @@ impl Message {
         let reply = reply.to_owned();
         let msg = msg.as_ref().to_vec();
         unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
-    }
-}
-
-impl Default for Message {
-    fn default() -> Message {
-        Message {
-            subject: String::from(""),
-            reply: None,
-            data: Vec::new(),
-            headers: None,
-            client: None,
-            double_acked: Arc::new(AtomicBool::new(false)),
-        }
     }
 }
 

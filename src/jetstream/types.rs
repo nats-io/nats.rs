@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use crate::header::HeaderMap;
+use crate::{header::HeaderMap, SubjectBuf};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::io;
@@ -35,13 +35,13 @@ pub(crate) struct StreamMessageGetRequest {
 pub struct RawStreamMessage {
     /// Subject of the message.
     #[serde(rename = "subject")]
-    pub subject: String,
+    pub subject: SubjectBuf,
 
     /// Sequence of the message.
     #[serde(rename = "seq")]
     pub sequence: u64,
 
-    /// Data of the mssage.
+    /// Data of the message.
     #[serde(default, rename = "data")]
     pub data: String,
 
@@ -67,10 +67,10 @@ pub(crate) struct StreamMessageGetResponse {
 #[derive(Debug, Clone)]
 pub struct StreamMessage {
     /// Subject of the message.
-    pub subject: String,
+    pub subject: SubjectBuf,
     /// Sequence of the message
     pub sequence: u64,
-    /// HeaderMap that were sent with the mesage, if any.
+    /// HeaderMap that were sent with the message, if any.
     pub headers: Option<HeaderMap>,
     /// Payload of the message.
     pub data: Vec<u8>,
@@ -171,7 +171,7 @@ pub struct ConsumerConfig {
     /// semantics in any system that is written to as a result of processing
     /// a message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deliver_subject: Option<String>,
+    pub deliver_subject: Option<SubjectBuf>,
 
     /// Setting `durable_name` to `Some(...)` will cause this consumer
     /// to be "durable". This may be a good choice for workloads that
@@ -195,7 +195,7 @@ pub struct ConsumerConfig {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Deliver group to use.
-    pub deliver_group: Option<String>,
+    pub deliver_group: Option<SubjectBuf>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     pub deliver_policy: DeliverPolicy,
     /// Used in combination with `DeliverPolicy::ByStartSeq` to only select messages arriving
@@ -215,8 +215,8 @@ pub struct ConsumerConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_deliver: i64,
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub filter_subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter_subject: Option<SubjectBuf>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -278,7 +278,7 @@ pub struct StreamConfig {
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub subjects: Vec<String>,
+    pub subjects: Vec<SubjectBuf>,
     /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
     pub retention: RetentionPolicy,
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
@@ -485,7 +485,7 @@ pub struct PurgeRequest {
 
     /// Subject to match against messages for the purge command.
     #[serde(default, rename = "filter", skip_serializing_if = "is_default")]
-    pub filter: Option<String>,
+    pub filter: Option<SubjectBuf>,
 
     /// Number of messages to keep.
     #[serde(default, rename = "filter", skip_serializing_if = "is_default")]
@@ -724,7 +724,7 @@ pub struct SubscribeOptions {
     pub(crate) ack_wait: Option<Duration>,
     pub(crate) replay_policy: Option<ReplayPolicy>,
     pub(crate) deliver_policy: Option<DeliverPolicy>,
-    pub(crate) deliver_subject: Option<String>,
+    pub(crate) deliver_subject: Option<SubjectBuf>,
     pub(crate) description: Option<String>,
     pub(crate) durable_name: Option<String>,
     pub(crate) sample_frequency: Option<u8>,
@@ -886,7 +886,7 @@ impl SubscribeOptions {
     /// and a creation request is sent to the server.
     ///
     /// If not provided, an inbox will be selected.
-    pub fn deliver_subject(mut self, subject: String) -> Self {
+    pub fn deliver_subject(mut self, subject: SubjectBuf) -> Self {
         self.deliver_subject = Some(subject);
         self
     }
@@ -942,7 +942,7 @@ pub struct AccountInfo {
     pub consumers: i64,
     /// Aggregated API statistics
     pub api: ApiStats,
-    /// Limits placed on the accuont
+    /// Limits placed on the account
     pub limits: AccountLimits,
 }
 

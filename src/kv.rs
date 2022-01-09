@@ -17,6 +17,7 @@
 use std::io;
 use std::time::Duration;
 
+use crate::SubjectBuf;
 use crate::header::{self, HeaderMap};
 use crate::jetstream::{
     DateTime, Error, ErrorCode, JetStream, PushSubscription, StorageType, StreamConfig, StreamInfo,
@@ -222,7 +223,7 @@ impl JetStream {
         let stream_info = self.add_stream(&StreamConfig {
             name: format!("KV_{}", config.bucket),
             description: Some(config.description.to_string()),
-            subjects: vec![format!("$KV.{}.>", config.bucket)],
+            subjects: vec![SubjectBuf::new_unchecked(format!("$KV.{}.>", config.bucket))],
             max_msgs_per_subject: history,
             max_bytes: config.max_bytes,
             max_age: config.max_age,
@@ -443,11 +444,7 @@ impl Store {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid key"));
         }
 
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key);
-
-        let publish_ack = self.context.publish(&subject, value)?;
+        let publish_ack = self.context.publish(&self.key_subject(key), value)?;
 
         Ok(publish_ack.sequence)
     }
@@ -515,10 +512,6 @@ impl Store {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid key"));
         }
 
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key);
-
         let mut headers = HeaderMap::default();
         let entry = headers
             .inner
@@ -527,7 +520,7 @@ impl Store {
 
         entry.insert(revision.to_string());
 
-        let message = Message::new(&subject, None, value, Some(headers));
+        let message = Message::new(self.key_subject(key), None, value.as_ref().to_vec(), Some(headers));
         let publish_ack = self.context.publish_message(&message)?;
 
         Ok(publish_ack.sequence)
@@ -559,10 +552,6 @@ impl Store {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid key"));
         }
 
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key);
-
         let mut headers = HeaderMap::default();
         let entry = headers
             .inner
@@ -571,7 +560,7 @@ impl Store {
 
         entry.insert(KV_OPERATION_DELETE.to_string());
 
-        let message = Message::new(&subject, None, b"", Some(headers));
+        let message = Message::new(self.key_subject(key), None, Vec::new(), Some(headers));
         self.context.publish_message(&message)?;
 
         Ok(())
@@ -603,10 +592,6 @@ impl Store {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid key"));
         }
 
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key);
-
         let mut headers = HeaderMap::default();
         let purge_entry = headers
             .inner
@@ -622,7 +607,7 @@ impl Store {
 
         rollup_entry.insert(ROLLUP_SUBJECT.to_string());
 
-        let message = Message::new(&subject, None, b"", Some(headers));
+        let message = Message::new(self.key_subject(key), None, Vec::new(), Some(headers));
         self.context.publish_message(&message)?;
 
         Ok(())
@@ -655,12 +640,8 @@ impl Store {
     /// # }
     /// ```
     pub fn keys(&self) -> io::Result<Keys> {
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(ALL_KEYS);
-
         let subscription = self.context.subscribe_with_options(
-            &subject,
+            &self.key_subject(ALL_KEYS),
             &SubscribeOptions::ordered()
                 .headers_only()
                 .deliver_last_per_subject(),
@@ -708,12 +689,8 @@ impl Store {
     /// # }
     /// ```
     pub fn history(&self, key: &str) -> io::Result<History> {
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key);
-
         let subscription = self.context.subscribe_with_options(
-            &subject,
+            &self.key_subject(key),
             &SubscribeOptions::ordered()
                 .deliver_all()
                 .enable_flow_control()
@@ -735,9 +712,8 @@ impl Store {
 
     /// Returns an iterator which iterates over each entry for specific key pattern as they happen.
     pub fn watch<T: AsRef<str>>(&self, key: T) -> io::Result<Watch> {
-        let subject = format!("{}{}", self.prefix, key.as_ref());
         let subscription = self.context.subscribe_with_options(
-            subject.as_str(),
+            &self.key_subject(key.as_ref()),
             &SubscribeOptions::ordered()
                 .deliver_last_per_subject()
                 .enable_flow_control()
@@ -754,6 +730,14 @@ impl Store {
     /// Returns the name of the bucket
     pub fn bucket(&self) -> &String {
         &self.name
+    }
+
+    /// Subject from prefix and key.
+    fn key_subject(&self, key: &str) -> SubjectBuf {
+        let mut subject = String::with_capacity(self.prefix.len() + key.len());
+        subject.push_str(&self.prefix);
+        subject.push_str(key);
+        SubjectBuf::new_unchecked(subject)
     }
 }
 

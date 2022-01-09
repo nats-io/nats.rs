@@ -16,6 +16,7 @@ use std::io::prelude::*;
 use std::io::{self, Error, ErrorKind};
 use std::str::{self, FromStr};
 
+use crate::{SubjectBuf, Subject};
 use crate::connect::ConnectInfo;
 use crate::{header::HeaderMap, inject_io_failure, ServerInfo};
 
@@ -27,19 +28,19 @@ pub(crate) enum ServerOp {
 
     /// `MSG <subject> <sid> [reply-to] <#bytes>\r\n[payload]\r\n`
     Msg {
-        subject: String,
+        subject: SubjectBuf,
         sid: u64,
-        reply_to: Option<String>,
+        reply_to: Option<SubjectBuf>,
         payload: Vec<u8>,
     },
 
     /// `HMSG <subject> <sid> [reply-to] <# header bytes> <# total
     /// bytes>\r\n<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
     Hmsg {
-        subject: String,
+        subject: SubjectBuf,
         headers: HeaderMap,
         sid: u64,
-        reply_to: Option<String>,
+        reply_to: Option<SubjectBuf>,
         payload: Vec<u8>,
     },
 
@@ -152,8 +153,8 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
             }
         };
 
-        // Convert the slice into an owned string.
-        let subject = subject.to_string();
+        // Convert the slice into an owned subject. Subjects from servers are always valid.
+        let subject = SubjectBuf::new_unchecked(subject.to_string());
 
         // Parse the subject ID.
         let sid = u64::from_str(sid).map_err(|_| {
@@ -163,8 +164,8 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
             )
         })?;
 
-        // Convert the slice into an owned string.
-        let reply_to = reply_to.map(ToString::to_string);
+        // Convert the slice into an owned subject. Subjects from servers are always valid.
+        let reply_to = reply_to.map(|sub| SubjectBuf::new_unchecked(sub.to_string()));
 
         // Parse the number of payload bytes.
         let num_bytes = u32::from_str(num_bytes).map_err(|_| {
@@ -214,8 +215,8 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
             }
         };
 
-        // Convert the slice into an owned string.
-        let subject = subject.to_string();
+        // Convert the slice into an owned string. Subjects from servers are always valid.
+        let subject = SubjectBuf::new_unchecked(subject.to_string());
 
         // Parse the subject ID.
         let sid = u64::from_str(sid).map_err(|_| {
@@ -225,8 +226,8 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
             )
         })?;
 
-        // Convert the slice into an owned string.
-        let reply_to = reply_to.map(ToString::to_string);
+        // Convert the slice into an owned string. Subjects from servers are always valid.
+        let reply_to = reply_to.map(|sub| SubjectBuf::new_unchecked(sub.to_string()));
 
         // Parse the number of payload bytes.
         let num_header_bytes = u32::from_str(num_header_bytes).map_err(|_| {
@@ -300,23 +301,23 @@ pub(crate) enum ClientOp<'a> {
 
     /// `PUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n`
     Pub {
-        subject: &'a str,
-        reply_to: Option<&'a str>,
+        subject: &'a Subject,
+        reply_to: Option<&'a Subject>,
         payload: &'a [u8],
     },
 
     /// `HPUB <subject> [reply-to] <#bytes>\r\n[payload]\r\n`
     Hpub {
-        subject: &'a str,
-        reply_to: Option<&'a str>,
+        subject: &'a Subject,
+        reply_to: Option<&'a Subject>,
         headers: &'a HeaderMap,
         payload: &'a [u8],
     },
 
     /// `SUB <subject> [queue group] <sid>\r\n`
     Sub {
-        subject: &'a str,
-        queue_group: Option<&'a str>,
+        subject: &'a Subject,
+        queue_group: Option<&'a Subject>,
         sid: u64,
     },
 

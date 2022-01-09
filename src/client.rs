@@ -25,6 +25,7 @@ use crossbeam_channel as channel;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
+use crate::{SubjectBuf, Subject};
 use crate::connector::{Connector, NatsStream};
 use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
@@ -88,8 +89,8 @@ pub(crate) type Preprocessor = Box<dyn Fn(u64, &Message) -> bool + Send + Sync>;
 
 /// A registered subscription.
 struct Subscription {
-    subject: String,
-    queue_group: Option<String>,
+    subject: SubjectBuf,
+    queue_group: Option<SubjectBuf>,
     messages: channel::Sender<Message>,
     preprocess: Preprocessor,
 }
@@ -374,8 +375,8 @@ impl Client {
     /// Subscribes to a subject.
     pub(crate) fn subscribe(
         &self,
-        subject: &str,
-        queue_group: Option<&str>,
+        subject: &Subject,
+        queue_group: Option<&Subject>,
     ) -> io::Result<(u64, channel::Receiver<Message>)> {
         self.subscribe_with_preprocessor(subject, queue_group, Box::new(|_, _| false))
     }
@@ -383,8 +384,8 @@ impl Client {
     /// Subscribe to a subject with a message preprocessor.
     pub(crate) fn subscribe_with_preprocessor(
         &self,
-        subject: &str,
-        queue_group: Option<&str>,
+        subject: &Subject,
+        queue_group: Option<&Subject>,
         message_processor: Preprocessor,
     ) -> io::Result<(u64, channel::Receiver<Message>)> {
         inject_delay();
@@ -415,8 +416,8 @@ impl Client {
         read.subscriptions.insert(
             sid,
             Subscription {
-                subject: subject.to_string(),
-                queue_group: queue_group.map(ToString::to_string),
+                subject: subject.to_owned(),
+                queue_group: queue_group.map(|sub | sub.to_owned()),
                 messages: sender,
                 preprocess: message_processor,
             },
@@ -437,7 +438,7 @@ impl Client {
 
     /// Resubscribes an existing subscription by unsubscribing from the old subject and subscribing
     /// to the new subject returning a new sid while retaining the existing channel receiver.
-    pub(crate) fn resubscribe(&self, old_sid: u64, new_subject: &str) -> io::Result<u64> {
+    pub(crate) fn resubscribe(&self, old_sid: u64, new_subject: &Subject) -> io::Result<u64> {
         // Inject random delays when testing.
         inject_delay();
 
@@ -525,8 +526,8 @@ impl Client {
     /// Publishes a message with optional reply subject and headers.
     pub fn publish(
         &self,
-        subject: &str,
-        reply_to: Option<&str>,
+        subject: &Subject,
+        reply_to: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: &[u8],
     ) -> io::Result<()> {
@@ -599,8 +600,8 @@ impl Client {
     /// whole message.
     pub fn try_publish(
         &self,
-        subject: &str,
-        reply_to: Option<&str>,
+        subject: &Subject,
+        reply_to: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: &[u8],
     ) -> Option<io::Result<()>> {
@@ -612,7 +613,8 @@ impl Client {
         // Estimate how many bytes the message will consume when written into
         // the stream. We must make a conservative guess: it's okay to
         // overestimate but not to underestimate.
-        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, str::len) + msg.len();
+        let sub_len = subject.as_str().len();
+        let mut estimate = 1024 + sub_len + reply_to.map(|_| sub_len).unwrap_or_default() + msg.len();
         if let Some(headers) = headers {
             estimate += headers
                 .iter()
@@ -741,8 +743,8 @@ impl Client {
             proto::encode(
                 &mut writer,
                 ClientOp::Sub {
-                    subject: subscription.subject.as_str(),
-                    queue_group: subscription.queue_group.as_deref(),
+                    subject: &subscription.subject,
+                    queue_group: subscription.queue_group.as_ref().map(AsRef::as_ref),
                     sid: *sid,
                 },
             )?;
