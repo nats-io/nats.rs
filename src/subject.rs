@@ -144,7 +144,7 @@ impl Subject {
     /// Get the nth token of the subject.
     ///
     /// Returns `None` if there are not enough tokens.
-    pub fn get(&self, idx: usize) -> Option<&Token> {
+    pub fn get_token(&self, idx: usize) -> Option<&Token> {
         self.tokens().nth(idx)
     }
     /// Get a sub-subject from the subject.
@@ -250,20 +250,6 @@ impl SubjectBuf {
     pub fn into_inner(self) -> String {
         self.0
     }
-    /// The subject as `&str`.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-    /// Check if two subjects match, considering wildcards.
-    pub fn matches(&self, other: &Subject) -> bool {
-        self.as_ref().matches(other)
-    }
-    /// Iterate over the subject's [`Token`]s.
-    pub fn tokens(&self) -> Tokens {
-        Tokens {
-            remaining_subject: &self.0,
-        }
-    }
     /// Append a token.
     pub fn join(mut self, token: &Token) -> Result<Self, Error> {
         if self.0.ends_with(MULTI_WILDCARD_CHAR) {
@@ -280,12 +266,6 @@ impl SubjectBuf {
     pub fn join_str(self, token: &str) -> Result<Self, Error> {
         let token = Token::new(token)?;
         self.join(token)
-    }
-    /// Check if the subject contains any wildcards.
-    ///
-    /// _Note:_ You can't publish to a subject that contains a wildcard.
-    pub fn contains_wildcards(&self) -> bool {
-        self.as_ref().contains_wildcards()
     }
 }
 
@@ -334,7 +314,7 @@ impl Deref for SubjectBuf {
     type Target = Subject;
 
     fn deref(&self) -> &Self::Target {
-        Subject::new_unchecked(self.as_str())
+        Subject::new_unchecked(&self.0)
     }
 }
 
