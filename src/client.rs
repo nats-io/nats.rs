@@ -38,9 +38,9 @@ const BUF_CAPACITY: usize = 32 * 1024;
 ///     first and released after when both are used.
 ///     Failure to follow this strict rule WILL create
 ///     a deadlock!
-struct State {
+pub(crate) struct State {
     write: Mutex<WriteState>,
-    read: Mutex<ReadState>,
+    pub(crate) read: Mutex<ReadState>,
     meta: Mutex<MetaState>,
 }
 
@@ -69,9 +69,9 @@ struct WriteState {
     next_sid: u64,
 }
 
-struct ReadState {
+pub(crate) struct ReadState {
     /// Current subscriptions.
-    subscriptions: HashMap<u64, Subscription>,
+    pub(crate) subscriptions: HashMap<u64, Subscription>,
 
     /// Expected pongs and their notification channels.
     pongs: VecDeque<channel::Sender<()>>,
@@ -87,18 +87,20 @@ struct ReadState {
 pub(crate) type Preprocessor = Box<dyn Fn(u64, &Message) -> bool + Send + Sync>;
 
 /// A registered subscription.
-struct Subscription {
+pub(crate) struct Subscription {
     subject: String,
     queue_group: Option<String>,
     messages: channel::Sender<Message>,
     preprocess: Preprocessor,
+    pub(crate) pending_messages_limit: Option<usize>,
+    pub(crate) dropped_messages: usize,
 }
 
 /// A NATS client.
 #[derive(Clone)]
 pub struct Client {
     /// Shared client state.
-    state: Arc<State>,
+    pub(crate) state: Arc<State>,
 
     /// Server info provided by the last INFO message.
     pub(crate) server_info: Arc<Mutex<ServerInfo>>,
@@ -438,6 +440,8 @@ impl Client {
                 queue_group: queue_group.map(ToString::to_string),
                 messages: sender,
                 preprocess: message_processor,
+                pending_messages_limit: None,
+                dropped_messages: 0,
             },
         );
 
@@ -878,7 +882,7 @@ impl Client {
                         continue;
                     }
 
-                    let read = self.state.read.lock();
+                    let mut read = self.state.read.lock();
 
                     // Send the message to matching subscription.
                     if let Some(subscription) = read.subscriptions.get(&sid) {
@@ -896,6 +900,26 @@ impl Client {
                         let preprocess = &subscription.preprocess;
                         if preprocess(sid, &msg) {
                             continue;
+                        }
+
+                        //check if subscription has set limits for slow consumers
+                        if let Some(pending_messages_limit) = subscription.pending_messages_limit {
+                            if pending_messages_limit <= subscription.messages.len() {
+                                connector.get_options().error_callback.call(
+                                    self,
+                                    io::Error::new(
+                                        ErrorKind::Other,
+                                        format!(
+                                            "slow consumer detected for subscription on subject {}. dropping messages",
+                                            subscription.subject
+                                        ),
+                                    ),
+                                );
+                                read.subscriptions
+                                    .entry(sid)
+                                    .and_modify(|sub| sub.dropped_messages += 1);
+                                continue;
+                            }
                         }
 
                         // Send a message or drop it if the channel is
@@ -935,6 +959,23 @@ impl Client {
                             continue;
                         }
 
+                        //check if subscription has set limits for slow consumers
+                        if let Some(pending_messages_limit) = subscription.pending_messages_limit {
+                            if pending_messages_limit <= subscription.messages.len() {
+                                connector.get_options().error_callback.call(
+                                    self,
+                                    io::Error::new(
+                                        ErrorKind::Other,
+                                        format!(
+                                            "slow consumer detected for subscription on subject {}. dropping messages",
+                                            subscription.subject
+                                        ),
+                                    ),
+                                );
+                                println!("reached slow consumers");
+                                continue;
+                            }
+                        }
                         // Send a message or drop it if the channel is
                         // disconnected or full.
                         subscription.messages.send(msg).unwrap();
