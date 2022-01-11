@@ -113,6 +113,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
+mod pull_subscription;
 mod push_subscription;
 mod types;
 
@@ -123,6 +124,8 @@ use crate::{
     header::{self, HeaderMap},
     Connection, Message,
 };
+
+use self::pull_subscription::PullSubscription;
 
 /// `JetStream` options
 #[derive(Clone)]
@@ -691,6 +694,120 @@ impl JetStream {
     /// ```
     pub fn subscribe(&self, subject: &str) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject, None, None)
+    }
+
+    /// Creates a pull subscription.
+    ///
+    /// # Example
+    /// ```
+    /// # use nats::jetstream::BatchOptions;
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// #
+    /// # context.add_stream("next")?;
+    /// # for _ in 0..10 {
+    ///   context.publish("next", b"foo")?;
+    /// }
+    /// let consumer = context.pull_subscribe("next")?;
+    ///
+    /// consumer.fetch_with_handler(10, |message| {
+    ///     println!("received message: {:?}", message);
+    ///     Ok(())
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pull_subscribe(&self, subject: &str) -> io::Result<PullSubscription> {
+        self.do_pull_subscribe(subject, None)
+    }
+
+    /// Creates a `PullSubscription` with options.
+    pub fn pull_subscribe_with_options(
+        &self,
+        subject: &str,
+        options: &PullSubscibeOptions,
+    ) -> io::Result<PullSubscription> {
+        self.do_pull_subscribe(subject, Some(options))
+    }
+
+    pub(crate) fn do_pull_subscribe(
+        &self,
+        subject: &str,
+        maybe_options: Option<&PullSubscibeOptions>,
+    ) -> io::Result<PullSubscription> {
+        // Find the stream mapped to the subject if not bound to a stream already.
+        let stream_name = maybe_options
+            .and_then(|options| options.stream_name.to_owned())
+            .map_or_else(|| self.stream_name_by_subject(subject), Ok)?;
+
+        let maybe_durable_consumer =
+            maybe_options.and_then(|options| options.durable_name.to_owned());
+
+        let process_consumer_info = |info: ConsumerInfo| {
+            // run the standard validation for pull consumer.
+            info.config.validate_for(&ConsumerKind::Pull)?;
+
+            // check mismatches between user config and info
+
+            // Make sure this new subject matches or is a subset.
+            if !info.config.filter_subject.is_empty() && subject != info.config.filter_subject {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "subjects do not match",
+                ));
+            }
+
+            Ok(info)
+        };
+
+        // check if this subscription is bind only. If not, create a new Pull Consumer
+        let (consumer_info, consumer_ownership) = {
+            if let Some(durable_name) = maybe_durable_consumer {
+                // bind to consumer
+                match self.consumer_info(stream_name, durable_name) {
+                    Ok(info) => (info, ConsumerOwnership::No),
+                    Err(err) => {
+                        return Err(io::Error::new(
+                            ErrorKind::NotFound,
+                            format!("provided durable consumer doesn't exist: {}", err),
+                        ));
+                    }
+                }
+            } else {
+                // create ephemeral consumer
+                let consumer_config = {
+                    maybe_options
+                        .and_then(|options| options.consumer_config.clone())
+                        .unwrap_or_else(|| ConsumerConfig {
+                            deliver_policy: DeliverPolicy::All,
+                            ack_policy: AckPolicy::Explicit,
+                            // Do filtering always, server will clear as needed.
+                            filter_subject: subject.to_string(),
+                            replay_policy: ReplayPolicy::Instant,
+                            ..Default::default()
+                        })
+                };
+                consumer_config.validate_for(&ConsumerKind::Pull)?;
+                (
+                    self.add_consumer(stream_name, consumer_config)?,
+                    ConsumerOwnership::Yes,
+                )
+            }
+        };
+        let consumer_info = process_consumer_info(consumer_info)?;
+
+        let inbox = self.connection.new_inbox();
+        let (pid, messages) = self.connection.0.client.subscribe(inbox.as_str(), None)?;
+
+        Ok(PullSubscription::new(
+            pid,
+            consumer_info,
+            consumer_ownership,
+            inbox,
+            messages,
+            self.clone(),
+        ))
     }
 
     /// Creates a push consumer subscription with options.

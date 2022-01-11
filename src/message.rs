@@ -115,6 +115,30 @@ impl Message {
         false
     }
 
+    /// Determine if a message is `404 No Messages`.
+    pub(crate) fn is_no_messages(&self) -> bool {
+        if let Some(hdrs) = &self.headers {
+            if let Some(set) = hdrs.get(header::STATUS) {
+                if set.get("404").is_some() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // Determine if a message is `408 Request Timeout`.
+    pub(crate) fn is_request_timeout(&self) -> bool {
+        if let Some(hdrs) = &self.headers {
+            if let Some(set) = hdrs.get(header::STATUS) {
+                if set.get("408").is_some() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     // Helper for detecting flow control messages.
     pub(crate) fn is_flow_control(&self) -> bool {
         if !self.data.is_empty() {

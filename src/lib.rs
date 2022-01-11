@@ -361,6 +361,9 @@ impl Drop for Inner {
 /// The [`IntoServerList`] trait allows to pass URLs in various different formats. Furthermore, if
 /// you need more control of the connection's parameters use [`Options::connect()`].
 ///
+/// **Warning:** There are asynchronous errors that can happen during operation of NATS client.
+/// To handle them, add handler for [`Options::error_callback()`].
+///
 /// # Examples
 ///
 /// If no scheme is provided the `nats://` scheme is assumed. The default port is `4222`.
