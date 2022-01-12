@@ -293,6 +293,16 @@ fn jetstream_subscribe() {
     assert_eq!(info.config.ack_policy, AckPolicy::Explicit);
     assert_eq!(info.delivered.consumer_seq, 10);
     assert_eq!(info.ack_floor.consumer_seq, 10);
+
+    // publish one more message to check drain behaviour
+    js.publish("foo", payload).unwrap();
+    // check if we still get messages from drain
+    sub.drain().unwrap();
+    assert!(sub.next().is_some());
+
+    // check if we are really unsubscribed and cannot get further messages
+    js.publish("foo", payload).unwrap();
+    assert!(sub.next().is_none());
 }
 
 #[test]
