@@ -270,7 +270,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        self.drain()?;
+        self.0.client.unsubscribe(self.0.sid)?;
         // Discard all queued messages.
         while self.0.messages.try_recv().is_ok() {}
         Ok(())
