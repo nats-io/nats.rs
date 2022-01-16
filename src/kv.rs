@@ -404,6 +404,7 @@ impl Store {
     ///   println!("Found value {:?}", value);
     /// }
     /// #
+    /// # context.delete_key_value("get")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -429,11 +430,12 @@ impl Store {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// # let bucket = context.create_key_value(&Config {
-    /// #  bucket: "get".to_string(),
+    /// #  bucket: "put".to_string(),
     /// #  ..Default::default()
     /// # })?;
     /// #
     /// bucket.put("foo", b"bar")?;
+    /// # context.delete_key_value("put")?;
     /// #
     /// # Ok(())
     /// # }
@@ -470,6 +472,7 @@ impl Store {
     /// bucket.purge("foo")?;
     /// bucket.create("foo", b"bar")?;
     /// #
+    /// # context.delete_key_value("create")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -506,6 +509,7 @@ impl Store {
     /// #
     /// let revision = bucket.put("foo", b"bar")?;
     /// let new_revision = bucket.update("foo", b"baz", revision)?;
+    /// # context.delete_key_value("update")?;
     /// #
     /// # Ok(())
     /// # }
@@ -551,6 +555,8 @@ impl Store {
     /// bucket.create("foo", b"bar")?;
     /// bucket.delete("foo")?;
     /// #
+    /// # context.delete_key_value("delete");
+    /// #
     /// # Ok(())
     /// # }
     /// ```
@@ -594,6 +600,7 @@ impl Store {
     /// #
     /// bucket.create("foo", b"bar")?;
     /// bucket.purge("foo")?;
+    /// # context.delete_key_value("purge")?;
     /// #
     /// # Ok(())
     /// # }
@@ -651,6 +658,7 @@ impl Store {
     /// assert_eq!(keys.next(), Some("foo".to_string()));
     /// assert_eq!(keys.next(), Some("bar".to_string()));
     /// #
+    /// # context.delete_key_value("keys")?;
     /// # Ok(())
     /// # }
     /// ```
