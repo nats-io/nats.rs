@@ -243,6 +243,8 @@ pub type ConnectionOptions = Options;
 #[deprecated(since = "0.17.0", note = "this has been moved to `header::HeaderMap`.")]
 pub type Headers = HeaderMap;
 
+pub use header::HeaderMap;
+
 use std::{
     io::{self, Error, ErrorKind},
     sync::Arc,
@@ -267,7 +269,6 @@ pub use rustls;
 pub use connect::ConnectInfo;
 
 use client::Client;
-use header::HeaderMap;
 use options::AuthStyle;
 use secure_wipe::{SecureString, SecureVec};
 

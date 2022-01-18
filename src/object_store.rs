@@ -24,7 +24,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cmp;
-use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
 use time::serde::rfc3339;
@@ -457,12 +456,7 @@ impl ObjectStore {
 
         let data = serde_json::to_vec(&object_info)?;
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(NATS_ROLLUP.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(ROLLUP_SUBJECT.to_string());
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
         let message = Message::new(&subject, None, data, Some(headers));
 
@@ -560,12 +554,7 @@ impl ObjectStore {
         let data = serde_json::to_vec(&object_info)?;
 
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(NATS_ROLLUP.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(ROLLUP_SUBJECT.to_string());
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
         let message = Message::new(&subject, None, data, Some(headers));
