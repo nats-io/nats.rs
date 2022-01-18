@@ -18,7 +18,7 @@ use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
 use std::mem;
 use std::sync::Arc;
 
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
@@ -108,6 +108,12 @@ pub struct Client {
 
     /// The options that this `Client` was created using.
     pub(crate) options: Arc<Options>,
+
+    /// handler of client thread.
+    pub(crate) client_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
+
+    /// handler of flush thread.
+    pub(crate) flush_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl Client {
@@ -142,6 +148,8 @@ impl Client {
             server_info: Arc::new(Mutex::new(ServerInfo::default())),
             shutdown: Arc::new(Mutex::new(false)),
             options: Arc::new(options),
+            client_thread: Arc::new(Mutex::new(None)),
+            flush_thread: Arc::new(Mutex::new(None)),
         };
 
         let options = client.options.clone();
@@ -155,7 +163,7 @@ impl Client {
         //   broken.
         // - Reading messages from the server and processing them.
         // - Forwarding MSG operations to subscribers.
-        thread::spawn({
+        let handle = thread::spawn({
             let client = client.clone();
             move || {
                 let res = client.run(connector);
@@ -175,6 +183,8 @@ impl Client {
             }
         });
 
+        *client.client_thread.lock() = Some(handle);
+
         channel::select! {
             recv(run_receiver) -> res => {
                 res.expect("client thread has panicked")?;
@@ -184,7 +194,7 @@ impl Client {
         }
 
         // Spawn a thread that periodically flushes buffered messages.
-        thread::spawn({
+        let handle = thread::spawn({
             let client = client.clone();
             move || {
                 // Track last flush/write time.
@@ -199,6 +209,10 @@ impl Client {
 
                 // Wait until at least one message is buffered.
                 loop {
+                    // if client is shutting down, stop periodic flushses.
+                    if client.check_shutdown().is_err() {
+                        break;
+                    }
                     match flush_wanted.recv_timeout(PING_INTERVAL) {
                         Ok(_) => {
                             let since = last.elapsed();
@@ -265,6 +279,7 @@ impl Client {
             }
         });
 
+        *client.flush_thread.lock() = Some(handle);
         Ok(client)
     }
 
@@ -351,6 +366,10 @@ impl Client {
             // NB see locking protocol for state.write and state.read
             drop(read);
             drop(write);
+
+            // wait for the threads.
+            self.client_thread.lock().take().map(JoinHandle::join);
+            self.flush_thread.lock().take().map(JoinHandle::join);
         }
     }
 
