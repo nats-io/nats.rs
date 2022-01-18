@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashSet, io, iter::FromIterator, time::Duration};
+use std::{io, time::Duration};
 
 mod util;
 use nats::jetstream;
@@ -247,10 +247,8 @@ fn jetstream_publish() {
     assert_eq!(
         msg.headers
             .unwrap()
-            .inner
-            .get("Nats-Expected-Last-Subject-Sequence")
-            .unwrap(),
-        &HashSet::from_iter(vec!["1".to_string()])
+            .get("Nats-Expected-Last-Subject-Sequence"),
+        Some(&"1".to_string())
     );
 }
 

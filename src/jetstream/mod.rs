@@ -95,7 +95,7 @@
 //! internally managed consumer resource that gets destroyed when the subscription is dropped.
 //!
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     convert::TryFrom,
     error, fmt,
     fmt::Debug,
@@ -608,48 +608,23 @@ impl JetStream {
             let mut headers = maybe_headers.map_or_else(HeaderMap::default, HeaderMap::clone);
 
             if let Some(v) = options.id.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_MSG_ID.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_MSG_ID, v.to_string());
             }
 
             if let Some(v) = options.expected_last_msg_id.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_LAST_MSG_ID.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_LAST_MSG_ID, v.to_string());
             }
 
             if let Some(v) = options.expected_stream.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_STREAM.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_STREAM, v.to_string());
             }
 
             if let Some(v) = options.expected_last_sequence.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_LAST_SEQUENCE.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_LAST_SEQUENCE, v.to_string());
             }
 
             if let Some(v) = options.expected_last_subject_sequence.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, v.to_string());
             }
 
             Some(headers)
@@ -1330,16 +1305,11 @@ impl JetStream {
                     let maybe_consumer_stalled = message
                         .headers
                         .as_ref()
-                        .and_then(|headers| {
-                            headers
-                                .get(header::NATS_CONSUMER_STALLED)
-                                .map(|set| set.iter().cloned().next())
-                        })
-                        .flatten();
+                        .and_then(|headers| headers.get(header::NATS_CONSUMER_STALLED));
 
                     if let Some(consumer_stalled) = maybe_consumer_stalled {
                         context.connection.try_publish_with_reply_or_headers(
-                            &consumer_stalled,
+                            consumer_stalled,
                             None,
                             None,
                             b"",
@@ -1349,12 +1319,7 @@ impl JetStream {
                     let maybe_consumer_seq = message
                         .headers
                         .as_ref()
-                        .and_then(|headers| {
-                            headers
-                                .get(header::NATS_LAST_CONSUMER)
-                                .map(|set| set.iter().cloned().next())
-                        })
-                        .flatten();
+                        .and_then(|headers| headers.get(header::NATS_LAST_CONSUMER));
 
                     if let Some(consumer_seq) = maybe_consumer_seq {
                         let consumer_seq = consumer_seq.parse::<u64>().unwrap();

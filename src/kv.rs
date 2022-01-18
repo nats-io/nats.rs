@@ -25,7 +25,6 @@ use crate::jetstream::{
 use crate::message::Message;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashSet;
 
 /// Configuration values for key value stores.
 #[derive(Debug, Default)]
@@ -72,14 +71,12 @@ pub enum Operation {
 // Helper to extract key value operation from message headers
 fn kv_operation_from_maybe_headers(maybe_headers: Option<&HeaderMap>) -> Operation {
     if let Some(headers) = maybe_headers {
-        if let Some(set) = headers.get(KV_OPERATION) {
-            if set.get(KV_OPERATION_DELETE).is_some() {
-                return Operation::Delete;
-            }
-
-            if set.get(KV_OPERATION_PURGE).is_some() {
-                return Operation::Purge;
-            }
+        if let Some(op) = headers.get(KV_OPERATION) {
+            return match op.as_str() {
+                KV_OPERATION_DELETE => Operation::Delete,
+                KV_OPERATION_PURGE => Operation::Purge,
+                _ => Operation::Put,
+            };
         }
     }
 
@@ -524,12 +521,10 @@ impl Store {
         subject.push_str(key);
 
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(revision.to_string());
+        headers.insert(
+            header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+            revision.to_string(),
+        );
 
         let message = Message::new(&subject, None, value, Some(headers));
         let publish_ack = self.context.publish_message(&message)?;
@@ -570,12 +565,7 @@ impl Store {
         subject.push_str(key);
 
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(KV_OPERATION.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(KV_OPERATION_DELETE.to_string());
+        headers.insert(KV_OPERATION, KV_OPERATION_DELETE.to_string());
 
         let message = Message::new(&subject, None, b"", Some(headers));
         self.context.publish_message(&message)?;
@@ -615,19 +605,8 @@ impl Store {
         subject.push_str(key);
 
         let mut headers = HeaderMap::default();
-        let purge_entry = headers
-            .inner
-            .entry(KV_OPERATION.to_string())
-            .or_insert_with(HashSet::default);
-
-        purge_entry.insert(KV_OPERATION_PURGE.to_string());
-
-        let rollup_entry = headers
-            .inner
-            .entry(NATS_ROLLUP.to_string())
-            .or_insert_with(HashSet::default);
-
-        rollup_entry.insert(ROLLUP_SUBJECT.to_string());
+        headers.insert(KV_OPERATION, KV_OPERATION_PURGE.to_string());
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
         let message = Message::new(&subject, None, b"", Some(headers));
         self.context.publish_message(&message)?;

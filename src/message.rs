@@ -105,35 +105,32 @@ impl Message {
         if !self.data.is_empty() {
             return false;
         }
-        if let Some(hdrs) = &self.headers {
-            if let Some(set) = hdrs.get(header::STATUS) {
-                if set.get("503").is_some() {
-                    return true;
-                }
+
+        if let Some(headers) = &self.headers {
+            if headers.get(header::STATUS) == Some(&"503".to_string()) {
+                return true;
             }
         }
+
         false
     }
 
     /// Determine if a message is `404 No Messages`.
     pub(crate) fn is_no_messages(&self) -> bool {
-        if let Some(hdrs) = &self.headers {
-            if let Some(set) = hdrs.get(header::STATUS) {
-                if set.get("404").is_some() {
-                    return true;
-                }
+        if let Some(headers) = &self.headers {
+            if headers.get(header::STATUS) == Some(&"404".to_string()) {
+                return true;
             }
         }
+
         false
     }
 
     // Determine if a message is `408 Request Timeout`.
     pub(crate) fn is_request_timeout(&self) -> bool {
-        if let Some(hdrs) = &self.headers {
-            if let Some(set) = hdrs.get(header::STATUS) {
-                if set.get("408").is_some() {
-                    return true;
-                }
+        if let Some(headers) = &self.headers {
+            if headers.get(header::STATUS) == Some(&"408".to_string()) {
+                return true;
             }
         }
         false
@@ -146,20 +143,16 @@ impl Message {
         }
 
         if let Some(headers) = &self.headers {
-            if let Some(set) = headers.get(header::STATUS) {
-                if set.get("100").is_none() {
-                    return false;
-                }
+            if headers.get(header::STATUS) != Some(&"100".to_string()) {
+                return false;
             }
 
-            if let Some(set) = headers.get(header::DESCRIPTION) {
-                if set.get("Flow Control").is_some() {
-                    return true;
-                }
+            if headers.get(header::DESCRIPTION) == Some(&"Flow Control".to_string()) {
+                return true;
+            }
 
-                if set.get("FlowControl Request").is_some() {
-                    return true;
-                }
+            if headers.get(header::DESCRIPTION) == Some(&"FlowControl Request".to_string()) {
+                return true;
             }
         }
 
@@ -173,16 +166,12 @@ impl Message {
         }
 
         if let Some(headers) = &self.headers {
-            if let Some(set) = headers.get(header::STATUS) {
-                if set.get("100").is_none() {
-                    return false;
-                }
+            if headers.get(header::STATUS) != Some(&"100".to_string()) {
+                return false;
             }
 
-            if let Some(set) = headers.get(header::DESCRIPTION) {
-                if set.get("Idle Heartbeat").is_some() {
-                    return true;
-                }
+            if headers.get(header::DESCRIPTION) == Some(&"Idle Heartbeat".to_string()) {
+                return true;
             }
         }
 
