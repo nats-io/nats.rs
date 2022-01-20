@@ -242,6 +242,15 @@ pub struct ConsumerConfig {
     /// Enable idle heartbeat messages
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
+    /// Maximum size of a request batch
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_batch: i64,
+    /// Maximum value for request exiration
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub max_expires: Duration,
+    /// Threshold for ephemeral consumer intactivity
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub inactive_threshold: Duration,
 }
 
 pub(crate) enum ConsumerKind {
