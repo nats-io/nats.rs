@@ -663,7 +663,7 @@ impl JetStream {
         match res {
             ApiResponse::Ok(pub_ack) => Ok(pub_ack),
             ApiResponse::Err { error, .. } => {
-                log::error!(
+                log::debug!(
                     "failed to parse API response: {:?}",
                     std::str::from_utf8(&res_msg.data)
                 );
