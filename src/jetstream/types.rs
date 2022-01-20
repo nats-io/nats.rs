@@ -744,7 +744,8 @@ pub(crate) struct StreamNamesRequest {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub(crate) struct StreamNamesResponse {
-    pub streams: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub streams: Option<Vec<String>>,
 }
 
 /// Options to configure Pull Subsscription

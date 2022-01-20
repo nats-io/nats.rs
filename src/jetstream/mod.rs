@@ -1515,10 +1515,18 @@ impl JetStream {
         let req = serde_json::ser::to_vec(&StreamNamesRequest {
             subject: subject.to_string(),
         })?;
-
         let request_subject = format!("{}STREAM.NAMES", self.api_prefix());
         self.js_request::<StreamNamesResponse>(&request_subject, &req)
-            .map(|res| res.streams.first().unwrap().to_string())
+            .map(|resp| resp.streams)?
+            .map_or_else(
+                || {
+                    Err(io::Error::new(
+                        ErrorKind::NotFound,
+                        "could not find stream for given subject",
+                    ))
+                },
+                |stream| Ok(stream.first().unwrap().to_string()),
+            )
     }
 
     /// List all `JetStream` streams.

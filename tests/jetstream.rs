@@ -703,3 +703,16 @@ fn jetstream_pull_subscribe_ephemeral() {
     consumer.request_batch(1).unwrap();
     consumer.next();
 }
+
+#[test]
+fn jetstream_pull_subscribe_bad_stream() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {}", err))
+        .connect(&s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    js.pull_subscribe("WRONG")
+        .expect_err("expected not found stream for a given subject");
+}
