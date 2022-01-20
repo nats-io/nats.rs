@@ -374,9 +374,13 @@ pub enum ErrorCode {
     ConsumerDeliverCycle = 10081,
     /// Consumer requires ack policy for max ack pending
     ConsumerMaxPendingAckPolicyRequired = 10082,
+    /// JSConsumerMaxRequestBatchNegative consumer max request batch needs to be > 0
+    JSConsumerMaxRequestBatchNegative = 10114,
+    /// JSConsumerMaxRequestExpiresToSmall consumer max request expires needs to be >= 1ms
+    JSConsumerMaxRequestExpiresToSmall = 10115,
     /// Consumer idle heartbeat needs to be >= 100ms
     ConsumerSmallHeartbeat = 10083,
-    /// Consumer in pull mode requires explicit ack policy
+    /// Consumer in pull mode requires ack policy
     ConsumerPullRequiresAck = 10084,
     /// Consumer in pull mode requires a durable name
     ConsumerPullNotDurable = 10085,
