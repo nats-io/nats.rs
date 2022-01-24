@@ -201,7 +201,6 @@ mod connector;
 mod message;
 mod options;
 mod proto;
-mod rfc3339;
 mod secure_wipe;
 mod subscription;
 

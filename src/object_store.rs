@@ -19,7 +19,6 @@ use crate::jetstream::{
     DateTime, DiscardPolicy, JetStream, PushSubscription, StorageType, StreamConfig,
     SubscribeOptions,
 };
-use crate::rfc3339;
 use crate::Message;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -29,6 +28,7 @@ use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
 use time::OffsetDateTime;
+use time::serde::rfc3339;
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";

@@ -14,10 +14,10 @@
 use std::time::Duration;
 
 use crate::header::HeaderMap;
-use crate::rfc3339;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::io;
+use time::serde::rfc3339;
 
 /// A UTC time
 pub type DateTime = time::OffsetDateTime;
@@ -51,8 +51,7 @@ pub struct RawStreamMessage {
     pub headers: Option<String>,
 
     /// The time the message was published.
-    #[serde(rename = "time")]
-    #[serde(with = "rfc3339")]
+    #[serde(rename = "time", with = "rfc3339")]
     pub time: DateTime,
 }
 
