@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::io;
+use std::io::{self, ErrorKind};
 use time::serde::rfc3339;
 
 /// A UTC time
@@ -243,6 +243,43 @@ pub struct ConsumerConfig {
     /// Enable idle heartbeat messages
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
+    /// Maximum size of a request batch
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_batch: i64,
+    /// Maximum value for request exiration
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub max_expires: Duration,
+    /// Threshold for ephemeral consumer intactivity
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub inactive_threshold: Duration,
+}
+
+pub(crate) enum ConsumerKind {
+    Pull,
+}
+
+// TODO: validate consumer
+impl ConsumerConfig {
+    pub(crate) fn validate_for(&self, kind: &ConsumerKind) -> io::Result<()> {
+        match kind {
+            ConsumerKind::Pull => {
+                if self.deliver_subject.is_some() {
+                    return Err(io::Error::new(
+                        ErrorKind::Other,
+                        "pull subscription cannot bind to Push Consumer",
+                    ));
+                }
+                // check ack policies
+                if let AckPolicy::None = self.ack_policy {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "pull subscription cannot have Ack Policy set to None",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl From<&ConsumerConfig> for ConsumerConfig {
@@ -687,9 +724,9 @@ pub struct SequencePair {
     pub stream_seq: u64,
 }
 
-/// for getting next messages for pull based consumers.
+/// Used for next Pull Request for Pull Consumer
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NextRequest {
+pub struct BatchOptions {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
     /// The optional number of nanoseconds that the server will store this next request for
@@ -712,7 +749,46 @@ pub(crate) struct StreamNamesRequest {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub(crate) struct StreamNamesResponse {
-    pub streams: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub streams: Option<Vec<String>>,
+}
+
+/// Options to configure Pull Subsscription
+#[derive(Debug, Default, Clone)]
+pub struct PullSubscibeOptions {
+    pub(crate) stream_name: Option<String>,
+    pub(crate) durable_name: Option<String>,
+    pub(crate) bind_only: bool,
+    pub(crate) consumer_config: Option<ConsumerConfig>,
+}
+
+impl PullSubscibeOptions {
+    /// creates new options
+    pub fn new() -> PullSubscibeOptions {
+        Default::default()
+    }
+
+    /// Binds subscription explicitly to a stream.
+    /// If not specified, stream will be looked up based on the subject provided.
+    pub fn bind_stream(mut self, stream_name: String) -> Self {
+        self.stream_name = Some(stream_name);
+        self.bind_only = true;
+        self
+    }
+
+    /// when creating Pull Subscription to not existing consumer
+    /// Consumer Configuration can be specified
+    /// will apply only if `bind_stream` is not called and consumer doesn't exist.
+    pub fn consumer_config(mut self, consumer_config: ConsumerConfig) -> Self {
+        self.consumer_config = Some(consumer_config);
+        self
+    }
+
+    /// define consumer name
+    pub fn durable_name(mut self, consumer_name: String) -> Self {
+        self.durable_name = Some(consumer_name);
+        self
+    }
 }
 
 /// Options for subscription

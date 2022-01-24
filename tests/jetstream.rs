@@ -293,6 +293,16 @@ fn jetstream_subscribe() {
     assert_eq!(info.config.ack_policy, AckPolicy::Explicit);
     assert_eq!(info.delivered.consumer_seq, 10);
     assert_eq!(info.ack_floor.consumer_seq, 10);
+
+    // publish one more message to check drain behaviour
+    js.publish("foo", payload).unwrap();
+    // check if we still get messages from drain
+    sub.drain().unwrap();
+    assert!(sub.next().is_some());
+
+    // check if we are really unsubscribed and cannot get further messages
+    js.publish("foo", payload).unwrap();
+    assert!(sub.next().is_none());
 }
 
 #[test]
@@ -505,4 +515,204 @@ fn jetstream_ordered() {
         let message = sub.next().unwrap();
         assert_eq!(message.data, (i as i64).to_be_bytes());
     }
+}
+
+#[test]
+fn jetstream_pull_subscribe_fetch() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {}", err))
+        .connect(&s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    js.add_stream(&StreamConfig {
+        name: "TEST".to_string(),
+        subjects: vec!["foo".to_string()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    js.stream_info("TEST").unwrap();
+    js.add_consumer(
+        "TEST",
+        ConsumerConfig {
+            durable_name: Some("CONSUMER".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    for _ in 0..1000 {
+        js.publish("foo", b"lorem").unwrap();
+    }
+
+    let consumer = js
+        .pull_subscribe_with_options(
+            "foo",
+            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+        )
+        .unwrap();
+
+    let batch = consumer.fetch(10).unwrap();
+
+    let mut i = 0;
+    for _ in batch {
+        i += 1;
+    }
+    assert_eq!(i, 10);
+
+    let batch = consumer.fetch(10).unwrap();
+    for _ in batch {
+        i += 1;
+    }
+    assert_eq!(i, 20);
+}
+
+#[test]
+fn jetstream_pull_subscribe_timeout_fetch() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {}", err))
+        .connect(&s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    js.add_stream(&StreamConfig {
+        name: "TEST".to_string(),
+        subjects: vec!["foo".to_string()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    js.stream_info("TEST").unwrap();
+    js.add_consumer(
+        "TEST",
+        ConsumerConfig {
+            durable_name: Some("CONSUMER".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    for _ in 0..15 {
+        js.publish("foo", b"lorem").unwrap();
+    }
+
+    let consumer = js
+        .pull_subscribe_with_options(
+            "foo",
+            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+        )
+        .unwrap();
+
+    let batch = consumer
+        .timeout_fetch(10, Duration::from_millis(100))
+        .unwrap();
+
+    for msg in batch {
+        msg.unwrap().ack().unwrap();
+    }
+
+    let batch = consumer
+        .timeout_fetch(10, Duration::from_millis(100))
+        .unwrap();
+
+    for (j, msg) in batch.enumerate() {
+        if j >= 5 {
+            msg.unwrap_err();
+            break;
+        }
+        msg.unwrap().ack().unwrap();
+    }
+}
+
+#[test]
+fn jetstream_pull_subscribe_fetch_with_handler() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {}", err))
+        .connect(&s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    js.add_stream(&StreamConfig {
+        name: "TEST".to_string(),
+        subjects: vec!["foo".to_string()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    js.stream_info("TEST").unwrap();
+    js.add_consumer(
+        "TEST",
+        ConsumerConfig {
+            durable_name: Some("CONSUMER".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    for _ in 0..15 {
+        js.publish("foo", b"lorem").unwrap();
+    }
+
+    let consumer = js
+        .pull_subscribe_with_options(
+            "foo",
+            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+        )
+        .unwrap();
+
+    let mut i = 0;
+    consumer
+        .fetch_with_handler(10, |_| {
+            i += 1;
+            Ok(())
+        })
+        .unwrap();
+
+    let info = js.consumer_info("TEST", "CONSUMER").unwrap();
+    assert_eq!(info.num_ack_pending, 0);
+    assert_eq!(info.num_pending, 5);
+    assert_eq!(10, i);
+}
+
+#[test]
+fn jetstream_pull_subscribe_ephemeral() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {}", err))
+        .connect(&s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    js.add_stream(&StreamConfig {
+        name: "TEST".to_string(),
+        subjects: vec!["foo".to_string()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    js.stream_info("TEST").unwrap();
+
+    js.publish("foo", b"foo").unwrap();
+
+    let consumer = js.pull_subscribe("foo").unwrap();
+
+    consumer.request_batch(1).unwrap();
+    consumer.next();
+}
+
+#[test]
+fn jetstream_pull_subscribe_bad_stream() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {}", err))
+        .connect(&s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    js.pull_subscribe("WRONG")
+        .expect_err("expected not found stream for a given subject");
 }

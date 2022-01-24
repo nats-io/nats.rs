@@ -230,6 +230,11 @@ fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }
 
+// comment out until we reach MSRV 1.54.0
+// #[doc = include_str!("../docs/migration-guide-0.17.0.md")]
+// #[derive(Copy, Clone)]
+// pub struct Migration0170;
+
 #[doc(hidden)]
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
@@ -360,6 +365,9 @@ impl Drop for Inner {
 ///
 /// The [`IntoServerList`] trait allows to pass URLs in various different formats. Furthermore, if
 /// you need more control of the connection's parameters use [`Options::connect()`].
+///
+/// **Warning:** There are asynchronous errors that can happen during operation of NATS client.
+/// To handle them, add handler for [`Options::error_callback()`].
 ///
 /// # Examples
 ///

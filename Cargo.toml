@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.16.0"
+version = "0.17.0"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
@@ -73,6 +73,7 @@ nats_test_server = { path = "nats_test_server" }
 quicli = "0.4.0"
 smol = "1.2.5"
 structopt = "0.3.21"
+nats_016 = { package = "nats", version = "0.16.0" }
 
 [[bench]]
 name = "nats_bench"
