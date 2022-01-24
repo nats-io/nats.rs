@@ -27,8 +27,8 @@ use std::cmp;
 use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
-use time::OffsetDateTime;
 use time::serde::rfc3339;
+use time::OffsetDateTime;
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
