@@ -19,8 +19,8 @@ use crate::jetstream::{
     DateTime, DiscardPolicy, JetStream, PushSubscription, StorageType, StreamConfig,
     SubscribeOptions,
 };
+use crate::rfc3339;
 use crate::Message;
-use chrono::Utc;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,7 @@ use std::cmp;
 use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
+use time::OffsetDateTime;
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
@@ -213,6 +214,7 @@ pub struct ObjectInfo {
     /// Number of chunks the object is stored in.
     pub chunks: usize,
     /// Date and time the object was last modified.
+    #[serde(with = "rfc3339")]
     pub modified: DateTime,
     /// Digest of the object stream.
     pub digest: String,
@@ -449,7 +451,7 @@ impl ObjectStore {
             chunks: object_chunks,
             size: object_size,
             digest: "".to_string(),
-            modified: Utc::now(),
+            modified: OffsetDateTime::now_utc(),
             deleted: false,
         };
 

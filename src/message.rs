@@ -24,7 +24,7 @@ use crate::{
     header::{self, HeaderMap},
 };
 
-use chrono::*;
+use time::OffsetDateTime;
 
 pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 
@@ -339,8 +339,8 @@ impl Message {
                 stream_seq: try_parse!(),
                 consumer_seq: try_parse!(),
                 published: {
-                    let nanos: i64 = try_parse!();
-                    Utc.timestamp_nanos(nanos)
+                    let nanos: i128 = try_parse!();
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()?
                 },
                 pending: try_parse!(),
                 token: if n_tokens >= 9 {
@@ -361,8 +361,8 @@ impl Message {
                 stream_seq: try_parse!(),
                 consumer_seq: try_parse!(),
                 published: {
-                    let nanos: i64 = try_parse!();
-                    Utc.timestamp_nanos(nanos)
+                    let nanos: i128 = try_parse!();
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()?
                 },
                 pending: try_parse!(),
                 token: None,
