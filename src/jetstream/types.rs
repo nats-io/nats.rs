@@ -17,9 +17,10 @@ use crate::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::io::{self, ErrorKind};
+use time::serde::rfc3339;
 
 /// A UTC time
-pub type DateTime = chrono::DateTime<chrono::Utc>;
+pub type DateTime = time::OffsetDateTime;
 
 #[derive(Serialize)]
 pub(crate) struct StreamMessageGetRequest {
@@ -50,7 +51,7 @@ pub struct RawStreamMessage {
     pub headers: Option<String>,
 
     /// The time the message was published.
-    #[serde(rename = "time")]
+    #[serde(rename = "time", with = "rfc3339")]
     pub time: DateTime,
 }
 
@@ -204,7 +205,7 @@ pub struct ConsumerConfig {
     pub opt_start_seq: Option<u64>,
     /// Used in combination with `DeliverPolicy::ByStartTime` to only select messages arriving
     /// after this time.
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(default, skip_serializing_if = "is_default", with = "rfc3339::option")]
     pub opt_start_time: Option<DateTime>,
     /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
@@ -385,6 +386,7 @@ pub struct StreamInfo {
     /// The configuration associated with this stream
     pub config: StreamConfig,
     /// The time that this stream was created
+    #[serde(with = "rfc3339")]
     pub created: DateTime,
     /// Various metrics associated with this stream
     pub state: StreamState,
@@ -425,10 +427,12 @@ pub struct StreamState {
     /// The lowest sequence number still present in this stream
     pub first_seq: u64,
     /// The time associated with the oldest message still present in this stream
+    #[serde(with = "rfc3339")]
     pub first_ts: DateTime,
     /// The last sequence number assigned to a message in this stream
     pub last_seq: u64,
     /// The time that the last message was received by this stream
+    #[serde(with = "rfc3339")]
     pub last_ts: DateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
@@ -680,6 +684,7 @@ pub struct ConsumerInfo {
     /// The consumer's unique name
     pub name: String,
     /// The time the consumer was created
+    #[serde(with = "rfc3339")]
     pub created: DateTime,
     /// The consumer's configuration
     pub config: ConsumerConfig,
