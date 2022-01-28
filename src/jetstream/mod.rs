@@ -117,6 +117,7 @@ mod pull_subscription;
 mod push_subscription;
 mod types;
 
+pub use pull_subscription::PullSubscription;
 pub use push_subscription::PushSubscription;
 pub use types::*;
 
@@ -124,8 +125,6 @@ use crate::{
     header::{self, HeaderMap},
     Connection, Message,
 };
-
-use self::pull_subscription::PullSubscription;
 
 /// `JetStream` options
 #[derive(Clone)]
