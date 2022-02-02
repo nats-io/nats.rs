@@ -84,6 +84,156 @@ impl PullSubscription {
         }))
     }
 
+    /// Fetch given amount of messages for `PullSubscription` and return Iterator
+    /// to handle them. The returned iterator is blocking, meaning it will wait until
+    /// every message from the batch are processed.
+    /// It can accept either `usize` defined size of the batch, or `BatchOptions` defining
+    /// also `expires` and `no_wait`.
+    /// If `no_wait` will be specified, iterator will also return when there are no more messages
+    /// in the Consumer.
+    ///
+    /// # Example
+    /// ```
+    /// # use nats::jetstream::BatchOptions;
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// #
+    /// # context.add_stream("next")?;
+    /// # for _ in 0..20 {
+    /// #    context.publish("next", "hello")?;
+    /// # }
+    /// let consumer = context.pull_subscribe("next")?;
+    ///
+    /// // pass just number of messages to be fetched
+    /// for message in consumer.fetch(10)? {
+    ///     println!("received message: {:?}", message);
+    /// }
+    ///
+    /// // pass whole `BatchOptions` to fetch
+    /// let messages = consumer.fetch(BatchOptions{
+    ///     expires: None,
+    ///     no_wait: false,
+    ///     batch: 10,
+    /// })?;
+    /// for message in messages {
+    ///     println!("received message {:?}", message);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn fetch<I: IntoFetchOptions>(&self, batch: I) -> io::Result<BatchIter<'_>> {
+        let batch_options = batch.into_fetch_opts();
+        self.request_batch(batch_options)?;
+        Ok(BatchIter {
+            batch_size: batch_options.batch,
+            processed: 0,
+            subscription: self,
+        })
+    }
+
+    /// Fetch given amount of messages for `PullSubscription` and return Iterator
+    /// to handle them. The returned iterator is will retrieve message or wait for new ones for
+    /// a given set of time.
+    /// It will stop when all messages for given batch are processed.
+    /// That can happen if there are no more messages in the stream, or when iterator processed
+    /// number of messages specified in batch.
+    /// It can accept either `usize` defined size of the batch, or `BatchOptions` defining
+    /// also `expires` and `no_wait`.
+    /// If `no_wait` will be specified, iterator will also return when there are no more messages
+    /// in the Consumer.
+    ///
+    /// # Example
+    /// ```
+    /// # use std::time::Duration;
+    /// # use nats::jetstream::BatchOptions;
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// #
+    /// # context.add_stream("next")?;
+    /// # for _ in 0..20 {
+    /// #    context.publish("next", "hello")?;
+    /// # }
+    /// let consumer = context.pull_subscribe("next")?;
+    ///
+    /// // pass just number of messages to be fetched
+    /// for message in consumer.timeout_fetch(10, Duration::from_millis(100))? {
+    ///     println!("received message: {:?}", message);
+    /// }
+    ///
+    /// // pass whole `BatchOptions` to fetch
+    /// let messages = consumer.timeout_fetch(BatchOptions{
+    ///     expires: None,
+    ///     no_wait: false,
+    ///     batch: 10,
+    /// }, Duration::from_millis(100))?;
+    /// for message in messages {
+    ///     println!("received message {:?}", message);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn timeout_fetch<I: IntoFetchOptions>(
+        &self,
+        batch: I,
+        timeout: Duration,
+    ) -> io::Result<TimeoutBatchIter<'_>> {
+        let batch_options = batch.into_fetch_opts();
+        self.request_batch(batch_options)?;
+        Ok(TimeoutBatchIter {
+            timeout,
+            batch_size: batch_options.batch,
+            processed: 0,
+            subscription: self,
+        })
+    }
+
+    /// High level method that fetches given set of messages, processes them in user-provider
+    /// closure and acks them automatically according to `Consumer` `AckPolicy`.
+    ///
+    /// # Example
+    /// ```
+    /// # use nats::jetstream::BatchOptions;
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// #
+    /// # context.add_stream("next")?;
+    /// let consumer = context.pull_subscribe("next")?;
+    ///
+    /// consumer.fetch_with_handler(10, |message| {
+    ///     println!("received message: {:?}", message);
+    ///     Ok(())
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn fetch_with_handler<F, I>(&self, batch: I, mut handler: F) -> io::Result<()>
+    where
+        F: FnMut(&Message) -> io::Result<()>,
+        I: IntoFetchOptions + Copy,
+    {
+        let mut last_message;
+        let consumer_ack_policy = self.0.consumer_ack_policy;
+        let batch = self.fetch(batch)?;
+        for message in batch {
+            handler(&message)?;
+            if consumer_ack_policy != AckPolicy::None {
+                message.ack()?
+            }
+            last_message = Some(message);
+            // if the policy is ack all - optimize and send the ack
+            // after the last message was processed.
+            if consumer_ack_policy == AckPolicy::All {
+                if let Some(last_message) = last_message {
+                    last_message.ack()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// A low level method that should be used only in specific cases.
     /// Pulls next message available for this `PullSubscription`.
     /// This operation is blocking and will indefinately wait for new messages.
@@ -190,111 +340,6 @@ impl PullSubscription {
         }
     }
 
-    /// Fetch given amount of messages for `PullSubscription` and return Iterator
-    /// to handle them. The returned iterator is blocking, meaning it will wait until
-    /// every message from the batch are processed.
-    /// It can accept either `usize` defined size of the batch, or `BatchOptions` defining
-    /// also `expires` and `no_wait`.
-    /// If `no_wait` will be specified, iterator will also return when there are no more messages
-    /// in the Consumer.
-    ///
-    /// # Example
-    /// ```
-    /// # use nats::jetstream::BatchOptions;
-    /// # fn main() -> std::io::Result<()> {
-    /// # let client = nats::connect("demo.nats.io")?;
-    /// # let context = nats::jetstream::new(client);
-    /// #
-    /// # context.add_stream("next")?;
-    /// # for _ in 0..20 {
-    /// #    context.publish("next", "hello")?;
-    /// # }
-    /// let consumer = context.pull_subscribe("next")?;
-    ///
-    /// // pass just number of messages to be fetched
-    /// for message in consumer.fetch(10)? {
-    ///     println!("received message: {:?}", message);
-    /// }
-    ///
-    /// // pass whole `BatchOptions` to fetch
-    /// let messages = consumer.fetch(BatchOptions{
-    ///     expires: None,
-    ///     no_wait: false,
-    ///     batch: 10,
-    /// })?;
-    /// for message in messages {
-    ///     println!("received message {:?}", message);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn fetch<I: IntoFetchOptions>(&self, batch: I) -> io::Result<BatchIter<'_>> {
-        let batch_options = batch.into_fetch_opts();
-        self.request_batch(batch_options)?;
-        Ok(BatchIter {
-            batch_size: batch_options.batch,
-            processed: 0,
-            subscription: self,
-        })
-    }
-
-    /// Fetch given amount of messages for `PullSubscription` and return Iterator
-    /// to handle them. The returned iterator is will retrieve message or wait for new ones for
-    /// a given set of time.
-    /// It will stop when all messages for given batch are processed.
-    /// That can happen if there are no more messages in the stream, or when iterator processed
-    /// number of messages specified in batch.
-    /// It can accept either `usize` defined size of the batch, or `BatchOptions` defining
-    /// also `expires` and `no_wait`.
-    /// If `no_wait` will be specified, iterator will also return when there are no more messages
-    /// in the Consumer.
-    ///
-    /// # Example
-    /// ```
-    /// # use std::time::Duration;
-    /// # use nats::jetstream::BatchOptions;
-    /// # fn main() -> std::io::Result<()> {
-    /// # let client = nats::connect("demo.nats.io")?;
-    /// # let context = nats::jetstream::new(client);
-    /// #
-    /// # context.add_stream("next")?;
-    /// # for _ in 0..20 {
-    /// #    context.publish("next", "hello")?;
-    /// # }
-    /// let consumer = context.pull_subscribe("next")?;
-    ///
-    /// // pass just number of messages to be fetched
-    /// for message in consumer.timeout_fetch(10, Duration::from_millis(100))? {
-    ///     println!("received message: {:?}", message);
-    /// }
-    ///
-    /// // pass whole `BatchOptions` to fetch
-    /// let messages = consumer.timeout_fetch(BatchOptions{
-    ///     expires: None,
-    ///     no_wait: false,
-    ///     batch: 10,
-    /// }, Duration::from_millis(100))?;
-    /// for message in messages {
-    ///     println!("received message {:?}", message);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn timeout_fetch<I: IntoFetchOptions>(
-        &self,
-        batch: I,
-        timeout: Duration,
-    ) -> io::Result<TimeoutBatchIter<'_>> {
-        let batch_options = batch.into_fetch_opts();
-        self.request_batch(batch_options)?;
-        Ok(TimeoutBatchIter {
-            timeout,
-            batch_size: batch_options.batch,
-            processed: 0,
-            subscription: self,
-        })
-    }
-
     /// Sends request for another set of messages to Pull Consumer.
     /// This method does not return any messages. It can be used
     /// to have more granular control of how many request and when are sent.
@@ -342,8 +387,10 @@ impl PullSubscription {
         Ok(())
     }
 
-    /// High level method that fetches given set of messages, processes them in user-provider
-    /// closure and acks them automatically according to `Consumer` `AckPolicy`.
+    /// Low level API that should be used with care.
+    /// For standard use cases consider using [`PullSubscription::fetch`] or [`PullSubscription::fetch_with_handler`].
+    /// Returns iterator for Current Subscription.
+    /// As Pull Consumers requires Client to fetch messages, this will yield nothing if explicit [`PullSubscription::request_batch`] was not sent.
     ///
     /// # Example
     /// ```
@@ -353,41 +400,24 @@ impl PullSubscription {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// # context.add_stream("next")?;
-    /// let consumer = context.pull_subscribe("next")?;
     ///
-    /// consumer.fetch_with_handler(10, |message| {
-    ///     println!("received message: {:?}", message);
-    ///     Ok(())
+    /// let consumer = context.pull_subscribe("next")?;
+    /// // request specific number of messages.
+    /// consumer.request_batch(10)?;
+    ///
+    /// // request messages specifying whole config.
+    /// consumer.request_batch(BatchOptions{
+    ///     expires: Some(10000),
+    ///     no_wait: true,
+    ///     batch: 10,
     /// })?;
+    /// for (i, message) in consumer.iter().enumerate() {
+    ///     println!("recieved message: {:?}", message);
+    ///     message.ack()?;
+    /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub fn fetch_with_handler<F, I>(&self, batch: I, mut handler: F) -> io::Result<()>
-    where
-        F: FnMut(&Message) -> io::Result<()>,
-        I: IntoFetchOptions + Copy,
-    {
-        let mut last_message;
-        let consumer_ack_policy = self.0.consumer_ack_policy;
-        let batch = self.fetch(batch)?;
-        for message in batch {
-            handler(&message)?;
-            if consumer_ack_policy != AckPolicy::None {
-                message.ack()?
-            }
-            last_message = Some(message);
-            // if the policy is ack all - optimize and send the ack
-            // after the last message was processed.
-            if consumer_ack_policy == AckPolicy::All {
-                if let Some(last_message) = last_message {
-                    last_message.ack()?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Returns an iterator that will wait endlessly for messages.
     pub fn iter(&self) -> Iter<'_> {
         Iter { subscription: self }
     }
