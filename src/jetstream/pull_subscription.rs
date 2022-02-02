@@ -362,7 +362,6 @@ impl PullSubscription {
     /// # Ok(())
     /// # }
     /// ```
-
     pub fn fetch_with_handler<F, I>(&self, batch: I, mut handler: F) -> io::Result<()>
     where
         F: FnMut(&Message) -> io::Result<()>,
@@ -388,6 +387,7 @@ impl PullSubscription {
         Ok(())
     }
 
+    /// Returns an iterator that will wait endlessly for messages.
     pub fn iter(&self) -> Iter<'_> {
         Iter { subscription: self }
     }
@@ -499,6 +499,7 @@ impl<'a> Iterator for TimeoutBatchIter<'a> {
 /// Trait that allows to set `BatchOptions` in different ways. Currently implemented for `usize`
 /// which allows passing just a message batch number instead of a whole struct.
 pub trait IntoFetchOptions {
+    ///  Converts self into `BatchOptions`
     fn into_fetch_opts(self) -> BatchOptions;
 }
 
