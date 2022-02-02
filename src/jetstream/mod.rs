@@ -116,7 +116,7 @@ const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 /// Pull subscriptions
 pub mod pull_subscription;
 
-/// Pull subscriptions
+/// Push subscriptions
 pub mod push_subscription;
 
 mod types;
