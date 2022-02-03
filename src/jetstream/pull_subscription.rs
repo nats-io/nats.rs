@@ -122,8 +122,8 @@ impl PullSubscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn fetch<I: IntoFetchOptions>(&self, batch: I) -> io::Result<BatchIter<'_>> {
-        let batch_options = batch.into_fetch_opts();
+    pub fn fetch<I: Into<BatchOptions>>(&self, batch: I) -> io::Result<BatchIter<'_>> {
+        let batch_options = batch.into();
         self.request_batch(batch_options)?;
         Ok(BatchIter {
             batch_size: batch_options.batch,
@@ -174,12 +174,12 @@ impl PullSubscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn timeout_fetch<I: IntoFetchOptions>(
+    pub fn timeout_fetch<I: Into<BatchOptions>>(
         &self,
         batch: I,
         timeout: Duration,
     ) -> io::Result<TimeoutBatchIter<'_>> {
-        let batch_options = batch.into_fetch_opts();
+        let batch_options = batch.into();
         self.request_batch(batch_options)?;
         Ok(TimeoutBatchIter {
             timeout,
@@ -212,7 +212,7 @@ impl PullSubscription {
     pub fn fetch_with_handler<F, I>(&self, batch: I, mut handler: F) -> io::Result<()>
     where
         F: FnMut(&Message) -> io::Result<()>,
-        I: IntoFetchOptions + Copy,
+        I: Into<BatchOptions> + Copy,
     {
         let mut last_message;
         let consumer_ack_policy = self.0.consumer_ack_policy;
@@ -366,8 +366,8 @@ impl PullSubscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request_batch<I: IntoFetchOptions>(&self, batch: I) -> io::Result<()> {
-        let batch_opts = batch.into_fetch_opts();
+    pub fn request_batch<I: Into<BatchOptions>>(&self, batch: I) -> io::Result<()> {
+        let batch_opts = batch.into();
 
         let subject = format!(
             "{}CONSUMER.MSG.NEXT.{}.{}",
@@ -526,24 +526,12 @@ impl<'a> Iterator for TimeoutBatchIter<'a> {
     }
 }
 
-/// Trait that allows to set `BatchOptions` in different ways. Currently implemented for `usize`
-/// which allows passing just a message batch number instead of a whole struct.
-pub trait IntoFetchOptions {
-    ///  Converts self into `BatchOptions`
-    fn into_fetch_opts(self) -> BatchOptions;
-}
-
-impl IntoFetchOptions for usize {
-    fn into_fetch_opts(self) -> BatchOptions {
+impl From<usize> for BatchOptions {
+    fn from(batch: usize) -> Self {
         BatchOptions {
-            batch: self,
+            batch,
             expires: None,
             no_wait: false,
         }
-    }
-}
-impl IntoFetchOptions for BatchOptions {
-    fn into_fetch_opts(self) -> BatchOptions {
-        self
     }
 }
