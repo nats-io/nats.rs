@@ -529,6 +529,7 @@ impl<'a> Iterator for TimeoutBatchIter<'a> {
 /// Trait that allows to set `BatchOptions` in different ways. Currently implemented for `usize`
 /// which allows passing just a message batch number instead of a whole struct.
 pub trait IntoFetchOptions {
+    ///  Converts self into `BatchOptions`
     fn into_fetch_opts(self) -> BatchOptions;
 }
 

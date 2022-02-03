@@ -113,12 +113,18 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
-mod pull_subscription;
-mod push_subscription;
+/// Pull subscriptions
+pub mod pull_subscription;
+
+/// Push subscriptions
+pub mod push_subscription;
+
 mod types;
 
-pub use pull_subscription::PullSubscription;
-pub use push_subscription::PushSubscription;
+// We use a fully qualified crate path so these are documented as re-exports.
+pub use crate::jetstream::pull_subscription::PullSubscription;
+pub use crate::jetstream::push_subscription::PushSubscription;
+
 pub use types::*;
 
 use crate::{
