@@ -139,6 +139,52 @@ impl PushSubscription {
         }
     }
 
+    /// Register this subscription in a `crossbeam_channel::Select`
+    /// and return a index that identifies this subscription in the
+    /// `crossbeam_channel::Select::select` result.
+    ///
+    /// This enables selecting/blocking on multiple subscriptions on
+    /// on a single thread.
+    ///
+    /// Note that you can't get a `crossbeam_channel::Receiver` out
+    /// of this object, so you have to use `PushSubscription::try_next`
+    /// to actually receive the message. You can get a None value from
+    /// `PushSubscription::try_next` after `crossbeam_channel::Select::select`
+    /// shows this subscription has a message ready, because some
+    /// processing happens in the `PushSubscription::try_next` function
+    /// (this is also the reason `crossbeam_channel::Receiver` is not exposed).
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// #
+    /// # context.add_stream("register_select_recv");
+    /// # let subscription = context.subscribe("register_select_recv")?;
+    /// let mut sel = crossbeam_channel::Select::new();
+    /// // if, we could get receiver out of this, then we could do
+    /// // let idx = sel.recv(&receiver);
+    /// // but as we can't, this has the same meaning:
+    /// let idx = subscription.register_select_recv(&mut sel);
+    /// let rdy_idx = sel.select().index();
+    /// // if we had registered multiple receivers, we would
+    /// // know which was ready by looking at rdy_idx, but as
+    /// // we only have one:
+    /// assert_eq!(idx, rdy_idx);
+    /// match subscription.try_next() {
+    ///     Some(message) => println!("Received {}", message),
+    ///     None => {}, // Valid result because of internal processing
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn register_select_recv<'a>(&'a self, select: &mut channel::Select<'a>) -> usize {
+        select.recv(&self.0.messages)
+    }
+
     /// Try to get the next non-protocol message, or None if no messages
     /// are present or if the subscription has been unsubscribed
     /// or the connection closed.
