@@ -39,7 +39,7 @@ as well!
 Basic connections, and those with options. The compiler will force these to be correct.
 
 ```rust
-# fn main() -> std::io::Result<()> {
+fn main() -> std::io::Result<()> {
 let nc = nats::connect("demo.nats.io")?;
 
 let nc2 = nats::Options::with_user_pass("derek", "s3cr3t!")
@@ -52,8 +52,8 @@ let nc3 = nats::Options::with_credentials("path/to/my.creds")
 let nc4 = nats::Options::new()
     .add_root_certificate("my-certs.pem")
     .connect("tls://demo.nats.io:4443")?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 <!--
 ### Publish
