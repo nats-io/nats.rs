@@ -1,3 +1,30 @@
+# 0.18.0
+## Overview
+This release focuses mainly around fixes of large changes introduces in 0.17.0, but also improves adds slow consumers support
+and improves header map interface. 
+
+## Breaking Change
+* Add a public convenience interface to header maps by @caspervonb in https://github.com/nats-io/nats.rs/pull/310
+
+## Added
+* Add slow consumers support by @Jarema in https://github.com/nats-io/nats.rs/pull/299
+
+## Changed
+* Replace `chrono` with `time` due to RUSTSEC-2020-0159 by @ShellWowza in https://github.com/nats-io/nats.rs/pull/309
+* Join all connect threads while closing connection by @Jarema in https://github.com/nats-io/nats.rs/pull/305
+
+## Fixed
+* Test server subject matching bug fix by @fdlg in https://github.com/nats-io/nats.rs/pull/221
+* Fix Pull Subscriber visibility by @Jarema in https://github.com/nats-io/nats.rs/pull/313
+* Fix missing export subscription modules by @caspervonb in https://github.com/nats-io/nats.rs/pull/314
+* Check sequence mismatch only for Ordered Consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/317
+
+## New Contributors
+* @ShellWowza made their first contribution in https://github.com/nats-io/nats.rs/pull/309
+* @fdlg made their first contribution in https://github.com/nats-io/nats.rs/pull/221
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/v0.17.0...v0.17.1
+
 # 0.17.0
 ## Overview
 
