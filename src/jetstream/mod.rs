@@ -100,13 +100,13 @@ use std::{
     error, fmt,
     fmt::Debug,
     io::{self, ErrorKind},
+    time::Duration,
 };
 
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -1321,6 +1321,11 @@ impl JetStream {
                         );
                     }
 
+                    // if it is not an ordered consumer, don't handle sequence mismatch.
+                    if is_ordered {
+                        return false;
+                    }
+
                     let maybe_consumer_seq = message
                         .headers
                         .as_ref()
@@ -1334,6 +1339,11 @@ impl JetStream {
                         }
                     }
 
+                    return false;
+                }
+
+                // if it is not an ordered consumer, don't handle sequence mismatch.
+                if !is_ordered {
                     return false;
                 }
 
