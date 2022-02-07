@@ -428,6 +428,81 @@ fn jetstream_queue_subscribe() {
     sub2.unsubscribe().unwrap();
 }
 
+/// this is a regression test for a bug that caused checking sequence mismatch for all push
+/// consumers, not only ordered ones. Because of it, preprocessor tried to recreate the consumer
+/// which resulted in errors and not getting messages.
+#[test]
+fn jetstream_queue_subscribe_no_mismatch_handle() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let con = nats::connect(s.client_url()).unwrap();
+    let jsm = nats::jetstream::new(con);
+
+    jsm.add_stream(StreamConfig {
+        name: "jobs_stream".to_string(),
+        discard: DiscardPolicy::Old,
+        subjects: vec!["waiting_jobs".to_string()],
+        retention: RetentionPolicy::WorkQueue,
+        storage: StorageType::File,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let c = jsm
+        .add_consumer(
+            "jobs_stream",
+            ConsumerConfig {
+                deliver_group: Some("dg".to_string()),
+                durable_name: Some("durable".to_string()),
+                deliver_policy: DeliverPolicy::All,
+                ack_policy: AckPolicy::Explicit,
+                deliver_subject: Some("deliver_subject".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    let job_sub = jsm
+        .queue_subscribe_with_options(
+            "waiting_jobs",
+            "dg",
+            &SubscribeOptions::bind("jobs_stream".to_string(), "durable".to_string())
+                .deliver_subject("deliver_subject".to_string())
+                .ack_explicit()
+                .deliver_all()
+                .replay_instant(),
+        )
+        .unwrap();
+
+    jsm.publish("waiting_jobs", b"foo").unwrap();
+    jsm.publish("waiting_jobs", b"foo").unwrap();
+    let msg = job_sub.next().unwrap();
+    msg.ack().unwrap();
+
+    // simulate disconnection
+    drop(job_sub);
+
+    let job_sub = jsm
+        .queue_subscribe_with_options(
+            "waiting_jobs",
+            "dg",
+            &SubscribeOptions::bind("jobs_stream".to_string(), "durable".to_string())
+                .deliver_subject("deliver_subject".to_string())
+                .ack_explicit()
+                .deliver_all()
+                .replay_instant(),
+        )
+        .unwrap();
+
+    jsm.publish("waiting_jobs", b"foo").unwrap();
+    jsm.publish("waiting_jobs", b"foo").unwrap();
+    // we should got this message if we really do not try to handle sequence mismatch for ordered
+    // consumers
+    let msg = job_sub
+        .next_timeout(Duration::from_millis(100))
+        .expect("should got a message");
+    msg.ack().unwrap();
+}
+
 #[test]
 fn jetstream_flow_control() {
     let s = util::run_server("tests/configs/jetstream.conf");
