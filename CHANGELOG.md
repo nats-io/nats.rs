@@ -1,3 +1,19 @@
+# 0.18.1
+## Overview
+A patch release fixing long durations until `close()` returned. It was introduced in the graceful shutdown of client connection threads in v0.18.0.
+
+Dropping NATS connection was not affected.
+
+## Fixed
+* Fix slow connection closing by @Jarema in https://github.com/nats-io/nats.rs/pull/319
+* Fix close() hang after js.subscribe() is called by @Jarema https://github.com/nats-io/nats.rs/pull/321
+* Fix close() hang after Push Consumer subsription edge case by @Jarema https://github.com/nats-io/nats.rs/pull/323
+
+## Minor
+* Replace custom Into trait with From by @Jarema in https://github.com/nats-io/nats.rs/pull/315
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/v0.18.0...v0.18.1
+
 # 0.18.0
 ## Overview
 This release focuses mainly around fixes of large changes introduces in 0.17.0, but also improves adds slow consumers support
