@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use smol::future::FutureExt;
-use std::io;
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 
 mod util;
 pub use util::*;
@@ -85,4 +88,26 @@ fn async_subscription_drop() -> io::Result<()> {
 
         Ok(())
     })
+}
+
+#[test]
+fn shutdown_responsivness_regression_check() {
+    let s = util::run_basic_server();
+    let conn = nats::Options::new().connect(s.client_url()).unwrap();
+    conn.rtt().unwrap();
+    let now = Instant::now();
+    conn.close();
+    assert!(now.elapsed().le(&Duration::from_secs(5)));
+}
+
+#[test]
+fn drop_responsivness_regression_check() {
+    let s = util::run_basic_server();
+    let now;
+    {
+        let conn = nats::Options::new().connect(s.client_url()).unwrap();
+        conn.rtt().unwrap();
+        now = Instant::now();
+    }
+    assert!(now.elapsed().le(&Duration::from_secs(5)));
 }
