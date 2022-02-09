@@ -147,12 +147,12 @@ impl PushSubscription {
     /// on a single thread.
     ///
     /// Note that you can't get a `crossbeam_channel::Receiver` out
-    /// of this object, so you have to use `PushSubscription::try_next`
+    /// of this object, so you have to use `complete_select_recv`
     /// to actually receive the message. You can get a None value from
-    /// `PushSubscription::try_next` after `crossbeam_channel::Select::select`
+    /// `complete_select_recv` after `crossbeam_channel::Select::select`
     /// shows this subscription has a message ready, because some
-    /// processing happens in the `PushSubscription::try_next` function
-    /// (this is also the reason `crossbeam_channel::Receiver` is not exposed).
+    /// processing happens in the receive function (this is also the
+    /// reason `crossbeam_channel::Receiver` is not exposed).
     ///
     ///
     /// # Example
@@ -165,16 +165,25 @@ impl PushSubscription {
     /// # context.add_stream("register_select_recv");
     /// # let subscription = context.subscribe("register_select_recv")?;
     /// let mut sel = crossbeam_channel::Select::new();
+    ///
     /// // if, we could get receiver out of this, then we could do
     /// // let idx = sel.recv(&receiver);
     /// // but as we can't, this has the same meaning:
     /// let idx = subscription.register_select_recv(&mut sel);
-    /// let rdy_idx = sel.select().index();
+    /// let sel_op = sel.select();
+    /// let rdy_idx = sel_op.index();
+    ///
     /// // if we had registered multiple receivers, we would
     /// // know which was ready by looking at rdy_idx, but as
     /// // we only have one:
     /// assert_eq!(idx, rdy_idx);
-    /// match subscription.try_next() {
+    ///
+    /// // if, we could get receiver out of this, then we could do
+    /// // let res = sel_op.recv(&receiver).ok();
+    /// // but as we can't, this has the same meaning:
+    /// let res = subscription.complete_select_recv(sel_op);
+    ///
+    /// match res {
     ///     Some(message) => println!("Received {}", message),
     ///     None => {}, // Valid result because of internal processing
     /// }
@@ -183,6 +192,22 @@ impl PushSubscription {
     /// ```
     pub fn register_select_recv<'a>(&'a self, select: &mut channel::Select<'a>) -> usize {
         select.recv(&self.0.messages)
+    }
+
+    /// Use this, when `crossbeam_channel::Select::recv` has indicated
+    /// this is ready to receive. For usage look at the example in
+    /// `register_select_recv`.
+    pub fn complete_select_recv<'a>(
+        &'a self,
+        selected_op: channel::SelectedOperation,
+    ) -> Option<Message> {
+        selected_op.recv(&self.0.messages).ok().and_then(|msg| {
+            if self.preprocess(&msg) {
+                None
+            } else {
+                Some(msg)
+            }
+        })
     }
 
     /// Try to get the next non-protocol message, or None if no messages
