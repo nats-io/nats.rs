@@ -343,6 +343,7 @@ impl Client {
         let mut write = self.state.write.lock();
         let mut read = self.state.read.lock();
 
+        write.flush_kicker.send(()).ok();
         // Initiate shutdown process.
         if self.shutdown() {
             // Clear all subscriptions.
