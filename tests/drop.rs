@@ -95,6 +95,10 @@ fn shutdown_responsivness_regression_check() {
     let s = util::run_basic_server();
     let conn = nats::Options::new().connect(s.client_url()).unwrap();
     conn.rtt().unwrap();
+    let sub = conn.subscribe("test").unwrap();
+    conn.publish("test", b"msg").unwrap();
+    sub.next().unwrap();
+
     let now = Instant::now();
     conn.close();
     assert!(now.elapsed().le(&Duration::from_secs(5)));
@@ -110,4 +114,19 @@ fn drop_responsivness_regression_check() {
         now = Instant::now();
     }
     assert!(now.elapsed().le(&Duration::from_secs(5)));
+}
+
+#[test]
+fn close_responsiveness_regression_jetstream() {
+    let (_s, nc, js) = run_basic_jetstream();
+
+    js.add_stream(nats::jetstream::StreamConfig {
+        name: "TEST".to_string(),
+        subjects: vec!["subject".to_string()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    js.subscribe("subject").expect("failed to subscribe");
+    nc.close();
 }
