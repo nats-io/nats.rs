@@ -977,7 +977,6 @@ impl Client {
                                         ),
                                     ),
                                 );
-                                println!("reached slow consumers");
                                 continue;
                             }
                         }
