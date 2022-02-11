@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use nats::jetstream;
 use smol::future::FutureExt;
 use std::{
     io,
@@ -127,6 +128,70 @@ fn close_responsiveness_regression_jetstream() {
     })
     .unwrap();
 
-    js.subscribe("subject").expect("failed to subscribe");
+    for _ in 0..1000 {
+        js.publish("subject", b"foo").unwrap();
+    }
+    let sub = js.subscribe("subject").expect("failed to subscribe");
+    sub.with_process_handler(|_| {
+        println!("message");
+        Ok(())
+    });
+
     nc.close();
+}
+
+#[test]
+fn close_responsiveness_regression_jetstream_complex() {
+    let (_s, conn, jetstream) = run_basic_jetstream();
+
+    jetstream
+        .add_stream(nats::jetstream::StreamConfig {
+            name: "stream10".to_string(),
+            subjects: vec!["subject11".to_string(), "subject12".to_string()],
+            max_msgs_per_subject: 1,
+            storage: nats::jetstream::StorageType::Memory,
+            ..Default::default()
+        })
+        .unwrap();
+
+    for _ in 0..99 {
+        jetstream
+            .publish("subject11", vec![1, 2, 3])
+            .expect("failed to publish");
+        jetstream
+            .publish("subject12", vec![1, 2, 3])
+            .expect("failed to publish");
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    let sub = jetstream
+        .subscribe("subject11")
+        .expect("failed to subscribe");
+
+    let (result_tx, result_rx): (
+        crossbeam_channel::Sender<i32>,
+        crossbeam_channel::Receiver<i32>,
+    ) = crossbeam_channel::bounded(32);
+    sub.clone().with_process_handler(move |msg| {
+        result_tx
+            .send(1)
+            .expect("failed to report back over channel");
+        Ok(())
+    });
+
+    let mut count = 0;
+    loop {
+        crossbeam_channel::select! {
+            recv(result_rx) -> _msg => count += 1,
+            default(std::time::Duration::from_millis(1000)) => {
+                    assert_eq!(count, 1);
+                    break
+            }
+        }
+    }
+
+    if let Err(e) = sub.unsubscribe() {
+        panic!("failed to unsubscribe {:?}", e);
+    }
+    conn.close();
 }

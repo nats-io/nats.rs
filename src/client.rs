@@ -344,6 +344,7 @@ impl Client {
         let mut read = self.state.read.lock();
 
         write.flush_kicker.try_send(()).ok();
+
         // Initiate shutdown process.
         if self.shutdown() {
             // Clear all subscriptions.
@@ -359,13 +360,16 @@ impl Client {
             read.subscriptions.clear();
 
             // Flush the writer in case there are buffered messages.
-            if let Some(writer) = write.writer.as_mut() {
+            if let Some(mut writer) = write.writer.as_mut() {
+                // TODO: for some reason sometimes Push Consumer Subscription cause
+                // `close()` to hang. Sending ping unblocks read_line. Not worth investigating further
+                // this edge case as async client will not have this issue.
+                proto::encode(&mut writer, ClientOp::Ping).ok();
                 writer.flush().ok();
             }
 
             // Wake up all pending flushes.
             read.pongs.clear();
-
             // NB see locking protocol for state.write and state.read
             drop(read);
             drop(write);

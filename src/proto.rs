@@ -66,6 +66,7 @@ fn read_line<R: BufRead + ?Sized>(r: &mut R, buf: &mut [u8]) -> io::Result<usize
             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         };
+
         let (done, len) = {
             if let Some(i) = memchr::memchr(b'\n', available) {
                 (true, i + 1)
