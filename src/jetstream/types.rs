@@ -215,6 +215,9 @@ pub struct ConsumerConfig {
     /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_deliver: i64,
+    // Array of durations representing backoff directive that is used for delivery retries
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub backoff: DurationVec,
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
@@ -252,6 +255,12 @@ pub struct ConsumerConfig {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+}
+
+#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+#[serde(transparent)]
+pub struct DurationVec {
+    pub inner: Vec<Duration>,
 }
 
 pub(crate) enum ConsumerKind {
@@ -649,7 +658,7 @@ pub enum AckKind {
     /// Signals that the message will not be processed now
     /// and processing can move onto the next message, NAK'd
     /// message will be retried.
-    Nak,
+    Nak(Option<Duration>),
     /// When sent before the AckWait period indicates that
     /// work is ongoing and the period should be extended by
     /// another equal to AckWait.
@@ -663,15 +672,16 @@ pub enum AckKind {
     Term,
 }
 
-impl AsRef<[u8]> for AckKind {
-    fn as_ref(&self) -> &[u8] {
+impl AckKind {
+    pub fn to_bytes(&self) -> Vec<u8> {
         use AckKind::*;
         match self {
-            Ack => b"+ACK",
-            Nak => b"-NAK",
-            Progress => b"+WPI",
-            Next => b"+NXT",
-            Term => b"+TERM",
+            Ack => b"+ACK".to_vec(),
+            Nak(None) => b"-NAK".to_vec(),
+            Nak(Some(delay)) => format!("-NAK {}", delay.as_nanos()).into_bytes(),
+            Progress => b"+WPI".to_vec(),
+            Next => b"+NXT".to_vec(),
+            Term => b"+TERM".to_vec(),
         }
     }
 }

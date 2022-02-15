@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Instant;
 use std::{io, time::Duration};
 
 mod util;
@@ -788,4 +789,73 @@ fn jetstream_pull_subscribe_bad_stream() {
 
     js.pull_subscribe("WRONG")
         .expect_err("expected not found stream for a given subject");
+}
+
+#[test]
+fn add_consumer() {
+    let s = util::run_server("tests/configs/jetstream.conf");
+    let con = nats::connect("localhost:4222").unwrap();
+
+    let js = nats::jetstream::new(con);
+
+    js.add_stream(&StreamConfig {
+        name: "TEST".to_string(),
+        subjects: vec!["foo".to_string()],
+        ..Default::default()
+    })
+    .unwrap();
+
+    js.stream_info("TEST").unwrap();
+    js.add_consumer(
+        "TEST",
+        ConsumerConfig {
+            durable_name: Some("CONSUMER".to_string()),
+            backoff: DurationVec {
+                inner: vec![
+                    Duration::from_secs(1),
+                    Duration::from_secs(2),
+                    Duration::from_secs(3),
+                ],
+            },
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // for _ in 0..10 {
+    js.publish("foo", b"data").unwrap();
+    // }
+
+    let consumer = js
+        .subscribe_with_options(
+            "foo",
+            &SubscribeOptions::bind("TEST".to_string(), "CONSUMER".to_string()),
+        )
+        .unwrap();
+
+    let message = consumer.next();
+    let mut now = Instant::now();
+    if let Some(message) = message {
+        // Nak the first message.
+        message.ack_kind(AckKind::Nak(None)).unwrap();
+    }
+    if let Some(message) = consumer.next() {
+        // check if we had to wait defined amount of time before getting redelivery.
+        assert!(now.elapsed().ge(&Duration::from_secs(1)));
+        message.ack_kind(AckKind::Nak(None)).unwrap();
+        now = Instant::now();
+    }
+    if let Some(message) = consumer.next() {
+        // check if we had to wait defined amount of time before getting another redelivery.
+        assert!(now.elapsed().ge(&Duration::from_secs(2)));
+        message
+            .ack_kind(AckKind::Nak(Some(Duration::from_millis(100))))
+            .unwrap();
+        now = Instant::now();
+    }
+    if let Some(message) = consumer.next() {
+        // check if we had to wait defined amount of time before getting another redelivery.
+        assert!(now.elapsed().le(&Duration::from_secs(200)));
+        message.ack().unwrap();
+    }
 }

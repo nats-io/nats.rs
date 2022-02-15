@@ -199,7 +199,7 @@ impl Message {
     ///
     /// Does not check whether this message has already been double-acked.
     pub fn ack_kind(&self, ack_kind: crate::jetstream::AckKind) -> io::Result<()> {
-        self.respond(ack_kind)
+        self.respond(ack_kind.to_bytes())
     }
 
     /// Acknowledge a `JetStream` message and wait for acknowledgement from the server
@@ -241,7 +241,8 @@ impl Message {
             let sub =
                 crate::Subscription::new(sid, ack_reply.to_string(), receiver, client.clone());
 
-            let pub_ret = client.publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
+            let pub_ret =
+                client.publish(original_reply, Some(&ack_reply), None, &ack_kind.to_bytes());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;

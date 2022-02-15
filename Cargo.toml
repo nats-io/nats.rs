@@ -50,13 +50,15 @@ rustls = "0.19.1"
 rustls-native-certs = "0.5.0"
 rustls-pemfile = "0.2.1"
 webpki = "0.21.0"
-serde = { version = "1.0.126", features = ["derive"] }
+serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.64"
-serde_nanos = "0.1.1"
+# serde_nanos = { path = "../serde_nanos" }
+serde_nanos = "0.1"
 serde_repr = "0.1.7"
 memchr = "2.4.0"
 url = "2.2.2"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
+format-bytes = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.98"
