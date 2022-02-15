@@ -792,9 +792,9 @@ fn jetstream_pull_subscribe_bad_stream() {
 }
 
 #[test]
-fn add_consumer() {
+fn jetstream_nak_backoff() {
     let s = util::run_server("tests/configs/jetstream.conf");
-    let con = nats::connect("localhost:4222").unwrap();
+    let con = nats::connect(s.client_url()).unwrap();
 
     let js = nats::jetstream::new(con);
 
