@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use crate::header::{self, HeaderMap};
 use crate::jetstream::{
-    DateTime, Error, ErrorCode, JetStream, PushSubscription, StorageType, StreamConfig, StreamInfo,
-    StreamMessage, SubscribeOptions,
+    DateTime, DiscardPolicy, Error, ErrorCode, JetStream, PushSubscription, StorageType,
+    StreamConfig, StreamInfo, StreamMessage, SubscribeOptions,
 };
 use crate::message::Message;
 use lazy_static::lazy_static;
@@ -190,6 +190,14 @@ impl JetStream {
             ));
         }
 
+        let discard_policy = {
+            if self.connection.is_server_compatible_version(2, 7, 2) {
+                DiscardPolicy::New
+            } else {
+                DiscardPolicy::Old
+            }
+        };
+
         if !is_valid_bucket_name(&config.bucket) {
             return Err(io::Error::new(io::ErrorKind::Other, "invalid bucket name"));
         }
@@ -228,6 +236,7 @@ impl JetStream {
             allow_rollup: true,
             deny_delete: true,
             num_replicas,
+            discard: discard_policy,
             ..Default::default()
         })?;
 
