@@ -217,7 +217,7 @@ pub struct ConsumerConfig {
     pub max_deliver: i64,
     // Array of durations representing backoff directive that is used for delivery retries
     #[serde(default, skip_serializing_if = "is_default")]
-    pub backoff: DurationVec,
+    pub backoff: Vec<Duration>,
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
@@ -255,12 +255,6 @@ pub struct ConsumerConfig {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-}
-
-#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
-#[serde(transparent)]
-pub struct DurationVec {
-    pub inner: Vec<Duration>,
 }
 
 pub(crate) enum ConsumerKind {
