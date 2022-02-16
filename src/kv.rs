@@ -338,7 +338,7 @@ impl Store {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// # let bucket = context.create_key_value(&Config {
-    /// #  bucket: "entry".to_string(),
+    /// #  bucket: "entry_bucket".to_string(),
     /// #  ..Default::default()
     /// # })?;
     /// #
