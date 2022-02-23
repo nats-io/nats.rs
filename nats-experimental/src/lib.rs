@@ -92,7 +92,7 @@ impl ServerInfo {
 #[derive(Clone, Debug)]
 pub enum ServerOp {
     Ok,
-    Info(ServerInfo),
+    Info(Box<ServerInfo>),
     Ping,
     Pong,
     Message {
@@ -161,7 +161,7 @@ impl Connection {
 
                 self.buffer.advance(len + 2);
 
-                return Ok(Some(ServerOp::Info(server_info)));
+                return Ok(Some(ServerOp::Info(Box::new(server_info))));
             }
 
             return Ok(None);
@@ -448,7 +448,7 @@ pub async fn connect<T: ToSocketAddrs>(addr: T) -> Result<Client, io::Error> {
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
-    let client = Client::new(sender.clone(), subscription_context.clone());
+    let client = Client::new(sender.clone(), subscription_context);
 
     tokio::spawn(async move {
         loop {
@@ -475,13 +475,16 @@ pub struct Message {
 }
 
 pub struct Subscriber {
-    sid: u64,
+    _sid: u64,
     receiver: mpsc::Receiver<Message>,
 }
 
 impl Subscriber {
     fn new(sid: u64, receiver: mpsc::Receiver<Message>) -> Subscriber {
-        Subscriber { sid, receiver }
+        Subscriber {
+            _sid: sid,
+            receiver,
+        }
     }
 }
 
