@@ -101,9 +101,7 @@ struct Client {
 
 fn read_line(stream: &mut TcpStream) -> Option<String> {
     fn ends_with_crlf(buf: &[u8]) -> bool {
-        buf.len() >= 2
-            && buf[buf.len() - 2] == b'\r'
-            && buf[buf.len() - 1] == b'\n'
+        buf.len() >= 2 && buf[buf.len() - 2] == b'\r' && buf[buf.len() - 1] == b'\n'
     }
 
     let mut buf = vec![];
@@ -294,8 +292,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 let client_id = max_client_id;
                 next.write_all(server_info(client_id, port).as_bytes())
                     .unwrap();
-                let _unchecked =
-                    next.set_read_timeout(Some(Duration::from_millis(1)));
+                let _unchecked = next.set_read_timeout(Some(Duration::from_millis(1)));
                 clients.insert(
                     client_id,
                     Client {
@@ -323,16 +320,10 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                     continue;
                 }
 
-                if client.has_sent_ping
-                    && client.last_ping.elapsed() > Duration::from_millis(50)
-                {
+                if client.has_sent_ping && client.last_ping.elapsed() > Duration::from_millis(50) {
                     log::trace!("{}: sending ping", client_id);
                     if let Err(err) = client.socket.write_all(b"PING\r\n") {
-                        log::debug!(
-                            "{}: socket error {} caused eviction",
-                            client_id,
-                            err
-                        );
+                        log::debug!("{}: socket error {} caused eviction", client_id, err);
                         to_evict.push(*client_id);
                         continue;
                     }
@@ -341,18 +332,10 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 }
 
                 if let Some(command) = read_line(&mut client.socket) {
-                    log::trace!(
-                        "{}: got command {}",
-                        client.client_id,
-                        &command
-                    );
+                    log::trace!("{}: got command {}", client.client_id, &command);
 
                     let action = client.handle_command(command, hop_ports);
-                    log::trace!(
-                        "{}: causes action {:?}",
-                        client.client_id,
-                        &action
-                    );
+                    log::trace!("{}: causes action {:?}", client.client_id, &action);
 
                     match action {
                         ClientAction::None => {}
@@ -387,24 +370,12 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                                 msg
                             )
                         } else {
-                            format!(
-                                "MSG {} {} {}\r\n{}\r\n",
-                                subject,
-                                sub_id,
-                                msg.len(),
-                                msg
-                            )
+                            format!("MSG {} {} {}\r\n{}\r\n", subject, sub_id, msg.len(), msg)
                         };
                         log::trace!("{}: sending [{}]", client_id, out);
 
-                        if let Err(err) =
-                            client.socket.write_all(&out.as_bytes())
-                        {
-                            log::debug!(
-                                "{}: socket error {} caused eviction",
-                                client_id,
-                                err
-                            );
+                        if let Err(err) = client.socket.write_all(&out.as_bytes()) {
+                            log::debug!("{}: socket error {} caused eviction", client_id, err);
                             to_evict.push(*client_id);
                             continue;
                         }
@@ -433,11 +404,7 @@ enum ClientAction {
 }
 
 impl Client {
-    fn handle_command(
-        &mut self,
-        command: String,
-        hop_ports: bool,
-    ) -> ClientAction {
+    fn handle_command(&mut self, command: String, hop_ports: bool) -> ClientAction {
         let mut parts = command.split(' ');
 
         match parts.next().unwrap() {
@@ -461,8 +428,7 @@ impl Client {
                 ClientAction::None
             }
             "CONNECT" => {
-                let _: ConnectInfo =
-                    serde_json::from_str(parts.next().unwrap()).unwrap();
+                let _: ConnectInfo = serde_json::from_str(parts.next().unwrap()).unwrap();
                 assert_eq!(parts.next(), None);
                 ClientAction::None
             }
@@ -478,25 +444,19 @@ impl Client {
                 ClientAction::None
             }
             "PUB" => {
-                let (subject, reply, len) =
-                    match (parts.next(), parts.next(), parts.next()) {
-                        (Some(subject), Some(reply), Some(len)) => {
-                            (subject, Some(reply), len)
-                        }
-                        (Some(subject), Some(len), None) => {
-                            (subject, None, len)
-                        }
-                        other => panic!("unknown args: {:?}", other),
-                    };
+                let (subject, reply, len) = match (parts.next(), parts.next(), parts.next()) {
+                    (Some(subject), Some(reply), Some(len)) => (subject, Some(reply), len),
+                    (Some(subject), Some(len), None) => (subject, None, len),
+                    other => panic!("unknown args: {:?}", other),
+                };
 
                 assert_eq!(parts.next(), None);
 
-                let next_line =
-                    if let Some(next_line) = read_line(&mut self.socket) {
-                        next_line
-                    } else {
-                        return ClientAction::Evict;
-                    };
+                let next_line = if let Some(next_line) = read_line(&mut self.socket) {
+                    next_line
+                } else {
+                    return ClientAction::Evict;
+                };
 
                 let parsed_len = if let Ok(parsed_len) = len.parse::<usize>() {
                     parsed_len
