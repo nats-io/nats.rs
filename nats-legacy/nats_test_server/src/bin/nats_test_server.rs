@@ -55,10 +55,7 @@ impl Args {
 }
 
 fn main() {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("debug"),
-    )
-    .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
     let args = Args::parse();
     log::info!("starting test server with args {:?}", &args);
