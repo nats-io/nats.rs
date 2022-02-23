@@ -246,11 +246,14 @@ impl Connection {
     pub async fn write_op(&mut self, item: &ClientOp) -> Result<(), io::Error> {
         match item {
             ClientOp::Publish { subject, payload } => {
+                let mut bufi = itoa::Buffer::new();
                 self.stream.write_all(b"PUB ").await?;
                 self.stream.write_all(subject.as_bytes()).await?;
+                self.stream.write_all(b" ").await?;
                 self.stream
-                    .write_all(format!(" {}\r\n", payload.len()).as_bytes())
+                    .write_all(bufi.format(payload.len()).as_bytes())
                     .await?;
+                self.stream.write_all(b"\r\n").await?;
                 self.stream.write_all(payload).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
