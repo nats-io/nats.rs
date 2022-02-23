@@ -374,7 +374,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                         };
                         log::trace!("{}: sending [{}]", client_id, out);
 
-                        if let Err(err) = client.socket.write_all(&out.as_bytes()) {
+                        if let Err(err) = client.socket.write_all(out.as_bytes()) {
                             log::debug!("{}: socket error {} caused eviction", client_id, err);
                             to_evict.push(*client_id);
                             continue;
