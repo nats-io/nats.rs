@@ -24,7 +24,6 @@
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
-//! [`async`]: crate::async
 //!
 //! ## Examples
 //!
