@@ -710,7 +710,7 @@ impl JetStream {
     pub fn pull_subscribe_with_options(
         &self,
         subject: &str,
-        options: &PullSubscibeOptions,
+        options: &PullSubscribeOptions,
     ) -> io::Result<PullSubscription> {
         self.do_pull_subscribe(subject, Some(options))
     }
@@ -718,7 +718,7 @@ impl JetStream {
     pub(crate) fn do_pull_subscribe(
         &self,
         subject: &str,
-        maybe_options: Option<&PullSubscibeOptions>,
+        maybe_options: Option<&PullSubscribeOptions>,
     ) -> io::Result<PullSubscription> {
         // Find the stream mapped to the subject if not bound to a stream already.
         let stream_name = maybe_options
