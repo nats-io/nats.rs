@@ -550,7 +550,7 @@ fn jetstream_pull_subscribe_fetch() {
     let consumer = js
         .pull_subscribe_with_options(
             "foo",
-            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+            &PullSubscribeOptions::new().durable_name("CONSUMER".to_string()),
         )
         .unwrap();
 
@@ -602,7 +602,7 @@ fn jetstream_pull_subscribe_timeout_fetch() {
     let consumer = js
         .pull_subscribe_with_options(
             "foo",
-            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+            &PullSubscribeOptions::new().durable_name("CONSUMER".to_string()),
         )
         .unwrap();
 
@@ -660,7 +660,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
     let consumer = js
         .pull_subscribe_with_options(
             "foo",
-            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+            &PullSubscribeOptions::new().durable_name("CONSUMER".to_string()),
         )
         .unwrap();
 

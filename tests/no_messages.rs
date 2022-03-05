@@ -41,7 +41,7 @@ fn no_messages() {
     let consumer = js
         .pull_subscribe_with_options(
             "foo",
-            &PullSubscibeOptions::new().durable_name("CONSUMER".to_string()),
+            &PullSubscribeOptions::new().durable_name("CONSUMER".to_string()),
         )
         .unwrap();
     let mut batch = consumer
