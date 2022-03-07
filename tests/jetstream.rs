@@ -51,7 +51,11 @@ fn jetstream_publish() {
     // Create the stream using our client API.
     js.add_stream(StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["test".to_string(), "foo".to_string(), "bar".to_string()],
+        subjects: vec![
+            "test".parse().unwrap(),
+            "foo".parse().unwrap(),
+            "bar".parse().unwrap(),
+        ],
         ..Default::default()
     })
     .unwrap();
@@ -250,10 +254,10 @@ fn jetstream_subscribe() {
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
         subjects: vec![
-            "foo".to_string(),
-            "bar".to_string(),
-            "baz".to_string(),
-            "foo.*".to_string(),
+            "foo".parse().unwrap(),
+            "bar".parse().unwrap(),
+            "baz".parse().unwrap(),
+            "foo.*".parse().unwrap(),
         ],
         ..Default::default()
     })
@@ -291,10 +295,10 @@ fn jetstream_subscribe_durable() {
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
         subjects: vec![
-            "foo".to_string(),
-            "bar".to_string(),
-            "baz".to_string(),
-            "foo.*".to_string(),
+            "foo".parse().unwrap(),
+            "bar".parse().unwrap(),
+            "baz".parse().unwrap(),
+            "foo.*".parse().unwrap(),
         ],
         ..Default::default()
     })
@@ -353,10 +357,10 @@ fn jetstream_queue_subscribe() {
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
         subjects: vec![
-            "foo".to_string(),
-            "bar".to_string(),
-            "baz".to_string(),
-            "foo.*".to_string(),
+            "foo".parse().unwrap(),
+            "bar".parse().unwrap(),
+            "baz".parse().unwrap(),
+            "foo.*".parse().unwrap(),
         ],
         ..Default::default()
     })
@@ -416,10 +420,10 @@ fn jetstream_flow_control() {
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
         subjects: vec![
-            "foo".to_string(),
-            "bar".to_string(),
-            "baz".to_string(),
-            "foo.*".to_string(),
+            "foo".parse().unwrap(),
+            "bar".parse().unwrap(),
+            "baz".parse().unwrap(),
+            "foo.*".parse().unwrap(),
         ],
         ..Default::default()
     })
@@ -432,7 +436,7 @@ fn jetstream_flow_control() {
             "foo",
             &SubscribeOptions::new()
                 .durable_name("foo".to_string())
-                .deliver_subject("fs".to_string())
+                .deliver_subject("fs".parse().unwrap())
                 .idle_heartbeat(Duration::from_millis(300))
                 .enable_flow_control(),
         )
@@ -466,10 +470,10 @@ fn jetstream_ordered() {
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
         subjects: vec![
-            "foo".to_string(),
-            "bar".to_string(),
-            "baz".to_string(),
-            "foo.*".to_string(),
+            "foo".parse().unwrap(),
+            "bar".parse().unwrap(),
+            "baz".parse().unwrap(),
+            "foo.*".parse().unwrap(),
         ],
         ..Default::default()
     })

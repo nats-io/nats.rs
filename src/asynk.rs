@@ -300,7 +300,12 @@ impl Connection {
                 let msg = msg.as_ref().to_vec();
                 let inner = self.inner.clone();
                 unblock(move || {
-                    inner.publish_with_reply_or_headers(&subject, reply.as_ref(), headers.as_ref(), msg)
+                    inner.publish_with_reply_or_headers(
+                        &subject,
+                        reply.as_ref(),
+                        headers.as_ref(),
+                        msg,
+                    )
                 })
                 .await
             }

@@ -122,7 +122,7 @@ pub use types::*;
 
 use crate::{
     header::{self, HeaderMap},
-    Connection, Message, Subject, SubjectBuf, AsSubject,
+    AsSubject, Connection, Message, Subject, SubjectBuf,
 };
 
 /// `JetStream` options
@@ -552,7 +552,11 @@ impl JetStream {
     }
 
     /// Publishes a message to `JetStream`
-    pub fn publish(&self, subject: impl AsSubject, data: impl AsRef<[u8]>) -> io::Result<PublishAck> {
+    pub fn publish(
+        &self,
+        subject: impl AsSubject,
+        data: impl AsRef<[u8]>,
+    ) -> io::Result<PublishAck> {
         self.publish_with_options_or_headers(subject.as_subject()?, None, None, data)
     }
 
@@ -593,7 +597,7 @@ impl JetStream {
     /// Publishes a message to `JetStream` with the given options and/or headers.
     pub(crate) fn publish_with_options_or_headers(
         &self,
-        subject: &Subject,
+        subject: impl AsSubject,
         maybe_options: Option<&PublishOptions>,
         maybe_headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
@@ -654,7 +658,7 @@ impl JetStream {
         let maybe_timeout = maybe_options.and_then(|options| options.timeout);
 
         let res_msg = self.connection.request_with_headers_or_timeout(
-            subject,
+            subject.as_subject()?,
             maybe_headers.as_ref(),
             maybe_timeout,
             msg,
@@ -689,8 +693,8 @@ impl JetStream {
     /// println!("Received message {:?}", subscription.next());
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn subscribe(&self, subject: &Subject) -> io::Result<PushSubscription> {
-        self.do_push_subscribe(subject, None, None)
+    pub fn subscribe(&self, subject: impl AsSubject) -> io::Result<PushSubscription> {
+        self.do_push_subscribe(subject.as_subject()?, None, None)
     }
 
     /// Creates a push consumer subscription with options.
@@ -713,10 +717,10 @@ impl JetStream {
     /// ```
     pub fn subscribe_with_options(
         &self,
-        subject: &Subject,
+        subject: impl AsSubject,
         options: &SubscribeOptions,
     ) -> io::Result<PushSubscription> {
-        self.do_push_subscribe(subject, None, Some(options))
+        self.do_push_subscribe(subject.as_subject()?, None, Some(options))
     }
 
     /// Creates a push-based consumer subscription with a queue group.
@@ -738,10 +742,10 @@ impl JetStream {
     /// ```
     pub fn queue_subscribe(
         &self,
-        subject: &Subject,
-        queue: &Subject,
+        subject: impl AsSubject,
+        queue: impl AsSubject,
     ) -> io::Result<PushSubscription> {
-        self.do_push_subscribe(subject, Some(queue), None)
+        self.do_push_subscribe(subject.as_subject()?, Some(queue.as_subject()?), None)
     }
 
     /// Creates a push-based consumer subscription with a queue group and options.
@@ -751,11 +755,15 @@ impl JetStream {
     ///
     pub fn queue_subscribe_with_options(
         &self,
-        subject: &Subject,
-        queue: &Subject,
+        subject: impl AsSubject,
+        queue: impl AsSubject,
         options: &SubscribeOptions,
     ) -> io::Result<PushSubscription> {
-        self.do_push_subscribe(subject, Some(queue), Some(options))
+        self.do_push_subscribe(
+            subject.as_subject()?,
+            Some(queue.as_subject()?),
+            Some(options),
+        )
     }
 
     fn do_push_subscribe(
@@ -765,6 +773,8 @@ impl JetStream {
         maybe_options: Option<&SubscribeOptions>,
     ) -> io::Result<PushSubscription> {
         // If no stream name is specified the subject cannot be empty.
+        // @MattesWhite Note: .is_empty() is from Deref<Target=str> but the constructor actually prevents this invariant
+        // If it is still valid to pass no subject we should cover this differently.
         if subject.is_empty()
             && maybe_options
                 .map(|options| options.stream_name.as_ref())
