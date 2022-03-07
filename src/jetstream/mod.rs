@@ -127,6 +127,10 @@ pub use crate::jetstream::push_subscription::PushSubscription;
 
 pub use types::*;
 
+#[deprecated(note = "Use PullSubscribeOptions instead")]
+#[doc(hidden)]
+pub type PullSubscibeOptions = PullSubscribeOptions;
+
 use crate::{
     header::{self, HeaderMap},
     Connection, Message,
