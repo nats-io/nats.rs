@@ -11,26 +11,22 @@ pub fn account_info(prefix: &str) -> SubjectBuf {
 
 /// Subject for requests to create a new stream.
 pub fn create_stream(prefix: &str, name: &str) -> io::Result<SubjectBuf> {
-    SubjectBuf::new(format!("{}STREAM.CREATE.{}", prefix, name))
-        .map_err(Into::into)
+    SubjectBuf::new(format!("{}STREAM.CREATE.{}", prefix, name)).map_err(Into::into)
 }
 
 /// Subject for requests to update an existing stream.
 pub fn update_stream(prefix: &str, name: &str) -> io::Result<SubjectBuf> {
-    SubjectBuf::new(format!("{}STREAM.UPDATE.{}", prefix, name))
-        .map_err(Into::into)
+    SubjectBuf::new(format!("{}STREAM.UPDATE.{}", prefix, name)).map_err(Into::into)
 }
 
 /// Subject for requests to purge an existing stream.
 pub fn purge_stream(prefix: &str, name: &str) -> io::Result<SubjectBuf> {
-    SubjectBuf::new(format!("{}STREAM.PURGE.{}", prefix, name))
-        .map_err(Into::into)
+    SubjectBuf::new(format!("{}STREAM.PURGE.{}", prefix, name)).map_err(Into::into)
 }
 
 /// Subject for requests to delete an existing stream.
 pub fn delete_stream(prefix: &str, name: &str) -> io::Result<SubjectBuf> {
-    SubjectBuf::new(format!("{}STREAM.DELETE.{}", prefix, name))
-        .map_err(Into::into)
+    SubjectBuf::new(format!("{}STREAM.DELETE.{}", prefix, name)).map_err(Into::into)
 }
 
 /// Subject to requests the names of existing streams.
@@ -62,14 +58,20 @@ pub fn stream_delete_message(prefix: &str, stream: &str) -> SubjectBuf {
 
 /// Subject to requests to create a new consumer for a stream.
 pub fn create_consumer(prefix: &str, stream: &str) -> io::Result<SubjectBuf> {
-    SubjectBuf::new(format!("{}CONSUMER.CREATE.{}", prefix, stream))
-        .map_err(Into::into)
+    SubjectBuf::new(format!("{}CONSUMER.CREATE.{}", prefix, stream)).map_err(Into::into)
 }
 
 /// Subject to requests to create a new durable consumer for a stream.
-pub fn create_durable_consumer(prefix: &str, stream: &str, consumer: &str) -> io::Result<SubjectBuf> {
-    SubjectBuf::new(format!("{}CONSUMER.DURABLE.CREATE.{}.{}", prefix, stream, consumer))
-        .map_err(Into::into)
+pub fn create_durable_consumer(
+    prefix: &str,
+    stream: &str,
+    consumer: &str,
+) -> io::Result<SubjectBuf> {
+    SubjectBuf::new(format!(
+        "{}CONSUMER.DURABLE.CREATE.{}.{}",
+        prefix, stream, consumer
+    ))
+    .map_err(Into::into)
 }
 
 /// Subject to requests to delete a consumer.

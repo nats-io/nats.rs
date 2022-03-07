@@ -1,19 +1,21 @@
 //! Typed implementation of a NATS subject.
 
 use std::{
-    fmt, 
-    str::FromStr, 
-    io, 
+    borrow::Borrow,
+    convert::TryFrom,
+    fmt,
+    hash::{Hash, Hasher},
+    io,
     ops::Deref,
-    hash::{Hash, Hasher}, borrow::Borrow, convert::TryFrom,
+    str::FromStr,
 };
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-lazy_static::lazy_static!{
+lazy_static::lazy_static! {
     /// Wildcard matching a single [`Token`].
     pub static ref SINGLE_WILDCARD: &'static Token = Token::new_unchecked("*");
-    
+
     /// Wildcard matching all following [`Token`]s.
     ///
     /// Only valid as last token of a [`Subject`].
@@ -48,6 +50,12 @@ impl From<Error> for io::Error {
     }
 }
 
+/// Convert something into a [`Subject`].
+pub trait AsSubject {
+    /// Try to represent as a [`Subject`].
+    fn as_subject(&self) -> Result<&Subject, io::Error>;
+}
+
 /// A valid NATS subject.
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq)]
@@ -79,8 +87,8 @@ impl Subject {
     /// definitely constructs a valid subject.
     pub fn new_unchecked(sub: &str) -> &Self {
         // Safety: Subject is #[repr(transparent)] therefore this is okay
-        unsafe { 
-            let ptr = sub as *const _ as *const Self; 
+        unsafe {
+            let ptr = sub as *const _ as *const Self;
             &*ptr
         }
     }
@@ -91,7 +99,7 @@ impl Subject {
             s if s.starts_with(TOKEN_SEPARATOR) || s.ends_with(TOKEN_SEPARATOR) => {
                 Err(Error::SeparatorAtEndOrBeginning)
             }
-            _ => Ok(subject)
+            _ => Ok(subject),
         }?;
         let mut last_was_multi_wildcard = false;
         for token in subject.split(TOKEN_SEPARATOR) {
@@ -231,6 +239,18 @@ impl ToOwned for Subject {
     }
 }
 
+impl AsSubject for Subject {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        Ok(self)
+    }
+}
+
+impl<'s> AsSubject for &'s Subject {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        Ok(self)
+    }
+}
+
 impl SubjectBuf {
     /// Create a new, owned and validated NATS subject.
     pub fn new(subject: String) -> Result<Self, Error> {
@@ -336,6 +356,18 @@ impl Borrow<Subject> for SubjectBuf {
     }
 }
 
+impl AsSubject for SubjectBuf {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        Ok(self.deref())
+    }
+}
+
+impl<'sb> AsSubject for &'sb SubjectBuf {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        Ok(self.deref())
+    }
+}
+
 impl Token {
     /// Constructor for a token.
     ///
@@ -345,7 +377,7 @@ impl Token {
     /// definitely constructs a valid token.
     pub fn new_unchecked(token: &str) -> &Self {
         // Safety: Token is #[repr(transparent)] therefore this is okay
-        unsafe { 
+        unsafe {
             let ptr = token as *const _ as *const Self;
             &*ptr
         }
@@ -369,8 +401,7 @@ impl Token {
     /// Check if two tokens match, considering wildcards.
     pub fn matches(&self, other: &Token) -> bool {
         match (self, other) {
-            (t, _)
-            | (_, t) if t == *MULTI_WILDCARD || t == *SINGLE_WILDCARD => true,
+            (t, _) | (_, t) if t == *MULTI_WILDCARD || t == *SINGLE_WILDCARD => true,
             (l, r) => l == r,
         }
     }
@@ -416,6 +447,30 @@ impl<'s> Iterator for Tokens<'s> {
             let last = std::mem::take(&mut self.remaining_subject);
             Some(Token::new_unchecked(last))
         }
+    }
+}
+
+impl AsSubject for str {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        Subject::new(&self).map_err(Into::into)
+    }
+}
+
+impl<'s> AsSubject for &'s str {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        (*self).as_subject()
+    }
+}
+
+impl AsSubject for String {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        self.as_str().as_subject()
+    }
+}
+
+impl<'s> AsSubject for &'s String {
+    fn as_subject(&self) -> Result<&Subject, io::Error> {
+        (*self).as_subject()
     }
 }
 
@@ -512,7 +567,9 @@ mod test {
     #[test_case("abc.def.ghi.jkl", 1, 2, "def.ghi" => true  ; "two middle")]
     fn sub_subjects(subject: &str, start: usize, end: usize, expect: &str) -> bool {
         let sub = Subject::new(subject).unwrap();
-        sub.sub_subject(start, end).map(|sub| sub.as_str() == expect).unwrap_or(false)
+        sub.sub_subject(start, end)
+            .map(|sub| sub.as_str() == expect)
+            .unwrap_or(false)
     }
 
     #[test]

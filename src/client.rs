@@ -25,11 +25,11 @@ use crossbeam_channel as channel;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
-use crate::{SubjectBuf, Subject};
 use crate::connector::{Connector, NatsStream};
 use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{header::HeaderMap, inject_delay, inject_io_failure, Options, ServerInfo};
+use crate::{Subject, SubjectBuf};
 
 const BUF_CAPACITY: usize = 32 * 1024;
 
@@ -417,7 +417,7 @@ impl Client {
             sid,
             Subscription {
                 subject: subject.to_owned(),
-                queue_group: queue_group.map(|sub | sub.to_owned()),
+                queue_group: queue_group.map(|sub| sub.to_owned()),
                 messages: sender,
                 preprocess: message_processor,
             },
@@ -534,6 +534,18 @@ impl Client {
         // Inject random delays when testing.
         inject_delay();
 
+        if subject.contains_wildcards()
+            || reply_to
+                .as_ref()
+                .map(|reply| reply.contains_wildcards())
+                .unwrap_or(false)
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "when publishing subjects must not contain any wildcards",
+            ));
+        }
+
         let server_info = self.server_info.lock();
         if headers.is_some() && !server_info.headers {
             return Err(Error::new(
@@ -598,23 +610,26 @@ impl Client {
     ///
     /// This only works when the write buffer has enough space to encode the
     /// whole message.
+    ///
+    /// If this operation would block an error with [`io::ErrorKind::WouldBlock`] is returned.
     pub fn try_publish(
         &self,
         subject: &Subject,
         reply_to: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: &[u8],
-    ) -> Option<io::Result<()>> {
+    ) -> io::Result<()> {
         // Check if the client is closed.
         if let Err(e) = self.check_shutdown() {
-            return Some(Err(e));
+            return Err(e);
         }
 
         // Estimate how many bytes the message will consume when written into
         // the stream. We must make a conservative guess: it's okay to
         // overestimate but not to underestimate.
         let sub_len = subject.as_str().len();
-        let mut estimate = 1024 + sub_len + reply_to.map(|_| sub_len).unwrap_or_default() + msg.len();
+        let mut estimate =
+            1024 + sub_len + reply_to.map(|_| sub_len).unwrap_or_default() + msg.len();
         if let Some(headers) = headers {
             estimate += headers
                 .iter()
@@ -637,19 +652,22 @@ impl Client {
             }
         };
 
-        let mut write = self.state.write.try_lock()?;
+        let mut write = self.state.write.try_lock().ok_or(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "Can not acquire write lock",
+        ))?;
 
         match write.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
                 let res = proto::encode(&mut write.buffer, op).and_then(|_| write.buffer.flush());
-                Some(res)
+                res
             }
             Some(mut writer) => {
                 // Check if there's enough space in the buffer to encode the
                 // whole message.
                 if BUF_CAPACITY - writer.buffer().len() < estimate {
-                    return None;
+                    return Err(io::Error::new(io::ErrorKind::WouldBlock, "Buffer to small"));
                 }
 
                 // If connected, write into the writer. This is not going to
@@ -665,7 +683,7 @@ impl Client {
                     let mut read = self.state.read.lock();
                     read.pongs.clear();
                 }
-                Some(res)
+                res
             }
         }
     }

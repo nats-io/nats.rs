@@ -17,13 +17,13 @@
 use std::io;
 use std::time::Duration;
 
-use crate::SubjectBuf;
 use crate::header::{self, HeaderMap};
 use crate::jetstream::{
     DateTime, Error, ErrorCode, JetStream, PushSubscription, StorageType, StreamConfig, StreamInfo,
     StreamMessage, SubscribeOptions,
 };
 use crate::message::Message;
+use crate::SubjectBuf;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
@@ -223,7 +223,10 @@ impl JetStream {
         let stream_info = self.add_stream(&StreamConfig {
             name: format!("KV_{}", config.bucket),
             description: Some(config.description.to_string()),
-            subjects: vec![SubjectBuf::new_unchecked(format!("$KV.{}.>", config.bucket))],
+            subjects: vec![SubjectBuf::new_unchecked(format!(
+                "$KV.{}.>",
+                config.bucket
+            ))],
             max_msgs_per_subject: history,
             max_bytes: config.max_bytes,
             max_age: config.max_age,
@@ -520,7 +523,12 @@ impl Store {
 
         entry.insert(revision.to_string());
 
-        let message = Message::new(self.key_subject(key), None, value.as_ref().to_vec(), Some(headers));
+        let message = Message::new(
+            self.key_subject(key),
+            None,
+            value.as_ref().to_vec(),
+            Some(headers),
+        );
         let publish_ack = self.context.publish_message(&message)?;
 
         Ok(publish_ack.sequence)

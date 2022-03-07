@@ -251,7 +251,7 @@ use regex::Regex;
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
-pub use subject::{Error as SubjectError, Subject, SubjectBuf, Token, Tokens};
+pub use subject::{AsSubject, Error as SubjectError, Subject, SubjectBuf, Token, Tokens};
 pub use subscription::{Handler, Subscription};
 
 /// A re-export of the `rustls` crate used in this crate,
@@ -382,41 +382,58 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub = nc.subscribe(Subject::new("foo")?)?;
+    /// let sub = nc.subscribe("foo")?;
     /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn subscribe(&self, subject: &Subject) -> io::Result<Subscription> {
-        self.do_subscribe(subject, None)
+    pub fn subscribe(&self, subject: impl AsSubject) -> io::Result<Subscription> {
+        self.do_subscribe(subject.as_subject()?, None)
     }
 
     /// Create a queue subscription for the given NATS connection.
     ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let subject = Subject::new("foo")?;
-    /// let queue = Subject::new("production")?;
-    /// let sub = nc.queue_subscribe(subject, queue)?;
+    /// let sub = nc.queue_subscribe("foo", "production")?;
     /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn queue_subscribe(&self, subject: &Subject, queue: &Subject) -> io::Result<Subscription> {
-        self.do_subscribe(subject, Some(queue))
+    pub fn queue_subscribe(
+        &self,
+        subject: impl AsSubject,
+        queue: impl AsSubject,
+    ) -> io::Result<Subscription> {
+        self.do_subscribe(subject.as_subject()?, Some(queue.as_subject()?))
     }
 
     /// Publish a message on the given subject.
     ///
+    /// It is required that the subject does not contain any wildcards else an error is returned.
+    ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// nc.publish(Subject::new("foo")?, "Hello World!")?;
+    /// nc.publish("foo", "Hello World!")?;
     /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn publish(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.publish_with_reply_or_headers(subject, None, None, msg)
+    ///
+    /// # Publish in loop
+    ///
+    /// When `publish()` is called in a loop you should consider turning the subject into a
+    /// [`SubjectBuf`] or [`Subject`]. This way the subject is only validated once.
+    ///
+    /// ```
+    /// use nats::SubjectBuf;
+    ///
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let subject = "foo".parse::<SubjectBuf>()?;
+    /// for _ in 0..5 {
+    ///     nc.publish(subject, "Hello World!")?;
+    /// }
+    /// # Ok::<(), io::Error>(())
+    /// ```
+    pub fn publish(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<()> {
+        self.publish_with_reply_or_headers(subject, None::<&SubjectBuf>, None, msg)
     }
 
     /// Publish a message on the given subject with a reply subject for
@@ -424,23 +441,24 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;
-    /// nc.publish_request(Subject::new("foo")?, reply.as_ref(), "Help me!")?;
-    /// # Ok(())
-    /// # }
+    /// nc.publish_request("foo", reply, "Help me!")?;
+    /// # Ok::<(), io::Error>(())
     /// ```
     pub fn publish_request(
         &self,
-        subject: &Subject,
-        reply: &Subject,
+        subject: impl AsSubject,
+        reply: impl AsSubject,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.0
-            .client
-            .publish(subject, Some(reply), None, msg.as_ref())
+        self.0.client.publish(
+            subject.as_subject()?,
+            Some(reply.as_subject()?),
+            None,
+            msg.as_ref(),
+        )
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -463,14 +481,13 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # nc.subscribe(Subject::new("foo")?)?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// let resp = nc.request(Subject::new("foo")?, "Help me?")?;
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// let resp = nc.request("foo", "Help me?")?;
     /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn request(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        self.request_with_headers_or_timeout(subject, None, None, msg)
+    pub fn request(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+        self.request_with_headers_or_timeout(subject.as_subject()?, None, None, msg)
     }
 
     /// Publish a message on the given subject as a request and receive the
@@ -479,19 +496,18 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # nc.subscribe(Subject::new("foo")?)?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// let resp = nc.request_timeout(Subject::new("foo")?, "Help me?", std::time::Duration::from_secs(2))?;
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// let resp = nc.request_timeout("foo", "Help me?", std::time::Duration::from_secs(2))?;
     /// # Ok::<(), io::Error>(())
     /// ```
     pub fn request_timeout(
         &self,
-        subject: &Subject,
+        subject: impl AsSubject,
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        self.request_with_headers_or_timeout(subject, None, Some(timeout), msg)
+        self.request_with_headers_or_timeout(subject.as_subject()?, None, Some(timeout), msg)
     }
 
     fn request_with_headers_or_timeout(
@@ -530,13 +546,16 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// # nc.subscribe(Subject::new("foo")?)?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
-    /// for msg in nc.request_multi(Subject::new("foo")?, "Help")?.iter().take(1) {}
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// for msg in nc.request_multi("foo", "Help")?.iter().take(1) {}
     /// # Ok::<(), io::Error>(())
     /// ```
-    pub fn request_multi(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<Subscription> {
+    pub fn request_multi(
+        &self,
+        subject: impl AsSubject,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<Subscription> {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
@@ -762,12 +781,17 @@ impl Connection {
     /// ```
     pub fn publish_with_reply_or_headers(
         &self,
-        subject: &Subject,
-        reply: Option<&Subject>,
+        subject: impl AsSubject,
+        reply: Option<&impl AsSubject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.0.client.publish(subject, reply, headers, msg.as_ref())
+        self.0.client.publish(
+            subject.as_subject()?,
+            reply.map(|sub| sub.as_subject()).transpose()?,
+            headers,
+            msg.as_ref(),
+        )
     }
 
     /// Returns the maximum payload size the most recently
@@ -795,16 +819,21 @@ impl Connection {
     }
 
     /// Attempts to publish a message without blocking.
+    ///
+    /// If not possible an error with [`io::ErrorKind::WouldBlock`] is returned.
     #[doc(hidden)]
     pub fn try_publish_with_reply_or_headers(
         &self,
-        subject: &Subject,
-        reply: Option<&Subject>,
+        subject: impl AsSubject,
+        reply: Option<&impl AsSubject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
-    ) -> Option<io::Result<()>> {
-        self.0
-            .client
-            .try_publish(subject, reply, headers, msg.as_ref())
+    ) -> io::Result<()> {
+        self.0.client.try_publish(
+            subject.as_subject()?,
+            reply.map(|sub| sub.as_subject()).transpose()?,
+            headers,
+            msg.as_ref(),
+        )
     }
 }

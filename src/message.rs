@@ -13,15 +13,17 @@
 
 use std::{
     fmt, io,
+    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    }, str::FromStr,
+    },
 };
 
 use crate::{
     client::Client,
-    header::{self, HeaderMap}, SubjectBuf, Token,
+    header::{self, HeaderMap},
+    SubjectBuf, Token,
 };
 
 use chrono::*;
@@ -84,7 +86,7 @@ impl Message {
             data,
             headers,
             client: None,
-            double_acked: Arc::new(AtomicBool::new(false))
+            double_acked: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -229,7 +231,8 @@ impl Message {
             let sub =
                 crate::Subscription::new(sid, ack_reply.to_string(), receiver, client.clone());
 
-            let pub_ret = client.publish(&original_reply, Some(&ack_reply), None, ack_kind.as_ref());
+            let pub_ret =
+                client.publish(&original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -264,20 +267,27 @@ impl Message {
         let n_tokens = reply.tokens().count();
         let mut tokens = reply.tokens().skip(2);
 
-        fn parse_next_token<'i, 's, T, E>(iter: &'i mut impl Iterator<Item = &'s Token>, reply: &'s str) -> Option<T>
+        fn parse_next_token<'i, 's, T, E>(
+            iter: &'i mut impl Iterator<Item = &'s Token>,
+            reply: &'s str,
+        ) -> Option<T>
         where
-            T: FromStr<Err=E>,
+            T: FromStr<Err = E>,
             E: fmt::Display,
         {
-            iter.next()?.as_str().parse().map_err(|e| {
-                log::error!(
-                    "failed to parse jetstream reply \
+            iter.next()?
+                .as_str()
+                .parse()
+                .map_err(|e| {
+                    log::error!(
+                        "failed to parse jetstream reply \
                     subject: {}, error: {}. Is your \
                     nats-server up to date?",
-                    reply,
-                    e
-                );
-            }).ok()
+                        reply,
+                        e
+                    );
+                })
+                .ok()
         }
 
         // now we can try to parse the tokens to individual types. We use an if-else chain instead

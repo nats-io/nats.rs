@@ -16,9 +16,9 @@ use std::io::prelude::*;
 use std::io::{self, Error, ErrorKind};
 use std::str::{self, FromStr};
 
-use crate::{SubjectBuf, Subject};
 use crate::connect::ConnectInfo;
 use crate::{header::HeaderMap, inject_io_failure, ServerInfo};
+use crate::{Subject, SubjectBuf};
 
 /// A protocol operation sent by the server.
 #[derive(Debug)]

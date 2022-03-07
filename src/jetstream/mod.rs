@@ -113,16 +113,16 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
+mod api;
 mod push_subscription;
 mod types;
-mod api;
 
 pub use push_subscription::PushSubscription;
 pub use types::*;
 
 use crate::{
     header::{self, HeaderMap},
-    Connection, Message, SubjectBuf, Subject,
+    Connection, Message, Subject, SubjectBuf, AsSubject,
 };
 
 /// `JetStream` options
@@ -552,18 +552,18 @@ impl JetStream {
     }
 
     /// Publishes a message to `JetStream`
-    pub fn publish(&self, subject: &Subject, data: impl AsRef<[u8]>) -> io::Result<PublishAck> {
-        self.publish_with_options_or_headers(subject, None, None, data)
+    pub fn publish(&self, subject: impl AsSubject, data: impl AsRef<[u8]>) -> io::Result<PublishAck> {
+        self.publish_with_options_or_headers(subject.as_subject()?, None, None, data)
     }
 
     /// Publishes a message to `JetStream` with the given options.
     pub fn publish_with_options(
         &self,
-        subject: &Subject,
+        subject: impl AsSubject,
         data: impl AsRef<[u8]>,
         options: &PublishOptions,
     ) -> io::Result<PublishAck> {
-        self.publish_with_options_or_headers(subject, Some(options), None, data)
+        self.publish_with_options_or_headers(subject.as_subject()?, Some(options), None, data)
     }
 
     /// Publishes a `Message` to `JetStream`.
@@ -706,7 +706,7 @@ impl JetStream {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let js = nats::jetstream::new(nc);
     /// let sub = js.subscribe_with_options(
-    ///     Subject::new("foo")?, 
+    ///     Subject::new("foo")?,
     ///     &SubscribeOptions::bind("existing_stream".to_string(), "existing_consumer".to_string())
     /// )?;
     /// # Ok::<(), std::io::Error>(())
@@ -736,7 +736,11 @@ impl JetStream {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn queue_subscribe(&self, subject: &Subject, queue: &Subject) -> io::Result<PushSubscription> {
+    pub fn queue_subscribe(
+        &self,
+        subject: &Subject,
+        queue: &Subject,
+    ) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject, Some(queue), None)
     }
 
@@ -850,12 +854,14 @@ impl JetStream {
         let process_consumer_info = |info: ConsumerInfo| {
             // Make sure this new subject matches or is a subset.
             match info.config.filter_subject.as_ref() {
-                Some(filter) if subject.matches(&filter) => {},
-                None => {},
-                Some(_) => return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "subject does not match consumer",
-                ))
+                Some(filter) if subject.matches(&filter) => {}
+                None => {}
+                Some(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "subject does not match consumer",
+                    ))
+                }
             }
 
             if let Some(deliver_group) = info.config.deliver_group.as_ref() {
@@ -1224,12 +1230,15 @@ impl JetStream {
                         .flatten();
 
                     if let Some(consumer_stalled) = maybe_consumer_stalled {
-                        context.connection.try_publish_with_reply_or_headers(
-                            Subject::new_unchecked(consumer_stalled),
-                            None,
-                            None,
-                            b"",
-                        );
+                        context
+                            .connection
+                            .try_publish_with_reply_or_headers(
+                                Subject::new_unchecked(consumer_stalled),
+                                Option::<&String>::None,
+                                None,
+                                b"",
+                            )
+                            .ok();
                     }
 
                     let maybe_consumer_seq = message
@@ -1600,11 +1609,7 @@ impl JetStream {
         }
 
         let subject = if let Some(consumer) = config.durable_name.as_ref() {
-            api::create_durable_consumer(
-                self.api_prefix(),
-                stream,
-                consumer
-            )
+            api::create_durable_consumer(self.api_prefix(), stream, consumer)
         } else {
             api::create_consumer(self.api_prefix(), stream)
         }?;
@@ -1639,11 +1644,7 @@ impl JetStream {
             ));
         }
 
-        let subject = api::delete_consumer(
-            self.api_prefix(),
-            stream,
-            consumer
-        )?;
+        let subject = api::delete_consumer(self.api_prefix(), stream, consumer)?;
 
         self.js_request::<DeleteResponse>(&subject, b"")
             .map(|dr| dr.success)

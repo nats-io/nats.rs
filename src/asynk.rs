@@ -98,7 +98,7 @@ use std::time::Duration;
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::{Subject, SubjectBuf, header::HeaderMap};
+use crate::{header::HeaderMap, AsSubject, Subject, SubjectBuf};
 
 /// Connect to a NATS server at the given url.
 ///
@@ -124,29 +124,32 @@ impl Connection {
     }
 
     /// Publishes a message.
-    pub async fn publish(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.publish_with_reply_or_headers(subject, None, None, msg)
+    pub async fn publish(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<()> {
+        self.publish_with_reply_or_headers(subject.as_subject()?, None, None, msg)
             .await
     }
 
     /// Publishes a message with a reply subject.
     pub async fn publish_request(
         &self,
-        subject: &Subject,
-        reply: &Subject,
+        subject: impl AsSubject,
+        reply: impl AsSubject,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        if let Some(res) =
-            self.inner
-                .try_publish_with_reply_or_headers(subject, Some(reply), None, &msg)
-        {
-            return res;
+        let subject = subject.as_subject()?.to_owned();
+        let reply = reply.as_subject()?.to_owned();
+
+        let res = self
+            .inner
+            .try_publish_with_reply_or_headers(&subject, Some(&reply), None, &msg);
+        match res {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                let msg = msg.as_ref().to_vec();
+                let inner = self.inner.clone();
+                unblock(move || inner.publish_request(subject, reply, msg)).await
+            }
+            _ => Ok(()),
         }
-        let subject = subject.to_owned();
-        let reply = reply.to_owned();
-        let msg = msg.as_ref().to_vec();
-        let inner = self.inner.clone();
-        unblock(move || inner.publish_request(&subject, &reply, msg)).await
     }
 
     /// Creates a new unique subject for receiving replies.
@@ -198,10 +201,10 @@ impl Connection {
     }
 
     /// Creates a subscription.
-    pub async fn subscribe(&self, subject: &Subject) -> io::Result<Subscription> {
-        let subject = subject.to_owned();
+    pub async fn subscribe(&self, subject: impl AsSubject) -> io::Result<Subscription> {
+        let subject = subject.as_subject()?.to_owned();
         let inner = self.inner.clone();
-        let inner = unblock(move || inner.subscribe(&subject)).await?;
+        let inner = unblock(move || inner.subscribe(subject)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,
@@ -211,7 +214,11 @@ impl Connection {
     }
 
     /// Creates a queue subscription.
-    pub async fn queue_subscribe(&self, subject: &Subject, queue: &Subject) -> io::Result<Subscription> {
+    pub async fn queue_subscribe(
+        &self,
+        subject: &Subject,
+        queue: &Subject,
+    ) -> io::Result<Subscription> {
         let subject = subject.to_owned();
         let queue = queue.to_owned();
         let inner = self.inner.clone();
@@ -278,21 +285,27 @@ impl Connection {
         headers: Option<&'s HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        if let Some(res) = self
-            .inner
-            .try_publish_with_reply_or_headers(subject, reply, headers, &msg)
-        {
-            return res;
-        }
         let subject = subject.to_owned();
         let reply = reply.map(ToOwned::to_owned);
         let headers = headers.map(HeaderMap::clone);
-        let msg = msg.as_ref().to_vec();
-        let inner = self.inner.clone();
-        unblock(move || {
-            inner.publish_with_reply_or_headers(&subject, reply.as_deref(), headers.as_ref(), msg)
-        })
-        .await
+
+        let res = self.inner.try_publish_with_reply_or_headers(
+            &subject,
+            reply.as_ref(),
+            headers.clone().as_ref(),
+            &msg,
+        );
+        match res {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                let msg = msg.as_ref().to_vec();
+                let inner = self.inner.clone();
+                unblock(move || {
+                    inner.publish_with_reply_or_headers(&subject, reply.as_ref(), headers.as_ref(), msg)
+                })
+                .await
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -433,14 +446,16 @@ impl Message {
                 crate::message::MESSAGE_NOT_BOUND,
             )
         })?;
-        if let Some(res) = client.try_publish(&reply, None, None, msg.as_ref()) {
-            return res;
+        let res = client.try_publish(&reply, None, None, msg.as_ref());
+        match res {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                let client = client.clone();
+                let reply = reply.to_owned();
+                let msg = msg.as_ref().to_vec();
+                unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
+            }
+            _ => Ok(()),
         }
-        // clone only if we have to move the data to the thread
-        let client = client.clone();
-        let reply = reply.to_owned();
-        let msg = msg.as_ref().to_vec();
-        unblock(move || client.publish(&reply, None, None, msg.as_ref())).await
     }
 }
 
