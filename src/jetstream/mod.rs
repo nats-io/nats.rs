@@ -121,6 +121,10 @@ pub use pull_subscription::PullSubscription;
 pub use push_subscription::PushSubscription;
 pub use types::*;
 
+#[deprecated(note = "Use PullSubscribeOptions instead")]
+#[doc(hidden)]
+pub type PullSubscibeOptions = PullSubscribeOptions;
+
 use crate::{
     header::{self, HeaderMap},
     Connection, Message,
