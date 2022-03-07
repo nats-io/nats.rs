@@ -152,7 +152,7 @@ This will attempt to bind to an existing consumer if it exists, otherwise it wil
 
 ## Minimum Supported Rust Version (MSRV)
 
-The minimum supported Rust version is 1.53.0.
+The minimum supported Rust version is 1.58.0.
 
 ## Sync vs Async
 
