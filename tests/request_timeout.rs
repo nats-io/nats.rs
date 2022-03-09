@@ -41,7 +41,7 @@ fn request_timeout() {
     let consumer = js
         .pull_subscribe_with_options(
             "foo",
-            &PullSubscibeOptions::new().bind_stream("TEST".to_string()),
+            &PullSubscribeOptions::new().bind_stream("TEST".to_string()),
         )
         .unwrap();
 

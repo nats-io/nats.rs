@@ -755,16 +755,16 @@ pub(crate) struct StreamNamesResponse {
 
 /// Options to configure Pull Subsscription
 #[derive(Debug, Default, Clone)]
-pub struct PullSubscibeOptions {
+pub struct PullSubscribeOptions {
     pub(crate) stream_name: Option<String>,
     pub(crate) durable_name: Option<String>,
     pub(crate) bind_only: bool,
     pub(crate) consumer_config: Option<ConsumerConfig>,
 }
 
-impl PullSubscibeOptions {
+impl PullSubscribeOptions {
     /// creates new options
-    pub fn new() -> PullSubscibeOptions {
+    pub fn new() -> PullSubscribeOptions {
         Default::default()
     }
 

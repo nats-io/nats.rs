@@ -19,12 +19,11 @@
 //! system for cloud native applications, `IoT` messaging, and microservices
 //! architectures.
 //!
-//! For async API refer to the [`async-nats`] crate.
+//! For async API refer to the [`asynk`] module.
 //!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
-//! [`async-nats`]: https://docs.rs/async-nats
 //!
 //! ## Examples
 //!

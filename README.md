@@ -152,7 +152,7 @@ This will attempt to bind to an existing consumer if it exists, otherwise it wil
 
 ## Minimum Supported Rust Version (MSRV)
 
-The minimum supported Rust version is 1.53.0.
+The minimum supported Rust version is 1.58.0.
 
 ## Sync vs Async
 
@@ -161,28 +161,3 @@ The Rust ecosystem has a diverse set of options for async programming. This clie
 The async interface provided by this library is implemented as just a thin wrapper around its sync interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
 
 <em>*NOTE:* This crate uses thread pool from [blocking crate](https://crates.io/crates/blocking/1.1.0). By default it limits number of threads to 500. It can be ovverided by setting `BLOCKING_MAX_THREADS` environment variable and set between 1 and 10000. Be careful when spinning a lot async operations, as it may drain the thread pool and block foverer until it's reworked</em>
-
-## Features
-The following is a list of features currently supported and planned for the near future.
-
-* [X] Basic Publish/Subscribe
-* [X] Request/Reply - Singelton and Streams
-* [X] Authentication
-  * [X] Token
-  * [X] User/Password
-  * [X] Nkeys
-  * [X] User JWTs (NATS 2.0)
-* [X] Reconnect logic
-* [X] TLS support
-* [X] Direct async support
-* [X] Crates.io listing
-* [x] Header Support
-
-### Miscellaneous TODOs
-* [X] Ping timer
-* [X] msg.respond
-* [X] Drain mode
-* [ ] COW for received messages
-* [X] Sub w/ handler can't do iter()
-* [X] Backup servers for option
-* [X] Travis integration
