@@ -469,9 +469,9 @@ pub async fn connect<T: ToSocketAddrs>(addr: T) -> Result<Client, io::Error> {
 
 #[derive(Debug)]
 pub struct Message {
-    subject: String,
-    reply_to: Option<String>,
-    payload: Bytes,
+    pub subject: String,
+    pub reply_to: Option<String>,
+    pub payload: Bytes,
 }
 
 pub struct Subscriber {
