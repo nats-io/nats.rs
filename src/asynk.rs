@@ -109,7 +109,6 @@ use std::sync::{atomic::AtomicBool, Arc};
 use std::time::Duration;
 
 use blocking::unblock;
-use flume::{Receiver, Sender};
 
 use crate::header::HeaderMap;
 use crate::IntoServerList;
@@ -206,12 +205,7 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
-        let (_closer_tx, closer_rx) = flume::bounded(0);
-        Ok(Subscription {
-            inner: sub,
-            _closer_tx,
-            closer_rx,
-        })
+        Ok(Subscription { inner: sub })
     }
 
     /// Creates a subscription.
@@ -219,12 +213,7 @@ impl Connection {
         let subject = subject.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
-        let (_closer_tx, closer_rx) = flume::bounded(0);
-        Ok(Subscription {
-            inner,
-            _closer_tx,
-            closer_rx,
-        })
+        Ok(Subscription { inner })
     }
 
     /// Creates a queue subscription.
@@ -233,12 +222,7 @@ impl Connection {
         let queue = queue.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
-        let (_closer_tx, closer_rx) = flume::bounded(0);
-        Ok(Subscription {
-            inner,
-            _closer_tx,
-            closer_rx,
-        })
+        Ok(Subscription { inner })
     }
 
     /// Flushes by performing a round trip to the server.
@@ -317,32 +301,18 @@ impl Connection {
 #[derive(Debug)]
 pub struct Subscription {
     inner: crate::Subscription,
-
-    // Dropping this signals to any receivers that the subscription has been closed. These should
-    // be dropped after inner is dropped, so if another thread is currently blocking, the
-    // subscription is closed on that thread.
-    _closer_tx: Sender<()>,
-    closer_rx: Receiver<()>,
 }
 
 impl Subscription {
     /// Gets the next message, or returns `None` if the subscription
     /// has been unsubscribed or the connection is closed.
     pub async fn next(&self) -> Option<Message> {
-        if let Some(msg) = self.inner.try_next() {
-            return Some(msg.into());
-        }
-        let inner = self.inner.clone();
-        let closer = self.closer_rx.clone();
-        let msg = unblock(move || {
-            // If the subscription is dropped, we should stop blocking this thread immediately.
-            flume::Selector::new()
-                .recv(&closer, |_| None)
-                .recv(&inner.receiver(), |msg| msg.ok())
-                .wait()
-        })
-        .await?;
-        Some(msg.into())
+        self.inner
+            .receiver()
+            .recv_async()
+            .await
+            .ok()
+            .map(|msg| msg.into())
     }
 
     /// Try to get the next message, or None if no messages
