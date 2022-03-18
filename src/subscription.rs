@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel as channel;
+use flume as channel;
 
 use crate::client::Client;
 use crate::message::Message;

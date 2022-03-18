@@ -19,7 +19,7 @@ use crate::jetstream::{ConsumerInfo, ConsumerOwnership, JetStream};
 use crate::Message;
 
 use super::{AckPolicy, BatchOptions};
-use crossbeam_channel as channel;
+use flume as channel;
 
 #[derive(Debug)]
 pub(crate) struct Inner {

@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crossbeam_channel as channel;
-use crossbeam_channel::RecvTimeoutError;
+use flume as channel;
+use flume::RecvTimeoutError;
 use parking_lot::Mutex;
 
 use crate::connector::{Connector, NatsStream, ServerAddress};
@@ -187,13 +187,13 @@ impl Client {
 
         *client.client_thread.lock() = Some(handle);
 
-        channel::select! {
-            recv(run_receiver) -> res => {
-                res.expect("client thread has panicked")?;
+        channel::select::Selector::new()
+            .recv(&run_receiver, |res| {
+                res.unwrap().expect("client thread has panicked");
                 unreachable!()
-            }
-            recv(pong_receiver) -> _ => {}
-        }
+            })
+            .recv(&pong_receiver, |_| {})
+            .wait();
 
         // Spawn a thread that periodically flushes buffered messages.
         let handle = thread::spawn({

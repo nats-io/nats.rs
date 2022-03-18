@@ -14,7 +14,7 @@
 mod util;
 use std::time::Duration;
 
-use crossbeam_channel::bounded;
+use flume::bounded;
 pub use util::*;
 
 #[test]

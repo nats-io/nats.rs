@@ -109,7 +109,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use std::time::Duration;
 
 use blocking::unblock;
-use crossbeam_channel::{Receiver, Sender};
+use flume::{Receiver, Sender};
 
 use crate::header::HeaderMap;
 use crate::IntoServerList;
@@ -206,7 +206,7 @@ impl Connection {
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
-        let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        let (_closer_tx, closer_rx) = flume::bounded(0);
         Ok(Subscription {
             inner: sub,
             _closer_tx,
@@ -219,7 +219,7 @@ impl Connection {
         let subject = subject.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.subscribe(&subject)).await?;
-        let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        let (_closer_tx, closer_rx) = flume::bounded(0);
         Ok(Subscription {
             inner,
             _closer_tx,
@@ -233,7 +233,7 @@ impl Connection {
         let queue = queue.to_string();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
-        let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
+        let (_closer_tx, closer_rx) = flume::bounded(0);
         Ok(Subscription {
             inner,
             _closer_tx,
@@ -336,10 +336,10 @@ impl Subscription {
         let closer = self.closer_rx.clone();
         let msg = unblock(move || {
             // If the subscription is dropped, we should stop blocking this thread immediately.
-            crossbeam_channel::select! {
-                recv(closer) -> _ => None,
-                recv(inner.receiver()) -> msg => msg.ok(),
-            }
+            flume::Selector::new()
+                .recv(&closer, |_| None)
+                .recv(&inner.receiver(), |msg| msg.ok())
+                .wait()
         })
         .await?;
         Some(msg.into())

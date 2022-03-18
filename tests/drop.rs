@@ -168,10 +168,7 @@ fn close_responsiveness_regression_jetstream_complex() {
         .subscribe("subject11")
         .expect("failed to subscribe");
 
-    let (result_tx, result_rx): (
-        crossbeam_channel::Sender<i32>,
-        crossbeam_channel::Receiver<i32>,
-    ) = crossbeam_channel::bounded(32);
+    let (result_tx, result_rx): (flume::Sender<i32>, flume::Receiver<i32>) = flume::bounded(32);
     sub.clone().with_process_handler(move |msg| {
         result_tx
             .send(1)
@@ -181,13 +178,12 @@ fn close_responsiveness_regression_jetstream_complex() {
 
     let mut count = 0;
     loop {
-        crossbeam_channel::select! {
-            recv(result_rx) -> _msg => count += 1,
-            default(std::time::Duration::from_millis(1000)) => {
-                    assert_eq!(count, 1);
-                    break
-            }
+        if let Err(_) = result_rx.recv_timeout(std::time::Duration::from_millis(1000)) {
+            assert_eq!(count, 1);
+            break;
         }
+
+        count += 1
     }
 
     if let Err(e) = sub.unsubscribe() {
