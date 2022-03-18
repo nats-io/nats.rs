@@ -189,11 +189,10 @@ impl Client {
 
         channel::select::Selector::new()
             .recv(&run_receiver, |res| {
-                res.unwrap().expect("client thread has panicked");
-                unreachable!()
+                res.expect("client thread has panicked")
             })
-            .recv(&pong_receiver, |_| {})
-            .wait();
+            .recv(&pong_receiver, |_| Ok(()))
+            .wait()?;
 
         // Spawn a thread that periodically flushes buffered messages.
         let handle = thread::spawn({
