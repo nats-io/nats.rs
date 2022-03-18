@@ -75,16 +75,15 @@ impl Subscription {
     /// # nc.publish("foo", "hello")?;
     /// let sub1_ch = sub1.receiver();
     /// let sub2_ch = sub2.receiver();
-    /// crossbeam_channel::select! {
-    ///     recv(sub1_ch) -> msg => {
+    /// flume::select::Selector::new()
+    ///     .recv(&sub1_ch, |msg| {
     ///         println!("Got message from sub1: {:?}", msg);
-    ///         Ok(())
-    ///     }
-    ///     recv(sub2_ch) -> msg => {
+    ///     })
+    ///     .recv(&sub2_ch, |msg| {
     ///         println!("Got message from sub2: {:?}", msg);
-    ///         Ok(())
-    ///     }
-    /// }
+    ///     })
+    ///     .wait();
+    /// Ok(())
     /// # }
     /// ```
     pub fn receiver(&self) -> &channel::Receiver<Message> {
