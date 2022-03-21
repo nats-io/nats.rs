@@ -94,21 +94,14 @@ impl Subject {
     }
     /// Create a new, validated NATS subject.
     pub fn new(subject: &str) -> Result<&Self, Error> {
-        let subject = match subject {
-            s if s.is_empty() => Err(Error::InvalidToken),
-            s if s.starts_with(TOKEN_SEPARATOR) || s.ends_with(TOKEN_SEPARATOR) => {
-                Err(Error::SeparatorAtEndOrBeginning)
-            }
-            _ => Ok(subject),
+        match subject.as_bytes() {
+            b"" => Err(Error::InvalidToken),
+            [b'.', ..] | [.., b'.'] => Err(Error::SeparatorAtEndOrBeginning),
+            s if s.starts_with(b">.") || s.windows(3).any(|win| win == b".>.") => Err(Error::MultiWildcardInMiddle),
+            s if s.iter().any(|b| b" \t\n\r".contains(b)) => Err(Error::InvalidToken),
+            _ => Ok(()),
         }?;
-        let mut last_was_multi_wildcard = false;
-        for token in subject.split(TOKEN_SEPARATOR) {
-            if last_was_multi_wildcard {
-                return Err(Error::MultiWildcardInMiddle);
-            }
-            let token = Token::new(token)?;
-            last_was_multi_wildcard = token == *MULTI_WILDCARD;
-        }
+
         Ok(Self::new_unchecked(subject))
     }
     /// The subject as `&str`.
