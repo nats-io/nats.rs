@@ -87,7 +87,9 @@ impl Subject {
         match subject.as_bytes() {
             b"" => Err(Error::InvalidToken),
             [b'.', ..] | [.., b'.'] => Err(Error::SeparatorAtEndOrBeginning),
-            s if s.starts_with(b">.") || s.windows(3).any(|win| win == b".>.") => Err(Error::MultiWildcardInMiddle),
+            s if s.starts_with(b">.") || s.windows(3).any(|win| win == b".>.") => {
+                Err(Error::MultiWildcardInMiddle)
+            }
             s if s.windows(2).any(|win| win == b"..") => Err(Error::InvalidToken),
             s if s.iter().any(|b| b" \t\n\r".contains(b)) => Err(Error::InvalidToken),
             _ => Ok(()),
@@ -131,7 +133,8 @@ impl Subject {
     ///
     /// _Note:_ You can't publish to a subject that contains a wildcard.
     pub fn contains_wildcards(&self) -> bool {
-        self.tokens().any(|t| t == SINGLE_WILDCARD || t == MULTI_WILDCARD)
+        self.tokens()
+            .any(|t| t == SINGLE_WILDCARD || t == MULTI_WILDCARD)
     }
     /// Get the nth token of the subject.
     ///
@@ -394,7 +397,11 @@ fn valid_token(token: &str) -> bool {
 }
 
 fn token_match(lt: &str, rt: &str) -> bool {
-    lt == rt || lt == SINGLE_WILDCARD || rt == SINGLE_WILDCARD || lt == MULTI_WILDCARD || rt == MULTI_WILDCARD
+    lt == rt
+        || lt == SINGLE_WILDCARD
+        || rt == SINGLE_WILDCARD
+        || lt == MULTI_WILDCARD
+        || rt == MULTI_WILDCARD
 }
 
 #[cfg(test)]
