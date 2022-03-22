@@ -80,6 +80,10 @@ test-case = "1.2"
 name = "nats_bench"
 harness = false
 
+[[bench]]
+name = "subject_bench"
+harness = false
+
 [[example]]
 name = "nats-box"
 path = "examples/nats-box/main.rs"

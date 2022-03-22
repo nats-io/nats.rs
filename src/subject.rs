@@ -98,6 +98,7 @@ impl Subject {
             b"" => Err(Error::InvalidToken),
             [b'.', ..] | [.., b'.'] => Err(Error::SeparatorAtEndOrBeginning),
             s if s.starts_with(b">.") || s.windows(3).any(|win| win == b".>.") => Err(Error::MultiWildcardInMiddle),
+            s if s.windows(2).any(|win| win == b"..") => Err(Error::InvalidToken),
             s if s.iter().any(|b| b" \t\n\r".contains(b)) => Err(Error::InvalidToken),
             _ => Ok(()),
         }?;
@@ -497,6 +498,7 @@ mod test {
     #[test_case("zzz.>.cdc" => false      ; "middle multi wildcard")]
     #[test_case("zzz.*." => false         ; "ending dot")]
     #[test_case(".dot" => false           ; "starting dot")]
+    #[test_case("dot..dot" => false       ; "empty token")]
     #[test_case(">>" => true              ; "double multi wildcard")]
     #[test_case("hi.**.no" => true        ; "double single wildcard")]
     fn validate_subject(subject: &str) -> bool {
