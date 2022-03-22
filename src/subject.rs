@@ -12,18 +12,13 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-lazy_static::lazy_static! {
-    /// Wildcard matching a single [`Token`].
-    pub static ref SINGLE_WILDCARD: &'static Token = Token::new_unchecked("*");
+/// Wildcard matching a single token.
+pub const SINGLE_WILDCARD: &str = "*";
 
-    /// Wildcard matching all following [`Token`]s.
-    ///
-    /// Only valid as last token of a [`Subject`].
-    pub static ref MULTI_WILDCARD: &'static Token = Token::new_unchecked(">");
-}
-
-// /// The character marking a single wildcard
-// pub const SINGLE_WILDCARD_CHAR: char = '*';
+/// Wildcard matching all following tokens.
+///
+/// Only valid as last token of a [`Subject`].
+pub const MULTI_WILDCARD: &str = ">";
 
 /// The character marking a multi wildcard
 pub const MULTI_WILDCARD_CHAR: char = '>';
@@ -66,11 +61,6 @@ pub struct Subject(str);
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct SubjectBuf(String);
-
-/// A valid token of a NATS [`Subject`].
-#[repr(transparent)]
-#[derive(Debug, PartialEq, Eq)]
-pub struct Token(str);
 
 /// Iterator over a [`Subject`]'s tokens.
 #[derive(Debug, Clone)]
@@ -120,9 +110,9 @@ impl Subject {
 
         loop {
             match (s_tokens.next(), o_tokens.next()) {
-                (Some(mw), Some(_)) | (Some(_), Some(mw)) if mw == *MULTI_WILDCARD => break true,
+                (Some(MULTI_WILDCARD), Some(_)) | (Some(_), Some(MULTI_WILDCARD)) => break true,
                 (Some(s_t), Some(o_t)) => {
-                    if s_t.matches(&o_t) {
+                    if token_match(s_t, o_t) {
                         continue;
                     } else {
                         break false;
@@ -141,12 +131,12 @@ impl Subject {
     ///
     /// _Note:_ You can't publish to a subject that contains a wildcard.
     pub fn contains_wildcards(&self) -> bool {
-        self.tokens().any(|t| t.is_wildcard())
+        self.tokens().any(|t| t == SINGLE_WILDCARD || t == MULTI_WILDCARD)
     }
     /// Get the nth token of the subject.
     ///
     /// Returns `None` if there are not enough tokens.
-    pub fn get_token(&self, idx: usize) -> Option<&Token> {
+    pub fn get_token(&self, idx: usize) -> Option<&str> {
         self.tokens().nth(idx)
     }
     /// Get a sub-subject from the subject.
@@ -189,7 +179,7 @@ impl AsRef<str> for Subject {
 }
 
 impl<'s> IntoIterator for &'s Subject {
-    type Item = &'s Token;
+    type Item = &'s str;
     type IntoIter = Tokens<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -265,21 +255,17 @@ impl SubjectBuf {
         self.0
     }
     /// Append a token.
-    pub fn join(mut self, token: &Token) -> Result<Self, Error> {
-        if self.0.ends_with(MULTI_WILDCARD_CHAR) {
+    pub fn join(mut self, token: &str) -> Result<Self, Error> {
+        if !valid_token(token) {
+            Err(Error::InvalidToken)
+        } else if self.0.ends_with(MULTI_WILDCARD_CHAR) {
             Err(Error::CanNotJoin)
         } else {
-            let token = token.as_str();
             self.0.reserve(token.len() + 1);
             self.0.push(TOKEN_SEPARATOR);
             self.0.push_str(token);
             Ok(self)
         }
-    }
-    /// Append a string. If the string is not a valid token an [`Error`] is returned.
-    pub fn join_str(self, token: &str) -> Result<Self, Error> {
-        let token = Token::new(token)?;
-        self.join(token)
     }
 }
 
@@ -362,73 +348,8 @@ impl<'sb> AsSubject for &'sb SubjectBuf {
     }
 }
 
-impl Token {
-    /// Constructor for a token.
-    ///
-    /// # WARNING
-    ///
-    /// An invalid token may brake assumptions of the [`Token`] type. Reassure, that this call
-    /// definitely constructs a valid token.
-    pub fn new_unchecked(token: &str) -> &Self {
-        // Safety: Token is #[repr(transparent)] therefore this is okay
-        unsafe {
-            let ptr = token as *const _ as *const Self;
-            &*ptr
-        }
-    }
-    /// Create a new validated token.
-    pub fn new(token: &str) -> Result<&Self, Error> {
-        if token.is_empty() || token.chars().any(|c| c == TOKEN_SEPARATOR || c == ' ') {
-            Err(Error::InvalidToken)
-        } else {
-            Ok(Self::new_unchecked(token))
-        }
-    }
-    /// The token as a `&str`
-    pub fn as_str(&self) -> &str {
-        self.deref()
-    }
-    /// Check if the token is the multi wildcard `>`.
-    pub fn is_wildcard(&self) -> bool {
-        self == *MULTI_WILDCARD || self == *SINGLE_WILDCARD
-    }
-    /// Check if two tokens match, considering wildcards.
-    pub fn matches(&self, other: &Token) -> bool {
-        match (self, other) {
-            (t, _) | (_, t) if t == *MULTI_WILDCARD || t == *SINGLE_WILDCARD => true,
-            (l, r) => l == r,
-        }
-    }
-}
-
-impl AsRef<str> for Token {
-    fn as_ref(&self) -> &str {
-        self.deref()
-    }
-}
-
-impl PartialEq<str> for Token {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl Deref for Token {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 impl<'s> Iterator for Tokens<'s> {
-    type Item = &'s Token;
+    type Item = &'s str;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining_subject.is_empty() {
@@ -436,10 +357,10 @@ impl<'s> Iterator for Tokens<'s> {
         } else if self.remaining_subject.contains(TOKEN_SEPARATOR) {
             let (token, rest) = self.remaining_subject.split_once(TOKEN_SEPARATOR)?;
             self.remaining_subject = rest;
-            Some(Token::new_unchecked(token))
+            Some(token)
         } else {
             let last = std::mem::take(&mut self.remaining_subject);
-            Some(Token::new_unchecked(last))
+            Some(last)
         }
     }
 }
@@ -468,6 +389,14 @@ impl<'s> AsSubject for &'s String {
     }
 }
 
+fn valid_token(token: &str) -> bool {
+    !token.is_empty() && !token.contains(['.', ' ', '\n', '\t', '\r'])
+}
+
+fn token_match(lt: &str, rt: &str) -> bool {
+    lt == rt || lt == SINGLE_WILDCARD || rt == SINGLE_WILDCARD || lt == MULTI_WILDCARD || rt == MULTI_WILDCARD
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -486,7 +415,7 @@ mod test {
     #[test_case("ab.cd" => false   ; "contains dot")]
     #[test_case("ab cd" => false   ; "contains space")]
     fn validate_token(token: &str) -> bool {
-        Token::new(token).is_ok()
+        valid_token(token)
     }
 
     #[test_case("" => false               ; "empty")]
@@ -512,9 +441,7 @@ mod test {
     #[test_case("*", ">" => true      ; "mixed wildcards")]
     #[test_case("cba", "abc" => false ; "unequal tokens")]
     fn match_tokens(l: &str, r: &str) -> bool {
-        let l = Token::new(l).unwrap();
-        let r = Token::new(r).unwrap();
-        l.matches(&r)
+        token_match(l, r)
     }
 
     #[test_case("cba", "abc" => false               ; "unequal subjects")]
@@ -544,7 +471,7 @@ mod test {
     fn join_subject(base: &str, appends: &[&str], expect: &str) {
         let mut base = SubjectBuf::new(base.to_owned()).unwrap();
         for append in appends {
-            base = base.join_str(append).unwrap();
+            base = base.join(append).unwrap();
         }
 
         assert_eq!(base, expect);

@@ -23,7 +23,7 @@ use std::{
 use crate::{
     client::Client,
     header::{self, HeaderMap},
-    SubjectBuf, Token,
+    SubjectBuf,
 };
 
 use chrono::*;
@@ -268,7 +268,7 @@ impl Message {
         let mut tokens = reply.tokens().skip(2);
 
         fn parse_next_token<'i, 's, T, E>(
-            iter: &'i mut impl Iterator<Item = &'s Token>,
+            iter: &'i mut impl Iterator<Item = &'s str>,
             reply: &'s str,
         ) -> Option<T>
         where
@@ -276,7 +276,6 @@ impl Message {
             E: fmt::Display,
         {
             iter.next()?
-                .as_str()
                 .parse()
                 .map_err(|e| {
                     log::error!(
@@ -296,16 +295,16 @@ impl Message {
         if n_tokens >= 11 {
             Some(crate::jetstream::JetStreamMessageInfo {
                 domain: {
-                    let domain: &str = tokens.next()?.as_str();
+                    let domain: &str = tokens.next()?;
                     if domain == "_" {
                         None
                     } else {
                         Some(domain)
                     }
                 },
-                acc_hash: Some(tokens.next()?.as_str()),
-                stream: tokens.next()?.as_str(),
-                consumer: tokens.next()?.as_str(),
+                acc_hash: Some(tokens.next()?),
+                stream: tokens.next()?,
+                consumer: tokens.next()?,
                 delivered: parse_next_token(&mut tokens, reply_str)?,
                 stream_seq: parse_next_token(&mut tokens, reply_str)?,
                 consumer_seq: parse_next_token(&mut tokens, reply_str)?,
@@ -315,7 +314,7 @@ impl Message {
                 },
                 pending: parse_next_token(&mut tokens, reply_str)?,
                 token: if n_tokens >= 11 {
-                    Some(tokens.next()?.as_str())
+                    Some(tokens.next()?)
                 } else {
                     None
                 },
@@ -326,8 +325,8 @@ impl Message {
             Some(crate::jetstream::JetStreamMessageInfo {
                 domain: None,
                 acc_hash: None,
-                stream: tokens.next()?.as_str(),
-                consumer: tokens.next()?.as_str(),
+                stream: tokens.next()?,
+                consumer: tokens.next()?,
                 delivered: parse_next_token(&mut tokens, reply_str)?,
                 stream_seq: parse_next_token(&mut tokens, reply_str)?,
                 consumer_seq: parse_next_token(&mut tokens, reply_str)?,
