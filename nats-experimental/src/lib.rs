@@ -126,11 +126,15 @@ pub struct Connection {
 impl Connection {
     pub async fn connect(addrs: impl IntoServerList) -> Result<Connection, io::Error> {
         let a = addrs
-            .into_server_list()
-            .unwrap()
+            .into_server_list()?
             .into_iter()
             .next()
-            .unwrap();
+            .ok_or_else(|| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    "did not found a single url in the url list",
+                )
+            })?;
         let tcp_stream = TcpStream::connect((a.host(), a.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
