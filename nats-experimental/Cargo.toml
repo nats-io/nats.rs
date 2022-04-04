@@ -15,3 +15,13 @@ serde_repr = "0.1.7"
 tokio = { version = "1.16.1", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
 itoa = "1"
+url = "2"
+
+[dev-dependencies]
+nats = { path = "../nats-legacy" }
+lazy_static = "1.4.0"
+regex = { version = "1.5.4", default-features = false, features = ["std", "unicode-perl"] }
+url = "2.2.2"
+nuid = "0.3.1"
+
+
