@@ -1,5 +1,6 @@
 use futures_util::stream::Stream;
 use std::collections::HashMap;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::str::{self, FromStr};
 use std::sync::Arc;
@@ -9,6 +10,8 @@ use subslice::SubsliceExt;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
+use tokio::io::ErrorKind;
+use url::Url;
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future::FutureExt;
@@ -19,6 +22,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio::net::ToSocketAddrs;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
@@ -84,6 +88,33 @@ pub struct ServerInfo {
     pub lame_duck_mode: bool,
 }
 
+impl ServerInfo {
+    fn parse(s: &str) -> Option<ServerInfo> {
+        let mut obj = json::parse(s).ok()?;
+        Some(ServerInfo {
+            server_id: obj["server_id"].take_string()?,
+            server_name: obj["server_name"].take_string().unwrap_or_default(),
+            host: obj["host"].take_string()?,
+            port: obj["port"].as_u16()?,
+            version: obj["version"].take_string()?,
+            auth_required: obj["auth_required"].as_bool().unwrap_or(false),
+            tls_required: obj["tls_required"].as_bool().unwrap_or(false),
+            max_payload: obj["max_payload"].as_usize()?,
+            proto: obj["proto"].as_i8()?,
+            client_id: obj["client_id"].as_u64()?,
+            go: obj["go"].take_string()?,
+            nonce: obj["nonce"].take_string().unwrap_or_default(),
+            connect_urls: obj["connect_urls"]
+                .members_mut()
+                .filter_map(|m| m.take_string())
+                .collect(),
+            client_ip: obj["client_ip"].take_string().unwrap_or_default(),
+            headers: obj["headers"].as_bool().unwrap_or(false),
+            lame_duck_mode: obj["ldm"].as_bool().unwrap_or(false),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ServerOp {
     Ok,
@@ -128,8 +159,18 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn connect(addr: impl ToSocketAddrs) -> Result<Connection, io::Error> {
-        let tcp_stream = TcpStream::connect(addr).await?;
+    pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
+        let a = addrs
+            .into_server_list()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    "did not found a single url in the url list",
+                )
+            })?;
+        let tcp_stream = TcpStream::connect((a.host(), a.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
         Ok(Connection {
@@ -468,8 +509,8 @@ impl Client {
     }
 }
 
-pub async fn connect<T: ToSocketAddrs>(addr: T) -> Result<Client, io::Error> {
-    let connection = Connection::connect(addr).await?;
+pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
+    let connection = Connection::connect(addrs).await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
 
@@ -629,4 +670,298 @@ pub enum Protocol {
     Original = 0,
     /// Protocol with dynamic reconfiguration of cluster and lame duck mode functionality.
     Dynamic = 1,
+}
+
+/// Address of a NATS server.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ServerAddress(Url);
+
+/// Capability to convert into a list of NATS server addresses.
+///
+/// There are several implementations ensuring the easy passing of one or more server addresses to
+/// functions like [`crate::connect()`].
+pub trait IntoServerList {
+    /// Convert the instance into a list of [`ServerAddress`]es.
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>>;
+}
+
+impl FromStr for ServerAddress {
+    type Err = io::Error;
+
+    /// Parse an address of a NATS server.
+    ///
+    /// If not stated explicitly the `nats://` schema and port `4222` is assumed.
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let url: Url = if input.contains("://") {
+            input.parse()
+        } else {
+            format!("nats://{}", input).parse()
+        }
+        .map_err(|e| {
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("NATS server URL is invalid: {}", e),
+            )
+        })?;
+
+        Self::from_url(url)
+    }
+}
+
+impl ServerAddress {
+    /// Check if the URL is a valid NATS server address.
+    pub fn from_url(url: Url) -> io::Result<Self> {
+        if url.scheme() != "nats" && url.scheme() != "tls" {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid scheme for NATS server URL: {}", url.scheme()),
+            ));
+        }
+
+        Ok(Self(url))
+    }
+
+    /// Turn the server address into a standard URL.
+    pub fn into_inner(self) -> Url {
+        self.0
+    }
+
+    /// Returns if tls is required by the client for this server.
+    pub fn tls_required(&self) -> bool {
+        self.0.scheme() == "tls"
+    }
+
+    /// Returns if the server url had embedded username and password.
+    pub fn has_user_pass(&self) -> bool {
+        self.0.username() != ""
+    }
+
+    /// Returns the host.
+    pub fn host(&self) -> &str {
+        self.0.host_str().unwrap()
+    }
+
+    /// Returns the port.
+    pub fn port(&self) -> u16 {
+        self.0.port().unwrap_or(4222)
+    }
+
+    /// Returns the optional username in the url.
+    pub fn username(&self) -> Option<String> {
+        let user = self.0.username();
+        if user.is_empty() {
+            None
+        } else {
+            Some(user.to_string())
+        }
+    }
+
+    /// Returns the optional password in the url.
+    pub fn password(&self) -> Option<String> {
+        self.0.password().map(|pwd| pwd.to_string())
+    }
+
+    /// Return the sockets from resolving the server address.
+    ///
+    /// # Fault injection
+    ///
+    /// If compiled with the `"fault_injection"` feature this method might fail artificially.
+    pub fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr>> {
+        (self.host(), self.port()).to_socket_addrs()
+    }
+}
+
+impl<'s> IntoServerList for &'s str {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.split(',').map(|url| url.parse()).collect()
+    }
+}
+
+impl<'s> IntoServerList for &'s [&'s str] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.iter().map(|url| url.parse()).collect()
+    }
+}
+
+impl<'s, const N: usize> IntoServerList for &'s [&'s str; N] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_ref().into_server_list()
+    }
+}
+
+impl IntoServerList for String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_str().into_server_list()
+    }
+}
+
+impl<'s> IntoServerList for &'s String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_str().into_server_list()
+    }
+}
+
+impl IntoServerList for ServerAddress {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        Ok(vec![self])
+    }
+}
+
+impl IntoServerList for Vec<ServerAddress> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        Ok(self)
+    }
+}
+
+impl IntoServerList for io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self
+    }
+}
+
+/// Address of a NATS server.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ServerAddress(Url);
+
+/// Capability to convert into a list of NATS server addresses.
+///
+/// There are several implementations ensuring the easy passing of one or more server addresses to
+/// functions like [`crate::connect()`].
+pub trait ToServerAddrs {
+    /// Convert the instance into a list of [`ServerAddress`]es.
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>>;
+}
+
+impl FromStr for ServerAddress {
+    type Err = io::Error;
+
+    /// Parse an address of a NATS server.
+    ///
+    /// If not stated explicitly the `nats://` schema and port `4222` is assumed.
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let url: Url = if input.contains("://") {
+            input.parse()
+        } else {
+            format!("nats://{}", input).parse()
+        }
+        .map_err(|e| {
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("NATS server URL is invalid: {}", e),
+            )
+        })?;
+
+        Self::from_url(url)
+    }
+}
+
+impl ServerAddress {
+    /// Check if the URL is a valid NATS server address.
+    pub fn from_url(url: Url) -> io::Result<Self> {
+        if url.scheme() != "nats" && url.scheme() != "tls" {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid scheme for NATS server URL: {}", url.scheme()),
+            ));
+        }
+
+        Ok(Self(url))
+    }
+
+    /// Turn the server address into a standard URL.
+    pub fn into_inner(self) -> Url {
+        self.0
+    }
+
+    /// Returns if tls is required by the client for this server.
+    pub fn tls_required(&self) -> bool {
+        self.0.scheme() == "tls"
+    }
+
+    /// Returns if the server url had embedded username and password.
+    pub fn has_user_pass(&self) -> bool {
+        self.0.username() != ""
+    }
+
+    /// Returns the host.
+    pub fn host(&self) -> &str {
+        self.0.host_str().unwrap()
+    }
+
+    /// Returns the port.
+    pub fn port(&self) -> u16 {
+        self.0.port().unwrap_or(4222)
+    }
+
+    /// Returns the optional username in the url.
+    pub fn username(&self) -> Option<String> {
+        let user = self.0.username();
+        if user.is_empty() {
+            None
+        } else {
+            Some(user.to_string())
+        }
+    }
+
+    /// Returns the optional password in the url.
+    pub fn password(&self) -> Option<String> {
+        self.0.password().map(|pwd| pwd.to_string())
+    }
+
+    /// Return the sockets from resolving the server address.
+    ///
+    /// # Fault injection
+    ///
+    /// If compiled with the `"fault_injection"` feature this method might fail artificially.
+    pub fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr>> {
+        (self.host(), self.port()).to_socket_addrs()
+    }
+}
+
+impl<'s> ToServerAddrs for &'s str {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.split(',').map(|url| url.parse()).collect()
+    }
+}
+
+impl<'s> ToServerAddrs for &'s [&'s str] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.iter().map(|url| url.parse()).collect()
+    }
+}
+
+impl<'s, const N: usize> ToServerAddrs for &'s [&'s str; N] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_ref().into_server_list()
+    }
+}
+
+impl ToServerAddrs for String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_str().into_server_list()
+    }
+}
+
+impl<'s> ToServerAddrs for &'s String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_str().into_server_list()
+    }
+}
+
+impl ToServerAddrs for ServerAddress {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        Ok(vec![self])
+    }
+}
+
+impl ToServerAddrs for Vec<ServerAddress> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        Ok(self)
+    }
+}
+
+impl ToServerAddrs for io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self
+    }
 }
