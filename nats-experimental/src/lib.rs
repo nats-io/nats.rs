@@ -106,13 +106,24 @@ pub enum ServerOp {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ClientOp {
-    Publish { subject: String, payload: Bytes },
-    Subscribe { sid: u64, subject: String },
-    Unsubscribe { sid: u64 },
+    Publish {
+        subject: String,
+        payload: Bytes,
+    },
+    Subscribe {
+        sid: u64,
+        subject: String,
+    },
+    Unsubscribe {
+        sid: u64,
+    },
     Ping,
     Pong,
+    Flush {
+        result: tokio::sync::oneshot::Sender<io::Result<()>>,
+    },
     Connect(ConnectInfo),
 }
 
@@ -247,7 +258,7 @@ impl Connection {
         }
     }
 
-    pub async fn write_op(&mut self, item: &ClientOp) -> Result<(), io::Error> {
+    pub async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
         match item {
             ClientOp::Connect(connect_info) => {
                 let op = format!(
@@ -268,7 +279,7 @@ impl Connection {
                     .write_all(bufi.format(payload.len()).as_bytes())
                     .await?;
                 self.stream.write_all(b"\r\n").await?;
-                self.stream.write_all(payload).await?;
+                self.stream.write_all(&payload).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
 
@@ -292,6 +303,11 @@ impl Connection {
             }
             ClientOp::Pong => {
                 self.stream.write_all(b"PONG\r\n").await?;
+            }
+            ClientOp::Flush { result } => {
+                result.send(self.stream.flush().await).map_err(|_| {
+                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                })?;
             }
         }
 
@@ -361,7 +377,7 @@ impl Connector {
                 maybe_op = receiver.recv().fuse() => {
                     match maybe_op {
                         Some(op) => {
-                            if let Err(err) = self.connection.write_op(&op).await {
+                            if let Err(err) = self.connection.write_op(op).await {
                                 println!("Send failed with {:?}", err);
                             }
                         }
@@ -377,7 +393,7 @@ impl Connector {
                     if let Ok(maybe_op) = result {
                         match maybe_op {
                             Some(ServerOp::Ping) => {
-                                self.connection.write_op(&ClientOp::Pong).await?;
+                                self.connection.write_op(ClientOp::Pong).await?;
                             }
                             Some(ServerOp::Message { sid, subject, reply_to, payload }) => {
                                 let mut context = self.subscription_context.lock().await;
@@ -449,6 +465,14 @@ impl Client {
             .unwrap();
 
         Ok(Subscriber::new(sid, receiver))
+    }
+
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.sender.send(ClientOp::Flush { result: tx }).await?;
+        // first question mark is an error from rx itself, second for error from flush.
+        rx.await??;
+        Ok(())
     }
 }
 
