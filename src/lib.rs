@@ -501,7 +501,7 @@ impl Connection {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;
-    /// nc.publish_request("foo", reply, "Help me!")?;
+    /// nc.publish_request("foo", &reply, "Help me!")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn publish_request<Sub, Rep>(
