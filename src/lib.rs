@@ -480,7 +480,7 @@ impl Connection {
     /// use nats::SubjectBuf;
     ///
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let subject = "foo".parse::<SubjectBuf>()?;
+    /// let subject: SubjectBuf = "foo".parse()?;
     /// for _ in 0..5 {
     ///     nc.publish(&subject, "Hello World!")?;
     /// }
@@ -526,7 +526,6 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # use nats::Subject;
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;

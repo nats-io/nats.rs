@@ -346,8 +346,7 @@ impl<'s> Iterator for Tokens<'s> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining_subject.is_empty() {
             None
-        } else if self.remaining_subject.contains(TOKEN_SEPARATOR) {
-            let (token, rest) = self.remaining_subject.split_once(TOKEN_SEPARATOR)?;
+        } else if let Some((token, rest)) = self.remaining_subject.split_once(TOKEN_SEPARATOR) {
             self.remaining_subject = rest;
             Some(token)
         } else {

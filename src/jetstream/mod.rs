@@ -680,13 +680,12 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::Subject;
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("ephemeral");
-    /// # context.publish(Subject::new("ephemeral")?, "hello");
+    /// # context.publish("ephemeral", "hello");
     /// #    
-    /// let subscription = context.subscribe(Subject::new("ephemeral")?)?;
+    /// let subscription = context.subscribe("ephemeral")?;
     /// println!("Received message {:?}", subscription.next());
     /// # Ok::<(), std::io::Error>(())
     /// ```
@@ -826,11 +825,11 @@ impl JetStream {
     /// # Example
     ///
     /// ```no_run
-    /// # use nats::{Subject, jetstream::{ SubscribeOptions }};
+    /// # use nats::{jetstream::{ SubscribeOptions }};
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let js = nats::jetstream::new(nc);
     /// let sub = js.subscribe_with_options(
-    ///     Subject::new("foo")?,
+    ///     "foo",
     ///     &SubscribeOptions::bind("existing_stream".to_string(), "existing_consumer".to_string())
     /// )?;
     /// # Ok::<(), std::io::Error>(())
@@ -852,14 +851,10 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::Subject;
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("queue");
-    /// let subscription = context.queue_subscribe(
-    ///     Subject::new("queue")?,
-    ///     Subject::new("queue_group")?
-    /// )?;
+    /// let subscription = context.queue_subscribe("queue", "queue_group")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn queue_subscribe<Sub, Que>(
@@ -994,14 +989,13 @@ impl JetStream {
         let process_consumer_info = |info: ConsumerInfo| {
             // Make sure this new subject matches or is a subset.
             match info.config.filter_subject.as_ref() {
-                Some(filter) if subject.matches(filter) => {}
-                None => {}
-                Some(_) => {
+                Some(filter) if !subject.matches(filter) => {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         "subject does not match consumer",
                     ))
                 }
+                _ => {}
             }
 
             if let Some(deliver_group) = info.config.deliver_group.as_ref() {

@@ -654,9 +654,9 @@ impl Client {
         // Estimate how many bytes the message will consume when written into
         // the stream. We must make a conservative guess: it's okay to
         // overestimate but not to underestimate.
-        let sub_len = subject.as_str().len();
+
         let mut estimate =
-            1024 + sub_len + reply_to.map(|_| sub_len).unwrap_or_default() + msg.len();
+            1024 + subject.len() + reply_to.map_or(0, |r| r.len()) + msg.len();
         if let Some(headers) = headers {
             estimate += headers
                 .iter()
@@ -787,7 +787,7 @@ impl Client {
                 &mut writer,
                 ClientOp::Sub {
                     subject: &subscription.subject,
-                    queue_group: subscription.queue_group.as_ref().map(AsRef::as_ref),
+                    queue_group: subscription.queue_group.as_deref(),
                     sid: *sid,
                 },
             )?;

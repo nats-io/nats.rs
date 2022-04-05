@@ -268,7 +268,7 @@ impl Message {
     pub fn jetstream_message_info(&self) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
         const PREFIX: &str = "$JS.ACK.";
 
-        let reply = self.reply.as_ref()?;
+        let reply = self.reply.as_deref()?;
         let reply_str = reply.as_str();
 
         if !reply.starts_with(PREFIX) {
