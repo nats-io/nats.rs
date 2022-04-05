@@ -13,6 +13,9 @@ use tokio::io::BufWriter;
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future::FutureExt;
 use futures_util::select;
+use serde::{Deserialize, Serialize};
+use serde_json;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio::net::ToSocketAddrs;
@@ -28,68 +31,57 @@ const LANG: &str = "rust";
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
 #[allow(unused)]
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
+    #[serde(default)]
     pub server_id: String,
     /// Generated Server Name.
+    #[serde(default)]
     pub server_name: String,
     /// The host specified in the cluster parameter/options.
+    #[serde(default)]
     pub host: String,
     /// The port number specified in the cluster parameter/options.
+    #[serde(default)]
     pub port: u16,
     /// The version of the NATS server.
+    #[serde(default)]
     pub version: String,
     /// If this is set, then the server should try to authenticate upon
     /// connect.
+    #[serde(default)]
     pub auth_required: bool,
     /// If this is set, then the server must authenticate using TLS.
+    #[serde(default)]
     pub tls_required: bool,
     /// Maximum payload size that the server will accept.
+    #[serde(default)]
     pub max_payload: usize,
     /// The protocol version in use.
+    #[serde(default)]
     pub proto: i8,
     /// The server-assigned client ID. This may change during reconnection.
+    #[serde(default)]
     pub client_id: u64,
     /// The version of golang the NATS server was built with.
+    #[serde(default)]
     pub go: String,
     /// The nonce used for nkeys.
+    #[serde(default)]
     pub nonce: String,
     /// A list of server urls that a client can connect to.
+    #[serde(default)]
     pub connect_urls: Vec<String>,
     /// The client IP as known by the server.
+    #[serde(default)]
     pub client_ip: String,
     /// Whether the server supports headers.
+    #[serde(default)]
     pub headers: bool,
     /// Whether server goes into lame duck mode.
+    #[serde(default)]
     pub lame_duck_mode: bool,
-}
-
-impl ServerInfo {
-    fn parse(s: &str) -> Option<ServerInfo> {
-        let mut obj = json::parse(s).ok()?;
-        Some(ServerInfo {
-            server_id: obj["server_id"].take_string()?,
-            server_name: obj["server_name"].take_string().unwrap_or_default(),
-            host: obj["host"].take_string()?,
-            port: obj["port"].as_u16()?,
-            version: obj["version"].take_string()?,
-            auth_required: obj["auth_required"].as_bool().unwrap_or(false),
-            tls_required: obj["tls_required"].as_bool().unwrap_or(false),
-            max_payload: obj["max_payload"].as_usize()?,
-            proto: obj["proto"].as_i8()?,
-            client_id: obj["client_id"].as_u64()?,
-            go: obj["go"].take_string()?,
-            nonce: obj["nonce"].take_string().unwrap_or_default(),
-            connect_urls: obj["connect_urls"]
-                .members_mut()
-                .filter_map(|m| m.take_string())
-                .collect(),
-            client_ip: obj["client_ip"].take_string().unwrap_or_default(),
-            headers: obj["headers"].as_bool().unwrap_or(false),
-            lame_duck_mode: obj["ldm"].as_bool().unwrap_or(false),
-        })
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -159,7 +151,7 @@ impl Connection {
                     io::Error::new(io::ErrorKind::InvalidInput, "cannot convert server info")
                 })?;
 
-                let server_info = ServerInfo::parse(line).ok_or_else(|| {
+                let server_info = serde_json::from_str(line).map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidInput, "cannot parse server info")
                 })?;
 
@@ -252,7 +244,7 @@ impl Connection {
             ClientOp::Connect(connect_info) => {
                 let op = format!(
                     "CONNECT {}\r\n",
-                    connect_info.dump().ok_or_else(|| io::Error::new(
+                    serde_json::to_string(&connect_info).map_err(|_| io::Error::new(
                         io::ErrorKind::InvalidData,
                         "cannot serialize connect info"
                     ))?
@@ -545,7 +537,7 @@ impl Stream for Subscriber {
 }
 
 /// Info to construct a CONNECT message.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 #[doc(hidden)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
@@ -606,48 +598,11 @@ pub struct ConnectInfo {
 }
 
 /// Protocol version used by the client.
-#[derive(Clone, Copy, Debug)]
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
+#[repr(u8)]
 pub enum Protocol {
     /// Original protocol.
     Original = 0,
     /// Protocol with dynamic reconfiguration of cluster and lame duck mode functionality.
     Dynamic = 1,
-}
-
-impl ConnectInfo {
-    pub(crate) fn dump(&self) -> Option<String> {
-        let mut obj = json::object! {
-            verbose: self.verbose,
-            pedantic: self.pedantic,
-            echo: self.echo,
-            lang: self.lang.clone(),
-            version: self.version.clone(),
-            protocol: self.protocol as u8,
-            tls_required: self.tls_required,
-            headers: self.headers,
-            no_responders: self.no_responders,
-        };
-        if let Some(s) = &self.user_jwt {
-            obj.insert("jwt", s.to_string()).ok()?;
-        }
-        if let Some(s) = &self.nkey {
-            obj.insert("nkey", s.to_string()).ok()?;
-        }
-        if let Some(s) = &self.signature {
-            obj.insert("sig", s.to_string()).ok()?;
-        }
-        if let Some(s) = &self.name {
-            obj.insert("name", s.to_string()).ok()?;
-        }
-        if let Some(s) = &self.user {
-            obj.insert("user", s.to_string()).ok()?;
-        }
-        if let Some(s) = &self.pass {
-            obj.insert("pass", s.to_string()).ok()?;
-        }
-        if let Some(s) = &self.auth_token {
-            obj.insert("auth_token", s.to_string()).ok()?;
-        }
-        Some(obj.dump())
-    }
 }

@@ -9,7 +9,9 @@ bytes = "1.1.0"
 futures = "0.3.21"
 futures-sink = "0.3.21"
 futures-util = "0.3.21"
-json = "0.12.4"
+serde = { version = "1.0.136", features = ["derive"] } 
+serde_json = "1.0.79"
+serde_repr = "0.1.7"
 tokio = { version = "1.16.1", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
 itoa = "1"
