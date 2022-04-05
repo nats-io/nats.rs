@@ -22,6 +22,9 @@ use tokio::task;
 
 pub type Error = Box<dyn std::error::Error>;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const LANG: &str = "rust";
+
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
 #[allow(unused)]
@@ -110,6 +113,7 @@ pub enum ClientOp {
     Unsubscribe { sid: u64 },
     Ping,
     Pong,
+    Connect(ConnectInfo),
 }
 
 /// A framed connection
@@ -245,6 +249,16 @@ impl Connection {
 
     pub async fn write_op(&mut self, item: &ClientOp) -> Result<(), io::Error> {
         match item {
+            ClientOp::Connect(connect_info) => {
+                let op = format!(
+                    "CONNECT {}\r\n",
+                    connect_info.dump().ok_or_else(|| io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "cannot serialize connect info"
+                    ))?
+                );
+                self.stream.write_all(op.as_bytes()).await?;
+            }
             ClientOp::Publish { subject, payload } => {
                 let mut bufi = itoa::Buffer::new();
                 self.stream.write_all(b"PUB ").await?;
@@ -440,15 +454,42 @@ impl Client {
 
 pub async fn connect<T: ToSocketAddrs>(addr: T) -> Result<Client, io::Error> {
     let mut connection = Connection::connect(addr).await?;
-    connection.stream.write_all(b"CONNECT { \"no_responders\": true, \"headers\": true, \"verbose\": false, \"pedantic\": false }\r\n").await?;
-    connection.stream.write_all(b"PING\r\n").await?;
-
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
     let client = Client::new(sender.clone(), subscription_context);
+    let connect_info = ConnectInfo {
+        // FIXME(tp): handle TLS properly
+        tls_required: false,
+        // FIXME(tp): have optional name
+        name: Some("beta-rust-client".to_string()),
+        pedantic: false,
+        verbose: false,
+        lang: crate::LANG.to_string(),
+        version: crate::VERSION.to_string(),
+        protocol: Protocol::Dynamic,
+        user: None,
+        pass: None,
+        auth_token: None,
+        user_jwt: None,
+        nkey: None,
+        signature: None,
+        echo: true,
+        headers: true,
+        no_responders: true,
+    };
+    client
+        .sender
+        .send(ClientOp::Connect(connect_info))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
+    client
+        .sender
+        .send(ClientOp::Ping)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
 
     tokio::spawn(async move {
         loop {
@@ -500,5 +541,113 @@ impl Stream for Subscriber {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_recv(cx)
+    }
+}
+
+/// Info to construct a CONNECT message.
+#[derive(Clone, Debug)]
+#[doc(hidden)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ConnectInfo {
+    /// Turns on +OK protocol acknowledgements.
+    pub verbose: bool,
+
+    /// Turns on additional strict format checking, e.g. for properly formed
+    /// subjects.
+    pub pedantic: bool,
+
+    /// User's JWT.
+    pub user_jwt: Option<String>,
+
+    /// Public nkey.
+    pub nkey: Option<String>,
+
+    /// Signed nonce, encoded to Base64URL.
+    pub signature: Option<String>,
+
+    /// Optional client name.
+    pub name: Option<String>,
+
+    /// If set to `true`, the server (version 1.2.0+) will not send originating
+    /// messages from this connection to its own subscriptions. Clients should
+    /// set this to `true` only for server supporting this feature, which is
+    /// when proto in the INFO protocol is set to at least 1.
+    pub echo: bool,
+
+    /// The implementation language of the client.
+    pub lang: String,
+
+    /// The version of the client.
+    pub version: String,
+
+    /// Sending 0 (or absent) indicates client supports original protocol.
+    /// Sending 1 indicates that the client supports dynamic reconfiguration
+    /// of cluster topology changes by asynchronously receiving INFO messages
+    /// with known servers it can reconnect to.
+    pub protocol: Protocol,
+
+    /// Indicates whether the client requires an SSL connection.
+    pub tls_required: bool,
+
+    /// Connection username (if `auth_required` is set)
+    pub user: Option<String>,
+
+    /// Connection password (if auth_required is set)
+    pub pass: Option<String>,
+
+    /// Client authorization token (if auth_required is set)
+    pub auth_token: Option<String>,
+
+    /// Whether the client supports the usage of headers.
+    pub headers: bool,
+
+    /// Whether the client supports no_responders.
+    pub no_responders: bool,
+}
+
+/// Protocol version used by the client.
+#[derive(Clone, Copy, Debug)]
+pub enum Protocol {
+    /// Original protocol.
+    Original = 0,
+    /// Protocol with dynamic reconfiguration of cluster and lame duck mode functionality.
+    Dynamic = 1,
+}
+
+impl ConnectInfo {
+    pub(crate) fn dump(&self) -> Option<String> {
+        let mut obj = json::object! {
+            verbose: self.verbose,
+            pedantic: self.pedantic,
+            echo: self.echo,
+            lang: self.lang.clone(),
+            version: self.version.clone(),
+            protocol: self.protocol as u8,
+            tls_required: self.tls_required,
+            headers: self.headers,
+            no_responders: self.no_responders,
+        };
+        if let Some(s) = &self.user_jwt {
+            obj.insert("jwt", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.nkey {
+            obj.insert("nkey", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.signature {
+            obj.insert("sig", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.name {
+            obj.insert("name", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.user {
+            obj.insert("user", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.pass {
+            obj.insert("pass", s.to_string()).ok()?;
+        }
+        if let Some(s) = &self.auth_token {
+            obj.insert("auth_token", s.to_string()).ok()?;
+        }
+        Some(obj.dump())
     }
 }
