@@ -71,7 +71,7 @@
 //!
 //! js.add_stream("my_stream")?;
 //! js.add_consumer("my_stream", ConsumerConfig {
-//!   deliver_subject: Some("my_deliver_subject".to_string()),
+//!   deliver_subject: Some("my_deliver_subject".parse()?),
 //!   durable_name: Some("my_durable_consumer".to_string()),
 //!   ..Default::default()
 //! })?;
@@ -706,7 +706,6 @@ impl JetStream {
     ///
     /// ```no_run
     /// # use nats::{Subject, jetstream::{ SubscribeOptions }};
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let js = nats::jetstream::new(nc);
     /// let sub = js.subscribe_with_options(
@@ -729,7 +728,7 @@ impl JetStream {
     /// # Example
     ///
     /// ```
-    /// # use nats::Subject
+    /// # use nats::Subject;
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("queue");
@@ -737,8 +736,7 @@ impl JetStream {
     ///     Subject::new("queue")?,
     ///     Subject::new("queue_group")?
     /// )?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn queue_subscribe(
         &self,

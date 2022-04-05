@@ -384,7 +384,7 @@ impl Connection {
     /// ```
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.subscribe("foo")?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn subscribe(&self, subject: impl AsSubject) -> io::Result<Subscription> {
         self.do_subscribe(subject.as_subject()?, None)
@@ -396,7 +396,7 @@ impl Connection {
     /// ```
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.queue_subscribe("foo", "production")?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn queue_subscribe(
         &self,
@@ -414,7 +414,7 @@ impl Connection {
     /// ```
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.publish("foo", "Hello World!")?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     ///
     /// # Publish in loop
@@ -428,12 +428,12 @@ impl Connection {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let subject = "foo".parse::<SubjectBuf>()?;
     /// for _ in 0..5 {
-    ///     nc.publish(subject, "Hello World!")?;
+    ///     nc.publish(&subject, "Hello World!")?;
     /// }
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn publish(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<()> {
-        self.publish_with_reply_or_headers(subject, None::<&SubjectBuf>, None, msg)
+        self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
     /// Publish a message on the given subject with a reply subject for
@@ -445,7 +445,7 @@ impl Connection {
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;
     /// nc.publish_request("foo", reply, "Help me!")?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn publish_request(
         &self,
@@ -469,7 +469,7 @@ impl Connection {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(&reply)?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn new_inbox(&self) -> SubjectBuf {
         // Always produces a valid subject
@@ -484,7 +484,7 @@ impl Connection {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// let resp = nc.request("foo", "Help me?")?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn request(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
         self.request_with_headers_or_timeout(subject.as_subject()?, None, None, msg)
@@ -499,7 +499,7 @@ impl Connection {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// let resp = nc.request_timeout("foo", "Help me?", std::time::Duration::from_secs(2))?;
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn request_timeout(
         &self,
@@ -549,7 +549,7 @@ impl Connection {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// for msg in nc.request_multi("foo", "Help")?.iter().take(1) {}
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn request_multi(
         &self,
@@ -573,11 +573,9 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.flush()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn flush(&self) -> io::Result<()> {
         self.flush_timeout(DEFAULT_FLUSH_TIMEOUT)
@@ -591,11 +589,9 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.flush()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn flush_timeout(&self, duration: Duration) -> io::Result<()> {
         self.0.client.flush(duration)
@@ -612,11 +608,9 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.close();
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn close(self) {
         self.0.client.flush(DEFAULT_FLUSH_TIMEOUT).ok();
@@ -629,11 +623,9 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// println!("server rtt: {:?}", nc.rtt());
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn rtt(&self) -> io::Result<Duration> {
         let start = Instant::now();
@@ -674,11 +666,9 @@ impl Connection {
     /// Supported as of server version 2.1.6.
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// println!("ip: {:?}", nc.client_ip());
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn client_ip(&self) -> io::Result<std::net::IpAddr> {
         let info = self.0.client.server_info();
@@ -711,11 +701,9 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// println!("ip: {:?}", nc.client_id());
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn client_id(&self) -> u64 {
         self.0.client.server_info().client_id
@@ -754,7 +742,7 @@ impl Connection {
     ///
     /// assert!(received.load(SeqCst));
     ///
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn drain(&self) -> io::Result<()> {
         self.0.client.flush(DEFAULT_FLUSH_TIMEOUT)?;
@@ -772,17 +760,16 @@ impl Connection {
     /// let sub = nc.subscribe(subject)?;
     /// let headers = [("header1", "value1"),
     ///                ("header2", "value2")].iter().collect();
-    /// let reply_to = None;
-    /// nc.publish_with_reply_or_headers(subject, reply_to, Some(&headers), "Hello World!")?;
+    /// nc.publish_with_reply_or_headers(subject, None, Some(&headers), "Hello World!")?;
     /// nc.flush()?;
     /// let message = sub.next_timeout(std::time::Duration::from_secs(2)).unwrap();
     /// assert_eq!(message.headers.unwrap().len(), 2);
-    /// # Ok::<(), io::Error>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn publish_with_reply_or_headers(
         &self,
         subject: impl AsSubject,
-        reply: Option<&impl AsSubject>,
+        reply: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
@@ -799,11 +786,9 @@ impl Connection {
     ///
     /// # Example
     /// ```
-    /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::connect("demo.nats.io")?;
     /// println!("max payload: {:?}", nc.max_payload());
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     pub fn max_payload(&self) -> usize {
         self.0.client.server_info.lock().max_payload
     }

@@ -158,8 +158,8 @@ impl Connection {
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(&self, subject: &Subject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
-        let subject = subject.to_owned();
+    pub async fn request(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+        let subject = subject.as_subject()?.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let msg = unblock(move || inner.request(&subject, msg)).await?;
@@ -170,11 +170,11 @@ impl Connection {
     /// timeout duration is reached
     pub async fn request_timeout(
         &self,
-        subject: &Subject,
+        subject: impl AsSubject,
         msg: impl AsRef<[u8]>,
         timeout: Duration,
     ) -> io::Result<Message> {
-        let subject = subject.to_owned();
+        let subject = subject.as_subject()?.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let msg = unblock(move || inner.request_timeout(&subject, msg, timeout)).await?;
@@ -185,10 +185,10 @@ impl Connection {
     /// response.
     pub async fn request_multi(
         &self,
-        subject: &Subject,
+        subject: impl AsSubject,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<Subscription> {
-        let subject = subject.to_owned();
+        let subject = subject.as_subject()?.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
         let sub = unblock(move || inner.request_multi(&subject, msg)).await?;
@@ -216,11 +216,11 @@ impl Connection {
     /// Creates a queue subscription.
     pub async fn queue_subscribe(
         &self,
-        subject: &Subject,
-        queue: &Subject,
+        subject: impl AsSubject,
+        queue: impl AsSubject,
     ) -> io::Result<Subscription> {
-        let subject = subject.to_owned();
-        let queue = queue.to_owned();
+        let subject = subject.as_subject()?.to_owned();
+        let queue = queue.as_subject()?.to_owned();
         let inner = self.inner.clone();
         let inner = unblock(move || inner.queue_subscribe(&subject, &queue)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
@@ -302,7 +302,7 @@ impl Connection {
                 unblock(move || {
                     inner.publish_with_reply_or_headers(
                         &subject,
-                        reply.as_ref(),
+                        reply.as_deref(),
                         headers.as_ref(),
                         msg,
                     )
