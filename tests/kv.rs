@@ -239,7 +239,7 @@ fn key_value_bind() {
     context
         .add_stream(&StreamConfig {
             name: "KV_TEST".to_string(),
-            subjects: vec!["foo".to_string()],
+            subjects: vec!["foo".parse().unwrap()],
             ..Default::default()
         })
         .unwrap();

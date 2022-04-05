@@ -78,7 +78,7 @@ impl Subject {
     ///
     /// # WARNING
     ///
-    /// An invalid token may brake assumptions of the [`Subject`] type. Reassure, that this call
+    /// An invalid subject may brake assumptions of the [`Subject`] type. Reassure, that this call
     /// definitely constructs a valid subject.
     pub fn new_unchecked(sub: &str) -> &Self {
         // Safety: Subject is #[repr(transparent)] therefore this is okay
@@ -148,37 +148,6 @@ impl Subject {
     /// Returns `None` if there are not enough tokens.
     pub fn get_token(&self, idx: usize) -> Option<&str> {
         self.tokens().nth(idx)
-    }
-    /// Get a sub-subject from the subject.
-    ///
-    /// # Example
-    /// ```
-    /// let sub = nats::Subject::new("abc.def.ghi")?;
-    /// let sub_sub = sub.sub_subject(0, 1).unwrap();
-    /// assert_eq!(sub_sub.as_str(), "abc.def");
-    /// # Ok::<(), nats::SubjectError>(())
-    /// ```
-    pub fn sub_subject(&self, start_token: usize, end_token: usize) -> Option<&Subject> {
-        let tokens_cnt = self.0.split(TOKEN_SEPARATOR).count();
-        if start_token >= tokens_cnt || end_token >= tokens_cnt || start_token > end_token {
-            return None;
-        }
-
-        let mut separators = self.match_indices(TOKEN_SEPARATOR).map(|(idx, _)| idx);
-        let start_idx = if start_token == 0 {
-            0
-        } else {
-            // Minus first token, it doesn't start with a '.'
-            // idx + 1 to not fetch the '.'
-            separators.nth(start_token - 1)? + 1
-        };
-        let end_idx = if end_token == tokens_cnt - 1 {
-            self.len() - 1
-        } else {
-            separators.nth(end_token - start_token)? - 1
-        };
-
-        Some(Subject::new_unchecked(&self.0[start_idx..=end_idx]))
     }
 }
 
@@ -501,23 +470,6 @@ mod test {
         }
 
         assert_eq!(base, expect);
-    }
-
-    #[test_case("abc.def.ghi", 0, 1, "abc.def" => true      ; "simple")]
-    #[test_case("abc.def.ghi", 0, 0, "abc" => true          ; "single beginning")]
-    #[test_case("abc.def.ghi", 1, 1, "def" => true          ; "single middle")]
-    #[test_case("abc.def.ghi", 2, 2, "ghi" => true          ; "single end")]
-    #[test_case("abc.def.ghi", 0, 2, "abc.def.ghi" => true  ; "all")]
-    #[test_case("abc.def.ghi", 0, 1, "abc.def" => true      ; "first two")]
-    #[test_case("abc.def.ghi", 1, 2, "def.ghi" => true      ; "last two")]
-    #[test_case("abc.def.ghi", 1,21, "" => false            ; "bound to high")]
-    #[test_case("abc.def.ghi", 1, 0, "" => false            ; "start before end")]
-    #[test_case("abc.def.ghi.jkl", 1, 2, "def.ghi" => true  ; "two middle")]
-    fn sub_subjects(subject: &str, start: usize, end: usize, expect: &str) -> bool {
-        let sub = Subject::new(subject).unwrap();
-        sub.sub_subject(start, end)
-            .map(|sub| sub.as_str() == expect)
-            .unwrap_or(false)
     }
 
     #[test]
