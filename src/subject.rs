@@ -27,14 +27,19 @@ pub const MULTI_WILDCARD_CHAR: char = '>';
 pub const TOKEN_SEPARATOR: char = '.';
 
 /// Errors validating a NATS subject.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Copy, Clone, thiserror::Error)]
 pub enum Error {
+    /// One of the [`Subject`]'s token is invalid.
     #[error("NATS subjects's tokens are not allowed to be empty or to contain spaces or dots")]
     InvalidToken,
+    /// The multi-wildcard token `>` is used within or at the beginning of a [`Subject`].
     #[error("The multi wildcard '>' is only allowed at the end of a subject")]
     MultiWildcardInMiddle,
+    /// The [`Subject`] started or ended with a `.`.
     #[error("The separator '.' is not allowed at the end or beginning of a subject")]
     SeparatorAtEndOrBeginning,
+    /// Can not join [`Subject`] as it ends with a multi-wildcard as this would result in an invalid
+    /// [`Subject`].
     #[error("Could not join on a subject ending with the multi wildcard")]
     CanNotJoin,
 }
@@ -77,6 +82,8 @@ impl Subject {
     /// definitely constructs a valid subject.
     pub fn new_unchecked(sub: &str) -> &Self {
         // Safety: Subject is #[repr(transparent)] therefore this is okay
+        #[allow(unsafe_code)]
+        #[allow(trivial_casts)]
         unsafe {
             let ptr = sub as *const _ as *const Self;
             &*ptr
@@ -102,7 +109,7 @@ impl Subject {
         self.deref()
     }
     /// Iterate over the subject's [`Token`]s.
-    pub fn tokens(&self) -> Tokens {
+    pub fn tokens(&self) -> Tokens<'_> {
         self.into_iter()
     }
     /// Check if two subjects match, considering wildcards.
