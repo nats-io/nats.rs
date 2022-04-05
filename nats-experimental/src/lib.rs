@@ -16,8 +16,8 @@ use futures_util::select;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio::net::ToSocketAddrs;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
 pub type Error = Box<dyn std::error::Error>;
@@ -122,7 +122,7 @@ pub enum ClientOp {
     Ping,
     Pong,
     Flush {
-        result: tokio::sync::oneshot::Sender<io::Result<()>>,
+        result: oneshot::Sender<io::Result<()>>,
     },
     Connect(ConnectInfo),
 }
