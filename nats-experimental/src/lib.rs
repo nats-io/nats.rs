@@ -124,7 +124,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn connect(addrs: impl IntoServerList) -> Result<Connection, io::Error> {
+    pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
         let a = addrs
             .into_server_list()?
             .into_iter()
@@ -459,8 +459,8 @@ impl Client {
     }
 }
 
-pub async fn connect(addr: impl IntoServerList) -> Result<Client, io::Error> {
-    let mut connection = Connection::connect(addr).await?;
+pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
+    let mut connection = Connection::connect(addrs).await?;
     connection.stream.write_all(b"CONNECT { \"no_responders\": true, \"headers\": true, \"verbose\": false, \"pedantic\": false }\r\n").await?;
     connection.stream.write_all(b"PING\r\n").await?;
 
@@ -526,18 +526,18 @@ impl Stream for Subscriber {
 
 /// Address of a NATS server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ServerAddrs(Url);
+pub struct ServerAddress(Url);
 
 /// Capability to convert into a list of NATS server addresses.
 ///
 /// There are several implementations ensuring the easy passing of one or more server addresses to
 /// functions like [`crate::connect()`].
-pub trait IntoServerList {
+pub trait ToServerAddrs {
     /// Convert the instance into a list of [`ServerAddress`]es.
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>>;
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>>;
 }
 
-impl FromStr for ServerAddrs {
+impl FromStr for ServerAddress {
     type Err = io::Error;
 
     /// Parse an address of a NATS server.
@@ -560,7 +560,7 @@ impl FromStr for ServerAddrs {
     }
 }
 
-impl ServerAddrs {
+impl ServerAddress {
     /// Check if the URL is a valid NATS server address.
     pub fn from_url(url: Url) -> io::Result<Self> {
         if url.scheme() != "nats" && url.scheme() != "tls" {
@@ -623,50 +623,50 @@ impl ServerAddrs {
     }
 }
 
-impl<'s> IntoServerList for &'s str {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl<'s> ToServerAddrs for &'s str {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self.split(',').map(|url| url.parse()).collect()
     }
 }
 
-impl<'s> IntoServerList for &'s [&'s str] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl<'s> ToServerAddrs for &'s [&'s str] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self.iter().map(|url| url.parse()).collect()
     }
 }
 
-impl<'s, const N: usize> IntoServerList for &'s [&'s str; N] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl<'s, const N: usize> ToServerAddrs for &'s [&'s str; N] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self.as_ref().into_server_list()
     }
 }
 
-impl IntoServerList for String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl ToServerAddrs for String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self.as_str().into_server_list()
     }
 }
 
-impl<'s> IntoServerList for &'s String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl<'s> ToServerAddrs for &'s String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self.as_str().into_server_list()
     }
 }
 
-impl IntoServerList for ServerAddrs {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl ToServerAddrs for ServerAddress {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         Ok(vec![self])
     }
 }
 
-impl IntoServerList for Vec<ServerAddrs> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl ToServerAddrs for Vec<ServerAddress> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         Ok(self)
     }
 }
 
-impl IntoServerList for io::Result<Vec<ServerAddrs>> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddrs>> {
+impl ToServerAddrs for io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self
     }
 }
