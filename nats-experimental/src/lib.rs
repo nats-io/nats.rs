@@ -135,7 +135,7 @@ impl Connection {
         })
     }
 
-    pub fn parse_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
+    pub fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         if self.buffer.starts_with(b"+OK\r\n") {
             self.buffer.advance(5);
             return Ok(Some(ServerOp::Ok));
@@ -233,7 +233,7 @@ impl Connection {
 
     pub async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         loop {
-            if let Some(op) = self.parse_op()? {
+            if let Some(op) = self.try_read_op()? {
                 return Ok(Some(op));
             }
 
