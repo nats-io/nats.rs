@@ -655,8 +655,7 @@ impl Client {
         // the stream. We must make a conservative guess: it's okay to
         // overestimate but not to underestimate.
 
-        let mut estimate =
-            1024 + subject.len() + reply_to.map_or(0, |r| r.len()) + msg.len();
+        let mut estimate = 1024 + subject.len() + reply_to.map_or(0, |r| r.len()) + msg.len();
         if let Some(headers) = headers {
             estimate += headers
                 .iter()
