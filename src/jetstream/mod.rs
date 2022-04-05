@@ -569,21 +569,23 @@ impl JetStream {
     }
 
     /// Publishes a message to `JetStream`
-    pub fn publish(
-        &self,
-        subject: impl AsSubject,
-        data: impl AsRef<[u8]>,
-    ) -> io::Result<PublishAck> {
+    pub fn publish<Sub>(&self, subject: &Sub, data: impl AsRef<[u8]>) -> io::Result<PublishAck>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.publish_with_options_or_headers(subject.as_subject()?, None, None, data)
     }
 
     /// Publishes a message to `JetStream` with the given options.
-    pub fn publish_with_options(
+    pub fn publish_with_options<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         data: impl AsRef<[u8]>,
         options: &PublishOptions,
-    ) -> io::Result<PublishAck> {
+    ) -> io::Result<PublishAck>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.publish_with_options_or_headers(subject.as_subject()?, Some(options), None, data)
     }
 
@@ -612,13 +614,16 @@ impl JetStream {
     }
 
     /// Publishes a message to `JetStream` with the given options and/or headers.
-    pub(crate) fn publish_with_options_or_headers(
+    pub(crate) fn publish_with_options_or_headers<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         maybe_options: Option<&PublishOptions>,
         maybe_headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<PublishAck> {
+    ) -> io::Result<PublishAck>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         let maybe_headers = if let Some(options) = maybe_options {
             let mut headers = maybe_headers.map_or_else(HeaderMap::default, HeaderMap::clone);
 
@@ -685,7 +690,10 @@ impl JetStream {
     /// println!("Received message {:?}", subscription.next());
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn subscribe(&self, subject: impl AsSubject) -> io::Result<PushSubscription> {
+    pub fn subscribe<Sub>(&self, subject: &Sub) -> io::Result<PushSubscription>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.do_push_subscribe(subject.as_subject()?, None, None)
     }
 
@@ -709,16 +717,22 @@ impl JetStream {
     /// })?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn pull_subscribe(&self, subject: impl AsSubject) -> io::Result<PullSubscription> {
+    pub fn pull_subscribe<Sub>(&self, subject: &Sub) -> io::Result<PullSubscription>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.do_pull_subscribe(subject.as_subject()?, None)
     }
 
     /// Creates a `PullSubscription` with options.
-    pub fn pull_subscribe_with_options(
+    pub fn pull_subscribe_with_options<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         options: &PullSubscribeOptions,
-    ) -> io::Result<PullSubscription> {
+    ) -> io::Result<PullSubscription>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.do_pull_subscribe(subject.as_subject()?, Some(options))
     }
 
@@ -821,11 +835,14 @@ impl JetStream {
     /// )?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn subscribe_with_options(
+    pub fn subscribe_with_options<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         options: &SubscribeOptions,
-    ) -> io::Result<PushSubscription> {
+    ) -> io::Result<PushSubscription>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.do_push_subscribe(subject.as_subject()?, None, Some(options))
     }
 
@@ -845,11 +862,15 @@ impl JetStream {
     /// )?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn queue_subscribe(
+    pub fn queue_subscribe<Sub, Que>(
         &self,
-        subject: impl AsSubject,
-        queue: impl AsSubject,
-    ) -> io::Result<PushSubscription> {
+        subject: &Sub,
+        queue: &Que,
+    ) -> io::Result<PushSubscription>
+    where
+        Sub: AsSubject + ?Sized,
+        Que: AsSubject + ?Sized,
+    {
         self.do_push_subscribe(subject.as_subject()?, Some(queue.as_subject()?), None)
     }
 
@@ -858,12 +879,16 @@ impl JetStream {
     /// If a durable name is not set within the options provided options then the queue group will
     /// be used as the durable name.
     ///
-    pub fn queue_subscribe_with_options(
+    pub fn queue_subscribe_with_options<Sub, Que>(
         &self,
-        subject: impl AsSubject,
-        queue: impl AsSubject,
+        subject: &Sub,
+        queue: &Que,
         options: &SubscribeOptions,
-    ) -> io::Result<PushSubscription> {
+    ) -> io::Result<PushSubscription>
+    where
+        Sub: AsSubject + ?Sized,
+        Que: AsSubject + ?Sized,
+    {
         self.do_push_subscribe(
             subject.as_subject()?,
             Some(queue.as_subject()?),

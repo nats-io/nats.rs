@@ -1,4 +1,4 @@
-//! Subjects representing the JetStream API.
+//! Subjects representing the `JetStream` API.
 
 use std::io;
 

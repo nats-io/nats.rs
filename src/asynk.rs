@@ -162,7 +162,7 @@ impl Connection {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 let msg = msg.as_ref().to_vec();
                 let inner = self.inner.clone();
-                unblock(move || inner.publish_request(subject, reply, msg)).await
+                unblock(move || inner.publish_request(&subject, &reply, msg)).await
             }
             _ => Ok(()),
         }
@@ -224,7 +224,7 @@ impl Connection {
     pub async fn subscribe(&self, subject: impl AsSubject) -> io::Result<Subscription> {
         let subject = subject.as_subject()?.to_owned();
         let inner = self.inner.clone();
-        let inner = unblock(move || inner.subscribe(subject)).await?;
+        let inner = unblock(move || inner.subscribe(&subject)).await?;
         let (_closer_tx, closer_rx) = crossbeam_channel::bounded(0);
         Ok(Subscription {
             inner,

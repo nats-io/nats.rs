@@ -510,6 +510,7 @@ fn tls_wait(mut tls: MutexGuard<'_, TlsStream>) -> io::Result<()> {
 
     // Initialize a pollfd object with readiness events we're looking for.
     #[allow(trivial_numeric_casts)]
+    #[allow(clippy::cast_possible_truncation)]
     let mut pollfd = pollfd {
         #[cfg(unix)]
         fd: tcp.as_raw_fd() as _,

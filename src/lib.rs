@@ -437,7 +437,10 @@ impl Connection {
     /// let sub = nc.subscribe("foo")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn subscribe(&self, subject: impl AsSubject) -> io::Result<Subscription> {
+    pub fn subscribe<Sub>(&self, subject: &Sub) -> io::Result<Subscription>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.do_subscribe(subject.as_subject()?, None)
     }
 
@@ -449,11 +452,11 @@ impl Connection {
     /// let sub = nc.queue_subscribe("foo", "production")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn queue_subscribe(
-        &self,
-        subject: impl AsSubject,
-        queue: impl AsSubject,
-    ) -> io::Result<Subscription> {
+    pub fn queue_subscribe<Sub, Que>(&self, subject: &Sub, queue: &Que) -> io::Result<Subscription>
+    where
+        Sub: AsSubject + ?Sized,
+        Que: AsSubject + ?Sized,
+    {
         self.do_subscribe(subject.as_subject()?, Some(queue.as_subject()?))
     }
 
@@ -483,7 +486,10 @@ impl Connection {
     /// }
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn publish(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<()> {
+    pub fn publish<Sub>(&self, subject: &Sub, msg: impl AsRef<[u8]>) -> io::Result<()>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.publish_with_reply_or_headers(subject, None, None, msg)
     }
 
@@ -498,12 +504,16 @@ impl Connection {
     /// nc.publish_request("foo", reply, "Help me!")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn publish_request(
+    pub fn publish_request<Sub, Rep>(
         &self,
-        subject: impl AsSubject,
-        reply: impl AsSubject,
+        subject: &Sub,
+        reply: &Rep,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    ) -> io::Result<()>
+    where
+        Sub: AsSubject + ?Sized,
+        Rep: AsSubject + ?Sized,
+    {
         self.0.client.publish(
             subject.as_subject()?,
             Some(reply.as_subject()?),
@@ -537,7 +547,10 @@ impl Connection {
     /// let resp = nc.request("foo", "Help me?")?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn request(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+    pub fn request<Sub>(&self, subject: &Sub, msg: impl AsRef<[u8]>) -> io::Result<Message>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.request_with_headers_or_timeout(subject.as_subject()?, None, None, msg)
     }
 
@@ -552,12 +565,15 @@ impl Connection {
     /// let resp = nc.request_timeout("foo", "Help me?", std::time::Duration::from_secs(2))?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn request_timeout(
+    pub fn request_timeout<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         msg: impl AsRef<[u8]>,
         timeout: Duration,
-    ) -> io::Result<Message> {
+    ) -> io::Result<Message>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.request_with_headers_or_timeout(subject.as_subject()?, None, Some(timeout), msg)
     }
 
@@ -602,11 +618,14 @@ impl Connection {
     /// for msg in nc.request_multi("foo", "Help")?.iter().take(1) {}
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn request_multi(
+    pub fn request_multi<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<Subscription> {
+    ) -> io::Result<Subscription>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         // Publish a request.
         let reply = self.new_inbox();
         let sub = self.subscribe(&reply)?;
@@ -817,13 +836,16 @@ impl Connection {
     /// assert_eq!(message.headers.unwrap().len(), 2);
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn publish_with_reply_or_headers(
+    pub fn publish_with_reply_or_headers<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         reply: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    ) -> io::Result<()>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.0.client.publish(
             subject.as_subject()?,
             reply.map(|sub| sub.as_subject()).transpose()?,
@@ -858,13 +880,16 @@ impl Connection {
     ///
     /// If not possible an error with [`io::ErrorKind::WouldBlock`] is returned.
     #[doc(hidden)]
-    pub fn try_publish_with_reply_or_headers(
+    pub fn try_publish_with_reply_or_headers<Sub>(
         &self,
-        subject: impl AsSubject,
+        subject: &Sub,
         reply: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
-    ) -> io::Result<()> {
+    ) -> io::Result<()>
+    where
+        Sub: AsSubject + ?Sized,
+    {
         self.0
             .client
             .try_publish(subject.as_subject()?, reply, headers, msg.as_ref())

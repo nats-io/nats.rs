@@ -119,7 +119,9 @@ impl Subject {
 
         loop {
             match (s_tokens.next(), o_tokens.next()) {
-                (Some(MULTI_WILDCARD), Some(_)) | (Some(_), Some(MULTI_WILDCARD)) => break true,
+                (Some(MULTI_WILDCARD), Some(_))
+                | (Some(_), Some(MULTI_WILDCARD))
+                | (None, None) => break true,
                 (Some(s_t), Some(o_t)) => {
                     if token_match(s_t, o_t) {
                         continue;
@@ -128,7 +130,6 @@ impl Subject {
                     }
                 }
                 (None, Some(_)) | (Some(_), None) => break false,
-                (None, None) => break true,
             }
         }
     }

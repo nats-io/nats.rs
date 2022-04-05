@@ -565,8 +565,7 @@ impl Client {
         if subject.contains_wildcards()
             || reply_to
                 .as_ref()
-                .map(|reply| reply.contains_wildcards())
-                .unwrap_or(false)
+                .map_or(false, |reply| reply.contains_wildcards())
         {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -680,16 +679,14 @@ impl Client {
             }
         };
 
-        let mut write = self.state.write.try_lock().ok_or(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "Can not acquire write lock",
-        ))?;
+        let mut write = self.state.write.try_lock().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::WouldBlock, "Can not acquire write lock")
+        })?;
 
         match write.writer.as_mut() {
             None => {
                 // If reconnecting, write into the buffer.
-                let res = proto::encode(&mut write.buffer, op).and_then(|_| write.buffer.flush());
-                res
+                proto::encode(&mut write.buffer, op).and_then(|_| write.buffer.flush())
             }
             Some(mut writer) => {
                 // Check if there's enough space in the buffer to encode the

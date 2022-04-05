@@ -279,28 +279,6 @@ impl Message {
         let n_tokens = reply.tokens().count();
         let mut tokens = reply.tokens().skip(2);
 
-        fn parse_next_token<'i, 's, T, E>(
-            iter: &'i mut impl Iterator<Item = &'s str>,
-            reply: &'s str,
-        ) -> Option<T>
-        where
-            T: FromStr<Err = E>,
-            E: fmt::Display,
-        {
-            iter.next()?
-                .parse()
-                .map_err(|e| {
-                    log::error!(
-                        "failed to parse jetstream reply \
-                    subject: {}, error: {}. Is your \
-                    nats-server up to date?",
-                        reply,
-                        e
-                    );
-                })
-                .ok()
-        }
-
         // now we can try to parse the tokens to individual types. We use an if-else chain instead
         // of a match because it produces more optimal code usually, and we want to try the 11 case
         // first because we expect it to be the most common. We use >= to be future-proof.
@@ -359,6 +337,26 @@ impl Message {
             None
         }
     }
+}
+
+fn parse_next_token<'i, 's, T, E>(
+    iter: &'i mut impl Iterator<Item = &'s str>,
+    reply: &'s str,
+) -> Option<T>
+where
+    T: FromStr<Err = E>,
+    E: fmt::Display,
+{
+    iter.next()?
+        .parse()
+        .map_err(|e| {
+            log::error!(
+                "failed to parse jetstream reply subject: {}, error: {}. Is your nats-server up to date?",
+                reply,
+                e
+            );
+        })
+        .ok()
 }
 
 impl fmt::Debug for Message {
