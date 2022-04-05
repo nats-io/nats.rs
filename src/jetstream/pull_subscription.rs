@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::jetstream::{ConsumerInfo, ConsumerOwnership, JetStream};
-use crate::Message;
+use crate::{Message, SubjectBuf};
 
 use super::{AckPolicy, BatchOptions};
 use crossbeam_channel as channel;
@@ -29,7 +29,7 @@ pub(crate) struct Inner {
     pub(crate) messages: channel::Receiver<Message>,
 
     /// sid of the inbox subscription
-    pub(crate) inbox: String,
+    pub(crate) inbox: SubjectBuf,
 
     /// Ack policy used in methods that automatically ack.
     pub(crate) consumer_ack_policy: AckPolicy,
@@ -69,7 +69,7 @@ impl PullSubscription {
         pid: u64,
         consumer_info: ConsumerInfo,
         consumer_ownership: ConsumerOwnership,
-        inbox: String,
+        inbox: SubjectBuf,
         messages: channel::Receiver<Message>,
         context: JetStream,
     ) -> PullSubscription {
@@ -380,7 +380,7 @@ impl PullSubscription {
 
         self.0.context.connection.publish_with_reply_or_headers(
             &subject,
-            Some(self.0.inbox.as_str()),
+            Some(&self.0.inbox),
             None,
             request,
         )?;

@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nats::jetstream;
 use smol::future::FutureExt;
 use std::{
     io,
@@ -123,7 +122,7 @@ fn close_responsiveness_regression_jetstream() {
 
     js.add_stream(nats::jetstream::StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["subject".to_string()],
+        subjects: vec!["subject".parse().unwrap()],
         ..Default::default()
     })
     .unwrap();
@@ -147,7 +146,7 @@ fn close_responsiveness_regression_jetstream_complex() {
     jetstream
         .add_stream(nats::jetstream::StreamConfig {
             name: "stream10".to_string(),
-            subjects: vec!["subject11".to_string(), "subject12".to_string()],
+            subjects: vec!["subject11".parse().unwrap(), "subject12".parse().unwrap()],
             max_msgs_per_subject: 1,
             storage: nats::jetstream::StorageType::Memory,
             ..Default::default()
@@ -172,7 +171,7 @@ fn close_responsiveness_regression_jetstream_complex() {
         crossbeam_channel::Sender<i32>,
         crossbeam_channel::Receiver<i32>,
     ) = crossbeam_channel::bounded(32);
-    sub.clone().with_process_handler(move |msg| {
+    sub.clone().with_process_handler(move |_| {
         result_tx
             .send(1)
             .expect("failed to report back over channel");

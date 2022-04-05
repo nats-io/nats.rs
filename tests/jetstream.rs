@@ -444,22 +444,22 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
     jsm.add_stream(StreamConfig {
         name: "jobs_stream".to_string(),
         discard: DiscardPolicy::Old,
-        subjects: vec!["waiting_jobs".to_string()],
+        subjects: vec!["waiting_jobs".parse().unwrap()],
         retention: RetentionPolicy::WorkQueue,
         storage: StorageType::File,
         ..Default::default()
     })
     .unwrap();
 
-    let c = jsm
+    jsm
         .add_consumer(
             "jobs_stream",
             ConsumerConfig {
-                deliver_group: Some("dg".to_string()),
+                deliver_group: Some("dg".parse().unwrap()),
                 durable_name: Some("durable".to_string()),
                 deliver_policy: DeliverPolicy::All,
                 ack_policy: AckPolicy::Explicit,
-                deliver_subject: Some("deliver_subject".to_string()),
+                deliver_subject: Some("deliver_subject".parse().unwrap()),
                 ..Default::default()
             },
         )
@@ -470,7 +470,7 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
             "waiting_jobs",
             "dg",
             &SubscribeOptions::bind("jobs_stream".to_string(), "durable".to_string())
-                .deliver_subject("deliver_subject".to_string())
+                .deliver_subject("deliver_subject".parse().unwrap())
                 .ack_explicit()
                 .deliver_all()
                 .replay_instant(),
@@ -490,7 +490,7 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
             "waiting_jobs",
             "dg",
             &SubscribeOptions::bind("jobs_stream".to_string(), "durable".to_string())
-                .deliver_subject("deliver_subject".to_string())
+                .deliver_subject("deliver_subject".parse().unwrap())
                 .ack_explicit()
                 .deliver_all()
                 .replay_instant(),
@@ -605,7 +605,7 @@ fn jetstream_pull_subscribe_fetch() {
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["foo".to_string()],
+        subjects: vec!["foo".parse().unwrap()],
         ..Default::default()
     })
     .unwrap();
@@ -657,7 +657,7 @@ fn jetstream_pull_subscribe_timeout_fetch() {
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["foo".to_string()],
+        subjects: vec!["foo".parse().unwrap()],
         ..Default::default()
     })
     .unwrap();
@@ -715,7 +715,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["foo".to_string()],
+        subjects: vec!["foo".parse().unwrap()],
         ..Default::default()
     })
     .unwrap();
@@ -766,7 +766,7 @@ fn jetstream_pull_subscribe_ephemeral() {
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["foo".to_string()],
+        subjects: vec!["foo".parse().unwrap()],
         ..Default::default()
     })
     .unwrap();

@@ -88,7 +88,7 @@ pub(crate) struct ReadState {
 pub(crate) type Preprocessor = Box<dyn Fn(u64, &Message) -> bool + Send + Sync>;
 
 /// A registered subscription.
-struct Subscription {
+pub(crate) struct Subscription {
     subject: SubjectBuf,
     queue_group: Option<SubjectBuf>,
     messages: channel::Sender<Message>,

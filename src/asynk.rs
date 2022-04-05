@@ -307,7 +307,7 @@ impl Connection {
 
         let res = self.inner.try_publish_with_reply_or_headers(
             &subject,
-            reply.as_ref(),
+            reply.as_deref(),
             headers.clone().as_ref(),
             &msg,
         );

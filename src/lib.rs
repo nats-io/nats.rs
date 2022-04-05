@@ -861,13 +861,13 @@ impl Connection {
     pub fn try_publish_with_reply_or_headers(
         &self,
         subject: impl AsSubject,
-        reply: Option<&impl AsSubject>,
+        reply: Option<&Subject>,
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
         self.0.client.try_publish(
             subject.as_subject()?,
-            reply.map(|sub| sub.as_subject()).transpose()?,
+            reply,
             headers,
             msg.as_ref(),
         )

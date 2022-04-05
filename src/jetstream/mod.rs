@@ -694,7 +694,6 @@ impl JetStream {
     /// # Example
     /// ```
     /// # use nats::jetstream::BatchOptions;
-    /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
@@ -708,25 +707,24 @@ impl JetStream {
     ///     println!("received message: {:?}", message);
     ///     Ok(())
     /// })?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn pull_subscribe(&self, subject: &str) -> io::Result<PullSubscription> {
-        self.do_pull_subscribe(subject, None)
+    pub fn pull_subscribe(&self, subject: impl AsSubject) -> io::Result<PullSubscription> {
+        self.do_pull_subscribe(subject.as_subject()?, None)
     }
 
     /// Creates a `PullSubscription` with options.
     pub fn pull_subscribe_with_options(
         &self,
-        subject: &str,
+        subject: impl AsSubject,
         options: &PullSubscribeOptions,
     ) -> io::Result<PullSubscription> {
-        self.do_pull_subscribe(subject, Some(options))
+        self.do_pull_subscribe(subject.as_subject()?, Some(options))
     }
 
     pub(crate) fn do_pull_subscribe(
         &self,
-        subject: &str,
+        subject: &Subject,
         maybe_options: Option<&PullSubscribeOptions>,
     ) -> io::Result<PullSubscription> {
         // Find the stream mapped to the subject if not bound to a stream already.
@@ -744,11 +742,14 @@ impl JetStream {
             // check mismatches between user config and info
 
             // Make sure this new subject matches or is a subset.
-            if !info.config.filter_subject.is_empty() && subject != info.config.filter_subject {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "subjects do not match",
-                ));
+            match info.config.filter_subject {
+                Some(filter_subject) if !filter_subject.matches(subject) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "subjects do not match",
+                    ));
+                }
+                _ => {}
             }
 
             Ok(info)
@@ -776,7 +777,7 @@ impl JetStream {
                             deliver_policy: DeliverPolicy::All,
                             ack_policy: AckPolicy::Explicit,
                             // Do filtering always, server will clear as needed.
-                            filter_subject: subject.to_string(),
+                            filter_subject: Some(subject.to_owned()),
                             replay_policy: ReplayPolicy::Instant,
                             ..Default::default()
                         })
@@ -791,7 +792,7 @@ impl JetStream {
         let consumer_info = process_consumer_info(consumer_info)?;
 
         let inbox = self.connection.new_inbox();
-        let (pid, messages) = self.connection.0.client.subscribe(inbox.as_str(), None)?;
+        let (pid, messages) = self.connection.0.client.subscribe(&inbox, None)?;
 
         Ok(PullSubscription::new(
             pid,
@@ -1344,7 +1345,7 @@ impl JetStream {
                             None,
                             None,
                             b"",
-                        );
+                        ).ok();
                     }
 
                     // if it is not an ordered consumer, don't handle sequence mismatch.

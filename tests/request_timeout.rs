@@ -23,7 +23,7 @@ fn request_timeout() {
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
-        subjects: vec!["foo".to_string()],
+        subjects: vec!["foo".parse().unwrap()],
         ..Default::default()
     })
     .unwrap();
