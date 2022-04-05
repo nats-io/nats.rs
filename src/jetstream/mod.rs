@@ -969,7 +969,7 @@ impl JetStream {
         let process_consumer_info = |info: ConsumerInfo| {
             // Make sure this new subject matches or is a subset.
             match info.config.filter_subject.as_ref() {
-                Some(filter) if subject.matches(&filter) => {}
+                Some(filter) if subject.matches(filter) => {}
                 None => {}
                 Some(_) => {
                     return Err(io::Error::new(
@@ -1340,12 +1340,10 @@ impl JetStream {
                         .and_then(|headers| headers.get(header::NATS_CONSUMER_STALLED));
 
                     if let Some(consumer_stalled) = maybe_consumer_stalled {
-                        context.connection.try_publish_with_reply_or_headers(
-                            consumer_stalled,
-                            None,
-                            None,
-                            b"",
-                        ).ok();
+                        context
+                            .connection
+                            .try_publish_with_reply_or_headers(consumer_stalled, None, None, b"")
+                            .ok();
                     }
 
                     // if it is not an ordered consumer, don't handle sequence mismatch.

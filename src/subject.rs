@@ -53,11 +53,11 @@ pub trait AsSubject {
 
 /// A valid NATS subject.
 #[repr(transparent)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq)]
 pub struct Subject(str);
 
 /// An owned, valid NATS subject.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct SubjectBuf(String);
@@ -212,6 +212,12 @@ impl Deref for Subject {
     }
 }
 
+impl PartialEq for Subject {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
 impl Hash for Subject {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
@@ -327,6 +333,12 @@ impl AsRef<Subject> for SubjectBuf {
     }
 }
 
+impl PartialEq for SubjectBuf {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
 impl Hash for SubjectBuf {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
@@ -370,7 +382,7 @@ impl<'s> Iterator for Tokens<'s> {
 
 impl AsSubject for str {
     fn as_subject(&self) -> Result<&Subject, io::Error> {
-        Subject::new(&self).map_err(Into::into)
+        Subject::new(self).map_err(Into::into)
     }
 }
 

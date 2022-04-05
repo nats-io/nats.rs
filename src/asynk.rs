@@ -111,7 +111,7 @@ use std::time::Duration;
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::{header::HeaderMap, AsSubject, Subject, SubjectBuf, IntoServerList};
+use crate::{header::HeaderMap, AsSubject, IntoServerList, Subject, SubjectBuf};
 
 /// Connect to a NATS server at the given url.
 ///
@@ -174,7 +174,11 @@ impl Connection {
     }
 
     /// Publishes a message and waits for the response.
-    pub async fn request(&self, subject: impl AsSubject, msg: impl AsRef<[u8]>) -> io::Result<Message> {
+    pub async fn request(
+        &self,
+        subject: impl AsSubject,
+        msg: impl AsRef<[u8]>,
+    ) -> io::Result<Message> {
         let subject = subject.as_subject()?.to_owned();
         let msg = msg.as_ref().to_vec();
         let inner = self.inner.clone();
@@ -467,7 +471,7 @@ impl Message {
                 crate::message::MESSAGE_NOT_BOUND,
             )
         })?;
-        let res = client.try_publish(&reply, None, None, msg.as_ref());
+        let res = client.try_publish(reply, None, None, msg.as_ref());
         match res {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 let client = client.clone();

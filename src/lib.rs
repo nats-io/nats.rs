@@ -865,11 +865,8 @@ impl Connection {
         headers: Option<&HeaderMap>,
         msg: impl AsRef<[u8]>,
     ) -> io::Result<()> {
-        self.0.client.try_publish(
-            subject.as_subject()?,
-            reply,
-            headers,
-            msg.as_ref(),
-        )
+        self.0
+            .client
+            .try_publish(subject.as_subject()?, reply, headers, msg.as_ref())
     }
 }

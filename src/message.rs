@@ -99,7 +99,7 @@ impl Message {
             .client
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, MESSAGE_NOT_BOUND))?;
-        client.publish(&reply, None, None, msg.as_ref())?;
+        client.publish(reply, None, None, msg.as_ref())?;
         Ok(())
     }
 
@@ -244,8 +244,7 @@ impl Message {
             let sub =
                 crate::Subscription::new(sid, ack_reply.to_string(), receiver, client.clone());
 
-            let pub_ret =
-                client.publish(&original_reply, Some(&ack_reply), None, ack_kind.as_ref());
+            let pub_ret = client.publish(original_reply, Some(&ack_reply), None, ack_kind.as_ref());
             if pub_ret.is_err() {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;

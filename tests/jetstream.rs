@@ -451,19 +451,18 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
     })
     .unwrap();
 
-    jsm
-        .add_consumer(
-            "jobs_stream",
-            ConsumerConfig {
-                deliver_group: Some("dg".parse().unwrap()),
-                durable_name: Some("durable".to_string()),
-                deliver_policy: DeliverPolicy::All,
-                ack_policy: AckPolicy::Explicit,
-                deliver_subject: Some("deliver_subject".parse().unwrap()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+    jsm.add_consumer(
+        "jobs_stream",
+        ConsumerConfig {
+            deliver_group: Some("dg".parse().unwrap()),
+            durable_name: Some("durable".to_string()),
+            deliver_policy: DeliverPolicy::All,
+            ack_policy: AckPolicy::Explicit,
+            deliver_subject: Some("deliver_subject".parse().unwrap()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let job_sub = jsm
         .queue_subscribe_with_options(

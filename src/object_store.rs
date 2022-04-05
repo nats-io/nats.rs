@@ -558,7 +558,7 @@ impl ObjectStore {
         let mut headers = HeaderMap::default();
         headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
-        let subject = api::object_meta(&self.name, &object_name)?;
+        let subject = api::object_meta(&self.name, object_name)?;
         let message = Message::new(subject, None, data, Some(headers));
 
         self.context.publish_message(&message)?;
