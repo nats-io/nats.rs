@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,6 +17,9 @@ use std::{
     iter::{FromIterator, IntoIterator},
     ops::Deref,
 };
+
+use std::collections::hash_set;
+use std::iter::Iterator;
 
 use log::trace;
 
@@ -54,7 +57,7 @@ pub const NATS_CONSUMER_STALLED: &str = "Nats-Consumer-Stalled";
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct HeaderMap {
     /// A multi-map from header name to a set of values for that header
-    pub inner: HashMap<String, HashSet<String>>,
+    inner: HashMap<String, HashSet<String>>,
 }
 
 impl FromIterator<(String, String)> for HeaderMap {
@@ -229,6 +232,178 @@ impl Deref for HeaderMap {
 }
 
 impl HeaderMap {
+    /// Creates a new header map
+    ///
+    pub fn new() -> HeaderMap {
+        HeaderMap::default()
+    }
+
+    /// Clears the map, removing all key-value pairs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    /// map.insert(STATUS, "200".to_string());
+    ///
+    /// map.clear();
+    /// assert!(map.is_empty());
+    /// ```
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Returns true if the map contains no elements.
+    ///
+    ///  # Examples
+    ///
+    /// ```
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    ///
+    /// assert!(map.is_empty());
+    ///
+    /// map.insert(STATUS, "200".to_string());
+    ///
+    /// assert!(!map.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Returns `true` if the map contains a value for the specified key.
+    ///
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.inner.contains_key(key)
+    }
+}
+
+impl HeaderMap {
+    /// Inserts a key-value pair into the map.
+    ///
+    /// If the map did not previously have this key present, then `None` is
+    /// returned.
+    ///
+    /// If the map did have this key present, the new value is associated with
+    /// the key and all previous values are removed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::collections::HashSet;
+    /// # use std::iter::FromIterator;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    /// map.insert(STATUS, "200");
+    /// assert!(!map.is_empty());
+    ///
+    /// let mut previous_set = map.insert(STATUS, "302").unwrap();
+    /// assert_eq!(HashSet::from_iter(["200".to_string()]), previous_set);
+    /// ```
+    pub fn insert<K, V>(&mut self, key: K, value: V) -> Option<HashSet<String>>
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let mut value_set = HashSet::new();
+        value_set.insert(value.into());
+
+        self.inner.insert(key.into(), value_set)
+    }
+
+    /// Inserts a key-value pair into the map.
+    ///
+    /// If the map did not previously have this key present, then false is returned.
+    ///
+    /// If the map did have this key present, the new value is inserted to the end of the set of values currently associated with the key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    /// map.append(STATUS, "200");
+    /// assert!(!map.is_empty());
+    ///
+    /// ```
+    pub fn append<K, V>(&mut self, key: K, value: V) -> bool
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.inner
+            .entry(key.into())
+            .or_insert_with(HashSet::default)
+            .insert(value.into())
+    }
+
+    /// Returns a reference to the value associated with the key.
+    ///
+    /// If there are multiple values associated with the key, then the first one
+    /// is returned. Use `get_all` to get all values associated with a given
+    /// key. Returns `None` if there are no values associated with the key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    /// assert!(map.get(STATUS).is_none());
+    ///
+    /// map.insert(STATUS, "200".to_string());
+    /// assert_eq!(map.get(STATUS).unwrap(), &"200");
+    /// ```
+    pub fn get<K: ?Sized>(&self, key: &K) -> Option<&String>
+    where
+        K: ToString,
+    {
+        self.inner
+            .get(&key.to_string())
+            .and_then(|values| values.iter().next())
+    }
+
+    /// Returns a view of all values associated with a key.
+    ///
+    /// The returned view does not incur any allocations and allows iterating
+    /// the values associated with the key.  See [`GetAll`] for more details.
+    /// Returns `None` if there are no values associated with the key.
+    ///
+    /// [`GetAll`]: struct.GetAll.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    ///
+    /// map.insert(STATUS, "hello");
+    /// map.append(STATUS, "goodbye");
+    ///
+    /// let values = map.get_all(STATUS);
+    ///
+    /// // Will print in an arbitrary order.
+    /// for x in values {
+    ///   println!("{}", x);
+    /// }
+    /// ```
+    ///
+    pub fn get_all<K: ?Sized>(&self, key: &K) -> GetAll<'_>
+    where
+        K: ToString,
+    {
+        GetAll {
+            map: self,
+            key: key.to_string(),
+        }
+    }
+
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         // `<version line>\r\n[headers]\r\n\r\n[payload]\r\n`
         let mut buf = vec![];
@@ -243,6 +418,74 @@ impl HeaderMap {
         }
         buf.extend_from_slice(b"\r\n");
         buf
+    }
+}
+
+/// A view to all values stored in a single entry.
+///
+/// This struct is returned by `HeaderMap::get_all`.
+#[derive(Debug)]
+pub struct GetAll<'a> {
+    map: &'a HeaderMap,
+    key: String,
+}
+
+impl<'a> GetAll<'a> {
+    /// Returns an iterator visiting all values associated with the entry.
+    ///
+    /// The values are iterated on in an arbitrary but deterministic order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use nats::HeaderMap;
+    /// # use nats::header::STATUS;
+    /// let mut map = HeaderMap::new();
+    /// map.insert(STATUS, "hello");
+    /// map.append(STATUS, "goodbye");
+    ///
+    /// let values = map.get_all(STATUS);
+    ///
+    /// // Will print in an arbitrary order.
+    /// for x in values {
+    ///   println!("{}", x);
+    /// }
+    /// ```
+    pub fn iter(&self) -> ValueIter<'a> {
+        // This creates a new GetAll struct so that the lifetime
+        // isn't bound to &self.
+        GetAll {
+            map: self.map,
+            key: self.key.to_owned(),
+        }
+        .into_iter()
+    }
+}
+
+impl<'a> IntoIterator for GetAll<'a> {
+    type Item = &'a String;
+    type IntoIter = ValueIter<'a>;
+
+    fn into_iter(self) -> ValueIter<'a> {
+        ValueIter {
+            maybe_inner: self.map.inner.get(&self.key).map(|values| values.iter()),
+        }
+    }
+}
+
+/// Iterator for iterating over values.
+pub struct ValueIter<'a> {
+    maybe_inner: Option<hash_set::Iter<'a, String>>,
+}
+
+impl<'a> Iterator for ValueIter<'a> {
+    type Item = &'a String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.maybe_inner {
+            Some(inner) => inner.next(),
+            None => None,
+        }
     }
 }
 

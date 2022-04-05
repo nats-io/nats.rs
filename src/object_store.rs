@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -22,14 +22,14 @@ use crate::jetstream::{
     SubscribeOptions,
 };
 use crate::Message;
-use chrono::Utc;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cmp;
-use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
+use time::serde::rfc3339;
+use time::OffsetDateTime;
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
@@ -215,6 +215,7 @@ pub struct ObjectInfo {
     /// Number of chunks the object is stored in.
     pub chunks: usize,
     /// Date and time the object was last modified.
+    #[serde(with = "rfc3339")]
     pub modified: DateTime,
     /// Digest of the object stream.
     pub digest: String,
@@ -451,18 +452,13 @@ impl ObjectStore {
             chunks: object_chunks,
             size: object_size,
             digest: "".to_string(),
-            modified: Utc::now(),
+            modified: OffsetDateTime::now_utc(),
             deleted: false,
         };
 
         let data = serde_json::to_vec(&object_info)?;
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(NATS_ROLLUP.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(ROLLUP_SUBJECT.to_string());
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
         let message = Message::new(subject, None, data, Some(headers));
 
@@ -560,12 +556,7 @@ impl ObjectStore {
         let data = serde_json::to_vec(&object_info)?;
 
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(NATS_ROLLUP.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(ROLLUP_SUBJECT.to_string());
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
         let subject = api::object_meta(&self.name, &object_name)?;
         let message = Message::new(subject, None, data, Some(headers));

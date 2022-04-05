@@ -1,3 +1,95 @@
+# 0.18.1
+## Overview
+A patch release fixing long durations until `close()` returned. It was introduced in the graceful shutdown of client connection threads in v0.18.0.
+
+Dropping NATS connection was not affected.
+
+## Fixed
+* Fix slow connection closing by @Jarema in https://github.com/nats-io/nats.rs/pull/319
+* Fix close() hang after js.subscribe() is called by @Jarema https://github.com/nats-io/nats.rs/pull/321
+* Fix close() hang after Push Consumer subsription edge case by @Jarema https://github.com/nats-io/nats.rs/pull/323
+
+## Minor
+* Replace custom Into trait with From by @Jarema in https://github.com/nats-io/nats.rs/pull/315
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/v0.18.0...v0.18.1
+
+# 0.18.0
+## Overview
+This release focuses mainly around fixes of large changes introduces in 0.17.0, but also improves adds slow consumers support
+and improves header map interface. 
+
+## Breaking Change
+* Add a public convenience interface to header maps by @caspervonb in https://github.com/nats-io/nats.rs/pull/310
+
+## Added
+* Add slow consumers support by @Jarema in https://github.com/nats-io/nats.rs/pull/299
+
+## Changed
+* Replace `chrono` with `time` due to RUSTSEC-2020-0159 by @ShellWowza in https://github.com/nats-io/nats.rs/pull/309
+* Join all connect threads while closing connection by @Jarema in https://github.com/nats-io/nats.rs/pull/305
+
+## Fixed
+* Test server subject matching bug fix by @fdlg in https://github.com/nats-io/nats.rs/pull/221
+* Fix Pull Subscriber visibility by @Jarema in https://github.com/nats-io/nats.rs/pull/313
+* Fix missing export subscription modules by @caspervonb in https://github.com/nats-io/nats.rs/pull/314
+* Check sequence mismatch only for Ordered Consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/317
+
+## New Contributors
+* @ShellWowza made their first contribution in https://github.com/nats-io/nats.rs/pull/309
+* @fdlg made their first contribution in https://github.com/nats-io/nats.rs/pull/221
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/v0.17.0...v0.17.1
+
+# 0.17.0
+## Overview
+
+This release brings a lot of changes and refactors among which the highlights are:
+* A complete rewrite of the JetStream API with a new subscription interface
+* Improvements of JetStream internals
+* Key-Value Store support
+* Object Store support
+
+## Breaking Changes
+* Introduce a `JetStream` type by @caspervonb in https://github.com/nats-io/nats.rs/pull/247
+* Move Consumer Management to JetStream by @Jarema in https://github.com/nats-io/nats.rs/pull/250
+* Re-work JetStream push consumer interface by @caspervonb in https://github.com/nats-io/nats.rs/pull/252
+* Re-work JetStream pull consumer interface by @Jarema in https://github.com/nats-io/nats.rs/pull/302
+* Rename create_stream to add_stream by @Jarema in https://github.com/nats-io/nats.rs/pull/251
+* Change return type of add_consumer to `ConsumerInfo` by @caspervonb in https://github.com/nats-io/nats.rs/pull/252
+
+## Added
+* Add header module by @caspervonb in https://github.com/nats-io/nats.rs/pull/260
+* Implement key-value store by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+* Implement object store by @caspervonb in https://github.com/nats-io/nats.rs/pull/269
+* Lame duck mode support by @Jarema in https://github.com/nats-io/nats.rs/pull/265
+* Add domain field to `PubAck` by @caspervonb in https://github.com/nats-io/nats.rs/pull/243
+* Add support for JetStream publishing by @caspervonb in https://github.com/nats-io/nats.rs/pull/248
+* Add `error_callback` by @derekcollison in https://github.com/nats-io/nats.rs/pull/253
+* Add `get_message` to JetStream context by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+* Add `get_last_message` to JetStream context  by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+* Add option `retry_on_failed_connect` by @pozsgaic in https://github.com/nats-io/nats.rs/pull/223
+* Add support for different .pem contents by @Jarema https://github.com/nats-io/nats.rs/pull/280
+* Introduce ServerAddress https://github.com/nats-io/nats.rs/pull/276
+
+## Changed
+* Allow for inline header description with spaces by @caspervonb in https://github.com/nats-io/nats.rs/pull/241
+* Allow setting a jetstream api prefix from a domain by @caspervonb in https://github.com/nats-io/nats.rs/pull/244
+* Have Client in Message as Option by @Jarema in https://github.com/nats-io/nats.rs/pull/258
+* Change jetstream log level to debug by @caspervonb https://github.com/nats-io/nats.rs/pull/307
+* Bump MSRV to 1.53.0
+
+## Minor
+* Reduce allocations in `Headers::try_from` by @caspervonb in https://github.com/nats-io/nats.rs/pull/238
+* Improve error handling by @caspervonb in https://github.com/nats-io/nats.rs/pull/249
+* Some additions.. by @derekcollison in https://github.com/nats-io/nats.rs/pull/253
+* Bump blocking crate by @Jarema in https://github.com/nats-io/nats.rs/pull/255
+* Add `sealed` field to `jetstream::StreamConfig` by @caspervonb in https://github.com/nats-io/nats.rs/pull/256
+* Fix unsubscribe method behaviour to act as in docs by @Jarema in https://github.com/nats-io/nats.rs/pull/301
+* Fix license formatting so it is properly detected by Github and add missing license banners in files by @Jarema in https://github.com/nats-io/nats.rs/pull/292
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/v0.16.0...v0.17.0
+
 # 0.16.0
 
 ### Added

@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -256,6 +256,57 @@ impl Subscription {
         Handler { sub: self }
     }
 
+    /// Sets limit of how many messages can wait in internal queue.
+    /// If limit will be reached, `error_callback` will be fired with information
+    /// which subscription is affected
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let sub =  nc.subscribe("bar")?;
+    /// sub.set_message_limits(1000);
+    /// # Ok(())
+    /// # }
+    /// ```
+
+    pub fn set_message_limits(&self, limit: usize) {
+        self.0
+            .client
+            .state
+            .read
+            .lock()
+            .subscriptions
+            .entry(self.0.sid)
+            .and_modify(|sub| sub.pending_messages_limit = Some(limit));
+    }
+
+    /// Returns number of dropped messages for this Subscription.
+    /// Dropped messages occur when `set_message_limits` is set and threashold is reached,
+    /// triggering `slow consumer` error.
+    ///
+    /// # Example:
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// let sub =  nc.subscribe("bar")?;
+    /// sub.set_message_limits(1000);
+    /// println!("dropped messages: {}", sub.dropped_messages()?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn dropped_messages(&self) -> io::Result<usize> {
+        self.0
+            .client
+            .state
+            .read
+            .lock()
+            .subscriptions
+            .get(&self.0.sid)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "subscription not found"))
+            .map(|subscription| subscription.dropped_messages)
+    }
+
     /// Unsubscribe a subscription immediately without draining.
     /// Use `drain` instead if you want any pending messages
     /// to be processed by a handler, if one is configured.
@@ -270,7 +321,7 @@ impl Subscription {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        self.drain()?;
+        self.0.client.unsubscribe(self.0.sid)?;
         // Discard all queued messages.
         while self.0.messages.try_recv().is_ok() {}
         Ok(())

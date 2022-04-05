@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -511,14 +511,6 @@ impl PushSubscription {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        // Drain
-        self.0
-            .context
-            .connection
-            .0
-            .client
-            .flush(DEFAULT_FLUSH_TIMEOUT)?;
-
         self.0
             .context
             .connection
@@ -561,9 +553,9 @@ impl PushSubscription {
         self.unsubscribe()
     }
 
-    /// Send an unsubscription then flush the connection,
+    /// Send an unsubscription and flush the connection,
     /// allowing any unprocessed messages to be handled
-    /// by a handler function if one is configured.
+    /// by a `Subscription`
     ///
     /// After the flush returns, we know that a round-trip
     /// to the server has happened after it received our
@@ -593,7 +585,7 @@ impl PushSubscription {
     ///
     /// subscription.drain()?;
     ///
-    /// assert!(subscription.next().is_none());
+    /// assert!(subscription.next().is_some());
     ///
     /// # Ok(())
     /// # }
@@ -613,9 +605,6 @@ impl PushSubscription {
             .0
             .client
             .unsubscribe(self.0.sid.load(Ordering::Relaxed))?;
-
-        // Discard all queued messages.
-        while self.0.messages.try_recv().is_ok() {}
 
         // Delete the consumer, if we own it.
         if self.0.consumer_ownership == ConsumerOwnership::Yes {
@@ -668,7 +657,7 @@ impl Handler {
     /// # }
     /// ```
     pub fn unsubscribe(self) -> io::Result<()> {
-        self.subscription.drain()
+        self.subscription.unsubscribe()
     }
 }
 

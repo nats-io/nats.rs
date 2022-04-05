@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -67,6 +67,7 @@ fn read_line<R: BufRead + ?Sized>(r: &mut R, buf: &mut [u8]) -> io::Result<usize
             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         };
+
         let (done, len) = {
             if let Some(i) = memchr::memchr(b'\n', available) {
                 (true, i + 1)

@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,14 +18,14 @@ use std::io::{self, BufReader, BufWriter, Error, ErrorKind};
 use std::mem;
 use std::sync::Arc;
 
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
 use crossbeam_channel::RecvTimeoutError;
 use parking_lot::Mutex;
 
-use crate::connector::{Connector, NatsStream};
+use crate::connector::{Connector, NatsStream, ServerAddress};
 use crate::message::Message;
 use crate::proto::{self, ClientOp, ServerOp};
 use crate::{header::HeaderMap, inject_delay, inject_io_failure, Options, ServerInfo};
@@ -39,9 +39,9 @@ const BUF_CAPACITY: usize = 32 * 1024;
 ///     first and released after when both are used.
 ///     Failure to follow this strict rule WILL create
 ///     a deadlock!
-struct State {
+pub(crate) struct State {
     write: Mutex<WriteState>,
-    read: Mutex<ReadState>,
+    pub(crate) read: Mutex<ReadState>,
     meta: Mutex<MetaState>,
 }
 
@@ -70,9 +70,9 @@ struct WriteState {
     next_sid: u64,
 }
 
-struct ReadState {
+pub(crate) struct ReadState {
     /// Current subscriptions.
-    subscriptions: HashMap<u64, Subscription>,
+    pub(crate) subscriptions: HashMap<u64, Subscription>,
 
     /// Expected pongs and their notification channels.
     pongs: VecDeque<channel::Sender<()>>,
@@ -93,13 +93,15 @@ struct Subscription {
     queue_group: Option<SubjectBuf>,
     messages: channel::Sender<Message>,
     preprocess: Preprocessor,
+    pub(crate) pending_messages_limit: Option<usize>,
+    pub(crate) dropped_messages: usize,
 }
 
 /// A NATS client.
 #[derive(Clone)]
 pub struct Client {
     /// Shared client state.
-    state: Arc<State>,
+    pub(crate) state: Arc<State>,
 
     /// Server info provided by the last INFO message.
     pub(crate) server_info: Arc<Mutex<ServerInfo>>,
@@ -109,11 +111,17 @@ pub struct Client {
 
     /// The options that this `Client` was created using.
     pub(crate) options: Arc<Options>,
+
+    /// handler of client thread.
+    pub(crate) client_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
+
+    /// handler of flush thread.
+    pub(crate) flush_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl Client {
     /// Creates a new client that will begin connecting in the background.
-    pub(crate) fn connect(url: &str, options: Options) -> io::Result<Client> {
+    pub(crate) fn connect(urls: Vec<ServerAddress>, options: Options) -> io::Result<Client> {
         // A channel for coordinating flushes.
         let (flush_kicker, flush_wanted) = channel::bounded(1);
 
@@ -143,20 +151,22 @@ impl Client {
             server_info: Arc::new(Mutex::new(ServerInfo::default())),
             shutdown: Arc::new(Mutex::new(false)),
             options: Arc::new(options),
+            client_thread: Arc::new(Mutex::new(None)),
+            flush_thread: Arc::new(Mutex::new(None)),
         };
 
         let options = client.options.clone();
 
         // Connector for creating the initial connection and reconnecting when
         // it is broken.
-        let connector = Connector::new(url, options.clone())?;
+        let connector = Connector::new(urls, options.clone())?;
 
         // Spawn the client thread responsible for:
         // - Maintaining a connection to the server and reconnecting when it is
         //   broken.
         // - Reading messages from the server and processing them.
         // - Forwarding MSG operations to subscribers.
-        thread::spawn({
+        let handle = thread::spawn({
             let client = client.clone();
             move || {
                 let res = client.run(connector);
@@ -176,6 +186,8 @@ impl Client {
             }
         });
 
+        *client.client_thread.lock() = Some(handle);
+
         channel::select! {
             recv(run_receiver) -> res => {
                 res.expect("client thread has panicked")?;
@@ -185,7 +197,7 @@ impl Client {
         }
 
         // Spawn a thread that periodically flushes buffered messages.
-        thread::spawn({
+        let handle = thread::spawn({
             let client = client.clone();
             move || {
                 // Track last flush/write time.
@@ -200,6 +212,10 @@ impl Client {
 
                 // Wait until at least one message is buffered.
                 loop {
+                    // if client is shutting down, stop periodic flushses.
+                    if client.check_shutdown().is_err() {
+                        break;
+                    }
                     match flush_wanted.recv_timeout(PING_INTERVAL) {
                         Ok(_) => {
                             let since = last.elapsed();
@@ -266,6 +282,7 @@ impl Client {
             }
         });
 
+        *client.flush_thread.lock() = Some(handle);
         Ok(client)
     }
 
@@ -327,6 +344,8 @@ impl Client {
         let mut write = self.state.write.lock();
         let mut read = self.state.read.lock();
 
+        write.flush_kicker.try_send(()).ok();
+
         // Initiate shutdown process.
         if self.shutdown() {
             // Clear all subscriptions.
@@ -342,16 +361,23 @@ impl Client {
             read.subscriptions.clear();
 
             // Flush the writer in case there are buffered messages.
-            if let Some(writer) = write.writer.as_mut() {
+            if let Some(mut writer) = write.writer.as_mut() {
+                // TODO: for some reason sometimes Push Consumer Subscription cause
+                // `close()` to hang. Sending ping unblocks read_line. Not worth investigating further
+                // this edge case as async client will not have this issue.
+                proto::encode(&mut writer, ClientOp::Ping).ok();
                 writer.flush().ok();
             }
 
             // Wake up all pending flushes.
             read.pongs.clear();
-
             // NB see locking protocol for state.write and state.read
             drop(read);
             drop(write);
+
+            // wait for the threads.
+            self.client_thread.lock().take().map(JoinHandle::join);
+            self.flush_thread.lock().take().map(JoinHandle::join);
         }
     }
 
@@ -420,6 +446,8 @@ impl Client {
                 queue_group: queue_group.map(|sub| sub.to_owned()),
                 messages: sender,
                 preprocess: message_processor,
+                pending_messages_limit: None,
+                dropped_messages: 0,
             },
         );
 
@@ -824,7 +852,7 @@ impl Client {
             match op {
                 ServerOp::Info(server_info) => {
                     for url in &server_info.connect_urls {
-                        connector.add_url(url).ok();
+                        connector.add_server(url.parse()?);
                     }
                     self.process_info(&server_info, connector);
                     *self.server_info.lock() = server_info;
@@ -879,7 +907,7 @@ impl Client {
                         continue;
                     }
 
-                    let read = self.state.read.lock();
+                    let mut read = self.state.read.lock();
 
                     // Send the message to matching subscription.
                     if let Some(subscription) = read.subscriptions.get(&sid) {
@@ -897,6 +925,26 @@ impl Client {
                         let preprocess = &subscription.preprocess;
                         if preprocess(sid, &msg) {
                             continue;
+                        }
+
+                        //check if subscription has set limits for slow consumers
+                        if let Some(pending_messages_limit) = subscription.pending_messages_limit {
+                            if pending_messages_limit <= subscription.messages.len() {
+                                connector.get_options().error_callback.call(
+                                    self,
+                                    io::Error::new(
+                                        ErrorKind::Other,
+                                        format!(
+                                            "slow consumer detected for subscription on subject {}. dropping messages",
+                                            subscription.subject
+                                        ),
+                                    ),
+                                );
+                                read.subscriptions
+                                    .entry(sid)
+                                    .and_modify(|sub| sub.dropped_messages += 1);
+                                continue;
+                            }
                         }
 
                         // Send a message or drop it if the channel is
@@ -936,6 +984,22 @@ impl Client {
                             continue;
                         }
 
+                        //check if subscription has set limits for slow consumers
+                        if let Some(pending_messages_limit) = subscription.pending_messages_limit {
+                            if pending_messages_limit <= subscription.messages.len() {
+                                connector.get_options().error_callback.call(
+                                    self,
+                                    io::Error::new(
+                                        ErrorKind::Other,
+                                        format!(
+                                            "slow consumer detected for subscription on subject {}. dropping messages",
+                                            subscription.subject
+                                        ),
+                                    ),
+                                );
+                                continue;
+                            }
+                        }
                         // Send a message or drop it if the channel is
                         // disconnected or full.
                         subscription.messages.send(msg).unwrap();

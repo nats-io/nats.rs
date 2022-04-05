@@ -1,4 +1,4 @@
-// Copyright 2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,14 +19,13 @@ use std::time::Duration;
 
 use crate::header::{self, HeaderMap};
 use crate::jetstream::{
-    DateTime, Error, ErrorCode, JetStream, PushSubscription, StorageType, StreamConfig, StreamInfo,
-    StreamMessage, SubscribeOptions,
+    DateTime, DiscardPolicy, Error, ErrorCode, JetStream, PushSubscription, StorageType,
+    StreamConfig, StreamInfo, StreamMessage, SubscribeOptions,
 };
 use crate::message::Message;
 use crate::SubjectBuf;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashSet;
 
 /// Configuration values for key value stores.
 #[derive(Debug, Default)]
@@ -73,14 +72,12 @@ pub enum Operation {
 // Helper to extract key value operation from message headers
 fn kv_operation_from_maybe_headers(maybe_headers: Option<&HeaderMap>) -> Operation {
     if let Some(headers) = maybe_headers {
-        if let Some(set) = headers.get(KV_OPERATION) {
-            if set.get(KV_OPERATION_DELETE).is_some() {
-                return Operation::Delete;
-            }
-
-            if set.get(KV_OPERATION_PURGE).is_some() {
-                return Operation::Purge;
-            }
+        if let Some(op) = headers.get(KV_OPERATION) {
+            return match op.as_str() {
+                KV_OPERATION_DELETE => Operation::Delete,
+                KV_OPERATION_PURGE => Operation::Purge,
+                _ => Operation::Put,
+            };
         }
     }
 
@@ -194,6 +191,14 @@ impl JetStream {
             ));
         }
 
+        let discard_policy = {
+            if self.connection.is_server_compatible_version(2, 7, 2) {
+                DiscardPolicy::New
+            } else {
+                DiscardPolicy::Old
+            }
+        };
+
         if !is_valid_bucket_name(&config.bucket) {
             return Err(io::Error::new(io::ErrorKind::Other, "invalid bucket name"));
         }
@@ -235,6 +240,7 @@ impl JetStream {
             allow_rollup: true,
             deny_delete: true,
             num_replicas,
+            discard: discard_policy,
             ..Default::default()
         })?;
 
@@ -336,7 +342,7 @@ impl Store {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// # let bucket = context.create_key_value(&Config {
-    /// #  bucket: "entry".to_string(),
+    /// #  bucket: "entry_bucket".to_string(),
     /// #  ..Default::default()
     /// # })?;
     /// #
@@ -408,6 +414,7 @@ impl Store {
     ///   println!("Found value {:?}", value);
     /// }
     /// #
+    /// # context.delete_key_value("get")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -433,11 +440,12 @@ impl Store {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// # let bucket = context.create_key_value(&Config {
-    /// #  bucket: "get".to_string(),
+    /// #  bucket: "put".to_string(),
     /// #  ..Default::default()
     /// # })?;
     /// #
     /// bucket.put("foo", b"bar")?;
+    /// # context.delete_key_value("put")?;
     /// #
     /// # Ok(())
     /// # }
@@ -470,6 +478,7 @@ impl Store {
     /// bucket.purge("foo")?;
     /// bucket.create("foo", b"bar")?;
     /// #
+    /// # context.delete_key_value("create")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -506,6 +515,7 @@ impl Store {
     /// #
     /// let revision = bucket.put("foo", b"bar")?;
     /// let new_revision = bucket.update("foo", b"baz", revision)?;
+    /// # context.delete_key_value("update")?;
     /// #
     /// # Ok(())
     /// # }
@@ -516,12 +526,10 @@ impl Store {
         }
 
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(revision.to_string());
+        headers.insert(
+            header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+            revision.to_string(),
+        );
 
         let message = Message::new(
             self.key_subject(key),
@@ -552,6 +560,8 @@ impl Store {
     /// bucket.create("foo", b"bar")?;
     /// bucket.delete("foo")?;
     /// #
+    /// # context.delete_key_value("delete");
+    /// #
     /// # Ok(())
     /// # }
     /// ```
@@ -561,12 +571,7 @@ impl Store {
         }
 
         let mut headers = HeaderMap::default();
-        let entry = headers
-            .inner
-            .entry(KV_OPERATION.to_string())
-            .or_insert_with(HashSet::default);
-
-        entry.insert(KV_OPERATION_DELETE.to_string());
+        headers.insert(KV_OPERATION, KV_OPERATION_DELETE.to_string());
 
         let message = Message::new(self.key_subject(key), None, Vec::new(), Some(headers));
         self.context.publish_message(&message)?;
@@ -591,6 +596,7 @@ impl Store {
     /// #
     /// bucket.create("foo", b"bar")?;
     /// bucket.purge("foo")?;
+    /// # context.delete_key_value("purge")?;
     /// #
     /// # Ok(())
     /// # }
@@ -601,19 +607,8 @@ impl Store {
         }
 
         let mut headers = HeaderMap::default();
-        let purge_entry = headers
-            .inner
-            .entry(KV_OPERATION.to_string())
-            .or_insert_with(HashSet::default);
-
-        purge_entry.insert(KV_OPERATION_PURGE.to_string());
-
-        let rollup_entry = headers
-            .inner
-            .entry(NATS_ROLLUP.to_string())
-            .or_insert_with(HashSet::default);
-
-        rollup_entry.insert(ROLLUP_SUBJECT.to_string());
+        headers.insert(KV_OPERATION, KV_OPERATION_PURGE.to_string());
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
         let message = Message::new(self.key_subject(key), None, Vec::new(), Some(headers));
         self.context.publish_message(&message)?;
@@ -644,6 +639,7 @@ impl Store {
     /// assert_eq!(keys.next(), Some("foo".to_string()));
     /// assert_eq!(keys.next(), Some("bar".to_string()));
     /// #
+    /// # context.delete_key_value("keys")?;
     /// # Ok(())
     /// # }
     /// ```

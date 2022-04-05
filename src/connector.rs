@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Error, ErrorKind};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -36,7 +37,7 @@ use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerI
 /// backoff after failed connect attempts.
 pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
-    attempts: HashMap<Server, usize>,
+    attempts: HashMap<ServerAddress, usize>,
 
     /// Configured options for establishing connections.
     options: Arc<Options>,
@@ -47,7 +48,7 @@ pub(crate) struct Connector {
 
 impl Connector {
     /// Creates a new connector with the URLs and options.
-    pub(crate) fn new(url: &str, options: Arc<Options>) -> io::Result<Connector> {
+    pub(crate) fn new(urls: Vec<ServerAddress>, options: Arc<Options>) -> io::Result<Connector> {
         let mut tls_config = options.tls_client_config.clone();
 
         // Include system root certificates.
@@ -92,25 +93,18 @@ impl Connector {
             }
         }
 
-        let mut connector = Connector {
-            attempts: HashMap::new(),
+        let connector = Connector {
+            attempts: urls.into_iter().map(|url| (url, 0)).collect(),
             options,
             tls_config: Arc::new(tls_config),
         };
-
-        // Add all URLs in the comma-separated list.
-        for url in url.split(',') {
-            connector.add_url(url)?;
-        }
 
         Ok(connector)
     }
 
     /// Adds an URL to the list of servers.
-    pub(crate) fn add_url(&mut self, url: &str) -> io::Result<()> {
-        let server = Server::new(url)?;
-        self.attempts.insert(server, 0);
-        Ok(())
+    pub(crate) fn add_server(&mut self, url: ServerAddress) {
+        self.attempts.insert(url, 0);
     }
 
     pub(crate) fn get_options(&self) -> Arc<Options> {
@@ -118,18 +112,18 @@ impl Connector {
     }
 
     /// Get the list of servers with enough reconnection attempts left
-    fn get_servers(&mut self) -> io::Result<Vec<Server>> {
-        let mut servers: Vec<Server> = self.attempts.keys().cloned().collect();
-
-        servers = servers
-            .into_iter()
-            .filter(|server| {
-                let reconnects = self.attempts.get_mut(server).unwrap();
-                match self.options.max_reconnects.as_ref() {
-                    Some(max) => max > reconnects,
-                    None => true,
-                }
-            })
+    fn get_servers(&mut self) -> io::Result<Vec<ServerAddress>> {
+        let servers: Vec<_> = self
+            .attempts
+            .iter()
+            .filter_map(
+                |(server, reconnects)| match self.options.max_reconnects.as_ref() {
+                    None => Some(server),
+                    Some(max) if reconnects < max => Some(server),
+                    Some(_) => None,
+                },
+            )
+            .cloned()
             .collect();
 
         if servers.is_empty() {
@@ -153,7 +147,7 @@ impl Connector {
 
         loop {
             // Shuffle the list of servers.
-            let mut servers: Vec<Server> = self.get_servers()?;
+            let mut servers = self.get_servers()?;
             fastrand::shuffle(&mut servers);
 
             // Iterate over the server list in random order.
@@ -164,14 +158,7 @@ impl Connector {
                 let sleep_duration = self.options.reconnect_delay_callback.call(*reconnects);
                 *reconnects += 1;
 
-                // Resolve the server URL to socket addresses.
-                let host = server.host();
-                let port = server.port();
-
-                // Inject random I/O failures when testing.
-                let fault_injection = inject_io_failure();
-
-                let lookup_res = fault_injection.and_then(|_| (host, port).to_socket_addrs());
+                let lookup_res = server.socket_addrs();
 
                 let mut addrs = match lookup_res {
                     Ok(addrs) => addrs.collect::<Vec<_>>(),
@@ -203,7 +190,7 @@ impl Connector {
 
                     // Add URLs discovered through the INFO message.
                     for url in &server_info.connect_urls {
-                        self.add_url(url)?;
+                        self.add_server(url.parse()?);
                     }
 
                     *self.attempts.get_mut(server).unwrap() = 0;
@@ -222,7 +209,7 @@ impl Connector {
     fn connect_addr(
         &self,
         addr: SocketAddr,
-        server: &Server,
+        server: &ServerAddress,
     ) -> io::Result<(ServerInfo, NatsStream)> {
         // Inject random I/O failures when testing.
         inject_io_failure()?;
@@ -367,87 +354,6 @@ impl Connector {
         }
 
         Ok((server_info, stream))
-    }
-}
-
-/// A parsed URL with defaults for port and scheme if needed.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct Server {
-    url: Url,
-}
-
-impl Server {
-    /// Returns if tls is required by the client for this server.
-    fn tls_required(&self) -> bool {
-        self.url.scheme() == "tls"
-    }
-
-    /// Returns if the server url had embedded username and password.
-    fn has_user_pass(&self) -> bool {
-        self.url.username() != ""
-    }
-
-    /// Returns the host.
-    fn host(&self) -> &str {
-        self.url.host_str().unwrap()
-    }
-
-    /// Returns the port.
-    fn port(&self) -> u16 {
-        self.url.port().unwrap()
-    }
-
-    /// Returns the optional username in the url.
-    fn username(&self) -> Option<SecureString> {
-        let user = self.url.username();
-        if user.is_empty() {
-            None
-        } else {
-            Some(SecureString::from(user.to_string()))
-        }
-    }
-
-    /// Returns the optional password in the url.
-    fn password(&self) -> Option<SecureString> {
-        self.url
-            .password()
-            .map(|password| SecureString::from(password.to_string()))
-    }
-
-    /// Creates a new server from an URL.
-    ///
-    /// Returns an error if the URL cannot be parsed.
-    fn new(raw_url: &str) -> io::Result<Server> {
-        let mut url_str = raw_url.to_string();
-
-        // Make sure this isn't a comma-separated URL list.
-        if url_str.contains(',') {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "only one server URL should be passed to Server::new",
-            ));
-        }
-
-        // Check for scheme. Url::parse requires it.
-        if !url_str.contains("://") {
-            url_str = format!("nats://{}", url_str);
-        }
-
-        let mut url = if let Ok(url) = Url::parse(&url_str) {
-            url
-        } else {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("invalid URL provided: {}", url_str),
-            ));
-        };
-
-        // Set default port.
-        if url.port().is_none() {
-            url.set_port(Some(4222)).ok();
-        }
-
-        Ok(Server { url })
     }
 }
 
@@ -636,4 +542,153 @@ fn tls_wait(mut tls: MutexGuard<'_, TlsStream>) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Address of a NATS server.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ServerAddress(Url);
+
+/// Capability to convert into a list of NATS server addresses.
+///
+/// There are several implementations ensuring the easy passing of one or more server addresses to
+/// functions like [`crate::connect()`].
+pub trait IntoServerList {
+    /// Convert the instance into a list of [`ServerAddress`]es.
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>>;
+}
+
+impl FromStr for ServerAddress {
+    type Err = Error;
+
+    /// Parse an address of a NATS server.
+    ///
+    /// If not stated explicitly the `nats://` schema and port `4222` is assumed.
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let url: Url = if input.contains("://") {
+            input.parse()
+        } else {
+            format!("nats://{}", input).parse()
+        }
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("NATS server URL is invalid: {}", e),
+            )
+        })?;
+
+        Self::from_url(url)
+    }
+}
+
+impl ServerAddress {
+    /// Check if the URL is a valid NATS server address.
+    pub fn from_url(url: Url) -> io::Result<Self> {
+        if url.scheme() != "nats" && url.scheme() != "tls" {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid scheme for NATS server URL: {}", url.scheme()),
+            ));
+        }
+
+        Ok(Self(url))
+    }
+
+    /// Turn the server address into a standard URL.
+    pub fn into_inner(self) -> Url {
+        self.0
+    }
+
+    /// Returns if tls is required by the client for this server.
+    pub fn tls_required(&self) -> bool {
+        self.0.scheme() == "tls"
+    }
+
+    /// Returns if the server url had embedded username and password.
+    pub fn has_user_pass(&self) -> bool {
+        self.0.username() != ""
+    }
+
+    /// Returns the host.
+    pub fn host(&self) -> &str {
+        self.0.host_str().unwrap()
+    }
+
+    /// Returns the port.
+    pub fn port(&self) -> u16 {
+        self.0.port().unwrap_or(4222)
+    }
+
+    /// Returns the optional username in the url.
+    pub fn username(&self) -> Option<SecureString> {
+        let user = self.0.username();
+        if user.is_empty() {
+            None
+        } else {
+            Some(SecureString::from(user.to_string()))
+        }
+    }
+
+    /// Returns the optional password in the url.
+    pub fn password(&self) -> Option<SecureString> {
+        self.0
+            .password()
+            .map(|password| SecureString::from(password.to_string()))
+    }
+
+    /// Return the sockets from resolving the server address.
+    ///
+    /// # Fault injection
+    ///
+    /// If compiled with the `"fault_injection"` feature this method might fail artificially.
+    pub fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr>> {
+        inject_io_failure().and_then(|_| (self.host(), self.port()).to_socket_addrs())
+    }
+}
+
+impl<'s> IntoServerList for &'s str {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.split(',').map(|url| url.parse()).collect()
+    }
+}
+
+impl<'s> IntoServerList for &'s [&'s str] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.iter().map(|url| url.parse()).collect()
+    }
+}
+
+impl<'s, const N: usize> IntoServerList for &'s [&'s str; N] {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_ref().into_server_list()
+    }
+}
+
+impl IntoServerList for String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_str().into_server_list()
+    }
+}
+
+impl<'s> IntoServerList for &'s String {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self.as_str().into_server_list()
+    }
+}
+
+impl IntoServerList for ServerAddress {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        Ok(vec![self])
+    }
+}
+
+impl IntoServerList for Vec<ServerAddress> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        Ok(self)
+    }
+}
+
+impl IntoServerList for io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+        self
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,12 +19,11 @@
 //! system for cloud native applications, `IoT` messaging, and microservices
 //! architectures.
 //!
-//! For async API refer to the [`async-nats`] crate.
+//! For async API refer to the [`asynk`] module.
 //!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
-//! [`async-nats`]: https://docs.rs/async-nats
 //!
 //! ## Examples
 //!
@@ -231,6 +230,11 @@ fn inject_io_failure() -> io::Result<()> {
     Ok(())
 }
 
+// comment out until we reach MSRV 1.54.0
+// #[doc = include_str!("../docs/migration-guide-0.17.0.md")]
+// #[derive(Copy, Clone)]
+// pub struct Migration0170;
+
 #[doc(hidden)]
 #[deprecated(since = "0.6.0", note = "this has been renamed to `Options`.")]
 pub type ConnectionOptions = Options;
@@ -238,6 +242,8 @@ pub type ConnectionOptions = Options;
 #[doc(hidden)]
 #[deprecated(since = "0.17.0", note = "this has been moved to `header::HeaderMap`.")]
 pub type Headers = HeaderMap;
+
+pub use header::HeaderMap;
 
 use std::{
     io::{self, Error, ErrorKind},
@@ -248,6 +254,7 @@ use std::{
 use lazy_static::lazy_static;
 use regex::Regex;
 
+pub use connector::{IntoServerList, ServerAddress};
 pub use jetstream::JetStreamOptions;
 pub use message::Message;
 pub use options::Options;
@@ -263,7 +270,6 @@ pub use rustls;
 pub use connect::ConnectInfo;
 
 use client::Client;
-use header::HeaderMap;
 use options::AuthStyle;
 use secure_wipe::{SecureString, SecureVec};
 
@@ -357,23 +363,68 @@ impl Drop for Inner {
     }
 }
 
-/// Connect to a NATS server at the given url.
+/// Connect to one or more NATS servers at the given URLs.
 ///
-/// # Example
+/// The [`IntoServerList`] trait allows to pass URLs in various different formats. Furthermore, if
+/// you need more control of the connection's parameters use [`Options::connect()`].
+///
+/// **Warning:** There are asynchronous errors that can happen during operation of NATS client.
+/// To handle them, add handler for [`Options::error_callback()`].
+///
+/// # Examples
+///
+/// If no scheme is provided the `nats://` scheme is assumed. The default port is `4222`.
 /// ```
-/// # fn main() -> std::io::Result<()> {
 /// let nc = nats::connect("demo.nats.io")?;
-/// # Ok(())
-/// # }
+/// # Ok::<(), std::io::Error>(())
 /// ```
-pub fn connect(nats_url: &str) -> io::Result<Connection> {
-    Options::new().connect(nats_url)
+///
+/// It is possible to provide several URLs as a comma separated list.
+/// ```
+/// let nc = nats::connect("demo.nats.io,tls://demo.nats.io:4443")?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// Alternatively, an array of strings can be passed.
+/// ```
+/// # use nats::IntoServerList;
+/// let nc = nats::connect(&["demo.nats.io", "tls://demo.nats.io:4443"])?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// Instead of using strings, [`ServerAddress`]es can be used directly as well. This is handy for
+/// validating user input.
+/// ```
+/// use std::io;
+/// use structopt::StructOpt;
+/// use nats::ServerAddress;
+///
+/// #[derive(Debug, StructOpt)]
+/// struct Config {
+///     #[structopt(short, long = "server", default_value = "demo.nats.io")]
+///     servers: Vec<ServerAddress>,
+/// }
+///
+/// fn main() -> io::Result<()> {
+///     let config = Config::from_args();
+///     let nc = nats::connect(config.servers)?;
+///     Ok(())
+/// }
+/// ```
+pub fn connect<I: IntoServerList>(nats_urls: I) -> io::Result<Connection> {
+    Options::new().connect(nats_urls)
 }
 
 impl Connection {
-    /// Connects on a URL with the given options.
-    pub(crate) fn connect_with_options(url: &str, options: Options) -> io::Result<Connection> {
-        let client = Client::connect(url, options)?;
+    /// Connects on one or more NATS servers with the given options.
+    ///
+    /// For more on how to use [`IntoServerList`] trait see [`crate::connect()`].
+    pub(crate) fn connect_with_options<I>(urls: I, options: Options) -> io::Result<Connection>
+    where
+        I: IntoServerList,
+    {
+        let urls = urls.into_server_list()?;
+        let client = Client::connect(urls, options)?;
         client.flush(DEFAULT_FLUSH_TIMEOUT)?;
         Ok(Connection(Arc::new(Inner { client })))
     }

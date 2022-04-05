@@ -39,6 +39,7 @@ as well!
 Basic connections, and those with options. The compiler will force these to be correct.
 
 ```rust
+fn main() -> std::io::Result<()> {
 let nc = nats::connect("demo.nats.io")?;
 
 let nc2 = nats::Options::with_user_pass("derek", "s3cr3t!")
@@ -51,8 +52,10 @@ let nc3 = nats::Options::with_credentials("path/to/my.creds")
 let nc4 = nats::Options::new()
     .add_root_certificate("my-certs.pem")
     .connect("tls://demo.nats.io:4443")?;
+Ok(())
+}
 ```
-
+<!--
 ### Publish
 
 ```rust
@@ -107,9 +110,49 @@ nc.publish_request("foo", &reply, "Help me!")?;
 let response = rsub.iter().take(1);
 ```
 
+### Jetstream
+
+Create a new stream with default options:
+```rust
+let js = nats::jetstream::new(nc);
+
+// add_stream converts a str into a
+// default `StreamConfig`.
+js.add_stream("my_stream")?;
+```
+
+Create a new consumer:
+```rust
+let nc = nats::connect("demo.nats.io")?;
+let js = nats::jetstream::new(nc);
+
+js.add_stream("my_stream")?;
+js.add_consumer("my_stream", "my_consumer")?;
+```
+
+Create a new subscription:
+```rust
+let nc = nats::connect("demo.nats.io")?;
+let js = nats::jetstream::new(nc);
+
+js.add_stream("my_stream")?;
+let subscription = js.subscribe("my_stream")?;
+
+// add stream with options
+js.add_stream(nats::jetstream::StreamConfig{
+    name: "my_another_stream".to_string(),
+    max_msgs: 2000,
+    discard: nats::jetstream::DiscardPolicy::Old,
+    ..Default::default()
+})?
+})
+``` -->
+This will attempt to bind to an existing consumer if it exists, otherwise it will create a new internally managed consumer resource that gets destroyed when the subscription is dropped.
+
+
 ## Minimum Supported Rust Version (MSRV)
 
-The minimum supported Rust version is 1.53.0.
+The minimum supported Rust version is 1.58.0.
 
 ## Sync vs Async
 
@@ -118,28 +161,3 @@ The Rust ecosystem has a diverse set of options for async programming. This clie
 The async interface provided by this library is implemented as just a thin wrapper around its sync interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
 
 <em>*NOTE:* This crate uses thread pool from [blocking crate](https://crates.io/crates/blocking/1.1.0). By default it limits number of threads to 500. It can be ovverided by setting `BLOCKING_MAX_THREADS` environment variable and set between 1 and 10000. Be careful when spinning a lot async operations, as it may drain the thread pool and block foverer until it's reworked</em>
-
-## Features
-The following is a list of features currently supported and planned for the near future.
-
-* [X] Basic Publish/Subscribe
-* [X] Request/Reply - Singelton and Streams
-* [X] Authentication
-  * [X] Token
-  * [X] User/Password
-  * [X] Nkeys
-  * [X] User JWTs (NATS 2.0)
-* [X] Reconnect logic
-* [X] TLS support
-* [X] Direct async support
-* [X] Crates.io listing
-* [x] Header Support
-
-### Miscellaneous TODOs
-* [X] Ping timer
-* [X] msg.respond
-* [X] Drain mode
-* [ ] COW for received messages
-* [X] Sub w/ handler can't do iter()
-* [X] Backup servers for option
-* [X] Travis integration

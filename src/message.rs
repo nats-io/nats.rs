@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -26,7 +26,7 @@ use crate::{
     SubjectBuf,
 };
 
-use chrono::*;
+use time::OffsetDateTime;
 
 pub(crate) const MESSAGE_NOT_BOUND: &str = "message not bound to a connection";
 
@@ -108,11 +108,32 @@ impl Message {
         if !self.data.is_empty() {
             return false;
         }
-        if let Some(hdrs) = &self.headers {
-            if let Some(set) = hdrs.get(header::STATUS) {
-                if set.get("503").is_some() {
-                    return true;
-                }
+
+        if let Some(headers) = &self.headers {
+            if headers.get(header::STATUS) == Some(&"503".to_string()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Determine if a message is `404 No Messages`.
+    pub(crate) fn is_no_messages(&self) -> bool {
+        if let Some(headers) = &self.headers {
+            if headers.get(header::STATUS) == Some(&"404".to_string()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    // Determine if a message is `408 Request Timeout`.
+    pub(crate) fn is_request_timeout(&self) -> bool {
+        if let Some(headers) = &self.headers {
+            if headers.get(header::STATUS) == Some(&"408".to_string()) {
+                return true;
             }
         }
         false
@@ -125,20 +146,16 @@ impl Message {
         }
 
         if let Some(headers) = &self.headers {
-            if let Some(set) = headers.get(header::STATUS) {
-                if set.get("100").is_none() {
-                    return false;
-                }
+            if headers.get(header::STATUS) != Some(&"100".to_string()) {
+                return false;
             }
 
-            if let Some(set) = headers.get(header::DESCRIPTION) {
-                if set.get("Flow Control").is_some() {
-                    return true;
-                }
+            if headers.get(header::DESCRIPTION) == Some(&"Flow Control".to_string()) {
+                return true;
+            }
 
-                if set.get("FlowControl Request").is_some() {
-                    return true;
-                }
+            if headers.get(header::DESCRIPTION) == Some(&"FlowControl Request".to_string()) {
+                return true;
             }
         }
 
@@ -152,16 +169,12 @@ impl Message {
         }
 
         if let Some(headers) = &self.headers {
-            if let Some(set) = headers.get(header::STATUS) {
-                if set.get("100").is_none() {
-                    return false;
-                }
+            if headers.get(header::STATUS) != Some(&"100".to_string()) {
+                return false;
             }
 
-            if let Some(set) = headers.get(header::DESCRIPTION) {
-                if set.get("Idle Heartbeat").is_some() {
-                    return true;
-                }
+            if headers.get(header::DESCRIPTION) == Some(&"Idle Heartbeat".to_string()) {
+                return true;
             }
         }
 
@@ -309,8 +322,8 @@ impl Message {
                 stream_seq: parse_next_token(&mut tokens, reply_str)?,
                 consumer_seq: parse_next_token(&mut tokens, reply_str)?,
                 published: {
-                    let nanos: i64 = parse_next_token(&mut tokens, reply_str)?;
-                    Utc.timestamp_nanos(nanos)
+                    let nanos: i128 = parse_next_token(&mut tokens, reply_str)?;
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()?
                 },
                 pending: parse_next_token(&mut tokens, reply_str)?,
                 token: if n_tokens >= 11 {
@@ -331,8 +344,8 @@ impl Message {
                 stream_seq: parse_next_token(&mut tokens, reply_str)?,
                 consumer_seq: parse_next_token(&mut tokens, reply_str)?,
                 published: {
-                    let nanos: i64 = parse_next_token(&mut tokens, reply_str)?;
-                    Utc.timestamp_nanos(nanos)
+                    let nanos: i128 = parse_next_token(&mut tokens, reply_str)?;
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()?
                 },
                 pending: parse_next_token(&mut tokens, reply_str)?,
                 token: None,

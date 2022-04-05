@@ -11,21 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
-
 mod util;
 pub use util::*;
 
 #[test]
-fn basic_nkey_auth() -> io::Result<()> {
-    let s = util::run_server("tests/configs/nkey.conf");
+fn drain() {
+    let s = run_basic_server();
+    let nc = nats::connect(s.client_url()).unwrap();
 
-    let nkey = "UAMMBNV2EYR65NYZZ7IAK5SIR5ODNTTERJOBOF4KJLMWI45YOXOSWULM";
-    let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
-    let kp = nkeys::KeyPair::from_seed(seed).unwrap();
+    let sub = nc.subscribe("test").unwrap();
 
-    nats::Options::with_nkey(nkey, move |nonce| kp.sign(nonce).unwrap())
-        .connect(&s.client_url())?;
+    for _ in 0..10000 {
+        nc.publish("test", b"foo").unwrap();
+    }
+    let mut i = 0;
+    // first drain
+    sub.drain().unwrap();
+    // then read messages
+    for _msg in sub.iter() {
+        i += 1;
+    }
+    assert_eq!(10000, i);
 
-    Ok(())
+    // check if we do not get further messages when publishing to drained subscription.
+    nc.publish("test", b"ipsum").unwrap();
+    assert!(sub.next().is_none());
+
+    sub.unsubscribe().unwrap();
 }

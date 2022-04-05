@@ -1,3 +1,16 @@
+// Copyright 2020-2022 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! An async Rust client for the NATS.io ecosystem.
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
@@ -98,7 +111,7 @@ use std::time::Duration;
 use blocking::unblock;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::{header::HeaderMap, AsSubject, Subject, SubjectBuf};
+use crate::{header::HeaderMap, AsSubject, Subject, SubjectBuf, IntoServerList};
 
 /// Connect to a NATS server at the given url.
 ///
@@ -108,7 +121,10 @@ use crate::{header::HeaderMap, AsSubject, Subject, SubjectBuf};
 /// let nc = nats::asynk::connect("demo.nats.io").await?;
 /// # std::io::Result::Ok(()) });
 /// ```
-pub async fn connect(nats_url: &str) -> io::Result<Connection> {
+pub async fn connect<I>(nats_url: I) -> io::Result<Connection>
+where
+    I: IntoServerList,
+{
     Options::new().connect(nats_url).await
 }
 
@@ -741,9 +757,12 @@ impl Options {
     ///     .await?;
     /// # std::io::Result::Ok(()) });
     /// ```
-    pub async fn connect(self, nats_url: &str) -> io::Result<Connection> {
-        let nats_url = nats_url.to_string();
-        let conn = unblock(move || self.inner.connect(&nats_url)).await?;
+    pub async fn connect<I>(self, nats_url: I) -> io::Result<Connection>
+    where
+        I: IntoServerList,
+    {
+        let servers = nats_url.into_server_list()?;
+        let conn = unblock(move || self.inner.connect(servers)).await?;
         Ok(Connection::new(conn))
     }
 

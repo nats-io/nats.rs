@@ -1,4 +1,4 @@
-// Copyright 2020-2021 The NATS Authors
+// Copyright 2020-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -95,18 +95,18 @@
 //! internally managed consumer resource that gets destroyed when the subscription is dropped.
 //!
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     convert::TryFrom,
     error, fmt,
     fmt::Debug,
     io::{self, ErrorKind},
+    time::Duration,
 };
 
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -114,11 +114,24 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_nanos(5_000_000_000);
 
 mod api;
-mod push_subscription;
+
+/// Pull subscriptions
+pub mod pull_subscription;
+
+/// Push subscriptions
+pub mod push_subscription;
+
 mod types;
 
-pub use push_subscription::PushSubscription;
+// We use a fully qualified crate path so these are documented as re-exports.
+pub use crate::jetstream::pull_subscription::PullSubscription;
+pub use crate::jetstream::push_subscription::PushSubscription;
+
 pub use types::*;
+
+#[deprecated(note = "Use PullSubscribeOptions instead")]
+#[doc(hidden)]
+pub type PullSubscibeOptions = PullSubscribeOptions;
 
 use crate::{
     header::{self, HeaderMap},
@@ -372,9 +385,13 @@ pub enum ErrorCode {
     ConsumerDeliverCycle = 10081,
     /// Consumer requires ack policy for max ack pending
     ConsumerMaxPendingAckPolicyRequired = 10082,
+    /// JSConsumerMaxRequestBatchNegative consumer max request batch needs to be > 0
+    JSConsumerMaxRequestBatchNegative = 10114,
+    /// JSConsumerMaxRequestExpiresToSmall consumer max request expires needs to be >= 1ms
+    JSConsumerMaxRequestExpiresToSmall = 10115,
     /// Consumer idle heartbeat needs to be >= 100ms
     ConsumerSmallHeartbeat = 10083,
-    /// Consumer in pull mode requires explicit ack policy
+    /// Consumer in pull mode requires ack policy
     ConsumerPullRequiresAck = 10084,
     /// Consumer in pull mode requires a durable name
     ConsumerPullNotDurable = 10085,
@@ -606,48 +623,23 @@ impl JetStream {
             let mut headers = maybe_headers.map_or_else(HeaderMap::default, HeaderMap::clone);
 
             if let Some(v) = options.id.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_MSG_ID.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_MSG_ID, v.to_string());
             }
 
             if let Some(v) = options.expected_last_msg_id.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_LAST_MSG_ID.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_LAST_MSG_ID, v.to_string());
             }
 
             if let Some(v) = options.expected_stream.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_STREAM.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_STREAM, v.to_string());
             }
 
             if let Some(v) = options.expected_last_sequence.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_LAST_SEQUENCE.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_LAST_SEQUENCE, v.to_string());
             }
 
             if let Some(v) = options.expected_last_subject_sequence.as_ref() {
-                let entry = headers
-                    .inner
-                    .entry(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE.to_string())
-                    .or_insert_with(HashSet::default);
-
-                entry.insert(v.to_string());
+                headers.insert(header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, v.to_string());
             }
 
             Some(headers)
@@ -668,7 +660,7 @@ impl JetStream {
         match res {
             ApiResponse::Ok(pub_ack) => Ok(pub_ack),
             ApiResponse::Err { error, .. } => {
-                log::error!(
+                log::debug!(
                     "failed to parse API response: {:?}",
                     std::str::from_utf8(&res_msg.data)
                 );
@@ -695,6 +687,120 @@ impl JetStream {
     /// ```
     pub fn subscribe(&self, subject: impl AsSubject) -> io::Result<PushSubscription> {
         self.do_push_subscribe(subject.as_subject()?, None, None)
+    }
+
+    /// Creates a pull subscription.
+    ///
+    /// # Example
+    /// ```
+    /// # use nats::jetstream::BatchOptions;
+    /// # fn main() -> std::io::Result<()> {
+    /// # let client = nats::connect("demo.nats.io")?;
+    /// # let context = nats::jetstream::new(client);
+    /// #
+    /// # context.add_stream("next")?;
+    /// # for _ in 0..10 {
+    ///   context.publish("next", b"foo")?;
+    /// }
+    /// let consumer = context.pull_subscribe("next")?;
+    ///
+    /// consumer.fetch_with_handler(10, |message| {
+    ///     println!("received message: {:?}", message);
+    ///     Ok(())
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pull_subscribe(&self, subject: &str) -> io::Result<PullSubscription> {
+        self.do_pull_subscribe(subject, None)
+    }
+
+    /// Creates a `PullSubscription` with options.
+    pub fn pull_subscribe_with_options(
+        &self,
+        subject: &str,
+        options: &PullSubscribeOptions,
+    ) -> io::Result<PullSubscription> {
+        self.do_pull_subscribe(subject, Some(options))
+    }
+
+    pub(crate) fn do_pull_subscribe(
+        &self,
+        subject: &str,
+        maybe_options: Option<&PullSubscribeOptions>,
+    ) -> io::Result<PullSubscription> {
+        // Find the stream mapped to the subject if not bound to a stream already.
+        let stream_name = maybe_options
+            .and_then(|options| options.stream_name.to_owned())
+            .map_or_else(|| self.stream_name_by_subject(subject), Ok)?;
+
+        let maybe_durable_consumer =
+            maybe_options.and_then(|options| options.durable_name.to_owned());
+
+        let process_consumer_info = |info: ConsumerInfo| {
+            // run the standard validation for pull consumer.
+            info.config.validate_for(&ConsumerKind::Pull)?;
+
+            // check mismatches between user config and info
+
+            // Make sure this new subject matches or is a subset.
+            if !info.config.filter_subject.is_empty() && subject != info.config.filter_subject {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "subjects do not match",
+                ));
+            }
+
+            Ok(info)
+        };
+
+        // check if this subscription is bind only. If not, create a new Pull Consumer
+        let (consumer_info, consumer_ownership) = {
+            if let Some(durable_name) = maybe_durable_consumer {
+                // bind to consumer
+                match self.consumer_info(stream_name, durable_name) {
+                    Ok(info) => (info, ConsumerOwnership::No),
+                    Err(err) => {
+                        return Err(io::Error::new(
+                            ErrorKind::NotFound,
+                            format!("provided durable consumer doesn't exist: {}", err),
+                        ));
+                    }
+                }
+            } else {
+                // create ephemeral consumer
+                let consumer_config = {
+                    maybe_options
+                        .and_then(|options| options.consumer_config.clone())
+                        .unwrap_or_else(|| ConsumerConfig {
+                            deliver_policy: DeliverPolicy::All,
+                            ack_policy: AckPolicy::Explicit,
+                            // Do filtering always, server will clear as needed.
+                            filter_subject: subject.to_string(),
+                            replay_policy: ReplayPolicy::Instant,
+                            ..Default::default()
+                        })
+                };
+                consumer_config.validate_for(&ConsumerKind::Pull)?;
+                (
+                    self.add_consumer(stream_name, consumer_config)?,
+                    ConsumerOwnership::Yes,
+                )
+            }
+        };
+        let consumer_info = process_consumer_info(consumer_info)?;
+
+        let inbox = self.connection.new_inbox();
+        let (pid, messages) = self.connection.0.client.subscribe(inbox.as_str(), None)?;
+
+        Ok(PullSubscription::new(
+            pid,
+            consumer_info,
+            consumer_ownership,
+            inbox,
+            messages,
+            self.clone(),
+        ))
     }
 
     /// Creates a push consumer subscription with options.
@@ -1230,34 +1336,26 @@ impl JetStream {
                     let maybe_consumer_stalled = message
                         .headers
                         .as_ref()
-                        .and_then(|headers| {
-                            headers
-                                .get(header::NATS_CONSUMER_STALLED)
-                                .map(|set| set.iter().next())
-                        })
-                        .flatten();
+                        .and_then(|headers| headers.get(header::NATS_CONSUMER_STALLED));
 
                     if let Some(consumer_stalled) = maybe_consumer_stalled {
-                        context
-                            .connection
-                            .try_publish_with_reply_or_headers(
-                                Subject::new_unchecked(consumer_stalled),
-                                Option::<&String>::None,
-                                None,
-                                b"",
-                            )
-                            .ok();
+                        context.connection.try_publish_with_reply_or_headers(
+                            consumer_stalled,
+                            None,
+                            None,
+                            b"",
+                        );
+                    }
+
+                    // if it is not an ordered consumer, don't handle sequence mismatch.
+                    if is_ordered {
+                        return false;
                     }
 
                     let maybe_consumer_seq = message
                         .headers
                         .as_ref()
-                        .and_then(|headers| {
-                            headers
-                                .get(header::NATS_LAST_CONSUMER)
-                                .map(|set| set.iter().cloned().next())
-                        })
-                        .flatten();
+                        .and_then(|headers| headers.get(header::NATS_LAST_CONSUMER));
 
                     if let Some(consumer_seq) = maybe_consumer_seq {
                         let consumer_seq = consumer_seq.parse::<u64>().unwrap();
@@ -1267,6 +1365,11 @@ impl JetStream {
                         }
                     }
 
+                    return false;
+                }
+
+                // if it is not an ordered consumer, don't handle sequence mismatch.
+                if !is_ordered {
                     return false;
                 }
 
@@ -1421,7 +1524,16 @@ impl JetStream {
 
         let request_subject = api::stream_names(self.api_prefix());
         self.js_request::<StreamNamesResponse>(&request_subject, &req)
-            .map(|res| res.streams.first().unwrap().to_string())
+            .map(|resp| resp.streams)?
+            .map_or_else(
+                || {
+                    Err(io::Error::new(
+                        ErrorKind::NotFound,
+                        "could not find stream for given subject",
+                    ))
+                },
+                |stream| Ok(stream.first().unwrap().to_string()),
+            )
     }
 
     /// List all `JetStream` streams.
