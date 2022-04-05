@@ -453,7 +453,7 @@ impl Client {
 }
 
 pub async fn connect<T: ToSocketAddrs>(addr: T) -> Result<Client, io::Error> {
-    let mut connection = Connection::connect(addr).await?;
+    let connection = Connection::connect(addr).await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
 
@@ -467,8 +467,8 @@ pub async fn connect<T: ToSocketAddrs>(addr: T) -> Result<Client, io::Error> {
         name: Some("beta-rust-client".to_string()),
         pedantic: false,
         verbose: false,
-        lang: crate::LANG.to_string(),
-        version: crate::VERSION.to_string(),
+        lang: LANG.to_string(),
+        version: VERSION.to_string(),
         protocol: Protocol::Dynamic,
         user: None,
         pass: None,
