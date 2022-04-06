@@ -1,7 +1,10 @@
 use futures_util::stream::Stream;
 use std::collections::HashMap;
+use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::option;
 use std::pin::Pin;
+use std::slice;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -160,16 +163,12 @@ pub struct Connection {
 
 impl Connection {
     pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
-        let a = addrs
-            .into_server_list()?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                io::Error::new(
-                    ErrorKind::Other,
-                    "did not found a single url in the url list",
-                )
-            })?;
+        let a = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::Other,
+                "did not found a single url in the url list",
+            )
+        })?;
         let tcp_stream = TcpStream::connect((a.host(), a.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
@@ -821,18 +820,9 @@ impl IntoServerList for io::Result<Vec<ServerAddress>> {
 
 /// Address of a NATS server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ServerAddress(Url);
+pub struct ServerAddr(Url);
 
-/// Capability to convert into a list of NATS server addresses.
-///
-/// There are several implementations ensuring the easy passing of one or more server addresses to
-/// functions like [`crate::connect()`].
-pub trait ToServerAddrs {
-    /// Convert the instance into a list of [`ServerAddress`]es.
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>>;
-}
-
-impl FromStr for ServerAddress {
+impl FromStr for ServerAddr {
     type Err = io::Error;
 
     /// Parse an address of a NATS server.
@@ -855,7 +845,7 @@ impl FromStr for ServerAddress {
     }
 }
 
-impl ServerAddress {
+impl ServerAddr {
     /// Check if the URL is a valid NATS server address.
     pub fn from_url(url: Url) -> io::Result<Self> {
         if url.scheme() != "nats" && url.scheme() != "tls" {
@@ -918,50 +908,52 @@ impl ServerAddress {
     }
 }
 
-impl<'s> ToServerAddrs for &'s str {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        self.split(',').map(|url| url.parse()).collect()
+/// Capability to convert into a list of NATS server addresses.
+///
+/// There are several implementations ensuring the easy passing of one or more server addresses to
+/// functions like [`crate::connect()`].
+pub trait ToServerAddrs {
+    /// Returned iterator over socket addresses which this type may correspond
+    /// to.
+    type Iter: Iterator<Item = ServerAddr>;
+
+    ///
+    fn to_server_addrs(&self) -> io::Result<Self::Iter>;
+}
+
+impl ToServerAddrs for ServerAddr {
+    type Iter = option::IntoIter<ServerAddr>;
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        Ok(Some(self.clone()).into_iter())
     }
 }
 
-impl<'s> ToServerAddrs for &'s [&'s str] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        self.iter().map(|url| url.parse()).collect()
-    }
-}
-
-impl<'s, const N: usize> ToServerAddrs for &'s [&'s str; N] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        self.as_ref().into_server_list()
+impl ToServerAddrs for str {
+    type Iter = option::IntoIter<ServerAddr>;
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        self.parse::<ServerAddr>()
+            .map(|addr| Some(addr).into_iter())
     }
 }
 
 impl ToServerAddrs for String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        self.as_str().into_server_list()
+    type Iter = option::IntoIter<ServerAddr>;
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        (&**self).to_server_addrs()
     }
 }
 
-impl<'s> ToServerAddrs for &'s String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        self.as_str().into_server_list()
+impl<'a> ToServerAddrs for &'a [ServerAddr] {
+    type Iter = iter::Cloned<slice::Iter<'a, ServerAddr>>;
+
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        Ok(self.iter().cloned())
     }
 }
 
-impl ToServerAddrs for ServerAddress {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        Ok(vec![self])
-    }
-}
-
-impl ToServerAddrs for Vec<ServerAddress> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        Ok(self)
-    }
-}
-
-impl ToServerAddrs for io::Result<Vec<ServerAddress>> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
-        self
+impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
+    type Iter = T::Iter;
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        (**self).to_server_addrs()
     }
 }
