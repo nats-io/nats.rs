@@ -526,7 +526,7 @@ impl Stream for Subscriber {
 
 /// Address of a NATS server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ServerAddress(Url);
+pub struct ServerAddr(Url);
 
 /// Capability to convert into a list of NATS server addresses.
 ///
@@ -534,10 +534,10 @@ pub struct ServerAddress(Url);
 /// functions like [`crate::connect()`].
 pub trait ToServerAddrs {
     /// Convert the instance into a list of [`ServerAddress`]es.
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>>;
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>>;
 }
 
-impl FromStr for ServerAddress {
+impl FromStr for ServerAddr {
     type Err = io::Error;
 
     /// Parse an address of a NATS server.
@@ -560,7 +560,7 @@ impl FromStr for ServerAddress {
     }
 }
 
-impl ServerAddress {
+impl ServerAddr {
     /// Check if the URL is a valid NATS server address.
     pub fn from_url(url: Url) -> io::Result<Self> {
         if url.scheme() != "nats" && url.scheme() != "tls" {
@@ -624,49 +624,49 @@ impl ServerAddress {
 }
 
 impl<'s> ToServerAddrs for &'s str {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         self.split(',').map(|url| url.parse()).collect()
     }
 }
 
 impl<'s> ToServerAddrs for &'s [&'s str] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         self.iter().map(|url| url.parse()).collect()
     }
 }
 
 impl<'s, const N: usize> ToServerAddrs for &'s [&'s str; N] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         self.as_ref().into_server_list()
     }
 }
 
 impl ToServerAddrs for String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         self.as_str().into_server_list()
     }
 }
 
 impl<'s> ToServerAddrs for &'s String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         self.as_str().into_server_list()
     }
 }
 
-impl ToServerAddrs for ServerAddress {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+impl ToServerAddrs for ServerAddr {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         Ok(vec![self])
     }
 }
 
-impl ToServerAddrs for Vec<ServerAddress> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+impl ToServerAddrs for Vec<ServerAddr> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         Ok(self)
     }
 }
 
-impl ToServerAddrs for io::Result<Vec<ServerAddress>> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
+impl ToServerAddrs for io::Result<Vec<ServerAddr>> {
+    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
         self
     }
 }
