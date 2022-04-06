@@ -125,16 +125,12 @@ pub struct Connection {
 
 impl Connection {
     pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
-        let a = addrs
-            .into_server_list()?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                io::Error::new(
-                    ErrorKind::Other,
-                    "did not found a single url in the url list",
-                )
-            })?;
+        let a = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::Other,
+                "did not found a single url in the url list",
+            )
+        })?;
         let tcp_stream = TcpStream::connect((a.host(), a.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
@@ -534,7 +530,7 @@ pub struct ServerAddr(Url);
 /// functions like [`crate::connect()`].
 pub trait ToServerAddrs {
     /// Convert the instance into a list of [`ServerAddress`]es.
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>>;
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>>;
 }
 
 impl FromStr for ServerAddr {
@@ -624,49 +620,49 @@ impl ServerAddr {
 }
 
 impl<'s> ToServerAddrs for &'s str {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
         self.split(',').map(|url| url.parse()).collect()
     }
 }
 
 impl<'s> ToServerAddrs for &'s [&'s str] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
         self.iter().map(|url| url.parse()).collect()
     }
 }
 
 impl<'s, const N: usize> ToServerAddrs for &'s [&'s str; N] {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
-        self.as_ref().into_server_list()
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
+        self.as_ref().to_server_addrs()
     }
 }
 
 impl ToServerAddrs for String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
-        self.as_str().into_server_list()
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
+        self.as_str().to_server_addrs()
     }
 }
 
 impl<'s> ToServerAddrs for &'s String {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
-        self.as_str().into_server_list()
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
+        self.as_str().to_server_addrs()
     }
 }
 
 impl ToServerAddrs for ServerAddr {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
         Ok(vec![self])
     }
 }
 
 impl ToServerAddrs for Vec<ServerAddr> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
         Ok(self)
     }
 }
 
 impl ToServerAddrs for io::Result<Vec<ServerAddr>> {
-    fn into_server_list(self) -> io::Result<Vec<ServerAddr>> {
+    fn to_server_addrs(self) -> io::Result<Vec<ServerAddr>> {
         self
     }
 }
