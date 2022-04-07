@@ -11,13 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod util;
+mod nats_server;
 use futures_util::StreamExt;
-pub use util::*;
+pub use nats_server::*;
 
 #[tokio::test]
 async fn basic_pub_sub() {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
     let mut con = nats_experimental::connect(s.client_url()).await.unwrap();
 
     let mut sub = con.subscribe("foo".into()).await.unwrap();
