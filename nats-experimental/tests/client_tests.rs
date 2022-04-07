@@ -13,7 +13,6 @@
 
 mod nats_server;
 use futures_util::StreamExt;
-pub use nats_server::*;
 
 #[tokio::test]
 async fn basic_pub_sub() {
