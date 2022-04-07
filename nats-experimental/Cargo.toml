@@ -18,7 +18,6 @@ itoa = "1"
 url = "2"
 
 [dev-dependencies]
-nats = { path = "../nats-legacy" }
 lazy_static = "1.4.0"
 regex = { version = "1.5.4", default-features = false, features = ["std", "unicode-perl"] }
 url = "2.2.2"
