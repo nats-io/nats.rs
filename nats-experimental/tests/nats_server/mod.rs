@@ -19,8 +19,6 @@ use std::{env, fs};
 use std::{thread, time::Duration};
 
 use lazy_static::lazy_static;
-use nats::jetstream::{JetStream, JetStreamOptions};
-use nats::Connection;
 use regex::Regex;
 
 pub struct Server {
@@ -148,13 +146,4 @@ pub fn run_server(cfg: &str) -> Server {
 /// Starts a local basic NATS server that gets stopped and cleaned up on drop.
 pub fn run_basic_server() -> Server {
     run_server("")
-}
-
-// Helper function to return server and client.
-pub fn run_basic_jetstream() -> (Server, Connection, JetStream) {
-    let s = run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
-    let js = JetStream::new(nc.clone(), JetStreamOptions::default());
-
-    (s, nc, js)
 }
