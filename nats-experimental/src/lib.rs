@@ -19,79 +19,75 @@ use url::Url;
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future::FutureExt;
 use futures_util::select;
+use serde::{Deserialize, Serialize};
+use serde_json;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::net::ToSocketAddrs;
 use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
 pub type Error = Box<dyn std::error::Error>;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const LANG: &str = "rust";
+
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
 #[allow(unused)]
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
+    #[serde(default)]
     pub server_id: String,
     /// Generated Server Name.
+    #[serde(default)]
     pub server_name: String,
     /// The host specified in the cluster parameter/options.
+    #[serde(default)]
     pub host: String,
     /// The port number specified in the cluster parameter/options.
+    #[serde(default)]
     pub port: u16,
     /// The version of the NATS server.
+    #[serde(default)]
     pub version: String,
     /// If this is set, then the server should try to authenticate upon
     /// connect.
+    #[serde(default)]
     pub auth_required: bool,
     /// If this is set, then the server must authenticate using TLS.
+    #[serde(default)]
     pub tls_required: bool,
     /// Maximum payload size that the server will accept.
+    #[serde(default)]
     pub max_payload: usize,
     /// The protocol version in use.
+    #[serde(default)]
     pub proto: i8,
     /// The server-assigned client ID. This may change during reconnection.
+    #[serde(default)]
     pub client_id: u64,
     /// The version of golang the NATS server was built with.
+    #[serde(default)]
     pub go: String,
     /// The nonce used for nkeys.
+    #[serde(default)]
     pub nonce: String,
     /// A list of server urls that a client can connect to.
+    #[serde(default)]
     pub connect_urls: Vec<String>,
     /// The client IP as known by the server.
+    #[serde(default)]
     pub client_ip: String,
     /// Whether the server supports headers.
+    #[serde(default)]
     pub headers: bool,
     /// Whether server goes into lame duck mode.
+    #[serde(default)]
     pub lame_duck_mode: bool,
-}
-
-impl ServerInfo {
-    fn parse(s: &str) -> Option<ServerInfo> {
-        let mut obj = json::parse(s).ok()?;
-        Some(ServerInfo {
-            server_id: obj["server_id"].take_string()?,
-            server_name: obj["server_name"].take_string().unwrap_or_default(),
-            host: obj["host"].take_string()?,
-            port: obj["port"].as_u16()?,
-            version: obj["version"].take_string()?,
-            auth_required: obj["auth_required"].as_bool().unwrap_or(false),
-            tls_required: obj["tls_required"].as_bool().unwrap_or(false),
-            max_payload: obj["max_payload"].as_usize()?,
-            proto: obj["proto"].as_i8()?,
-            client_id: obj["client_id"].as_u64()?,
-            go: obj["go"].take_string()?,
-            nonce: obj["nonce"].take_string().unwrap_or_default(),
-            connect_urls: obj["connect_urls"]
-                .members_mut()
-                .filter_map(|m| m.take_string())
-                .collect(),
-            client_ip: obj["client_ip"].take_string().unwrap_or_default(),
-            headers: obj["headers"].as_bool().unwrap_or(false),
-            lame_duck_mode: obj["ldm"].as_bool().unwrap_or(false),
-        })
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -108,14 +104,25 @@ pub enum ServerOp {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ClientOp {
-    Publish { subject: String, payload: Bytes },
-    Subscribe { sid: u64, subject: String },
-    Unsubscribe { sid: u64 },
+    Publish {
+        subject: String,
+        payload: Bytes,
+    },
+    Subscribe {
+        sid: u64,
+        subject: String,
+    },
+    Unsubscribe {
+        sid: u64,
+    },
     Ping,
     Pong,
-    Flush,
+    Flush {
+        result: oneshot::Sender<io::Result<()>>,
+    },
+    Connect(ConnectInfo),
 }
 
 /// A framed connection
@@ -255,8 +262,18 @@ impl Connection {
         }
     }
 
-    pub async fn write_op(&mut self, item: &ClientOp) -> Result<(), io::Error> {
+    pub async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
         match item {
+            ClientOp::Connect(connect_info) => {
+                let op = format!(
+                    "CONNECT {}\r\n",
+                    serde_json::to_string(&connect_info).map_err(|_| io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "cannot serialize connect info"
+                    ))?
+                );
+                self.stream.write_all(op.as_bytes()).await?;
+            }
             ClientOp::Publish { subject, payload } => {
                 let mut bufi = itoa::Buffer::new();
                 self.stream.write_all(b"PUB ").await?;
@@ -266,7 +283,7 @@ impl Connection {
                     .write_all(bufi.format(payload.len()).as_bytes())
                     .await?;
                 self.stream.write_all(b"\r\n").await?;
-                self.stream.write_all(payload).await?;
+                self.stream.write_all(&payload).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
 
@@ -291,8 +308,10 @@ impl Connection {
             ClientOp::Pong => {
                 self.stream.write_all(b"PONG\r\n").await?;
             }
-            ClientOp::Flush => {
-                self.stream.flush().await?;
+            ClientOp::Flush { result } => {
+                result.send(self.stream.flush().await).map_err(|_| {
+                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                })?;
             }
         }
 
@@ -362,7 +381,7 @@ impl Connector {
                 maybe_op = receiver.recv().fuse() => {
                     match maybe_op {
                         Some(op) => {
-                            if let Err(err) = self.connection.write_op(&op).await {
+                            if let Err(err) = self.connection.write_op(op).await {
                                 println!("Send failed with {:?}", err);
                             }
                         }
@@ -453,22 +472,52 @@ impl Client {
     }
 
     pub async fn flush(&mut self) -> Result<(), Error> {
-        self.sender.send(ClientOp::Flush).await?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.sender.send(ClientOp::Flush { result: tx }).await?;
+        // first question mark is an error from rx itself, second for error from flush.
+        rx.await??;
         Ok(())
     }
 }
 
-pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
-    let mut connection = Connection::connect(addrs).await?;
-    connection.stream.write_all(b"CONNECT { \"no_responders\": true, \"headers\": true, \"verbose\": false, \"pedantic\": false }\r\n").await?;
-    connection.stream.write_all(b"PING\r\n").await?;
-
+pub async fn connect<A: ToServerAddrs>(addr: A) -> Result<Client, io::Error> {
+    let connection = Connection::connect(addr).await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
     let client = Client::new(sender.clone(), subscription_context);
+    let connect_info = ConnectInfo {
+        // FIXME(tp): handle TLS properly
+        tls_required: false,
+        // FIXME(tp): have optional name
+        name: Some("beta-rust-client".to_string()),
+        pedantic: false,
+        verbose: false,
+        lang: LANG.to_string(),
+        version: VERSION.to_string(),
+        protocol: Protocol::Dynamic,
+        user: None,
+        pass: None,
+        auth_token: None,
+        user_jwt: None,
+        nkey: None,
+        signature: None,
+        echo: true,
+        headers: true,
+        no_responders: true,
+    };
+    client
+        .sender
+        .send(ClientOp::Connect(connect_info))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
+    client
+        .sender
+        .send(ClientOp::Ping)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
 
     tokio::spawn(async move {
         loop {
@@ -489,9 +538,9 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 
 #[derive(Debug)]
 pub struct Message {
-    subject: String,
-    reply_to: Option<String>,
-    payload: Bytes,
+    pub subject: String,
+    pub reply_to: Option<String>,
+    pub payload: Bytes,
 }
 
 pub struct Subscriber {
@@ -523,6 +572,75 @@ impl Stream for Subscriber {
     }
 }
 
+/// Info to construct a CONNECT message.
+#[derive(Clone, Debug, Serialize)]
+#[doc(hidden)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ConnectInfo {
+    /// Turns on +OK protocol acknowledgements.
+    pub verbose: bool,
+
+    /// Turns on additional strict format checking, e.g. for properly formed
+    /// subjects.
+    pub pedantic: bool,
+
+    /// User's JWT.
+    pub user_jwt: Option<String>,
+
+    /// Public nkey.
+    pub nkey: Option<String>,
+
+    /// Signed nonce, encoded to Base64URL.
+    pub signature: Option<String>,
+
+    /// Optional client name.
+    pub name: Option<String>,
+
+    /// If set to `true`, the server (version 1.2.0+) will not send originating
+    /// messages from this connection to its own subscriptions. Clients should
+    /// set this to `true` only for server supporting this feature, which is
+    /// when proto in the INFO protocol is set to at least 1.
+    pub echo: bool,
+
+    /// The implementation language of the client.
+    pub lang: String,
+
+    /// The version of the client.
+    pub version: String,
+
+    /// Sending 0 (or absent) indicates client supports original protocol.
+    /// Sending 1 indicates that the client supports dynamic reconfiguration
+    /// of cluster topology changes by asynchronously receiving INFO messages
+    /// with known servers it can reconnect to.
+    pub protocol: Protocol,
+
+    /// Indicates whether the client requires an SSL connection.
+    pub tls_required: bool,
+
+    /// Connection username (if `auth_required` is set)
+    pub user: Option<String>,
+
+    /// Connection password (if auth_required is set)
+    pub pass: Option<String>,
+
+    /// Client authorization token (if auth_required is set)
+    pub auth_token: Option<String>,
+
+    /// Whether the client supports the usage of headers.
+    pub headers: bool,
+
+    /// Whether the client supports no_responders.
+    pub no_responders: bool,
+}
+
+/// Protocol version used by the client.
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum Protocol {
+    /// Original protocol.
+    Original = 0,
+    /// Protocol with dynamic reconfiguration of cluster and lame duck mode functionality.
+    Dynamic = 1,
 /// Address of a NATS server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServerAddr(Url);

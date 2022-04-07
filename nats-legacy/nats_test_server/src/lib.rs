@@ -540,12 +540,12 @@ fn test_unused_server_cleanup() {
         let success = success.clone();
         std::thread::spawn(move || {
             let server = NatsTestServer::build().spawn();
-            std::thread::sleep(Duration::from_millis(1));
+            std::thread::sleep(Duration::from_millis(100));
             std::mem::drop(server);
             success.store(true, Ordering::Release);
         });
     }
-    std::thread::sleep(Duration::from_millis(2));
+    std::thread::sleep(Duration::from_millis(500));
     assert!(success.load(Ordering::Acquire));
 }
 
