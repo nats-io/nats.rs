@@ -1,19 +1,35 @@
+// Copyright 2020-2022 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use futures_util::stream::Stream;
+use rustls::OwnedTrustAnchor;
 use std::collections::HashMap;
-use std::iter;
+use std::fs::File;
+use std::io::BufReader;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use std::{fmt, iter};
 use subslice::SubsliceExt;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
+use tokio::io::{AsyncRead, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite};
 use url::Url;
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -22,15 +38,24 @@ use futures_util::select;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
+use tokio::io::BufWriter;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
+use tokio_rustls::webpki;
 
 pub type Error = Box<dyn std::error::Error>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
+
+/// A re-export of the `rustls` crate used in this crate,
+/// for use in cases where manual client configurations
+/// must be provided using `Options::tls_client_config`.
+pub use rustls;
+
+mod tls;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -123,29 +148,187 @@ pub enum ClientOp {
     Connect(ConnectInfo),
 }
 
+trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
+
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
 /// A framed connection
 ///
 /// The type will probably not be public.
 pub struct Connection {
-    stream: BufWriter<TcpStream>,
+    stream: Box<dyn AsyncReadWrite>,
     buffer: BytesMut,
 }
 
+/// Connect options.
+#[derive(Clone)]
+pub struct Options {
+    // pub(crate) auth: AuthStyle,
+    pub(crate) name: Option<String>,
+    pub(crate) no_echo: bool,
+    pub(crate) retry_on_failed_connect: bool,
+    pub(crate) max_reconnects: Option<usize>,
+    pub(crate) reconnect_buffer_size: usize,
+    pub(crate) tls_required: bool,
+    pub(crate) certificates: Vec<PathBuf>,
+    pub(crate) client_cert: Option<PathBuf>,
+    pub(crate) client_key: Option<PathBuf>,
+    pub(crate) tls_client_config: Option<crate::rustls::ClientConfig>,
+}
+
+impl fmt::Debug for Options {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_map()
+            .entry(&"name", &self.name)
+            .entry(&"no_echo", &self.no_echo)
+            .entry(&"retry_on_failed_connect", &self.retry_on_failed_connect)
+            .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
+            .entry(&"max_reconnects", &self.max_reconnects)
+            .entry(&"tls_required", &self.tls_required)
+            .entry(&"certificates", &self.certificates)
+            .entry(&"client_cert", &self.client_cert)
+            .entry(&"client_key", &self.client_key)
+            .entry(&"tls_client_config", &"XXXXXXXX")
+            .finish()
+    }
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            name: None,
+            no_echo: false,
+            retry_on_failed_connect: false,
+            reconnect_buffer_size: 8 * 1024 * 1024,
+            max_reconnects: Some(60),
+            tls_required: false,
+            certificates: Vec::new(),
+            client_cert: None,
+            client_key: None,
+            tls_client_config: None,
+        }
+    }
+}
+
+impl Options {
+    fn new() -> Self {
+        Options::default()
+    }
+    pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Connection> {
+        Connection::connect_with_options(addrs, self.to_owned()).await
+    }
+}
+
 impl Connection {
-    pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
-        let a = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
+    pub async fn connect_with_options<A: ToServerAddrs>(
+        addrs: A,
+        options: Options,
+    ) -> io::Result<Connection> {
+        let addr = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
             io::Error::new(
                 ErrorKind::Other,
                 "did not found a single url in the url list",
             )
         })?;
-        let tcp_stream = TcpStream::connect((a.host(), a.port())).await?;
+
+        let mut root_store = rustls::RootCertStore::empty();
+        // adds Mozilla root certs
+        root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        }));
+
+        // use provided ClientConfig or built it from options.
+        let tls_config = {
+            if let Some(config) = options.tls_client_config {
+                Ok(config)
+            } else {
+                // Include user-provided certificates.
+                for cafile in &options.certificates {
+                    let mut pem = BufReader::new(File::open(cafile)?);
+                    let certs = rustls_pemfile::certs(&mut pem)?;
+                    let trust_anchors = certs.iter().map(|cert| {
+                        let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..])
+                            .map_err(|err| {
+                                io::Error::new(
+                                    ErrorKind::InvalidInput,
+                                    format!("could not load certs: {}", err),
+                                )
+                            })
+                            .unwrap();
+                        OwnedTrustAnchor::from_subject_spki_name_constraints(
+                            ta.subject,
+                            ta.spki,
+                            ta.name_constraints,
+                        )
+                    });
+                    root_store.add_server_trust_anchors(trust_anchors);
+                }
+                let builder = tokio_rustls::rustls::ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_root_certificates(root_store);
+                if let Some(cert) = options.client_cert {
+                    if let Some(key) = options.client_key {
+                        let key = tls::load_key(&key)?;
+                        let cert = tls::load_certs(&cert)?;
+                        builder.with_single_cert(cert, key).map_err(|_| {
+                            io::Error::new(ErrorKind::Other, "could not add certificate or key")
+                        })
+                    } else {
+                        Err(io::Error::new(
+                            ErrorKind::Other,
+                            "found certificate, but no key",
+                        ))
+                    }
+                } else {
+                    // if there are no client certs provided, connect with just TLS.
+                    Ok(builder.with_no_client_auth())
+                }
+            }
+        }?;
+        let mut tcp_stream = TcpStream::connect((addr.host(), addr.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
+        // expect first message from server being INFO.
+        let info = read_info(&mut tcp_stream).await?;
+
+        let tls_required = options.tls_required || info.tls_required || addr.tls_required();
+
+        if tls_required {
+            let tls_config = Arc::new(tls_config);
+            let connector = tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    format!("failed to create tsl connector from tsl config: {}", err),
+                )
+            })?;
+
+            let domain = rustls::ServerName::try_from(info.host.as_str())
+                .or_else(|_| rustls::ServerName::try_from(addr.host()))
+                .map_err(|_| {
+                    io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "cannot determine hostname for TLS connection",
+                    )
+                })?;
+
+            return Ok(Connection {
+                stream: Box::new(BufWriter::new(connector.connect(domain, tcp_stream).await?)),
+                buffer: BytesMut::new(),
+            });
+        };
+
         Ok(Connection {
-            stream: BufWriter::new(tcp_stream),
+            stream: Box::new(BufWriter::new(tcp_stream)),
             buffer: BytesMut::new(),
         })
+    }
+
+    pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
+        Options::new().connect(addrs).await
     }
 
     pub fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
@@ -766,5 +949,40 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     type Iter = T::Iter;
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         (**self).to_server_addrs()
+    }
+}
+
+async fn read_info(stream: &mut TcpStream) -> io::Result<ServerInfo> {
+    let mut buffer = BytesMut::new();
+    loop {
+        if 0 == stream.read_buf(&mut buffer).await? {
+            return Err(io::Error::new(
+                ErrorKind::Other,
+                "connection reset while getting initial INFO",
+            ));
+        }
+
+        if buffer.starts_with(b"INFO ") {
+            if let Some(len) = buffer.find(b"\r\n") {
+                let line = std::str::from_utf8(&buffer[5..len]).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "cannot convert server info")
+                })?;
+
+                let server_info = serde_json::from_str(line).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "cannot parse server info")
+                })?;
+
+                buffer.advance(len + 2);
+
+                return Ok(server_info);
+            }
+        } else if buffer.is_empty() {
+            continue;
+        } else {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "expected server info, got something else",
+            ));
+        }
     }
 }
