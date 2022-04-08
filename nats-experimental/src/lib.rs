@@ -479,7 +479,11 @@ impl Client {
 }
 
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
-    let connection = Connection::connect(addrs).await?;
+    let mut connection = Connection::connect(addrs).await?;
+
+    // Consume the first op to catch any protocol errors
+    connection.read_op().await?;
+
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
 
