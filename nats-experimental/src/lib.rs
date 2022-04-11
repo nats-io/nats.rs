@@ -16,16 +16,15 @@ use rustls::OwnedTrustAnchor;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
+use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use std::{fmt, iter};
 use subslice::SubsliceExt;
 use tokio::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncWriteExt};
@@ -55,6 +54,7 @@ const LANG: &str = "rust";
 /// must be provided using `Options::tls_client_config`.
 pub use rustls;
 
+pub mod options;
 mod tls;
 
 /// Information sent by the server back to this client
@@ -160,84 +160,10 @@ pub struct Connection {
     buffer: BytesMut,
 }
 
-/// Connect options.
-#[derive(Clone)]
-pub struct Options {
-    // pub(crate) auth: AuthStyle,
-    pub(crate) name: Option<String>,
-    pub(crate) no_echo: bool,
-    pub(crate) retry_on_failed_connect: bool,
-    pub(crate) max_reconnects: Option<usize>,
-    pub(crate) reconnect_buffer_size: usize,
-    pub(crate) tls_required: bool,
-    pub(crate) certificates: Vec<PathBuf>,
-    pub(crate) client_cert: Option<PathBuf>,
-    pub(crate) client_key: Option<PathBuf>,
-    pub(crate) tls_client_config: Option<crate::rustls::ClientConfig>,
-}
-
-impl fmt::Debug for Options {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(&"name", &self.name)
-            .entry(&"no_echo", &self.no_echo)
-            .entry(&"retry_on_failed_connect", &self.retry_on_failed_connect)
-            .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
-            .entry(&"max_reconnects", &self.max_reconnects)
-            .entry(&"tls_required", &self.tls_required)
-            .entry(&"certificates", &self.certificates)
-            .entry(&"client_cert", &self.client_cert)
-            .entry(&"client_key", &self.client_key)
-            .entry(&"tls_client_config", &"XXXXXXXX")
-            .finish()
-    }
-}
-
-impl Default for Options {
-    fn default() -> Options {
-        Options {
-            name: None,
-            no_echo: false,
-            retry_on_failed_connect: false,
-            reconnect_buffer_size: 8 * 1024 * 1024,
-            max_reconnects: Some(60),
-            tls_required: false,
-            certificates: Vec::new(),
-            client_cert: None,
-            client_key: None,
-            tls_client_config: None,
-        }
-    }
-}
-
-impl Options {
-    pub fn new() -> Self {
-        Options::default()
-    }
-    pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Connection> {
-        Connection::connect_with_options(addrs, self.to_owned()).await
-    }
-
-    pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut Options {
-        self.certificates = vec![path];
-        self
-    }
-
-    pub fn add_client_certificates(&mut self, cert: PathBuf, key: PathBuf) -> &mut Options {
-        self.client_cert = Some(cert);
-        self.client_key = Some(key);
-        self
-    }
-    pub fn require_tls(&mut self, is_required: bool) -> &mut Options {
-        self.tls_required = is_required;
-        self
-    }
-}
-
 impl Connection {
     pub async fn connect_with_options<A: ToServerAddrs>(
         addrs: A,
-        options: Options,
+        options: options::Options,
     ) -> io::Result<Connection> {
         let addr = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
             io::Error::new(
@@ -343,7 +269,7 @@ impl Connection {
     }
 
     pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
-        Options::new().connect(addrs).await
+        options::Options::new().connect(addrs).await
     }
 
     pub fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
