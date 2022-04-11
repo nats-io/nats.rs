@@ -168,13 +168,11 @@ impl Connection {
 
         if self.buffer.starts_with(b"INFO ") {
             if let Some(len) = self.buffer.find(b"\r\n") {
-                let line = std::str::from_utf8(&self.buffer[5..len]).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "cannot convert server info")
-                })?;
+                let line = std::str::from_utf8(&self.buffer[5..len])
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
-                let server_info = serde_json::from_str(line).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "cannot parse server info")
-                })?;
+                let server_info = serde_json::from_str(line)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
                 self.buffer.advance(len + 2);
 
@@ -205,20 +203,12 @@ impl Connection {
                     }
                 };
 
-                let sid = u64::from_str(sid).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "cannot parse sid argument after MSG",
-                    )
-                })?;
+                let sid = u64::from_str(sid)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
                 // Parse the number of payload bytes.
-                let payload_len = usize::from_str(payload_len).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "cannot parse the number of bytes argument after MSG",
-                    )
-                })?;
+                let payload_len = usize::from_str(payload_len)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
                 // Only advance if there is enough data for the entire operation and payload remaining.
                 if len + payload_len + 4 <= self.buffer.remaining() {
@@ -265,10 +255,8 @@ impl Connection {
             ClientOp::Connect(connect_info) => {
                 let op = format!(
                     "CONNECT {}\r\n",
-                    serde_json::to_string(&connect_info).map_err(|_| io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "cannot serialize connect info"
-                    ))?
+                    serde_json::to_string(&connect_info)
+                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
                 );
                 self.stream.write_all(op.as_bytes()).await?;
             }
