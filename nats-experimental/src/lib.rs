@@ -211,11 +211,26 @@ impl Default for Options {
 }
 
 impl Options {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Options::default()
     }
     pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Connection> {
         Connection::connect_with_options(addrs, self.to_owned()).await
+    }
+
+    pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut Options {
+        self.certificates = vec![path];
+        self
+    }
+
+    pub fn add_client_certificates(&mut self, cert: PathBuf, key: PathBuf) -> &mut Options {
+        self.client_cert = Some(cert);
+        self.client_key = Some(key);
+        self
+    }
+    pub fn require_tls(&mut self, is_required: bool) -> &mut Options {
+        self.tls_required = is_required;
+        self
     }
 }
 
