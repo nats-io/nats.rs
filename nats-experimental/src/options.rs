@@ -89,46 +89,46 @@ impl Options {
     }
 }
 
-struct TLSOptions<CC = False, CK = False> {
-    client_cert_set: PhantomData<CC>,
-    client_key_set: PhantomData<CK>,
+// struct TLSOptions<CC = False, CK = False> {
+//     client_cert_set: PhantomData<CC>,
+//     client_key_set: PhantomData<CK>,
 
-    pub(crate) tls_required: bool,
-    pub(crate) certificates: Vec<PathBuf>,
-    pub(crate) client_cert: Option<PathBuf>,
-    pub(crate) client_key: Option<PathBuf>,
-}
+//     pub(crate) tls_required: bool,
+//     pub(crate) certificates: Vec<PathBuf>,
+//     pub(crate) client_cert: Option<PathBuf>,
+//     pub(crate) client_key: Option<PathBuf>,
+// }
 
-impl TLSOptions {
-    fn new() -> Self {
-        Default::default()
-    }
-    pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut TLSOptions {
-        self.certificates = vec![path];
-        self
-    }
+// impl<CC, CK> TLSOptions<CC, CK> {
+//     fn new() -> Self {
+//         Default::default()
+//     }
+//     pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut TLSOptions {
+//         self.certificates = vec![path];
+//         self
+//     }
 
-    pub fn add_client_certificates(&mut self, cert: PathBuf, key: PathBuf) -> &mut TLSOptions {
-        self.client_cert = Some(cert);
-        self.client_key = Some(key);
-        self
-    }
-    pub fn require_tls(&mut self, is_required: bool) -> &mut TLSOptions {
-        self.tls_required = is_required;
-        self
-    }
-}
+//     pub fn add_client_certificates(&mut self, cert: PathBuf, key: PathBuf) -> &mut TLSOptions {
+//         self.client_cert = Some(cert);
+//         self.client_key = Some(key);
+//         self
+//     }
+//     pub fn require_tls(&mut self, is_required: bool) -> &mut TLSOptions {
+//         self.tls_required = is_required;
+//         self
+//     }
+// }
 
-impl Default for TLSOptions {
-    fn default() -> Self {
-        TLSOptions {
-            tls_required: true,
-            certificates: Vec::new(),
-            client_key: None,
-            client_cert: None,
-        }
-    }
-}
+// impl Default for TLSOptions {
+//     fn default() -> Self {
+//         TLSOptions {
+//             tls_required: true,
+//             certificates: Vec::new(),
+//             client_key: None,
+//             client_cert: None,
+//         }
+//     }
+// }
 
 pub struct True;
 pub struct False;
