@@ -170,11 +170,30 @@ impl Connection {
 
         let tls_config = tls::config_tls(&options)?;
 
-        let mut tcp_stream = TcpStream::connect((addr.host(), addr.port())).await?;
+        let tcp_stream = TcpStream::connect((addr.host(), addr.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
-        // expect first message from server being INFO.
-        let info = read_info(&mut tcp_stream).await?;
+        let mut connection = Connection {
+            stream: Box::new(BufWriter::new(tcp_stream)),
+            buffer: BytesMut::new(),
+        };
+
+        let op = connection.read_op().await?;
+        let info = match op {
+            Some(ServerOp::Info(info)) => info,
+            Some(op) => {
+                return Err(io::Error::new(
+                    ErrorKind::Other,
+                    format!("expected info, got {:?}", op),
+                ))
+            }
+            None => {
+                return Err(io::Error::new(
+                    ErrorKind::Other,
+                    "expected info, got nothing",
+                ))
+            }
+        };
 
         let tls_required = options.tls_required || info.tls_required || addr.tls_required();
 
@@ -197,15 +216,12 @@ impl Connection {
                 })?;
 
             return Ok(Connection {
-                stream: Box::new(BufWriter::new(connector.connect(domain, tcp_stream).await?)),
+                stream: Box::new(connector.connect(domain, connection.stream).await?),
                 buffer: BytesMut::new(),
             });
         };
 
-        Ok(Connection {
-            stream: Box::new(BufWriter::new(tcp_stream)),
-            buffer: BytesMut::new(),
-        })
+        Ok(connection)
     }
 
     pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
@@ -830,40 +846,5 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     type Iter = T::Iter;
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         (**self).to_server_addrs()
-    }
-}
-
-async fn read_info(stream: &mut TcpStream) -> io::Result<ServerInfo> {
-    let mut buffer = BytesMut::new();
-    loop {
-        if 0 == stream.read_buf(&mut buffer).await? {
-            return Err(io::Error::new(
-                ErrorKind::Other,
-                "connection reset while getting initial INFO",
-            ));
-        }
-
-        if buffer.starts_with(b"INFO ") {
-            if let Some(len) = buffer.find(b"\r\n") {
-                let line = std::str::from_utf8(&buffer[5..len]).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "cannot convert server info")
-                })?;
-
-                let server_info = serde_json::from_str(line).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "cannot parse server info")
-                })?;
-
-                buffer.advance(len + 2);
-
-                return Ok(server_info);
-            }
-        } else if buffer.is_empty() {
-            continue;
-        } else {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                "expected server info, got something else",
-            ));
-        }
     }
 }
