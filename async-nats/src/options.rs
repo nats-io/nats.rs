@@ -11,14 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Connection, ToServerAddrs};
+use crate::{Client, ToServerAddrs};
 use std::{fmt, path::PathBuf};
 use tokio::io;
 use tokio_rustls::rustls;
 
 /// Connect options.
 #[derive(Clone)]
-pub struct Options {
+pub struct ConnectOptions {
     // pub(crate) auth: AuthStyle,
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
@@ -32,7 +32,7 @@ pub struct Options {
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
 }
 
-impl fmt::Debug for Options {
+impl fmt::Debug for ConnectOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_map()
             .entry(&"name", &self.name)
@@ -49,9 +49,9 @@ impl fmt::Debug for Options {
     }
 }
 
-impl Default for Options {
-    fn default() -> Options {
-        Options {
+impl Default for ConnectOptions {
+    fn default() -> ConnectOptions {
+        ConnectOptions {
             name: None,
             no_echo: false,
             retry_on_failed_connect: false,
@@ -66,20 +66,20 @@ impl Default for Options {
     }
 }
 
-impl Options {
+impl ConnectOptions {
     /// Enables customization of NATS connection.
     ///
     /// # Examples
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let mut options = async_nats::Options::new();
+    /// let mut options = async_nats::ConnectOptions::new();
     /// let nc = options.connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn new() -> Self {
-        Options::default()
+        ConnectOptions::default()
     }
 
     /// Connect to the NATS Server leveraging all passed options.
@@ -88,12 +88,12 @@ impl Options {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let nc = async_nats::Options::new().require_tls(true).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Connection> {
-        Connection::connect_with_options(addrs, self.to_owned()).await
+    pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Client> {
+        crate::connect_with_options(addrs, Some(self.to_owned())).await
     }
 
     /// Loads root certificates by providing the path to them.
@@ -103,11 +103,11 @@ impl Options {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
-    /// async_nats::Options::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut Options {
+    pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut ConnectOptions {
         self.certificates = vec![path];
         self
     }
@@ -119,11 +119,11 @@ impl Options {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
-    /// async_nats::Options::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn add_client_certificate(&mut self, cert: PathBuf, key: PathBuf) -> &mut Options {
+    pub fn add_client_certificate(&mut self, cert: PathBuf, key: PathBuf) -> &mut ConnectOptions {
         self.client_cert = Some(cert);
         self.client_key = Some(key);
         self
@@ -136,11 +136,11 @@ impl Options {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
-    /// async_nats::Options::new().require_tls(true).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn require_tls(&mut self, is_required: bool) -> &mut Options {
+    pub fn require_tls(&mut self, is_required: bool) -> &mut ConnectOptions {
         self.tls_required = is_required;
         self
     }
