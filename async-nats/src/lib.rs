@@ -165,7 +165,7 @@ pub struct Connection {
 impl Connection {
     pub async fn connect_with_options<A: ToServerAddrs>(
         addrs: A,
-        options: options::Options,
+        options: options::ConnectOptions,
     ) -> io::Result<Connection> {
         let addr = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
             io::Error::new(
@@ -229,10 +229,6 @@ impl Connection {
         };
 
         Ok(connection)
-    }
-
-    pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Connection, io::Error> {
-        options::Options::new().connect(addrs).await
     }
 
     pub fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
@@ -611,8 +607,12 @@ impl Client {
     }
 }
 
-pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
-    let connection = Connection::connect(addrs).await?;
+pub async fn connect_with_options<A: ToServerAddrs>(
+    addrs: A,
+    options: Option<ConnectOptions>,
+) -> Result<Client, io::Error> {
+    let options = options.unwrap_or_default();
+    let connection = Connection::connect_with_options(addrs, options.clone()).await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
 
@@ -620,8 +620,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
     let (sender, receiver) = mpsc::channel(128);
     let client = Client::new(sender.clone(), subscription_context);
     let connect_info = ConnectInfo {
-        // FIXME(tp): handle TLS properly
-        tls_required: false,
+        tls_required: options.tls_required,
         // FIXME(tp): have optional name
         name: Some("beta-rust-client".to_string()),
         pedantic: false,
@@ -665,6 +664,10 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
     task::spawn(async move { connector.process(receiver).await });
 
     Ok(client)
+}
+
+pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
+    connect_with_options(addrs, None).await
 }
 
 #[derive(Debug)]
