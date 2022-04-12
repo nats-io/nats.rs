@@ -502,6 +502,7 @@ impl Connector {
     }
 }
 
+#[derive(Clone)]
 pub struct Client {
     sender: mpsc::Sender<ClientOp>,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
