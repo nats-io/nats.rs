@@ -11,42 +11,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
-use std::path::PathBuf;
+mod nats_server;
 
-mod util;
-pub use util::*;
+mod client {
+    use std::io;
+    use std::path::PathBuf;
 
-#[tokio::test]
-async fn basic_tls() -> io::Result<()> {
-    let s = util::run_server("tests/configs/tls.conf");
+    use super::nats_server;
+    #[tokio::test]
+    async fn basic_tls() -> io::Result<()> {
+        let s = nats_server::run_server("tests/configs/tls.conf");
 
-    assert!(nats_experimental::connect("nats://127.0.0.1")
-        .await
-        .is_err());
+        assert!(nats_experimental::connect("nats://127.0.0.1")
+            .await
+            .is_err());
 
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    nats_experimental::options::Options::new()
-        .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
-        .add_client_certificates(
-            path.join("tests/configs/certs/client-cert.pem"),
-            path.join("tests/configs/certs/client-key.pem"),
-        )
-        .require_tls(true)
-        .connect(&s.client_url())
-        .await?;
+        nats_experimental::options::Options::new()
+            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+            .add_client_certificates(
+                path.join("tests/configs/certs/client-cert.pem"),
+                path.join("tests/configs/certs/client-key.pem"),
+            )
+            .require_tls(true)
+            .connect(&s.client_url())
+            .await?;
 
-    // test scenario where rootCA, client certificate and client key are all in one .pem file
-    nats_experimental::options::Options::new()
-        .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
-        .add_client_certificates(
-            path.join("tests/configs/certs/client-all.pem"),
-            path.join("tests/configs/certs/client-all.pem"),
-        )
-        .require_tls(true)
-        .connect(&s.client_url())
-        .await?;
+        // test scenario where rootCA, client certificate and client key are all in one .pem file
+        nats_experimental::options::Options::new()
+            .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
+            .add_client_certificates(
+                path.join("tests/configs/certs/client-all.pem"),
+                path.join("tests/configs/certs/client-all.pem"),
+            )
+            .require_tls(true)
+            .connect(&s.client_url())
+            .await?;
 
-    Ok(())
+        Ok(())
+    }
 }
