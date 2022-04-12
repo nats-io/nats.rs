@@ -14,7 +14,9 @@
 mod nats_server;
 
 mod client {
+
     use super::nats_server;
+    use bytes::Bytes;
     use futures_util::StreamExt;
 
     #[tokio::test]
@@ -71,5 +73,61 @@ mod client {
             }
         }
         assert_eq!(i, 10);
+    }
+
+    #[tokio::test]
+    async fn publish_request() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut sub = client.subscribe("test".into()).await.unwrap();
+
+        tokio::spawn({
+            let mut client = client.clone();
+            async move {
+                let msg = sub.next().await.unwrap();
+                client
+                    .publish(msg.reply.unwrap(), "resp".into())
+                    .await
+                    .unwrap();
+                client.flush().await.unwrap();
+            }
+        });
+        let inbox = client.new_inbox();
+        let mut insub = client.subscribe(inbox.clone()).await.unwrap();
+        client
+            .publish_with_reply("test".into(), inbox, "data".into())
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+        assert!(insub.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn request() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut sub = client.subscribe("test".into()).await.unwrap();
+
+        tokio::spawn({
+            let mut client = client.clone();
+            async move {
+                let msg = sub.next().await.unwrap();
+                client
+                    .publish(msg.reply.unwrap(), "reply".into())
+                    .await
+                    .unwrap();
+                client.flush().await.unwrap();
+            }
+        });
+
+        let resp = tokio::time::timeout(
+            tokio::time::Duration::from_millis(200),
+            client.request("test".into(), "request".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
 }
