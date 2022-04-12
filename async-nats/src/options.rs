@@ -73,7 +73,7 @@ impl Options {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let mut options = nats_experimental::Options::new();
+    /// let mut options = async_nats::Options::new();
     /// let nc = options.connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -88,7 +88,7 @@ impl Options {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let nc = nats_experimental::Options::new().require_tls(true).connect("demo.nats.io").await?;
+    /// let nc = async_nats::Options::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -103,7 +103,7 @@ impl Options {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
-    /// nats_experimental::Options::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
+    /// async_nats::Options::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -119,7 +119,7 @@ impl Options {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
-    /// nats_experimental::Options::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
+    /// async_nats::Options::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -136,7 +136,7 @@ impl Options {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
-    /// nats_experimental::Options::new().require_tls(true).connect("demo.nats.io").await?;
+    /// async_nats::Options::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
