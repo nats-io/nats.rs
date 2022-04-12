@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::options::Options;
-use crate::tls;
+use crate::{tls, Options};
 use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
-use tokio_rustls::rustls::{Certificate, OwnedTrustAnchor, PrivateKey};
+use tokio_rustls::rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
 use tokio_rustls::webpki;
 
 /// Loads client certificates from a `.pem` file.
@@ -62,9 +61,7 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
     .await?
 }
 
-pub(crate) async fn config_tls(
-    options: &Options,
-) -> io::Result<tokio_rustls::rustls::ClientConfig> {
+pub(crate) async fn config_tls(options: &Options) -> io::Result<rustls::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
     // adds Mozilla root certs
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
@@ -101,7 +98,7 @@ pub(crate) async fn config_tls(
                 });
                 root_store.add_server_trust_anchors(trust_anchors);
             }
-            let builder = tokio_rustls::rustls::ClientConfig::builder()
+            let builder = rustls::ClientConfig::builder()
                 .with_safe_defaults()
                 .with_root_certificates(root_store);
             if let Some(cert) = options.client_cert.clone() {
