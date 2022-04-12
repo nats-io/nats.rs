@@ -30,7 +30,7 @@ mod client {
 
         nats_experimental::Options::new()
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
-            .add_client_certificates(
+            .add_client_certificate(
                 path.join("tests/configs/certs/client-cert.pem"),
                 path.join("tests/configs/certs/client-key.pem"),
             )
@@ -41,7 +41,7 @@ mod client {
         // test scenario where rootCA, client certificate and client key are all in one .pem file
         nats_experimental::Options::new()
             .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
-            .add_client_certificates(
+            .add_client_certificate(
                 path.join("tests/configs/certs/client-all.pem"),
                 path.join("tests/configs/certs/client-all.pem"),
             )

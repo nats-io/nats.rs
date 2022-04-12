@@ -14,6 +14,7 @@
 use crate::{Connection, ToServerAddrs};
 use std::{fmt, path::PathBuf};
 use tokio::io;
+use tokio_rustls::rustls;
 
 /// Connect options.
 #[derive(Clone)]
@@ -28,7 +29,7 @@ pub struct Options {
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
-    pub(crate) tls_client_config: Option<crate::rustls::ClientConfig>,
+    pub(crate) tls_client_config: Option<rustls::ClientConfig>,
 }
 
 impl fmt::Debug for Options {
@@ -79,7 +80,7 @@ impl Options {
         self
     }
 
-    pub fn add_client_certificates(&mut self, cert: PathBuf, key: PathBuf) -> &mut Options {
+    pub fn add_client_certificate(&mut self, cert: PathBuf, key: PathBuf) -> &mut Options {
         self.client_cert = Some(cert);
         self.client_key = Some(key);
         self
