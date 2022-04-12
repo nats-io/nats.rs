@@ -185,13 +185,13 @@ impl Connection {
             Some(op) => {
                 return Err(io::Error::new(
                     ErrorKind::Other,
-                    format!("expected info, got {:?}", op),
+                    format!("expected INFO, got {:?}", op),
                 ))
             }
             None => {
                 return Err(io::Error::new(
                     ErrorKind::Other,
-                    "expected info, got nothing",
+                    "expected INFO, got nothing",
                 ))
             }
         };
@@ -200,12 +200,13 @@ impl Connection {
 
         if tls_required {
             let tls_config = Arc::new(tls_config);
-            let connector = tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
-                io::Error::new(
-                    ErrorKind::Other,
-                    format!("failed to create tsl connector from tsl config: {}", err),
-                )
-            })?;
+            let tls_connector =
+                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
+                    io::Error::new(
+                        ErrorKind::Other,
+                        format!("failed to create TLS connector from TLS config: {}", err),
+                    )
+                })?;
 
             let domain = rustls::ServerName::try_from(info.host.as_str())
                 .or_else(|_| rustls::ServerName::try_from(addr.host()))
@@ -217,7 +218,7 @@ impl Connection {
                 })?;
 
             return Ok(Connection {
-                stream: Box::new(connector.connect(domain, connection.stream).await?),
+                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
                 buffer: BytesMut::new(),
             });
         };
