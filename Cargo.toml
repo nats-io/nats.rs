@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-  "nats-legacy",
+  "nats",
   "async-nats"
 ]
