@@ -26,7 +26,7 @@ mod client {
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-        async_nats::Options::new()
+        async_nats::ConnectOptions::new()
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
             .add_client_certificate(
                 path.join("tests/configs/certs/client-cert.pem"),
@@ -37,7 +37,7 @@ mod client {
             .await?;
 
         // test scenario where rootCA, client certificate and client key are all in one .pem file
-        async_nats::Options::new()
+        async_nats::ConnectOptions::new()
             .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
             .add_client_certificate(
                 path.join("tests/configs/certs/client-all.pem"),
