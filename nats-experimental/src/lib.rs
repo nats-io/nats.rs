@@ -48,9 +48,10 @@ const LANG: &str = "rust";
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
 /// must be provided using `Options::tls_client_config`.
-pub use rustls;
+pub use tokio_rustls::rustls;
 
-pub mod options;
+mod options;
+pub use options::*;
 mod tls;
 
 /// Information sent by the server back to this client
@@ -168,7 +169,7 @@ impl Connection {
             )
         })?;
 
-        let tls_config = tls::config_tls(&options)?;
+        let tls_config = tls::config_tls(&options).await?;
 
         let tcp_stream = TcpStream::connect((addr.host(), addr.port())).await?;
         tcp_stream.set_nodelay(true)?;

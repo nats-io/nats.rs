@@ -13,51 +13,58 @@
 
 use crate::options::Options;
 use crate::tls;
-use rustls::OwnedTrustAnchor;
 use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
-use std::path::Path;
-use tokio_rustls::rustls::{Certificate, PrivateKey};
+use std::path::PathBuf;
+use tokio_rustls::rustls::{Certificate, OwnedTrustAnchor, PrivateKey};
 use tokio_rustls::webpki;
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
 /// empty set of Certificates, not error.
 /// Can be used to parse only client certificates from .pem file containing both client key and certs.
-pub(crate) fn load_certs(path: &Path) -> io::Result<Vec<Certificate>> {
-    let file = std::fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let certs = rustls_pemfile::certs(&mut reader)?
-        .iter()
-        .map(|v| Certificate(v.clone()))
-        .collect();
-    Ok(certs)
+pub(crate) async fn load_certs(path: PathBuf) -> io::Result<Vec<Certificate>> {
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let certs = rustls_pemfile::certs(&mut reader)?
+            .iter()
+            .map(|v| Certificate(v.clone()))
+            .collect();
+        Ok(certs)
+    })
+    .await?
 }
 
 /// Loads client key from a `.pem` file.
 /// Can be used to parse only client key from .pem file containing both client key and certs.
-pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
-    let file = std::fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
+pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(path)?;
+        let mut reader = BufReader::new(file);
 
-    loop {
-        match rustls_pemfile::read_one(&mut reader)? {
-            Some(rustls_pemfile::Item::RSAKey(key))
-            | Some(rustls_pemfile::Item::PKCS8Key(key))
-            | Some(rustls_pemfile::Item::ECKey(key)) => return Ok(PrivateKey(key)),
-            // if public key is found, don't error, just skip it and hope to find client key next.
-            Some(rustls_pemfile::Item::X509Certificate(_)) | Some(_) => {}
-            None => break,
+        loop {
+            match rustls_pemfile::read_one(&mut reader)? {
+                Some(rustls_pemfile::Item::RSAKey(key))
+                | Some(rustls_pemfile::Item::PKCS8Key(key))
+                | Some(rustls_pemfile::Item::ECKey(key)) => return Ok(PrivateKey(key)),
+                // if public key is found, don't error, just skip it and hope to find client key next.
+                Some(rustls_pemfile::Item::X509Certificate(_)) | Some(_) => {}
+                None => break,
+            }
         }
-    }
 
-    Err(io::Error::new(
-        ErrorKind::NotFound,
-        "could not find client key in the path",
-    ))
+        Err(io::Error::new(
+            ErrorKind::NotFound,
+            "could not find client key in the path",
+        ))
+    })
+    .await?
 }
 
-pub(crate) fn config_tls(options: &Options) -> io::Result<tokio_rustls::rustls::ClientConfig> {
+pub(crate) async fn config_tls(
+    options: &Options,
+) -> io::Result<tokio_rustls::rustls::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
     // adds Mozilla root certs
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
@@ -97,10 +104,10 @@ pub(crate) fn config_tls(options: &Options) -> io::Result<tokio_rustls::rustls::
             let builder = tokio_rustls::rustls::ClientConfig::builder()
                 .with_safe_defaults()
                 .with_root_certificates(root_store);
-            if let Some(cert) = &options.client_cert {
-                if let Some(key) = &options.client_key {
-                    let key = tls::load_key(key)?;
-                    let cert = tls::load_certs(cert)?;
+            if let Some(cert) = options.client_cert.clone() {
+                if let Some(key) = options.client_key.clone() {
+                    let key = tls::load_key(key).await?;
+                    let cert = tls::load_certs(cert).await?;
                     builder.with_single_cert(cert, key).map_err(|_| {
                         io::Error::new(ErrorKind::Other, "could not add certificate or key")
                     })
