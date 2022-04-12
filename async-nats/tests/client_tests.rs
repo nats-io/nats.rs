@@ -20,9 +20,7 @@ mod client {
     #[tokio::test]
     async fn basic_pub_sub() {
         let server = nats_server::run_basic_server();
-        let mut client = nats_experimental::connect(server.client_url())
-            .await
-            .unwrap();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 

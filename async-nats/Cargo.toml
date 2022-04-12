@@ -1,6 +1,6 @@
 [package]
-name = "nats-experimental"
-version = "0.0.0"
+name = "async-nats"
+version = "0.20.0"
 edition = "2021"
 
 [dependencies]
