@@ -43,4 +43,33 @@ mod client {
         }
         assert_eq!(i, 10);
     }
+
+    #[tokio::test]
+    async fn cloned_client() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let mut subscriber = client.clone().subscribe("foo".into()).await.unwrap();
+
+        let mut cloned_client = client.clone();
+        for _ in 0..10 {
+            cloned_client
+                .publish("foo".into(), "data".into())
+                .await
+                .unwrap();
+        }
+        client.flush().await.unwrap();
+
+        let mut i = 0;
+        while tokio::time::timeout(tokio::time::Duration::from_millis(100), subscriber.next())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            i += 1;
+            if i >= 10 {
+                break;
+            }
+        }
+        assert_eq!(i, 10);
+    }
 }
