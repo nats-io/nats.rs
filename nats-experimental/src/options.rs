@@ -67,24 +67,79 @@ impl Default for Options {
 }
 
 impl Options {
+    /// Enables customization of NATS connection.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut options = nats_experimental::Options::new();
+    /// let nc = options.connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new() -> Self {
         Options::default()
     }
 
+    /// Connect to the NATS Server leveraging all passed options.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc = nats_experimental::Options::new().require_tls(true).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Connection> {
         Connection::connect_with_options(addrs, self.to_owned()).await
     }
 
+    /// Loads root certificates by providing the path to them.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc =
+    /// nats_experimental::Options::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut Options {
         self.certificates = vec![path];
         self
     }
 
+    /// Loads client certificate by providing the path to it.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc =
+    /// nats_experimental::Options::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn add_client_certificate(&mut self, cert: PathBuf, key: PathBuf) -> &mut Options {
         self.client_cert = Some(cert);
         self.client_key = Some(key);
         self
     }
+
+    /// Sets or disables TLS requirement. If TLS connection is impossible while `options.require_tls(true)` connection will return error.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc =
+    /// nats_experimental::Options::new().require_tls(true).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn require_tls(&mut self, is_required: bool) -> &mut Options {
         self.tls_required = is_required;
         self
