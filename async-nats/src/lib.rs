@@ -12,6 +12,8 @@
 // limitations under the License.
 
 use futures_util::stream::Stream;
+use futures_util::StreamExt;
+
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -119,7 +121,7 @@ pub enum ServerOp {
     Message {
         sid: u64,
         subject: String,
-        reply_to: Option<String>,
+        reply: Option<String>,
         payload: Bytes,
     },
 }
@@ -129,6 +131,7 @@ pub enum ClientOp {
     Publish {
         subject: String,
         payload: Bytes,
+        respond: Option<String>,
     },
     Subscribe {
         sid: u64,
@@ -305,7 +308,7 @@ impl Connection {
 
                     return Ok(Some(ServerOp::Message {
                         sid,
-                        reply_to,
+                        reply: reply_to,
                         subject,
                         payload,
                     }));
@@ -344,11 +347,19 @@ impl Connection {
                 );
                 self.stream.write_all(op.as_bytes()).await?;
             }
-            ClientOp::Publish { subject, payload } => {
+            ClientOp::Publish {
+                subject,
+                payload,
+                respond,
+            } => {
                 let mut bufi = itoa::Buffer::new();
                 self.stream.write_all(b"PUB ").await?;
                 self.stream.write_all(subject.as_bytes()).await?;
                 self.stream.write_all(b" ").await?;
+                if let Some(respond) = respond {
+                    self.stream.write_all(respond.as_bytes()).await?;
+                    self.stream.write_all(b" ").await?;
+                }
                 self.stream
                     .write_all(bufi.format(payload.len()).as_bytes())
                     .await?;
@@ -469,12 +480,12 @@ impl Connector {
                             Some(ServerOp::Ping) => {
                                 self.connection.write_op(ClientOp::Pong).await?;
                             }
-                            Some(ServerOp::Message { sid, subject, reply_to, payload }) => {
+                            Some(ServerOp::Message { sid, subject, reply, payload }) => {
                                 let mut context = self.subscription_context.lock().await;
                                 if let Some(subscription) = context.get(sid) {
                                     let message = Message {
                                         subject,
-                                        reply_to,
+                                        reply,
                                         payload,
                                     };
 
@@ -521,10 +532,59 @@ impl Client {
 
     pub async fn publish(&mut self, subject: String, payload: Bytes) -> Result<(), Error> {
         self.sender
-            .send(ClientOp::Publish { subject, payload })
+            .send(ClientOp::Publish {
+                subject,
+                payload,
+                respond: None,
+            })
             .await?;
-
         Ok(())
+    }
+
+    pub async fn publish_with_reply(
+        &mut self,
+        subject: String,
+        reply: String,
+        payload: Bytes,
+    ) -> Result<(), Error> {
+        self.sender
+            .send(ClientOp::Publish {
+                subject,
+                payload,
+                respond: Some(reply),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn request(&mut self, subject: String, payload: Bytes) -> Result<Message, Error> {
+        let inbox = self.new_inbox();
+        let mut sub = self.subscribe(inbox.clone()).await?;
+        self.publish_with_reply(subject, inbox, payload).await?;
+        self.flush().await?;
+        match sub.next().await {
+            Some(message) => Ok(message),
+            None => Err(Box::new(io::Error::new(
+                ErrorKind::BrokenPipe,
+                "did not receive any message",
+            ))),
+        }
+    }
+
+    /// Create a new globally unique inbox which can be used for replies.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// # let mut nc = async_nats::connect("demo.nats.io").await?;
+    /// let reply = nc.new_inbox();
+    /// let rsub = nc.subscribe(reply).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_inbox(&self) -> String {
+        format!("_INBOX.{}", nuid::next())
     }
 
     pub async fn subscribe(&mut self, subject: String) -> Result<Subscriber, io::Error> {
@@ -610,7 +670,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 #[derive(Debug)]
 pub struct Message {
     pub subject: String,
-    pub reply_to: Option<String>,
+    pub reply: Option<String>,
     pub payload: Bytes,
 }
 
