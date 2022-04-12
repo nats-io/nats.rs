@@ -145,8 +145,10 @@ pub enum ClientOp {
     Connect(ConnectInfo),
 }
 
+/// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
 trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
 
+/// Blanked implementation that applies to both TLS and non-TLS `TcpStream`.
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
 /// A framed connection
