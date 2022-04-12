@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{Connection, ToServerAddrs};
-use std::{fmt, marker::PhantomData, path::PathBuf};
+use std::{fmt, path::PathBuf};
 use tokio::io;
 
 /// Connect options.
@@ -69,6 +69,7 @@ impl Options {
     pub fn new() -> Self {
         Options::default()
     }
+
     pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Connection> {
         Connection::connect_with_options(addrs, self.to_owned()).await
     }
@@ -88,51 +89,3 @@ impl Options {
         self
     }
 }
-
-// struct TLSOptions<CC = False, CK = False> {
-//     client_cert_set: PhantomData<CC>,
-//     client_key_set: PhantomData<CK>,
-
-//     pub(crate) tls_required: bool,
-//     pub(crate) certificates: Vec<PathBuf>,
-//     pub(crate) client_cert: Option<PathBuf>,
-//     pub(crate) client_key: Option<PathBuf>,
-// }
-
-// impl<CC, CK> TLSOptions<CC, CK> {
-//     fn new() -> Self {
-//         Default::default()
-//     }
-//     pub fn add_root_certificates(&mut self, path: PathBuf) -> &mut TLSOptions {
-//         self.certificates = vec![path];
-//         self
-//     }
-
-//     pub fn add_client_certificates(&mut self, cert: PathBuf, key: PathBuf) -> &mut TLSOptions {
-//         self.client_cert = Some(cert);
-//         self.client_key = Some(key);
-//         self
-//     }
-//     pub fn require_tls(&mut self, is_required: bool) -> &mut TLSOptions {
-//         self.tls_required = is_required;
-//         self
-//     }
-// }
-
-// impl Default for TLSOptions {
-//     fn default() -> Self {
-//         TLSOptions {
-//             tls_required: true,
-//             certificates: Vec::new(),
-//             client_key: None,
-//             client_cert: None,
-//         }
-//     }
-// }
-
-pub struct True;
-pub struct False;
-trait Complete {}
-
-impl Complete for True {}
-impl Complete for False {}
