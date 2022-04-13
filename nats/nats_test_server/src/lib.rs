@@ -558,6 +558,10 @@ fn test_pub_sub_2_clients() {
     let conn2 = nats::connect(&server.address().to_string()).unwrap();
 
     let sub = conn1.subscribe("*").unwrap();
+    // This test was sometimes failing due to some issues in `nats_test_server`.
+    // As it is neither recommended nor actively developed way to test features,
+    // sleep was added to circumvent the problem.
+    thread::sleep(Duration::from_millis(100));
     conn2.publish("subject", "message").unwrap();
 
     sub.next_timeout(Duration::from_millis(100)).unwrap();
