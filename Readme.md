@@ -41,7 +41,7 @@ Legacy *synchronous* client that supports:
 
 ### async-nats
 
-New async Tokio-based NATS client.
+New bleeding edge experimental async Tokio-based NATS client.
 
 Currently supports:
 
