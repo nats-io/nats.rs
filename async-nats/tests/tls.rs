@@ -14,39 +14,52 @@
 mod nats_server;
 
 mod client {
-    use std::io;
     use std::path::PathBuf;
 
     use super::nats_server;
     #[tokio::test]
-    async fn basic_tls() -> io::Result<()> {
+    async fn basic_tls() {
         let s = nats_server::run_server("tests/configs/tls.conf");
 
         assert!(async_nats::connect("nats://127.0.0.1").await.is_err());
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-        async_nats::ConnectOptions::new()
-            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
-            .add_client_certificate(
-                path.join("tests/configs/certs/client-cert.pem"),
-                path.join("tests/configs/certs/client-key.pem"),
-            )
-            .require_tls(true)
-            .connect(&s.client_url())
-            .await?;
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            async_nats::ConnectOptions::new()
+                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+                .add_client_certificate(
+                    path.join("tests/configs/certs/client-cert.pem"),
+                    path.join("tests/configs/certs/client-key.pem"),
+                )
+                .require_tls(true)
+                .connect(&s.client_url()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
 
+    #[tokio::test]
+    async fn basic_tls_all_certs_one_file() {
+        let s = nats_server::run_server("tests/configs/tls.conf");
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         // test scenario where rootCA, client certificate and client key are all in one .pem file
-        async_nats::ConnectOptions::new()
-            .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
-            .add_client_certificate(
-                path.join("tests/configs/certs/client-all.pem"),
-                path.join("tests/configs/certs/client-all.pem"),
-            )
-            .require_tls(true)
-            .connect(&s.client_url())
-            .await?;
-
-        Ok(())
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            async_nats::ConnectOptions::new()
+                .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
+                .add_client_certificate(
+                    path.join("tests/configs/certs/client-all.pem"),
+                    path.join("tests/configs/certs/client-all.pem"),
+                )
+                .require_tls(true)
+                .connect(&s.client_url()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
     }
 }
