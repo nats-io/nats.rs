@@ -143,6 +143,7 @@ pub use tokio_rustls::rustls;
 
 mod options;
 pub use options::*;
+mod auth;
 mod tls;
 
 /// Information sent by the server back to this client
@@ -733,7 +734,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
     let client = Client::new(sender.clone(), subscription_context);
-    let connect_info = ConnectInfo {
+    let mut connect_info = ConnectInfo {
         tls_required: options.tls_required,
         // FIXME(tp): have optional name
         name: Some("beta-rust-client".to_string()),
@@ -752,6 +753,14 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         headers: true,
         no_responders: true,
     };
+    match options.auth {
+        auth::AuthStyle::NoAuth => {}
+        auth::AuthStyle::Token(token) => connect_info.auth_token = Some(token),
+        auth::AuthStyle::UserPass(user, pass) => {
+            connect_info.user = Some(user);
+            connect_info.pass = Some(pass);
+        }
+    }
     client
         .sender
         .send(ClientOp::Connect(connect_info))

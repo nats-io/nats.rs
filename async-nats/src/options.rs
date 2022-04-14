@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::auth::{self, AuthStyle};
 use crate::{Client, ToServerAddrs};
 use std::{fmt, path::PathBuf, time::Duration};
 use tokio::io;
@@ -31,7 +32,7 @@ use tokio_rustls::rustls;
 /// ```
 #[derive(Clone)]
 pub struct ConnectOptions {
-    // pub(crate) auth: AuthStyle,
+    pub(crate) auth: auth::AuthStyle,
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
     pub(crate) retry_on_failed_connect: bool,
@@ -68,6 +69,7 @@ impl fmt::Debug for ConnectOptions {
 impl Default for ConnectOptions {
     fn default() -> ConnectOptions {
         ConnectOptions {
+            auth: auth::AuthStyle::NoAuth,
             name: None,
             no_echo: false,
             retry_on_failed_connect: false,
@@ -101,6 +103,41 @@ impl ConnectOptions {
     /// ```
     pub fn new() -> Self {
         ConnectOptions::default()
+    }
+
+    /// Auth against NATS Server with provided token.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc =
+    /// async_nats::ConnectOptions::with_token("t0k3n!".into()).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_token(token: String) -> Self {
+        ConnectOptions {
+            auth: AuthStyle::Token(token),
+            ..Default::default()
+        }
+    }
+
+    /// Auth against NATS Server with provided username and password.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc = async_nats::ConnectOptions::with_user_pass("derek".into(), "s3cr3t!".into()).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_user_pass(user: String, pass: String) -> Self {
+        ConnectOptions {
+            auth: AuthStyle::UserPass(user, pass),
+            ..Default::default()
+        }
     }
 
     /// Connect to the NATS Server leveraging all passed options.
