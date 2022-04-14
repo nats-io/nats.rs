@@ -126,4 +126,23 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+
+    #[tokio::test]
+    async fn unsubscribe() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut sub = client.subscribe("test".into()).await.unwrap();
+
+        client.publish("test".into(), "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        assert!(sub.next().await.is_some());
+        sub.unsubscribe();
+        // check if we can still send messages after unsubscribe.
+        let mut sub2 = client.subscribe("test2".into()).await.unwrap();
+        client.publish("test2".into(), "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+        assert!(sub2.next().await.is_some());
+    }
 }
