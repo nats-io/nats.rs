@@ -51,7 +51,7 @@ fn is_valid_object_name(object_name: &str) -> bool {
 }
 
 fn sanitize_object_name(object_name: &str) -> String {
-    object_name.replace(".", "_").replace(" ", "_")
+    object_name.replace('.', "_").replace(' ', "_")
 }
 
 /// Configuration values for object store buckets.
