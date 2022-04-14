@@ -68,13 +68,13 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn Error>> {
-//!     let mut client = async_nats::connect("demo.nats.io").await?;
+//! let mut client = async_nats::connect("demo.nats.io").await?;
 //!
-//!     let subject = String::from("foo");
-//!     let data = Bytes::from("bar");
-//!     for _ in 0..10 {
-//!         client.publish("subject".into(), "data".into()).await?;
-//!     }
+//! let subject = String::from("foo");
+//! let data = Bytes::from("bar");
+//! for _ in 0..10 {
+//!     client.publish("subject".into(), "data".into()).await?;
+//! }
 //! #    Ok(())
 //! # }
 //! ```
@@ -89,13 +89,13 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn Error>> {
-//!     let mut client = async_nats::connect("demo.nats.io").await?;
+//! let mut client = async_nats::connect("demo.nats.io").await?;
 //!
-//!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
-//!     while let Some(message) = subscriber.next().await {
-//!         println!("Received message {:?}", message);
-//!     }
+//! while let Some(message) = subscriber.next().await {
+//!     println!("Received message {:?}", message);
+//! }
 //! #     Ok(())
 //! # }
 
