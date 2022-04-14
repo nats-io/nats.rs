@@ -11,6 +11,94 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A Rust async bleeding edge client for the NATS.io ecosystem.
+//!
+//! `git clone https://github.com/nats-io/nats.rs`
+//!
+//! NATS.io is a simple, secure and high performance open source messaging
+//! system for cloud native applications, `IoT` messaging, and microservices
+//! architectures.
+//!
+//! For sync API refer to the [https://crates.io/crates/nats]
+//!
+//! For more information see [https://nats.io/].
+//!
+//! [https://nats.io/]: https://nats.io/
+//!
+//! ## Examples
+//!
+//! ### Complete example
+//!
+//! ```
+//! use bytes::Bytes;
+//! use futures_util::StreamExt;
+//!
+//! #[tokio::main]
+//! async fn example() {
+//!     let mut client = async_nats::connect("demo.nats.io").await.unwrap();
+//!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//!
+//!     for _ in 0..10 {
+//!         client.publish("foo".into(), "data".into()).await.unwrap();
+//!     }
+//!
+//!     client.flush().await.unwrap();
+//!
+//!     let mut i = 0;
+//!     while subscriber.next()
+//!         .await
+//!         .is_some()
+//!     {
+//!         i += 1;
+//!         if i >= 10 {
+//!             break;
+//!         }
+//!     }
+//!     assert_eq!(i, 10);
+//! }
+//!
+//! ```
+//!
+//! ### Publish
+//!
+//! ```
+//! # use bytes::Bytes;
+//! # use std::error::Error;
+//! # use std::time::Instant;
+//!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn Error>> {
+//!     let mut client = async_nats::connect("demo.nats.io").await?;
+//!
+//!     let subject = String::from("foo");
+//!     let data = Bytes::from("bar");
+//!     for _ in 0..10 {
+//!         client.publish("subject".into(), "data".into()).await?;
+//!     }
+//! #    Ok(())
+//! # }
+//! ```
+//!
+//! ### Subscribe
+//!
+//! ```no_run
+//! # use bytes::Bytes;
+//! # use futures_util::StreamExt;
+//! # use std::error::Error;
+//! # use std::time::Instant;
+//!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn Error>> {
+//!     let mut client = async_nats::connect("demo.nats.io").await?;
+//!
+//!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//!
+//!     while let Some(message) = subscriber.next().await {
+//!         println!("Received message {:?}", message);
+//!     }
+//! #     Ok(())
+//! # }
+
 use futures_util::stream::Stream;
 use futures_util::StreamExt;
 
@@ -164,7 +252,7 @@ pub(crate) struct Connection {
 /// Internal representation of the connection.
 /// Helds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
-    pub async fn connect_with_options<A: ToServerAddrs>(
+    pub(crate) async fn connect_with_options<A: ToServerAddrs>(
         addrs: A,
         options: options::ConnectOptions,
     ) -> io::Result<Connection> {
@@ -608,7 +696,7 @@ impl Client {
     }
 }
 
-pub(crate) async fn connect_with_options<A: ToServerAddrs>(
+pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: Option<ConnectOptions>,
 ) -> Result<Client, io::Error> {
