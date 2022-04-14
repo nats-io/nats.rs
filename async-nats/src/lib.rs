@@ -113,7 +113,7 @@ pub struct ServerInfo {
 }
 
 #[derive(Clone, Debug)]
-pub enum ServerOp {
+pub(crate) enum ServerOp {
     Ok,
     Info(Box<ServerInfo>),
     Ping,
@@ -126,6 +126,7 @@ pub enum ServerOp {
     },
 }
 
+/// `ClientOp` represents all actions of `Client`.
 #[derive(Debug)]
 pub enum ClientOp {
     Publish {
@@ -155,13 +156,13 @@ trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
 /// A framed connection
-///
-/// The type will probably not be public.
-pub struct Connection {
+pub(crate) struct Connection {
     stream: Box<dyn AsyncReadWrite>,
     buffer: BytesMut,
 }
 
+/// Internal representation of the connection.
+/// Helds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
     pub async fn connect_with_options<A: ToServerAddrs>(
         addrs: A,
@@ -231,7 +232,7 @@ impl Connection {
         Ok(connection)
     }
 
-    pub fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
+    pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         if self.buffer.starts_with(b"+OK\r\n") {
             self.buffer.advance(5);
             return Ok(Some(ServerOp::Ok));
@@ -317,7 +318,7 @@ impl Connection {
         Ok(None)
     }
 
-    pub async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
+    pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         loop {
             if let Some(op) = self.try_read_op()? {
                 return Ok(Some(op));
@@ -333,7 +334,7 @@ impl Connection {
         }
     }
 
-    pub async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
+    pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
         match item {
             ClientOp::Connect(connect_info) => {
                 let op = format!(
@@ -433,7 +434,7 @@ impl SubscriptionContext {
 /// The connector takes ownership of the channel.
 ///
 /// The type will probably not be public.
-pub struct Connector {
+pub(crate) struct Connector {
     connection: Connection,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
 }
@@ -607,7 +608,7 @@ impl Client {
     }
 }
 
-pub async fn connect_with_options<A: ToServerAddrs>(
+pub(crate) async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: Option<ConnectOptions>,
 ) -> Result<Client, io::Error> {
