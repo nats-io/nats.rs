@@ -471,9 +471,11 @@ impl Connection {
             }
             ClientOp::Ping => {
                 self.stream.write_all(b"PING\r\n").await?;
+                self.stream.flush().await?;
             }
             ClientOp::Pong => {
                 self.stream.write_all(b"PONG\r\n").await?;
+                self.stream.flush().await?;
             }
             ClientOp::Flush { result } => {
                 result.send(self.stream.flush().await).map_err(|_| {
