@@ -33,7 +33,7 @@ mod client {
         client.flush().await.unwrap();
 
         let mut i = 0;
-        while tokio::time::timeout(tokio::time::Duration::from_millis(100), subscriber.next())
+        while tokio::time::timeout(tokio::time::Duration::from_millis(500), subscriber.next())
             .await
             .unwrap()
             .is_some()
@@ -49,7 +49,7 @@ mod client {
     #[tokio::test]
     async fn cloned_client() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
         let mut subscriber = client.clone().subscribe("foo".into()).await.unwrap();
 
         let mut cloned_client = client.clone();
@@ -59,10 +59,9 @@ mod client {
                 .await
                 .unwrap();
         }
-        client.flush().await.unwrap();
 
         let mut i = 0;
-        while tokio::time::timeout(tokio::time::Duration::from_millis(100), subscriber.next())
+        while tokio::time::timeout(tokio::time::Duration::from_millis(500), subscriber.next())
             .await
             .unwrap()
             .is_some()
@@ -90,7 +89,6 @@ mod client {
                     .publish(msg.reply.unwrap(), "resp".into())
                     .await
                     .unwrap();
-                client.flush().await.unwrap();
             }
         });
         let inbox = client.new_inbox();
@@ -99,7 +97,6 @@ mod client {
             .publish_with_reply("test".into(), inbox, "data".into())
             .await
             .unwrap();
-        client.flush().await.unwrap();
         assert!(insub.next().await.is_some());
     }
 
@@ -118,12 +115,11 @@ mod client {
                     .publish(msg.reply.unwrap(), "reply".into())
                     .await
                     .unwrap();
-                client.flush().await.unwrap();
             }
         });
 
         let resp = tokio::time::timeout(
-            tokio::time::Duration::from_millis(200),
+            tokio::time::Duration::from_millis(500),
             client.request("test".into(), "request".into()),
         )
         .await

@@ -42,8 +42,6 @@
 //!         client.publish("foo".into(), "data".into()).await.unwrap();
 //!     }
 //!
-//!     client.flush().await.unwrap();
-//!
 //!     let mut i = 0;
 //!     while subscriber.next()
 //!         .await
