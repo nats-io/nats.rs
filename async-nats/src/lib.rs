@@ -99,6 +99,8 @@
 //! #     Ok(())
 //! # }
 
+use futures_util::future::FutureExt;
+use futures_util::select;
 use futures_util::stream::Stream;
 use futures_util::StreamExt;
 
@@ -119,8 +121,6 @@ use tokio::io::{AsyncReadExt, AsyncWrite};
 use url::Url;
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::future::FutureExt;
-use futures_util::select;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
@@ -234,6 +234,7 @@ pub enum ClientOp {
     Flush {
         result: oneshot::Sender<io::Result<()>>,
     },
+    TryFlush,
     Connect(ConnectInfo),
 }
 
@@ -479,6 +480,9 @@ impl Connection {
                     io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                 })?;
             }
+            ClientOp::TryFlush => {
+                self.stream.flush().await?;
+            }
         }
 
         Ok(())
@@ -588,6 +592,8 @@ impl Connector {
                         }
                     }
                 }
+
+
             }
             // ...
         }
@@ -738,14 +744,25 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
 
+    tokio::spawn({
+        let sender = sender.clone();
+        async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                match sender.send(ClientOp::Ping).await {
+                    Ok(()) => {}
+                    Err(_) => return,
+                }
+            }
+        }
+    });
+
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            match sender.send(ClientOp::Ping).await {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            match sender.send(ClientOp::TryFlush).await {
                 Ok(()) => {}
-                Err(_) => {
-                    return;
-                }
+                Err(_) => return,
             }
         }
     });
