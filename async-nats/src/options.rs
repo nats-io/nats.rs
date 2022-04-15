@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{Client, ToServerAddrs};
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::PathBuf, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -30,6 +30,8 @@ pub struct ConnectOptions {
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
+    pub(crate) flush_interval: Duration,
+    pub(crate) ping_interval: Duration,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -45,6 +47,8 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
+            .entry(&"flush_interval", &self.flush_interval)
+            .entry(&"ping_interval", &self.ping_interval)
             .finish()
     }
 }
@@ -62,6 +66,8 @@ impl Default for ConnectOptions {
             client_cert: None,
             client_key: None,
             tls_client_config: None,
+            flush_interval: Duration::from_millis(100),
+            ping_interval: Duration::from_secs(60),
         }
     }
 }
@@ -142,6 +148,40 @@ impl ConnectOptions {
     /// ```
     pub fn require_tls(&mut self, is_required: bool) -> &mut ConnectOptions {
         self.tls_required = is_required;
+        self
+    }
+
+    /// Sets the interval for flushing. NATS connection will send buffered data to the NATS Server
+    /// whenever buffer limit is reached, but it is also necessary to flush once in a while if
+    /// client is sending rarely and small messages. Flush interval allows to modify that interval.
+    ///
+    /// # Examples
+    /// ```
+    /// # use tokio::time::Duration;
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn flush_interval(&mut self, flush_interval: Duration) -> &mut ConnectOptions {
+        self.flush_interval = flush_interval;
+        self
+    }
+
+    /// Sets how often Client sends PING message to the server.
+    ///
+    /// # Examples
+    /// ```
+    /// # use tokio::time::Duration;
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn ping_interval(&mut self, ping_interval: Duration) -> &mut ConnectOptions {
+        self.ping_interval = ping_interval;
         self
     }
 }
