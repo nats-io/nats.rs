@@ -111,7 +111,6 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 use subslice::SubsliceExt;
 use tokio::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncWriteExt};
@@ -748,7 +747,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         let sender = sender.clone();
         async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(options.ping_interval).await;
                 match sender.send(ClientOp::Ping).await {
                     Ok(()) => {}
                     Err(_) => return,
@@ -759,7 +758,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(options.flush_interval).await;
             match sender.send(ClientOp::TryFlush).await {
                 Ok(()) => {}
                 Err(_) => return,
