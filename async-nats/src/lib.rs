@@ -238,6 +238,10 @@ pub enum ClientOp {
     },
     TryFlush,
     Connect(ConnectInfo),
+    Connect {
+        connect_info: ConnectInfo,
+        result: oneshot::Sender<io::Result<()>>,
+    },
 }
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
@@ -427,13 +431,25 @@ impl Connection {
 
     pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
         match item {
-            ClientOp::Connect(connect_info) => {
-                let op = format!(
-                    "CONNECT {}\r\n",
-                    serde_json::to_string(&connect_info)
-                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
-                );
-                self.stream.write_all(op.as_bytes()).await?;
+            ClientOp::Connect {
+                connect_info,
+                result,
+            } => {
+                println!("entering connect");
+                let connect = || async move {
+                    println!("calling closure");
+                    let op = format!(
+                        "CONNECT {}\r\n",
+                        serde_json::to_string(&connect_info)
+                            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
+                    );
+                    self.stream.write_all(op.as_bytes()).await?;
+                    self.stream.flush().await?;
+                    Ok(())
+                };
+                result.send(connect().await).map_err(|_| {
+                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                })?;
             }
             ClientOp::Publish {
                 subject,
@@ -761,11 +777,20 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connect_info.pass = Some(pass);
         }
     }
+    task::spawn(async move { connector.process(receiver).await });
+
+    let (connect_tx, connect_rx) = oneshot::channel();
     client
         .sender
-        .send(ClientOp::Connect(connect_info))
+        .send(ClientOp::Connect {
+            connect_info,
+            result: connect_tx,
+        })
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
+    connect_rx
+        .await
+        .map_err(|err| io::Error::new(ErrorKind::BrokenPipe, err))??;
     client
         .sender
         .send(ClientOp::Ping)
@@ -794,8 +819,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             }
         }
     });
-
-    task::spawn(async move { connector.process(receiver).await });
 
     Ok(client)
 }

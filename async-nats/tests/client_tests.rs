@@ -126,4 +126,38 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+
+    #[tokio::test]
+    async fn token_auth() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        let mut nc = async_nats::ConnectOptions::with_user_pass("dupa".into(), "dupaaaa".into())
+            .connect("localhost:4222")
+            .await
+            .unwrap();
+        // let mut nc = async_nats::connect("localhost:4222").await.unwrap();
+        nc.publish("dupa".into(), "data".into()).await.unwrap();
+        nc.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        let mut nc = async_nats::ConnectOptions::with_user_pass("derek".into(), "s3cr3t".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        nc.publish("test".into(), "test".into()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth_wrong_pass() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        assert!(
+            async_nats::ConnectOptions::with_user_pass("derek".into(), "bad".into())
+                .connect(server.client_url())
+                .await
+                .is_err()
+        )
+    }
 }
