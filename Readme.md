@@ -6,14 +6,6 @@
     A <a href="https://www.rust-lang.org/">Rust</a> client for the <a href="https://nats.io">NATS messaging system</a>.
 </p>
 
-## Status
-
-[![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Crates.io](https://img.shields.io/crates/v/nats.svg)](https://crates.io/crates/nats)
-[![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
-[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
-
-
 ## Motivation
 
 Rust may be one the most interesting new languages the NATS ecosystem has seen.
@@ -31,6 +23,11 @@ There are two clients available in two separate crates:
 
 ### nats
 
+[![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Crates.io](https://img.shields.io/crates/v/nats.svg)](https://crates.io/crates/nats)
+[![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
+[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
+
 Legacy *synchronous* client that supports:
 
 * Core NATS
@@ -40,6 +37,12 @@ Legacy *synchronous* client that supports:
 * Object Store
 
 ### async-nats
+
+[![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Crates.io](https://img.shields.io/crates/v/async-nats.svg)](https://crates.io/crates/async-nats)
+[![Documentation](https://docs.rs/async-nats/badge.svg)](https://docs.rs/async-nats/)
+[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
+
 
 New bleeding edge experimental async Tokio-based NATS client.
 
