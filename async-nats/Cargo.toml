@@ -7,7 +7,7 @@ license = "Apache-2.0"
 documentation = "https://docs.rs/async-nats"
 homepage = "https://github.com/nats-io/nats.rs"
 repository = "https://github.com/nats-io/nats.rs"
-readme = "README.md"
+readme = "../README.md"
 keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
