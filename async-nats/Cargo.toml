@@ -1,6 +1,6 @@
 [package]
 name = "async-nats"
-version = "0.20.0"
+version = "0.11.0"
 edition = "2021"
 
 [dependencies]

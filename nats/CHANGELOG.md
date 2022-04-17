@@ -1,3 +1,18 @@
+# 0.19.0
+## Overview
+Minor release with some fixes and improvements and repo restructuring.
+
+## Changed
+* Bump nuid dependency to `0.3.1` by @mfelsche in https://github.com/nats-io/nats.rs/pull/325
+* Adapt discard policy according to server version by @Jarema in https://github.com/nats-io/nats.rs/pull/327
+* Link to asynk module instead of async-nats by @aditsachde in https://github.com/nats-io/nats.rs/pull/331
+* Remove `Features` section from Readme.md by @Jarema in https://github.com/nats-io/nats.rs/pull/335
+* upgrade itoa, nkeys, parking_lot, regex by @attila-lin in https://github.com/nats-io/nats.rs/pull/330
+
+## Fixed
+* Fix a couple of minor things by @caspervonb in https://github.com/nats-io/nats.rs/pull/338
+* Fix clippy warning by @caspervonb in https://github.com/nats-io/nats.rs/pull/361
+
 # 0.18.1
 ## Overview
 A patch release fixing long durations until `close()` returned. It was introduced in the graceful shutdown of client connection threads in v0.18.0.
