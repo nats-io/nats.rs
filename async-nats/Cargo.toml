@@ -2,6 +2,14 @@
 name = "async-nats"
 version = "0.11.0"
 edition = "2021"
+description = "A async Rust NATS client"
+license = "Apache-2.0"
+documentation = "https://docs.rs/async-nats"
+homepage = "https://github.com/nats-io/nats.rs"
+repository = "https://github.com/nats-io/nats.rs"
+readme = "README.md"
+keywords = ["nats", "client", "messaging", "api"]
+categories = ["network-programming", "api-bindings"]
 
 [dependencies]
 subslice = "0.2.3"
