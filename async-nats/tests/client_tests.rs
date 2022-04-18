@@ -18,7 +18,6 @@ mod client {
     use super::nats_server;
     use bytes::Bytes;
     use futures_util::StreamExt;
-    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn basic_pub_sub() {
@@ -130,14 +129,16 @@ mod client {
 
     #[tokio::test]
     async fn token_auth() {
-        let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let mut nc = async_nats::ConnectOptions::with_user_pass("dupa".into(), "dupaaaa".into())
-            .connect("localhost:4222")
+        let server = nats_server::run_server("tests/configs/token.conf");
+        let mut nc = async_nats::ConnectOptions::with_token("s3cr3t".into())
+            .connect(server.client_url())
             .await
             .unwrap();
-        // let mut nc = async_nats::connect("localhost:4222").await.unwrap();
-        nc.publish("dupa".into(), "data".into()).await.unwrap();
+
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "test".into()).await.unwrap();
         nc.flush().await.unwrap();
+        assert!(sub.next().await.is_some());
     }
 
     #[tokio::test]
@@ -148,28 +149,33 @@ mod client {
             .await
             .unwrap();
 
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
         nc.publish("test".into(), "test".into()).await.unwrap();
+        nc.flush().await.unwrap();
+        assert!(sub.next().await.is_some());
     }
 
     #[tokio::test]
     async fn user_pass_auth_wrong_pass() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let mut nc = async_nats::ConnectOptions::with_user_pass("derek".into(), "bad".into())
-            .connect("localhost:4222")
-            .await
-            .unwrap();
-        let mut sub = nc.subscribe("whatever".into()).await.unwrap();
+        let mut nc =
+            async_nats::ConnectOptions::with_user_pass("derek".into(), "bad_password".into())
+                .connect(server.client_url())
+                .await
+                .unwrap();
 
         let mut errs = nc.errors().await.unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn({
             async move {
-                while let Some(err) = errs.next().await {
-                    println!("err: {:?}", err);
-                }
+                if let Some(err) = errs.next().await {
+                    tx.send(err).unwrap();
+                };
             }
         });
-        tokio::time::timeout(tokio::time::Duration::from_millis(5000), sub.next())
+        tokio::time::timeout(tokio::time::Duration::from_millis(5000), rx)
             .await
+            .unwrap()
             .unwrap();
     }
 }
