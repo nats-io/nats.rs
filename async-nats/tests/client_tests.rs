@@ -18,6 +18,7 @@ mod client {
     use super::nats_server;
     use bytes::Bytes;
     use futures_util::StreamExt;
+    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn basic_pub_sub() {
@@ -158,6 +159,15 @@ mod client {
             .await
             .unwrap();
         let mut sub = nc.subscribe("whatever".into()).await.unwrap();
+
+        let mut errs = nc.errors().await.unwrap();
+        tokio::spawn({
+            async move {
+                while let Some(err) = errs.next().await {
+                    println!("err: {:?}", err);
+                }
+            }
+        });
         tokio::time::timeout(tokio::time::Duration::from_millis(5000), sub.next())
             .await
             .unwrap();

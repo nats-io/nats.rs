@@ -562,6 +562,7 @@ impl Connector {
     pub async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<ClientOp>,
+        errors_channel: Option<mpsc::Sender<String>>,
     ) -> Result<(), io::Error> {
         loop {
             select! {
@@ -600,7 +601,11 @@ impl Connector {
                             }
 
                             Some(ServerOp::Error(error_message)) => {
+                                if let Some(error_channel) = &errors_channel {
+                                    error_channel.send(error_message).await.unwrap();
+                                } else {
                                 println!("error from server: {:?}", error_message);
+                                }
                             }
 
                             None => {
@@ -632,17 +637,43 @@ impl Connector {
 pub struct Client {
     sender: mpsc::Sender<ClientOp>,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
+    errors: Option<tokio::sync::mpsc::Receiver<String>>,
+}
+
+impl Clone for Client {
+    fn clone(&self) -> Self {
+        Client {
+            sender: self.sender.clone(),
+            subscription_context: self.subscription_context.clone(),
+            errors: None,
+        }
+    }
 }
 
 impl Client {
     pub(crate) fn new(
         sender: mpsc::Sender<ClientOp>,
         subscription_context: Arc<Mutex<SubscriptionContext>>,
+        errors: Option<mpsc::Receiver<String>>,
     ) -> Client {
         Client {
             sender,
             subscription_context,
+            errors,
         }
+    }
+
+    pub async fn errors(&mut self) -> io::Result<Errors> {
+        let errors = self.errors.take();
+        errors.map_or_else(
+            || {
+                Err(io::Error::new(
+                    ErrorKind::AlreadyExists,
+                    "errors stream already consumerd or used on cloned Client",
+                ))
+            },
+            |errors| Ok(Errors::new(errors)),
+        )
     }
 
     pub async fn publish(&mut self, subject: String, payload: Bytes) -> Result<(), Error> {
@@ -750,7 +781,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
-    let client = Client::new(sender.clone(), subscription_context);
+    let (errors_tx, errors_rx) = mpsc::channel(128);
+    let client = Client::new(sender.clone(), subscription_context, Some(errors_rx));
     let mut connect_info = ConnectInfo {
         tls_required: options.tls_required,
         // FIXME(tp): have optional name
@@ -779,7 +811,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     }
     task::spawn(async move {
-        let res = connector.process(receiver).await;
+        let res = connector.process(receiver, Some(errors_tx)).await;
         println!("processor stopped: {:?}", res);
     });
 
@@ -883,6 +915,24 @@ impl Drop for Subscriber {
 impl Stream for Subscriber {
     type Item = Message;
 
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.receiver.poll_recv(cx)
+    }
+}
+
+#[derive(Debug)]
+pub struct Errors {
+    receiver: tokio::sync::mpsc::Receiver<String>,
+}
+
+impl Errors {
+    fn new(receiver: tokio::sync::mpsc::Receiver<String>) -> Errors {
+        Errors { receiver }
+    }
+}
+
+impl Stream for Errors {
+    type Item = String;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_recv(cx)
     }
