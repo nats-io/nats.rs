@@ -239,9 +239,6 @@ pub enum ClientOp {
     },
     TryFlush,
     Connect(ConnectInfo),
-    Connect {
-        connect_info: ConnectInfo,
-    },
 }
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
@@ -442,7 +439,7 @@ impl Connection {
 
     pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
         match item {
-            ClientOp::Connect { connect_info } => {
+            ClientOp::Connect(connect_info) => {
                 let op = format!(
                     "CONNECT {}\r\n",
                     serde_json::to_string(&connect_info)
@@ -788,7 +785,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     client
         .sender
-        .send(ClientOp::Connect { connect_info })
+        .send(ClientOp::Connect(connect_info))
         .await
         .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
     client
