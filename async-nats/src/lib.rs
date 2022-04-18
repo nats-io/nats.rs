@@ -689,7 +689,7 @@ impl Client {
             .await
             .unwrap();
 
-        Ok(Subscriber::new(sid, receiver))
+        Ok(Subscriber::new(receiver))
     }
 
     pub async fn flush(&mut self) -> Result<(), Error> {
@@ -783,16 +783,12 @@ pub struct Message {
 }
 
 pub struct Subscriber {
-    _sid: u64,
     receiver: mpsc::Receiver<Message>,
 }
 
 impl Subscriber {
-    fn new(sid: u64, receiver: mpsc::Receiver<Message>) -> Subscriber {
-        Subscriber {
-            _sid: sid,
-            receiver,
-        }
+    fn new(receiver: mpsc::Receiver<Message>) -> Subscriber {
+        Subscriber { receiver }
     }
 }
 
