@@ -69,7 +69,7 @@ impl fmt::Debug for ConnectOptions {
 impl Default for ConnectOptions {
     fn default() -> ConnectOptions {
         ConnectOptions {
-            auth: auth::Authorization::NoAuth,
+            auth: auth::Authorization::None,
             name: None,
             no_echo: false,
             retry_on_failed_connect: false,
@@ -135,7 +135,7 @@ impl ConnectOptions {
     /// ```
     pub fn with_user_pass(user: String, pass: String) -> Self {
         ConnectOptions {
-            auth: Authorization::UserPass(user, pass),
+            auth: Authorization::UsernamePassword(user, pass),
             ..Default::default()
         }
     }

@@ -13,11 +13,11 @@
 #[derive(Clone)]
 pub(crate) enum Authorization {
     /// No authentication.
-    NoAuth,
+    None,
 
     /// Authenticate using a token.
     Token(String),
 
     /// Authenticate using a username and password.
-    UserPass(String, String),
+    UsernamePassword(String, String),
 }

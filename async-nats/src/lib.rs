@@ -774,9 +774,9 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         no_responders: true,
     };
     match options.auth {
-        auth::Authorization::NoAuth => {}
+        auth::Authorization::None => {}
         auth::Authorization::Token(token) => connect_info.auth_token = Some(token),
-        auth::Authorization::UserPass(user, pass) => {
+        auth::Authorization::UsernamePassword(user, pass) => {
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
         }
