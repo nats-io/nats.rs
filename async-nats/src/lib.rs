@@ -240,7 +240,6 @@ pub enum ClientOp {
     Connect(ConnectInfo),
     Connect {
         connect_info: ConnectInfo,
-        result: oneshot::Sender<io::Result<()>>,
     },
 }
 
@@ -431,25 +430,14 @@ impl Connection {
 
     pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
         match item {
-            ClientOp::Connect {
-                connect_info,
-                result,
-            } => {
-                println!("entering connect");
-                let connect = || async move {
-                    println!("calling closure");
-                    let op = format!(
-                        "CONNECT {}\r\n",
-                        serde_json::to_string(&connect_info)
-                            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
-                    );
-                    self.stream.write_all(op.as_bytes()).await?;
-                    self.stream.flush().await?;
-                    Ok(())
-                };
-                result.send(connect().await).map_err(|_| {
-                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                })?;
+            ClientOp::Connect { connect_info } => {
+                let op = format!(
+                    "CONNECT {}\r\n",
+                    serde_json::to_string(&connect_info)
+                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
+                );
+                self.stream.write_all(op.as_bytes()).await?;
+                self.stream.flush().await?;
             }
             ClientOp::Publish {
                 subject,
@@ -770,27 +758,23 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         no_responders: true,
     };
     match options.auth {
-        auth::AuthStyle::NoAuth => {}
-        auth::AuthStyle::Token(token) => connect_info.auth_token = Some(token),
-        auth::AuthStyle::UserPass(user, pass) => {
+        auth::Authorization::NoAuth => {}
+        auth::Authorization::Token(token) => connect_info.auth_token = Some(token),
+        auth::Authorization::UserPass(user, pass) => {
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
         }
     }
-    task::spawn(async move { connector.process(receiver).await });
+    task::spawn(async move {
+        let res = connector.process(receiver).await;
+        println!("processor stopped: {:?}", res);
+    });
 
-    let (connect_tx, connect_rx) = oneshot::channel();
     client
         .sender
-        .send(ClientOp::Connect {
-            connect_info,
-            result: connect_tx,
-        })
+        .send(ClientOp::Connect { connect_info })
         .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
-    connect_rx
-        .await
-        .map_err(|err| io::Error::new(ErrorKind::BrokenPipe, err))??;
+        .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
     client
         .sender
         .send(ClientOp::Ping)

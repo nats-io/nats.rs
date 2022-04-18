@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::auth::{self, AuthStyle};
+use crate::auth::{self, Authorization};
 use crate::{Client, ToServerAddrs};
 use std::{fmt, path::PathBuf, time::Duration};
 use tokio::io;
@@ -32,7 +32,7 @@ use tokio_rustls::rustls;
 /// ```
 #[derive(Clone)]
 pub struct ConnectOptions {
-    pub(crate) auth: auth::AuthStyle,
+    pub(crate) auth: auth::Authorization,
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
     pub(crate) retry_on_failed_connect: bool,
@@ -69,7 +69,7 @@ impl fmt::Debug for ConnectOptions {
 impl Default for ConnectOptions {
     fn default() -> ConnectOptions {
         ConnectOptions {
-            auth: auth::AuthStyle::NoAuth,
+            auth: auth::Authorization::NoAuth,
             name: None,
             no_echo: false,
             retry_on_failed_connect: false,
@@ -118,7 +118,7 @@ impl ConnectOptions {
     /// ```
     pub fn with_token(token: String) -> Self {
         ConnectOptions {
-            auth: AuthStyle::Token(token),
+            auth: Authorization::Token(token),
             ..Default::default()
         }
     }
@@ -135,7 +135,7 @@ impl ConnectOptions {
     /// ```
     pub fn with_user_pass(user: String, pass: String) -> Self {
         ConnectOptions {
-            auth: AuthStyle::UserPass(user, pass),
+            auth: Authorization::UserPass(user, pass),
             ..Default::default()
         }
     }

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #[derive(Clone)]
-pub(crate) enum AuthStyle {
+pub(crate) enum Authorization {
     /// No authentication.
     NoAuth,
 

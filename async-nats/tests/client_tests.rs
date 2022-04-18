@@ -153,11 +153,13 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth_wrong_pass() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        assert!(
-            async_nats::ConnectOptions::with_user_pass("derek".into(), "bad".into())
-                .connect(server.client_url())
-                .await
-                .is_err()
-        )
+        let mut nc = async_nats::ConnectOptions::with_user_pass("derek".into(), "bad".into())
+            .connect("localhost:4222")
+            .await
+            .unwrap();
+        let mut sub = nc.subscribe("whatever".into()).await.unwrap();
+        tokio::time::timeout(tokio::time::Duration::from_millis(5000), sub.next())
+            .await
+            .unwrap();
     }
 }
