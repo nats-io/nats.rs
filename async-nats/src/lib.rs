@@ -214,6 +214,7 @@ pub(crate) enum ServerOp {
         reply: Option<String>,
         payload: Bytes,
     },
+    Error(String),
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -342,6 +343,17 @@ impl Connection {
             self.buffer.advance(6);
 
             return Ok(Some(ServerOp::Pong));
+        }
+
+        if self.buffer.starts_with(b"-ERR") {
+            if let Some(len) = self.buffer.find(b"\r\n") {
+                let line = std::str::from_utf8(&self.buffer[5..len])
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                let error_message = line.trim_matches('\'').to_string();
+                self.buffer.advance(len + 2);
+
+                return Ok(Some(ServerOp::Error(error_message)));
+            }
         }
 
         if self.buffer.starts_with(b"INFO ") {
@@ -588,6 +600,10 @@ impl Connector {
 
                                     subscription.sender.send(message).await.unwrap();
                                 }
+                            }
+
+                            Some(ServerOp::Error(error_message)) => {
+                                println!("error from server: {:?}", error_message);
                             }
 
                             None => {
