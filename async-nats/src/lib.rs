@@ -19,13 +19,17 @@
 //! system for cloud native applications, `IoT` messaging, and microservices
 //! architectures.
 //!
-//! For sync API refer to the [https://crates.io/crates/nats]
+//! For sync API refer  <https://crates.io/crates/nats>
 //!
 //! For more information see [https://nats.io/].
 //!
 //! [https://nats.io/]: https://nats.io/
 //!
 //! ## Examples
+//!
+//! Below you can find some basic examples how to use this library.
+//!
+//! For details, refer docs for specific method/struct.
 //!
 //! ### Complete example
 //!
@@ -603,6 +607,9 @@ impl Connector {
     }
 }
 
+/// Client is a `Clonable` handle to NATS connection.
+/// Client should not be created directly. Instead, one of two methods can be used:
+/// [connect] and [ConnectOptions::connect]
 #[derive(Clone)]
 pub struct Client {
     sender: mpsc::Sender<ClientOp>,
@@ -701,6 +708,20 @@ impl Client {
     }
 }
 
+/// Connets to the NATS with specified options.
+///
+/// It is generally advised to use [ConnectOptions] instead, as it provides builder for whole
+/// configuration.
+///
+/// # Examples
+/// ```
+/// # #[tokio::main]
+/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// let mut nc = async_nats::connect_with_options("demo.nats.io", Some(async_nats::ConnectOptions::new())).await?;
+/// nc.publish("test".into(), "data".into()).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
@@ -770,6 +791,21 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     Ok(client)
 }
 
+/// Connects to NATS with default config.
+///
+/// Returns clonable [Client].
+///
+/// To have customized NATS connection, check [ConnectOptions].
+///
+/// # Examples
+/// ```
+/// # #[tokio::main]
+/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// let mut nc = async_nats::connect("demo.nats.io").await?;
+/// nc.publish("test".into(), "data".into()).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
@@ -781,6 +817,19 @@ pub struct Message {
     pub payload: Bytes,
 }
 
+/// Retrieves messages from given `subscription` created by [Client::subscribe].
+///
+/// Implements [futures_util::stream::Stream] for ergonomic async message processing.
+///
+/// # Examples
+/// ```
+/// # #[tokio::main]
+/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// let mut nc = async_nats::connect("demo.nats.io").await?;
+/// # nc.publish("test".into(), "data".into()).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct Subscriber {
     _sid: u64,
     receiver: mpsc::Receiver<Message>,
