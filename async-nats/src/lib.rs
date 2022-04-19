@@ -663,7 +663,7 @@ impl Client {
         }
     }
 
-    pub async fn errors(&mut self) -> io::Result<Errors> {
+    pub async fn errors_stream(&mut self) -> io::Result<ErrorsStream> {
         let errors = self.errors.take();
         errors.map_or_else(
             || {
@@ -672,7 +672,7 @@ impl Client {
                     "errors stream already consumerd or used on cloned Client",
                 ))
             },
-            |errors| Ok(Errors::new(errors)),
+            |errors| Ok(ErrorsStream::new(errors)),
         )
     }
 
@@ -921,17 +921,17 @@ impl Stream for Subscriber {
 }
 
 #[derive(Debug)]
-pub struct Errors {
+pub struct ErrorsStream {
     receiver: tokio::sync::mpsc::Receiver<String>,
 }
 
-impl Errors {
-    fn new(receiver: tokio::sync::mpsc::Receiver<String>) -> Errors {
-        Errors { receiver }
+impl ErrorsStream {
+    fn new(receiver: tokio::sync::mpsc::Receiver<String>) -> ErrorsStream {
+        ErrorsStream { receiver }
     }
 }
 
-impl Stream for Errors {
+impl Stream for ErrorsStream {
     type Item = String;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_recv(cx)
