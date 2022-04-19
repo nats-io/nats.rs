@@ -49,12 +49,21 @@ jobs:
       - name: Install nats-server
         run: go get github.com/nats-io/nats-server/v2
 
-      - name: Run tests
+
+      - name: Run tests for async-nats
         env:
           RUST_BACKTRACE: 1
         run: |
           rustup update
-          cargo test --features=unstable -- --nocapture
+        cargo test --features=unstable -p async-nats -- --nocapture
+
+
+      - name: Run tests for nats
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          rustup update
+        cargo test --features=unstable -p nats:0.19.0 -- --nocapture
 
   test_fault-injection:
     name: test (fault-injection)
