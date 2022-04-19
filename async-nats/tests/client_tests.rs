@@ -164,7 +164,7 @@ mod client {
                 .await
                 .unwrap();
 
-        let mut errs = nc.errors().await.unwrap();
+        let mut errs = nc.errors_stream().await.unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn({
             async move {

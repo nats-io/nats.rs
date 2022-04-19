@@ -562,7 +562,7 @@ impl Connector {
     pub async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<ClientOp>,
-        errors_channel: Option<mpsc::Sender<String>>,
+        errors_channel: mpsc::Sender<String>,
     ) -> Result<(), io::Error> {
         loop {
             select! {
@@ -601,11 +601,7 @@ impl Connector {
                             }
 
                             Some(ServerOp::Error(error_message)) => {
-                                if let Some(error_channel) = &errors_channel {
-                                    error_channel.send(error_message).await.unwrap();
-                                } else {
-                                println!("error from server: {:?}", error_message);
-                                }
+                                    errors_channel.send(error_message).await.unwrap();
                             }
 
                             None => {
@@ -811,7 +807,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     }
     task::spawn(async move {
-        let res = connector.process(receiver, Some(errors_tx)).await;
+        let res = connector.process(receiver, errors_tx).await;
         println!("processor stopped: {:?}", res);
     });
 
