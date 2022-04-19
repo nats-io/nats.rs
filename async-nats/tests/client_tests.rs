@@ -169,10 +169,13 @@ mod client {
         tokio::spawn({
             async move {
                 if let Some(err) = errs.next().await {
+                    println!("waiting for errors");
                     tx.send(err).unwrap();
+                    println!("error sent!");
                 };
             }
         });
+        println!("starting timeout check");
         tokio::time::timeout(tokio::time::Duration::from_millis(5000), rx)
             .await
             .unwrap()
