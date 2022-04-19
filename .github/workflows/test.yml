@@ -103,7 +103,7 @@ jobs:
           go-version: '1.16'
 
       - name: install nats-server
-        run: go get github.com/nats-io/nats-server/v2
+        run: go get github.com/nats-io/nats-server/v2@v2.7.4
 
       - name: Start nats-server
         run: nats-server --jetstream &
