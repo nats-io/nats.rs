@@ -16,7 +16,19 @@ use std::{fmt, path::PathBuf, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
 
-/// Connect options.
+/// Connect options. Used to connect with NATS when custom config is needed.
+/// # Examples
+/// ```
+/// # #[tokio::main]
+/// # async fn options() -> std::io::Result<()> {
+/// let mut options =
+/// async_nats::ConnectOptions::new()
+///     .require_tls(true)
+///     .ping_interval(std::time::Duration::from_secs(10))
+///     .connect("demo.nats.io").await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct ConnectOptions {
     // pub(crate) auth: AuthStyle,
@@ -78,9 +90,12 @@ impl ConnectOptions {
     /// # Examples
     /// ```
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
-    /// let mut options = async_nats::ConnectOptions::new();
-    /// let nc = options.connect("demo.nats.io").await?;
+    /// # async fn options() -> std::io::Result<()> {
+    /// let mut options =
+    /// async_nats::ConnectOptions::new()
+    ///     .require_tls(true)
+    ///     .ping_interval(std::time::Duration::from_secs(10))
+    ///     .connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
