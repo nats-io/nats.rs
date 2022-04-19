@@ -519,6 +519,10 @@ impl SubscriptionContext {
 
         sid
     }
+
+    pub fn remove(&mut self, sid: u64) {
+        self.subscription_map.remove(&sid);
+    }
 }
 
 /// A connector which facilitates communication from channels to a single shared connection.
@@ -682,7 +686,21 @@ impl Client {
 
         // Aiming to make this the only lock (aside from internal locks in channels).
         let mut context = self.subscription_context.lock().await;
-        let sid = context.insert(Subscription { sender });
+        let sid = context.insert(Subscription {
+            sender: sender.clone(),
+        });
+
+        tokio::spawn({
+            let client = self.clone();
+
+            async move {
+                sender.closed().await;
+                client.sender.send(ClientOp::Unsubscribe { sid }).await;
+
+                let mut context = client.subscription_context.lock().await;
+                context.remove(sid);
+            }
+        });
 
         self.sender
             .send(ClientOp::Subscribe { sid, subject })
