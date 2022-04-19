@@ -228,6 +228,7 @@ impl Subscription {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
+    /// # nc.publish("bar", b"data")?;
     /// nc.subscribe("bar")?.with_handler(move |msg| {
     ///     println!("Received {}", &msg);
     ///     Ok(())

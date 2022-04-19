@@ -397,9 +397,12 @@ impl PullSubscription {
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
-    /// # let context = nats::jetstream::new(client);
+    /// # let context = nats::jetstream::new(client.clone());
     /// #
     /// # context.add_stream("next")?;
+    /// # for i in 0..20 {
+    /// # client.publish("next", b"data")?;
+    /// # }
     ///
     /// let consumer = context.pull_subscribe("next")?;
     /// // request specific number of messages.
@@ -414,6 +417,7 @@ impl PullSubscription {
     /// for (i, message) in consumer.iter().enumerate() {
     ///     println!("recieved message: {:?}", message);
     ///     message.ack()?;
+    /// #   break;
     /// }
     /// # Ok(())
     /// # }
