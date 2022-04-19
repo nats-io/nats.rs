@@ -55,7 +55,7 @@ jobs:
           RUST_BACKTRACE: 1
         run: |
           rustup update
-        cargo test --features=unstable -p async-nats -- --nocapture
+        cargo test --features=unstable --workspace -p async-nats -- --nocapture
 
 
       - name: Run tests for nats
@@ -63,7 +63,7 @@ jobs:
           RUST_BACKTRACE: 1
         run: |
           rustup update
-        cargo test --features=unstable -p nats:0.19.0 -- --nocapture
+        cargo test --features=unstable --workspace -p nats -- --nocapture
 
   test_fault-injection:
     name: test (fault-injection)
