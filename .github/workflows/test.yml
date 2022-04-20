@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Cache rust
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         env:
           cache-name: cache-rust
         with:
@@ -27,7 +27,7 @@ jobs:
             ${{ runner.os }}-
 
       - name: Cache go
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             ~/go/pkg/mod              # Module download cache
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cache rust
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         env:
           cache-name: cache-rust-fault-injection
         with:
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cache rust
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         env:
           cache-name: cache-rust
         with:
@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cache rust
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         env:
           cache-name: cache-rust
         with:
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cache rust
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         env:
           cache-name: cache-rust
         with:
@@ -196,7 +196,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cache rust
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         env:
           cache-name: cache-rust
         with:
