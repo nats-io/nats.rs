@@ -703,9 +703,8 @@ impl Client {
 
 pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
-    options: Option<ConnectOptions>,
+    options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let options = options.unwrap_or_default();
     let connection = Connection::connect_with_options(addrs, options.clone()).await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = Connector::new(connection, subscription_context.clone());
@@ -772,7 +771,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 }
 
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
-    connect_with_options(addrs, None).await
+    connect_with_options(addrs, ConnectOptions::default()).await
 }
 
 #[derive(Debug)]

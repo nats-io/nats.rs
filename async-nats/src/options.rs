@@ -99,7 +99,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Client> {
-        crate::connect_with_options(addrs, Some(self.to_owned())).await
+        crate::connect_with_options(addrs, self.to_owned()).await
     }
 
     /// Loads root certificates by providing the path to them.
