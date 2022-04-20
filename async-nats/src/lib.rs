@@ -717,7 +717,7 @@ impl Client {
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
-/// let mut nc = async_nats::connect_with_options("demo.nats.io", Some(async_nats::ConnectOptions::new())).await?;
+/// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
