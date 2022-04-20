@@ -32,8 +32,7 @@ fn jetstream_not_enabled() {
         .into_inner()
         .expect("should be able to convert error into inner")
         .downcast::<jetstream::Error>()
-        .expect("should be able to downcast into error")
-        .to_owned();
+        .expect("should be able to downcast into error");
 
     assert_eq!(err.error_code(), jetstream::ErrorCode::NotEnabled);
 }
@@ -51,8 +50,7 @@ fn jetstream_account_not_enabled() {
         .into_inner()
         .expect("should be able to convert error into inner")
         .downcast::<jetstream::Error>()
-        .expect("should be able to downcast into jetstream::Error")
-        .to_owned();
+        .expect("should be able to downcast into jetstream::Error");
 
     assert_eq!(err.error_code(), jetstream::ErrorCode::NotEnabledForAccount);
 }
@@ -98,8 +96,7 @@ fn jetstream_publish() {
         .into_inner()
         .expect("should be able to convert error into inner")
         .downcast::<jetstream::Error>()
-        .expect("should be able to downcast into error")
-        .to_owned();
+        .expect("should be able to downcast into error");
 
     assert_eq!(err.error_code(), jetstream::ErrorCode::StreamNotMatch);
 
@@ -121,8 +118,7 @@ fn jetstream_publish() {
         .into_inner()
         .expect("should be able to convert error into inner")
         .downcast::<jetstream::Error>()
-        .expect("should be able to downcast into error")
-        .to_owned();
+        .expect("should be able to downcast into error");
 
     assert_eq!(
         err.error_code(),
@@ -182,8 +178,7 @@ fn jetstream_publish() {
         .into_inner()
         .expect("should be able to convert error into inner")
         .downcast::<jetstream::Error>()
-        .expect("should be able to downcast into error")
-        .to_owned();
+        .expect("should be able to downcast into error");
 
     assert_eq!(err.error_code(), jetstream::ErrorCode::StreamWrongLastMsgId);
     assert_eq!(js.stream_info("TEST").unwrap().state.messages, 2);
@@ -205,8 +200,7 @@ fn jetstream_publish() {
         .into_inner()
         .expect("should be able to convert error into inner")
         .downcast::<jetstream::Error>()
-        .expect("should be able to downcast into error")
-        .to_owned();
+        .expect("should be able to downcast into error");
 
     assert_eq!(
         err.error_code(),
@@ -447,19 +441,18 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
     })
     .unwrap();
 
-    let c = jsm
-        .add_consumer(
-            "jobs_stream",
-            ConsumerConfig {
-                deliver_group: Some("dg".to_string()),
-                durable_name: Some("durable".to_string()),
-                deliver_policy: DeliverPolicy::All,
-                ack_policy: AckPolicy::Explicit,
-                deliver_subject: Some("deliver_subject".to_string()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+    jsm.add_consumer(
+        "jobs_stream",
+        ConsumerConfig {
+            deliver_group: Some("dg".to_string()),
+            durable_name: Some("durable".to_string()),
+            deliver_policy: DeliverPolicy::All,
+            ack_policy: AckPolicy::Explicit,
+            deliver_subject: Some("deliver_subject".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let job_sub = jsm
         .queue_subscribe_with_options(

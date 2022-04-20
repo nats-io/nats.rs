@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nats::jetstream;
 use smol::future::FutureExt;
 use std::{
     io,
@@ -172,7 +171,7 @@ fn close_responsiveness_regression_jetstream_complex() {
         crossbeam_channel::Sender<i32>,
         crossbeam_channel::Receiver<i32>,
     ) = crossbeam_channel::bounded(32);
-    sub.clone().with_process_handler(move |msg| {
+    sub.clone().with_process_handler(move |_| {
         result_tx
             .send(1)
             .expect("failed to report back over channel");
