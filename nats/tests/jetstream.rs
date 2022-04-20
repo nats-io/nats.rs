@@ -256,7 +256,7 @@ fn jetstream_publish() {
 fn jetstream_subscribe() {
     let s = util::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
-    let js = nats::jetstream::new(nc);
+    let js = nats::jetstream::new(nc.clone());
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
@@ -286,6 +286,7 @@ fn jetstream_subscribe() {
         assert_eq!(msg.data, payload);
     }
 
+    nc.flush().unwrap();
     // Check the state of consumer matches up with our expectations
     let info = sub.consumer_info().unwrap();
     assert_eq!(info.config.ack_policy, AckPolicy::Explicit);
@@ -707,7 +708,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
         .error_callback(|err| println!("error!: {}", err))
         .connect(&s.client_url())
         .unwrap();
-    let js = nats::jetstream::new(nc);
+    let js = nats::jetstream::new(nc.clone());
 
     js.add_stream(&StreamConfig {
         name: "TEST".to_string(),
@@ -745,6 +746,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
         })
         .unwrap();
 
+    nc.flush().unwrap();
     let info = js.consumer_info("TEST", "CONSUMER").unwrap();
     assert_eq!(info.num_ack_pending, 0);
     assert_eq!(info.num_pending, 5);
