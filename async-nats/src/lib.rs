@@ -611,16 +611,19 @@ impl SubscriptionContext {
 /// A connection handler which facilitates communication from channels to a single shared connection.
 pub(crate) struct ConnectionHandler {
     connection: Connection,
+    connector: Connector,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
 }
 
 impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
+        connector: Connector,
         subscription_context: Arc<Mutex<SubscriptionContext>>,
     ) -> ConnectionHandler {
         ConnectionHandler {
             connection,
+            connector,
             subscription_context,
         }
     }
@@ -631,183 +634,197 @@ impl ConnectionHandler {
     ) -> Result<(), io::Error> {
         loop {
             select! {
-                maybe_op = receiver.recv().fuse() => {
-                    match maybe_op {
-                        Some(op) => {
-                            // until we have separeted commands and op, let's just intercept
-                            // Unsubscibe and replace Subscription uid with sid
-                            //
-                            match op {
-                                Command::Unsubscribe { uid, max } => {
-                                    let mut context = self.subscription_context.lock().await;
-                                    let sid = {
-                                        let sid = context.get_sid(uid);
-                                        match sid {
-                                            Some(sid) => sid,
-                                            None => continue,
-                                        }
-                                    };
-
-                                    let sub = match context.get_mut(sid) {
-                                        Some(sub) => sub,
-                                        None => continue,
-                                    };
-
-                                    // check if max was passed to unsubscribe, meaning it is
-                                    // unsubscribe_after.
-                                    if let Some(max) = max {
-                                        // if we already reached unsub_after max delivery limit, remove
-                                        // `Subscription`.
-                                        if sub.delivered >= max {
-                                            context.remove(sid);
-                                        // otherwise just set `max` value for the `Subscription`.
-                                        } else {
-                                            context.entry(sid).and_modify(|sub| sub.max = Some(max));
-                                        }
-                                    // if `max` is `None`, just remove the subscription.
-                                    } else {
-                                        context.remove(sid);
-                                    }
-
-                                    if let Err(err) = self
-                                        .connection
-                                        .write_op(ClientOp::Unsubscribe { sid, max })
-                                        .await
-                                    {
-                                        println!("Send failed with {:?}", err);
-                                    }
-                                    continue;
-                                }
-                                Command::Ping => {
-                                    if let Err(err) = self.connection.write_op(ClientOp::Ping).await {
-                                        println!("Sending Ping failed with {:?}", err);
-                                    }
-                                }
-                                Command::Pong => {
-                                    if let Err(err) = self.connection.write_op(ClientOp::Ping).await {
-                                        println!("Sending Pong failed with {:?}", err);
-                                    }
-                                }
-                                Command::Flush { result } => {
-                                    if let Err(err) = self.connection.write_op(ClientOp::Flush { result }).await {
-                                        println!("Sending Flush failed with {:?}", err);
-                                    }
-                                }
-                                Command::TryFlush => {
-                                    if let Err(err) = self.connection.write_op(ClientOp::TryFlush).await {
-                                        println!("Sending TryFlush failed with {:?}", err);
-                                    }
-                                }
-                                Command::Subscribe {
-                                    sid,
-                                    subject,
-                                    queue_group,
-                                } => {
-                                    if let Err(err) = self
-                                        .connection
-                                        .write_op(ClientOp::Subscribe {
-                                            sid,
-                                            subject,
-                                            queue_group,
-                                        })
-                                        .await
-                                    {
-                                        println!("Sending Subscribe failed with {:?}", err);
-                                    }
-                                }
-                                Command::Publish {
-                                    subject,
-                                    payload,
-                                    respond,
-                                } => {
-                                    if let Err(err) = self
-                                        .connection
-                                        .write_op(ClientOp::Publish {
-                                            subject,
-                                            payload,
-                                            respond,
-                                        })
-                                        .await
-                                    {
-                                        println!("Sending Publish failed with {:?}", err);
-                                    }
-                                }
-                                Command::Connect(connect_info) => {
-                                    if let Err(err) = self
-                                        .connection
-                                        .write_op(ClientOp::Connect(connect_info))
-                                        .await
-                                    {
-                                        println!("Sending Connect failed with {:?}", err);
-                                    }
-                                }
-                            }
-
+                maybe_command = receiver.recv().fuse() => {
+                    match maybe_command {
+                        Some(command) => if let Err(err) = self.handle_command(command).await {
+                            println!("error handling command {}", err);
                         }
                         None => {
-                            println!("Sender closed");
-                            // Sender dropped, return.
-                            break
+                            break;
                         }
                     }
                 }
 
-                result = self.connection.read_op().fuse() => {
-                    if let Ok(maybe_op) = result {
-                        match maybe_op {
-                            Some(ServerOp::Ping) => {
-                                self.connection.write_op(ClientOp::Pong).await?;
-                            }
-                            Some(ServerOp::Message { sid, subject, reply, payload }) => {
-                                let mut context = self.subscription_context.lock().await;
-
-                                if let Some(subscription) = context.get_mut(sid) {
-                                    let message = Message {
-                                        subject,
-                                        reply,
-                                        payload,
-                                    };
-
-                                    // if the channel for subscription was dropped, remove the
-                                    // subscription from the map and unsubscribe.
-                                    if subscription.sender.send(message).await.is_err() {
-                                        context.remove(sid);
-                                        self.connection.write_op(ClientOp::Unsubscribe { sid: sid, max: None }).await?;
-                                        self.connection.stream.flush().await?;
-                                    // if channel was open and we sent the messsage, increase the
-                                    // `delivered` counter.
-                                    } else {
-                                        subscription.delivered += 1;
-                                        // if this `Subscription` has set `max` value, check if it
-                                        // was reached. If yes, remove the `Subscription` and in
-                                        // the result, `drop` the `sender` channel.
-                                        if let Some(max) = subscription.max {
-                                            if subscription.delivered.ge(&max) {
-                                               context.remove(sid);
-                                            }
-                                        }
-                                    }
-
-                                }
-                            }
-
-                            None => {
-                                return Ok(())
-                            }
-
-                            _ => {
-                                // ignore.
+                maybe_op_result = self.connection.read_op().fuse() => {
+                    match maybe_op_result {
+                        Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
+                            println!("error handling operation {}", err);
+                        }
+                        Ok(None) => {
+                            if let Err(err) = self.handle_reconnect().await {
+                                println!("error handling operation {}", err);
                             }
                         }
+                        Err(_) => {},
                     }
                 }
-
-
             }
-            // ...
         }
 
         self.connection.stream.flush().await?;
+
+        Ok(())
+    }
+
+    async fn handle_server_op(&mut self, server_op: ServerOp) -> Result<(), io::Error> {
+        match server_op {
+            ServerOp::Ping => {
+                self.connection.write_op(ClientOp::Pong).await?;
+            }
+            ServerOp::Message {
+                sid,
+                subject,
+                reply,
+                payload,
+            } => {
+                let mut context = self.subscription_context.lock().await;
+
+                if let Some(subscription) = context.get_mut(sid) {
+                    let message = Message {
+                        subject,
+                        reply,
+                        payload,
+                    };
+
+                    // if the channel for subscription was dropped, remove the
+                    // subscription from the map and unsubscribe.
+                    if subscription.sender.send(message).await.is_err() {
+                        context.remove(sid);
+                        self.connection
+                            .write_op(ClientOp::Unsubscribe {
+                                sid: sid,
+                                max: None,
+                            })
+                            .await?;
+                        self.connection.stream.flush().await?;
+                    // if channel was open and we sent the messsage, increase the
+                    // `delivered` counter.
+                    } else {
+                        subscription.delivered += 1;
+                        // if this `Subscription` has set `max` value, check if it
+                        // was reached. If yes, remove the `Subscription` and in
+                        // the result, `drop` the `sender` channel.
+                        if let Some(max) = subscription.max {
+                            if subscription.delivered.ge(&max) {
+                                context.remove(sid);
+                            }
+                        }
+                    }
+                }
+            }
+
+            _ => {
+                // TODO: don't ignore.
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
+        match command {
+            Command::Unsubscribe { uid, max } => {
+                let mut context = self.subscription_context.lock().await;
+                if let Some(sid) = context.get_sid(uid) {
+                    if let Some(subscription) = context.get_mut(sid) {
+                        // check if max was passed to unsubscribe, meaning it is
+                        // unsubscribe_after.
+                        if let Some(max) = max {
+                            // if we already reached unsub_after max delivery limit, remove
+                            // `Subscription`.
+                            if subscription.delivered >= max {
+                                context.remove(sid);
+                            // otherwise just set `max` value for the `Subscription`.
+                            } else {
+                                context.entry(sid).and_modify(|sub| sub.max = Some(max));
+                            }
+                        // if `max` is `None`, just remove the subscription.
+                        } else {
+                            context.remove(sid);
+                        }
+
+                        if let Err(err) = self
+                            .connection
+                            .write_op(ClientOp::Unsubscribe { sid, max })
+                            .await
+                        {
+                            println!("Send failed with {:?}", err);
+                        }
+                    }
+                }
+            }
+            Command::Ping => {
+                while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                    self.handle_reconnect().await?;
+                }
+            }
+            Command::Pong => {
+                while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                    self.handle_reconnect().await?;
+                }
+            }
+            Command::Flush { result } => {
+                if let Err(err) = self.connection.write_op(ClientOp::Flush { result }).await {
+                    self.handle_reconnect().await?;
+                }
+            }
+            Command::TryFlush => {
+                if let Err(err) = self.connection.write_op(ClientOp::TryFlush).await {
+                    println!("Sending TryFlush failed with {:?}", err);
+                }
+            }
+            Command::Subscribe {
+                sid,
+                subject,
+                queue_group,
+            } => {
+                if let Err(err) = self
+                    .connection
+                    .write_op(ClientOp::Subscribe {
+                        sid,
+                        subject,
+                        queue_group,
+                    })
+                    .await
+                {
+                    println!("Sending Subscribe failed with {:?}", err);
+                }
+            }
+            Command::Publish {
+                subject,
+                payload,
+                respond,
+            } => {
+                while let Err(err) = self
+                    .connection
+                    .write_op(ClientOp::Publish {
+                        subject: subject.clone(),
+                        payload: payload.clone(),
+                        respond: respond.clone(),
+                    })
+                    .await
+                {
+                    self.handle_reconnect().await?;
+                    println!("Sending Publish failed with {:?}", err);
+                }
+            }
+            Command::Connect(connect_info) => {
+                while let Err(err) = self
+                    .connection
+                    .write_op(ClientOp::Connect(connect_info.clone()))
+                    .await
+                {
+                    self.handle_reconnect().await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_reconnect(&mut self) -> Result<(), io::Error> {
+        let (_, connection) = self.connector.connect().await?;
+        self.connection = connection;
 
         Ok(())
     }
@@ -966,7 +983,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     let (_, connection) = connector.try_connect().await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
-    let mut connector = ConnectionHandler::new(connection, subscription_context.clone());
+    let mut connection_handler =
+        ConnectionHandler::new(connection, connector, subscription_context.clone());
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
@@ -1024,7 +1042,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move { connector.process(receiver).await });
+    task::spawn(async move { connection_handler.process(receiver).await });
 
     Ok(client)
 }
