@@ -629,7 +629,6 @@ impl Connector {
 /// Client is a `Clonable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [connect] and [ConnectOptions::connect]
-#[derive(Clone)]
 pub struct Client {
     sender: mpsc::Sender<ClientOp>,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
