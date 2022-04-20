@@ -231,4 +231,39 @@ mod client {
         assert!(sub.next().await.is_some());
         assert!(sub.next().await.is_none());
     }
+
+    #[tokio::test]
+    async fn connect_invalid() {
+        assert!(async_nats::connect("localhost:1111").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn reconnect_fallback() {
+        use async_nats::ServerAddr;
+
+        let mut servers = vec![
+            nats_server::run_basic_server(),
+            nats_server::run_basic_server(),
+            nats_server::run_basic_server(),
+        ];
+
+        let mut client = async_nats::connect(
+            servers
+                .iter()
+                .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                .collect::<Vec<ServerAddr>>()
+                .as_slice(),
+        )
+        .await
+        .unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        while !servers.is_empty() {
+            client.publish("test".into(), "data".into()).await.unwrap();
+            assert!(subscriber.next().await.is_some());
+
+            drop(servers.remove(0));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+    }
 }
