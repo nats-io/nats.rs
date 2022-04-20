@@ -159,7 +159,7 @@ jobs:
         uses: actions-rs/clippy-check@v1.0.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+          args: --tests --all-features
 
   check_msrv:
     name: check (msrv)
