@@ -15,7 +15,6 @@ use crate::auth::{self, Authorization};
 use crate::{Client, ToServerAddrs};
 use std::{fmt, path::PathBuf, time::Duration};
 use tokio::io;
-use tokio::sync::mpsc;
 use tokio_rustls::rustls;
 
 /// Connect options. Used to connect with NATS when custom config is needed.
