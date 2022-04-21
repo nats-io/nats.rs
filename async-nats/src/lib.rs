@@ -214,6 +214,7 @@ pub(crate) enum ServerOp {
         reply: Option<String>,
         payload: Bytes,
     },
+    //FIXME(tp): when adding error handling, make this an actual error.
     Error(String),
 }
 
@@ -658,6 +659,27 @@ impl Client {
         }
     }
 
+    /// Returns stream of asynchronous errors received from NATS server.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures_util::StreamExt;
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut nc = async_nats::connect("demo.nats.io").await?;
+    ///
+    /// let mut errs = nc.errors_stream().await?;
+    /// tokio::spawn({
+    ///    async move {
+    ///        if let Some(err) = errs.next().await {
+    ///             println!("received error: {}", err);
+    ///        };
+    ///    }
+    /// });
+    /// # Ok(())
+    /// # }
+    ///
+    /// ```
     pub async fn errors_stream(&mut self) -> io::Result<ErrorsStream> {
         let errors = self.errors.take();
         errors.map_or_else(
