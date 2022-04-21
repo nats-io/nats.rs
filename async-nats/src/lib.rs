@@ -805,10 +805,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connect_info.pass = Some(pass);
         }
     }
-    task::spawn(async move {
-        let res = connector.process(receiver, errors_tx).await;
-        println!("processor stopped: {:?}", res);
-    });
 
     client
         .sender
@@ -820,6 +816,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         .send(ClientOp::Ping)
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
+
+    task::spawn(async move {
+        let res = connector.process(receiver, errors_tx).await;
+        println!("processor stopped: {:?}", res);
+    });
 
     tokio::spawn({
         let sender = sender.clone();

@@ -168,6 +168,7 @@ mod client {
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn({
             async move {
+                println!("spawned one shot");
                 if let Some(err) = errs.next().await {
                     println!("waiting for errors");
                     tx.send(err).unwrap();
