@@ -168,16 +168,12 @@ mod client {
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn({
             async move {
-                println!("spawned one shot");
                 if let Some(err) = errs.next().await {
-                    println!("waiting for errors");
                     tx.send(err).unwrap();
-                    println!("error sent!");
                 };
             }
         });
-        println!("starting timeout check");
-        tokio::time::timeout(tokio::time::Duration::from_millis(5000), rx)
+        tokio::time::timeout(tokio::time::Duration::from_millis(10000), rx)
             .await
             .unwrap()
             .unwrap();
