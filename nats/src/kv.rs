@@ -153,13 +153,15 @@ impl JetStream {
             ));
         }
 
-        let prefix = format!("$KV.{}.", bucket);
-
         Ok(Store {
             name: bucket.to_string(),
             stream_name,
-            prefix,
+            prefix: format!("$KV.{}.", bucket),
             context: self.clone(),
+            domain_prefix: self
+                .options
+                .has_domain
+                .then(|| self.options.api_prefix.clone()),
         })
     }
 
@@ -245,6 +247,10 @@ impl JetStream {
             stream_name: stream_info.config.name,
             prefix: format!("$KV.{}.", config.bucket),
             context: self.clone(),
+            domain_prefix: self
+                .options
+                .has_domain
+                .then(|| self.options.api_prefix.clone()),
         })
     }
 
@@ -314,6 +320,7 @@ pub struct Store {
     stream_name: String,
     prefix: String,
     context: JetStream,
+    domain_prefix: Option<String>,
 }
 
 impl Store {
@@ -452,6 +459,9 @@ impl Store {
         }
 
         let mut subject = String::new();
+        if let Some(api_prefix) = self.domain_prefix.as_ref() {
+            subject.push_str(api_prefix);
+        }
         subject.push_str(&self.prefix);
         subject.push_str(key);
 
@@ -526,6 +536,9 @@ impl Store {
         }
 
         let mut subject = String::new();
+        if let Some(api_prefix) = self.domain_prefix.as_ref() {
+            subject.push_str(api_prefix);
+        }
         subject.push_str(&self.prefix);
         subject.push_str(key);
 
@@ -570,6 +583,9 @@ impl Store {
         }
 
         let mut subject = String::new();
+        if let Some(api_prefix) = self.domain_prefix.as_ref() {
+            subject.push_str(api_prefix);
+        }
         subject.push_str(&self.prefix);
         subject.push_str(key);
 
