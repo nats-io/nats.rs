@@ -173,6 +173,12 @@ mod client {
                 };
             }
         });
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "data".into()).await.unwrap();
+
+        let msg = sub.next().await.unwrap();
+        println!("message: {:?}", msg);
+
         tokio::time::timeout(tokio::time::Duration::from_millis(10000), rx)
             .await
             .unwrap()
