@@ -140,6 +140,7 @@ use crate::{
 #[derive(Clone)]
 pub struct JetStreamOptions {
     pub(crate) api_prefix: String,
+    pub(crate) has_domain: bool,
 }
 
 impl Debug for JetStreamOptions {
@@ -154,6 +155,7 @@ impl Default for JetStreamOptions {
     fn default() -> JetStreamOptions {
         JetStreamOptions {
             api_prefix: "$JS.API.".to_string(),
+            has_domain: false,
         }
     }
 }
@@ -195,10 +197,11 @@ impl JetStreamOptions {
     /// let options = nats::JetStreamOptions::new()
     ///   .domain("some_domain");
     /// ```
-    pub fn domain(self, domain: &str) -> Self {
+    pub fn domain(mut self, domain: &str) -> Self {
         if domain.is_empty() {
             self.api_prefix("".to_string())
         } else {
+            self.has_domain = true;
             self.api_prefix(format!("$JS.{}.API", domain))
         }
     }
