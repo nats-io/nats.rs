@@ -119,7 +119,7 @@ use subslice::SubsliceExt;
 use tokio::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
-use url::Url;
+use url::{Host, Url};
 
 use bytes::{Buf, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
@@ -1057,7 +1057,15 @@ impl ServerAddr {
 
     /// Returns the host.
     pub fn host(&self) -> &str {
-        self.0.host_str().unwrap()
+        match self.0.host() {
+            Some(Host::Domain(_)) | Some(Host::Ipv4 { .. }) => self.0.host_str().unwrap(),
+            // `host_str()` for Ipv6 includes the []s
+            Some(Host::Ipv6 { .. }) => {
+                let host = self.0.host_str().unwrap();
+                &host[1..host.len() - 1]
+            }
+            None => "",
+        }
     }
 
     /// Returns the port.
