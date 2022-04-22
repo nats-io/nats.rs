@@ -9,7 +9,7 @@
 ## Motivation
 
 Rust may be one the most interesting new languages the NATS ecosystem has seen.
-We believe this client will have a large impact n NATS, distributed systems, and
+We believe this client will have a large impact on NATS, distributed systems, and
 embedded and IoT environments. With Rust we wanted to be as idiomatic as we
 could be and lean into the strengths of the language. We moved many things that
 would have been runtime checks and errors to the compiler, most notably options
