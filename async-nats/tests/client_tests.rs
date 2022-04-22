@@ -126,4 +126,62 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+
+    #[tokio::test]
+    async fn token_auth() {
+        let server = nats_server::run_server("tests/configs/token.conf");
+        let mut nc = async_nats::ConnectOptions::with_token("s3cr3t".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "test".into()).await.unwrap();
+        nc.flush().await.unwrap();
+        assert!(sub.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        let mut nc = async_nats::ConnectOptions::with_user_pass("derek".into(), "s3cr3t".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "test".into()).await.unwrap();
+        nc.flush().await.unwrap();
+        assert!(sub.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth_wrong_pass() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        let mut nc =
+            async_nats::ConnectOptions::with_user_pass("derek".into(), "bad_password".into())
+                .connect(server.client_url())
+                .await
+                .unwrap();
+
+        let mut errs = nc.errors_stream().await.unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn({
+            async move {
+                if let Some(err) = errs.next().await {
+                    tx.send(err).unwrap();
+                };
+            }
+        });
+        tokio::time::timeout(tokio::time::Duration::from_millis(10000), rx)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "data".into()).await.unwrap();
+
+        let msg = sub.next().await.unwrap();
+        println!("message: {:?}", msg);
+    }
 }

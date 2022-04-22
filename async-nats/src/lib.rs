@@ -143,6 +143,7 @@ pub use tokio_rustls::rustls;
 
 mod options;
 pub use options::*;
+mod auth;
 mod tls;
 
 /// Information sent by the server back to this client
@@ -213,6 +214,8 @@ pub(crate) enum ServerOp {
         reply: Option<String>,
         payload: Bytes,
     },
+    //FIXME(tp): when adding error handling, make this an actual error.
+    Error(String),
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -340,6 +343,17 @@ impl Connection {
             return Ok(Some(ServerOp::Pong));
         }
 
+        if self.buffer.starts_with(b"-ERR") {
+            if let Some(len) = self.buffer.find(b"\r\n") {
+                let line = std::str::from_utf8(&self.buffer[5..len])
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                let error_message = line.trim_matches('\'').to_string();
+                self.buffer.advance(len + 2);
+
+                return Ok(Some(ServerOp::Error(error_message)));
+            }
+        }
+
         if self.buffer.starts_with(b"INFO ") {
             if let Some(len) = self.buffer.find(b"\r\n") {
                 let line = std::str::from_utf8(&self.buffer[5..len])
@@ -433,6 +447,7 @@ impl Connection {
                         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
                 );
                 self.stream.write_all(op.as_bytes()).await?;
+                self.stream.flush().await?;
             }
             ClientOp::Publish {
                 subject,
@@ -548,6 +563,7 @@ impl Connector {
     pub async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<ClientOp>,
+        errors_channel: mpsc::Sender<String>,
     ) -> Result<(), io::Error> {
         loop {
             select! {
@@ -585,6 +601,10 @@ impl Connector {
                                 }
                             }
 
+                            Some(ServerOp::Error(error_message)) => {
+                                    errors_channel.send(error_message).await.unwrap();
+                            }
+
                             None => {
                                 return Ok(())
                             }
@@ -610,21 +630,67 @@ impl Connector {
 /// Client is a `Clonable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [connect] and [ConnectOptions::connect]
-#[derive(Clone)]
 pub struct Client {
     sender: mpsc::Sender<ClientOp>,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
+    errors: Option<tokio::sync::mpsc::Receiver<String>>,
+}
+
+impl Clone for Client {
+    fn clone(&self) -> Self {
+        Client {
+            sender: self.sender.clone(),
+            subscription_context: self.subscription_context.clone(),
+            errors: None,
+        }
+    }
 }
 
 impl Client {
     pub(crate) fn new(
         sender: mpsc::Sender<ClientOp>,
         subscription_context: Arc<Mutex<SubscriptionContext>>,
+        errors: Option<mpsc::Receiver<String>>,
     ) -> Client {
         Client {
             sender,
             subscription_context,
+            errors,
         }
+    }
+
+    /// Returns stream of asynchronous errors received from NATS server.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures_util::StreamExt;
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut nc = async_nats::connect("demo.nats.io").await?;
+    ///
+    /// let mut errs = nc.errors_stream().await?;
+    /// tokio::spawn({
+    ///    async move {
+    ///        if let Some(err) = errs.next().await {
+    ///             println!("received error: {}", err);
+    ///        };
+    ///    }
+    /// });
+    /// # Ok(())
+    /// # }
+    ///
+    /// ```
+    pub async fn errors_stream(&mut self) -> io::Result<ErrorsStream> {
+        let errors = self.errors.take();
+        errors.map_or_else(
+            || {
+                Err(io::Error::new(
+                    ErrorKind::AlreadyExists,
+                    "errors stream already consumerd or used on cloned Client",
+                ))
+            },
+            |errors| Ok(ErrorsStream::new(errors)),
+        )
     }
 
     pub async fn publish(&mut self, subject: String, payload: Bytes) -> Result<(), Error> {
@@ -732,8 +798,9 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
-    let client = Client::new(sender.clone(), subscription_context);
-    let connect_info = ConnectInfo {
+    let (errors_tx, errors_rx) = mpsc::channel(128);
+    let client = Client::new(sender.clone(), subscription_context, Some(errors_rx));
+    let mut connect_info = ConnectInfo {
         tls_required: options.tls_required,
         // FIXME(tp): have optional name
         name: Some("beta-rust-client".to_string()),
@@ -752,11 +819,20 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         headers: true,
         no_responders: true,
     };
+    match options.auth {
+        auth::Authorization::None => {}
+        auth::Authorization::Token(token) => connect_info.auth_token = Some(token),
+        auth::Authorization::UsernamePassword(user, pass) => {
+            connect_info.user = Some(user);
+            connect_info.pass = Some(pass);
+        }
+    }
+
     client
         .sender
         .send(ClientOp::Connect(connect_info))
         .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
+        .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
     client
         .sender
         .send(ClientOp::Ping)
@@ -786,7 +862,10 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move { connector.process(receiver).await });
+    task::spawn(async move {
+        let res = connector.process(receiver, errors_tx).await;
+        println!("processor stopped: {:?}", res);
+    });
 
     Ok(client)
 }
@@ -854,6 +933,24 @@ impl Drop for Subscriber {
 impl Stream for Subscriber {
     type Item = Message;
 
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.receiver.poll_recv(cx)
+    }
+}
+
+#[derive(Debug)]
+pub struct ErrorsStream {
+    receiver: tokio::sync::mpsc::Receiver<String>,
+}
+
+impl ErrorsStream {
+    fn new(receiver: tokio::sync::mpsc::Receiver<String>) -> ErrorsStream {
+        ErrorsStream { receiver }
+    }
+}
+
+impl Stream for ErrorsStream {
+    type Item = String;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_recv(cx)
     }
