@@ -185,11 +185,50 @@ mod client {
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
-        sub.unsubscribe();
+        sub.unsubscribe().await;
         // check if we can still send messages after unsubscribe.
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
         client.publish("test2".into(), "data".into()).await.unwrap();
         client.flush().await.unwrap();
         assert!(sub2.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_after() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut sub = client.subscribe("test".into()).await.unwrap();
+
+        for _ in 0..2 {
+            client.publish("test".into(), "data".into()).await.unwrap();
+        }
+
+        client.flush().await.unwrap();
+        sub.unsubscribe_after(3).await;
+        client.publish("test".into(), "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        for _ in 0..3 {
+            assert!(sub.next().await.is_some());
+        }
+        assert!(sub.next().await.is_none());
+    }
+    #[tokio::test]
+    async fn unsubscribe_after_immediate() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut sub = client.subscribe("test".into()).await.unwrap();
+
+        client.publish("test".into(), "data".into()).await.unwrap();
+        client.publish("test".into(), "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        sub.unsubscribe_after(1).await;
+        client.flush().await.unwrap();
+
+        assert!(sub.next().await.is_some());
+        assert!(sub.next().await.is_none());
     }
 }

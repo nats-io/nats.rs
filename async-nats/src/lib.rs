@@ -230,6 +230,7 @@ pub enum ClientOp {
     },
     Unsubscribe {
         id: u64,
+        max: Option<u64>,
     },
     Ping,
     Pong,
@@ -474,11 +475,15 @@ impl Connection {
                 self.stream.flush().await?;
             }
 
-            ClientOp::Unsubscribe { id } => {
+            ClientOp::Unsubscribe { id, max } => {
                 self.stream.write_all(b"UNSUB ").await?;
-                self.stream
-                    .write_all(format!("{}\r\n", id).as_bytes())
-                    .await?;
+                self.stream.write_all(format!("{}", id).as_bytes()).await?;
+                if let Some(max) = max {
+                    self.stream
+                        .write_all(format!(" {}", max).as_bytes())
+                        .await?;
+                }
+                self.stream.write_all(b"\r\n").await?;
             }
             ClientOp::Ping => {
                 self.stream.write_all(b"PING\r\n").await?;
@@ -505,6 +510,8 @@ impl Connection {
 #[derive(Debug)]
 struct Subscription {
     sender: mpsc::Sender<Message>,
+    delivered: u64,
+    max: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -525,8 +532,12 @@ impl SubscriptionContext {
         }
     }
 
-    fn get(&mut self, sid: u64) -> Option<&Subscription> {
-        self.subscription_map.get(&sid)
+    fn get_mut(&mut self, sid: u64) -> Option<&mut Subscription> {
+        self.subscription_map.get_mut(&sid)
+    }
+
+    fn entry(&mut self, sid: u64) -> std::collections::hash_map::Entry<u64, Subscription> {
+        self.subscription_map.entry(sid)
     }
 
     fn insert(&mut self, subscription: Subscription) -> u64 {
@@ -580,7 +591,7 @@ impl Connector {
                         Some(op) => {
                             // until we have separeted commands and op, let's just intercept
                             // Unsubscibe and replace Subscription uid with sid
-                            if let ClientOp::Unsubscribe{id} = op {
+                            if let ClientOp::Unsubscribe{id, max} = op {
                                 let mut  context = self.subscription_context.lock().await;
                                 let sid = {
                                     let sid = context.get_sid(id);
@@ -590,9 +601,30 @@ impl Connector {
                                     }
                                 };
 
-                                context.remove(sid);
+                                let sub = match context.get_mut(sid) {
+                                    Some(sub) => sub,
+                                    None => continue,
+                                };
 
-                                if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid }).await {
+
+                                // check if max was passed to unsubscribe, meaning it is
+                                // unsubscribe_after.
+                                if let Some(max) = max {
+                                    // if we already reached unsub_after max delivery limit, remove
+                                    // `Subscription`.
+                                    if sub.delivered >= max {
+                                        context.remove(sid);
+                                    // otherwise just set `max` value for the `Subscription`.
+                                    } else {
+                                        context.entry(sid).and_modify(|sub| sub.max = Some(max));
+                                    }
+                                // if `max` is `None`, just remove the subscription.
+                                } else {
+                                    context.remove(sid);
+                                }
+
+
+                                if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid, max }).await {
                                     println!("Send failed with {:?}", err);
                                 }
                                 continue
@@ -618,7 +650,8 @@ impl Connector {
                             }
                             Some(ServerOp::Message { sid, subject, reply, payload }) => {
                                 let mut context = self.subscription_context.lock().await;
-                                if let Some(subscription) = context.get(sid) {
+
+                                if let Some(subscription) = context.get_mut(sid) {
                                     let message = Message {
                                         subject,
                                         reply,
@@ -629,8 +662,20 @@ impl Connector {
                                     // subscription from the map and unsubscribe.
                                     if subscription.sender.send(message).await.is_err() {
                                         context.remove(sid);
-                                        self.connection.write_op(ClientOp::Unsubscribe { id: sid }).await?;
+                                        self.connection.write_op(ClientOp::Unsubscribe { id: sid, max: None }).await?;
                                         self.connection.stream.flush().await?;
+                                    // if channel was open and we sent the messsage, increase the
+                                    // `delivered` counter.
+                                    } else {
+                                        subscription.delivered += 1;
+                                        // if this `Subscription` has set `max` value, check if it
+                                        // was reached. If yes, remove the `Subscription` and in
+                                        // the result, `drop` the `sender` channel.
+                                        if let Some(max) = subscription.max {
+                                            if subscription.delivered.ge(&max) {
+                                               context.remove(sid);
+                                            }
+                                        }
                                     }
 
                                 }
@@ -759,7 +804,11 @@ impl Client {
 
         // Aiming to make this the only lock (aside from internal locks in channels).
         let mut context = self.subscription_context.lock().await;
-        let sid = context.insert(Subscription { sender });
+        let sid = context.insert(Subscription {
+            sender,
+            delivered: 0,
+            max: None,
+        });
 
         self.sender
             .send(ClientOp::Subscribe {
@@ -936,8 +985,50 @@ impl Subscriber {
     ///  subscriber.unsubscribe();
     /// # Ok(())
     /// # }
-    pub fn unsubscribe(self) {
-        drop(self)
+    pub async fn unsubscribe(&mut self) {
+        self.receiver.close();
+        self.sender
+            .send(ClientOp::Unsubscribe {
+                id: self.uid,
+                max: None,
+            })
+            .await
+            .ok();
+    }
+
+    /// Unsubscribes from subscription after reaching given number of messages.
+    /// This is the total number of messages received by this subcsription in it's whole
+    /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures_util::StreamExt;
+    /// # #[tokio::main]
+    /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut client = async_nats::connect("demo.nats.io").await?;
+    ///
+    /// for _ in 0..3 {
+    ///     client.publish("test".into(), "data".into()).await?;
+    /// }
+    ///
+    /// let mut sub = client.subscribe("test".into()).await?;
+    /// sub.unsubscribe_after(3).await;
+    /// client.flush().await?;
+    ///
+    /// while let Some(message) = sub.next().await {
+    ///     println!("message received: {:?}", message);
+    /// }
+    /// println!("no more messages, unsubscribed");
+    /// # Ok(())
+    /// # }
+    pub async fn unsubscribe_after(&mut self, unsub_after: u64) {
+        self.sender
+            .send(ClientOp::Unsubscribe {
+                id: self.uid,
+                max: Some(unsub_after),
+            })
+            .await
+            .ok();
     }
 }
 
@@ -948,7 +1039,10 @@ impl Drop for Subscriber {
             let sender = self.sender.clone();
             let id = self.uid;
             async move {
-                sender.send(ClientOp::Unsubscribe { id }).await.ok();
+                sender
+                    .send(ClientOp::Unsubscribe { id, max: None })
+                    .await
+                    .ok();
             }
         });
     }
