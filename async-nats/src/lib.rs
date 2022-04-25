@@ -557,7 +557,9 @@ impl Connector {
 
 #[derive(Debug)]
 struct Subscription {
+    subject: String,
     sender: mpsc::Sender<Message>,
+    queue_group: Option<String>,
     delivered: u64,
     max: Option<u64>,
 }
@@ -826,6 +828,18 @@ impl ConnectionHandler {
         let (_, connection) = self.connector.connect().await?;
         self.connection = connection;
 
+        let subscription_context = self.subscription_context.lock().await;
+        for (sid, subscription) in &subscription_context.subscription_map {
+            self.connection
+                .write_op(ClientOp::Subscribe {
+                    sid: *sid,
+                    subject: subscription.subject.to_owned(),
+                    queue_group: subscription.queue_group.to_owned(),
+                })
+                .await
+                .unwrap();
+        }
+
         Ok(())
     }
 }
@@ -935,6 +949,8 @@ impl Client {
             sender,
             delivered: 0,
             max: None,
+            subject: subject.to_owned(),
+            queue_group: queue_group.to_owned(),
         });
 
         self.sender
