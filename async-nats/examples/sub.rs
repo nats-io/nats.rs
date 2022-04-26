@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use futures_util::StreamExt;
 use std::error::Error;
 use std::time::Instant;

@@ -17,7 +17,7 @@ mod client {
 
     use super::nats_server;
     use bytes::Bytes;
-    use futures_util::StreamExt;
+    use futures_util::{future::join_all, StreamExt};
 
     #[tokio::test]
     async fn basic_pub_sub() {
@@ -44,6 +44,53 @@ mod client {
             }
         }
         assert_eq!(i, 10);
+    }
+
+    #[tokio::test]
+    async fn queue_sub() {
+        let server = nats_server::run_basic_server();
+        const NUM_SUBSCRIBERS: usize = 3;
+        const NUM_ITEMS: usize = 20;
+
+        let mut subscribers = Vec::new();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        for _i in 0..NUM_SUBSCRIBERS {
+            subscribers.push(
+                client
+                    .queue_subscribe("qfoo".into(), "group".into())
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        for _ in 0..NUM_ITEMS {
+            client.publish("qfoo".into(), "data".into()).await.unwrap();
+        }
+        client.flush().await.unwrap();
+        let mut results = Vec::new();
+        for mut subscriber in subscribers.into_iter() {
+            results.push(tokio::spawn(async move {
+                let mut count = 0u32;
+                while let Ok(Some(item)) = tokio::time::timeout(
+                    tokio::time::Duration::from_millis(1000),
+                    subscriber.next(),
+                )
+                .await
+                {
+                    count += 1;
+                }
+                count
+            }));
+        }
+        let counts = join_all(results.iter_mut())
+            .await
+            .into_iter()
+            .filter_map(|n| n.ok())
+            .collect::<Vec<u32>>();
+        let total: u32 = counts.iter().sum();
+        assert_eq!(total, NUM_ITEMS as u32, "all items received");
+        let num_receivers = counts.into_iter().filter(|n| *n > 0u32).count();
+        assert!(num_receivers > 1, "should not all go to single subscriber");
     }
 
     #[tokio::test]
