@@ -982,18 +982,19 @@ impl Subscriber {
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
-    ///  subscriber.unsubscribe();
+    ///  subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
-    pub async fn unsubscribe(&mut self) {
-        self.receiver.close();
+    pub async fn unsubscribe(&mut self) -> io::Result<()> {
         self.sender
             .send(ClientOp::Unsubscribe {
                 id: self.uid,
                 max: None,
             })
             .await
-            .ok();
+            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+        self.receiver.close();
+        Ok(())
     }
 
     /// Unsubscribes from subscription after reaching given number of messages.
@@ -1012,7 +1013,7 @@ impl Subscriber {
     /// }
     ///
     /// let mut sub = client.subscribe("test".into()).await?;
-    /// sub.unsubscribe_after(3).await;
+    /// sub.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
     /// while let Some(message) = sub.next().await {
@@ -1021,14 +1022,15 @@ impl Subscriber {
     /// println!("no more messages, unsubscribed");
     /// # Ok(())
     /// # }
-    pub async fn unsubscribe_after(&mut self, unsub_after: u64) {
+    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(ClientOp::Unsubscribe {
                 id: self.uid,
                 max: Some(unsub_after),
             })
             .await
-            .ok();
+            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+        Ok(())
     }
 }
 

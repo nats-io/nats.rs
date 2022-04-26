@@ -185,7 +185,7 @@ mod client {
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
-        sub.unsubscribe().await;
+        sub.unsubscribe().await.unwrap();
         // check if we can still send messages after unsubscribe.
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
         client.publish("test2".into(), "data".into()).await.unwrap();
@@ -205,7 +205,7 @@ mod client {
         }
 
         client.flush().await.unwrap();
-        sub.unsubscribe_after(3).await;
+        sub.unsubscribe_after(3).await.unwrap();
         client.publish("test".into(), "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
@@ -225,7 +225,7 @@ mod client {
         client.publish("test".into(), "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
-        sub.unsubscribe_after(1).await;
+        sub.unsubscribe_after(1).await.unwrap();
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
