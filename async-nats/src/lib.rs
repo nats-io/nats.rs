@@ -226,6 +226,7 @@ pub enum ClientOp {
     Subscribe {
         sid: u64,
         subject: String,
+        queue_group: Option<String>,
     },
     Unsubscribe {
         id: u64,
@@ -455,9 +456,18 @@ impl Connection {
                 self.stream.write_all(b"\r\n").await?;
             }
 
-            ClientOp::Subscribe { sid, subject } => {
+            ClientOp::Subscribe {
+                sid,
+                subject,
+                queue_group,
+            } => {
                 self.stream.write_all(b"SUB ").await?;
                 self.stream.write_all(subject.as_bytes()).await?;
+                if let Some(queue_group) = queue_group {
+                    self.stream
+                        .write_all(format!(" {}", queue_group).as_bytes())
+                        .await?;
+                }
                 self.stream
                     .write_all(format!(" {}\r\n", sid).as_bytes())
                     .await?;
@@ -725,7 +735,26 @@ impl Client {
         format!("_INBOX.{}", nuid::next())
     }
 
+    pub async fn queue_subscribe(
+        &mut self,
+        subject: String,
+        queue_group: String,
+    ) -> Result<Subscriber, io::Error> {
+        self._subscribe(subject, Some(queue_group)).await
+    }
+
     pub async fn subscribe(&mut self, subject: String) -> Result<Subscriber, io::Error> {
+        self._subscribe(subject, None).await
+    }
+
+    // TODO: options/questions for nats team:
+    //  - should there just be a single subscribe() function (would be breaking api against 0.11.0)
+    //  - if queue_subscribe is a separate function, how do you want to name the private function here?
+    async fn _subscribe(
+        &mut self,
+        subject: String,
+        queue_group: Option<String>,
+    ) -> Result<Subscriber, io::Error> {
         let (sender, receiver) = mpsc::channel(16);
 
         // Aiming to make this the only lock (aside from internal locks in channels).
@@ -733,7 +762,11 @@ impl Client {
         let sid = context.insert(Subscription { sender });
 
         self.sender
-            .send(ClientOp::Subscribe { sid, subject })
+            .send(ClientOp::Subscribe {
+                sid,
+                subject,
+                queue_group,
+            })
             .await
             .unwrap();
 
@@ -749,9 +782,9 @@ impl Client {
     }
 }
 
-/// Connets to the NATS with specified options.
+/// Connects to NATS with specified options.
 ///
-/// It is generally advised to use [ConnectOptions] instead, as it provides builder for whole
+/// It is generally advised to use [ConnectOptions] instead, as it provides a builder for whole
 /// configuration.
 ///
 /// # Examples
