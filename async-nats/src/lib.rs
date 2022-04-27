@@ -585,21 +585,18 @@ impl SubscriptionContext {
     }
 }
 
-/// A connector which facilitates communication from channels to a single shared connection.
-/// The connector takes ownership of the channel.
-///
-/// The type will probably not be public.
-pub(crate) struct Connector {
+/// A connection handler which facilitates communication from channels to a single shared connection.
+pub(crate) struct ConnectionHandler {
     connection: Connection,
     subscription_context: Arc<Mutex<SubscriptionContext>>,
 }
 
-impl Connector {
+impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
         subscription_context: Arc<Mutex<SubscriptionContext>>,
-    ) -> Connector {
-        Connector {
+    ) -> ConnectionHandler {
+        ConnectionHandler {
             connection,
             subscription_context,
         }
@@ -941,7 +938,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 ) -> Result<Client, io::Error> {
     let connection = Connection::connect_with_options(addrs, options.clone()).await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
-    let mut connector = Connector::new(connection, subscription_context.clone());
+    let mut connector = ConnectionHandler::new(connection, subscription_context.clone());
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
