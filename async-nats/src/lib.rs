@@ -142,7 +142,7 @@ const LANG: &str = "rust";
 pub use tokio_rustls::rustls;
 
 mod options;
-pub use options::*;
+pub use options::ConnectOptions;
 mod tls;
 
 /// Information sent by the server back to this client
@@ -283,7 +283,7 @@ pub(crate) struct Connection {
 impl Connection {
     pub(crate) async fn connect_with_options<A: ToServerAddrs>(
         addrs: A,
-        options: options::ConnectOptions,
+        options: ConnectOptions,
     ) -> io::Result<Connection> {
         let addr = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
             io::Error::new(
