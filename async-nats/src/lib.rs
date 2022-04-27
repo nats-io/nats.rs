@@ -281,74 +281,6 @@ pub(crate) struct Connection {
 /// Internal representation of the connection.
 /// Helds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
-    pub(crate) async fn connect_with_options<A: ToServerAddrs>(
-        addrs: A,
-        options: ConnectOptions,
-    ) -> io::Result<Connection> {
-        let addr = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
-            io::Error::new(
-                ErrorKind::Other,
-                "did not found a single url in the url list",
-            )
-        })?;
-
-        let tls_config = tls::config_tls(&options).await?;
-
-        let tcp_stream = TcpStream::connect((addr.host(), addr.port())).await?;
-        tcp_stream.set_nodelay(true)?;
-
-        let mut connection = Connection {
-            stream: Box::new(BufWriter::new(tcp_stream)),
-            buffer: BytesMut::new(),
-        };
-
-        let op = connection.read_op().await?;
-        let info = match op {
-            Some(ServerOp::Info(info)) => info,
-            Some(op) => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    format!("expected INFO, got {:?}", op),
-                ))
-            }
-            None => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    "expected INFO, got nothing",
-                ))
-            }
-        };
-
-        let tls_required = options.tls_required || info.tls_required || addr.tls_required();
-
-        if tls_required {
-            let tls_config = Arc::new(tls_config);
-            let tls_connector =
-                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
-                    io::Error::new(
-                        ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {}", err),
-                    )
-                })?;
-
-            let domain = rustls::ServerName::try_from(info.host.as_str())
-                .or_else(|_| rustls::ServerName::try_from(addr.host()))
-                .map_err(|_| {
-                    io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "cannot determine hostname for TLS connection",
-                    )
-                })?;
-
-            return Ok(Connection {
-                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
-                buffer: BytesMut::new(),
-            });
-        };
-
-        Ok(connection)
-    }
-
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         if self.buffer.starts_with(b"+OK\r\n") {
             self.buffer.advance(5);
@@ -529,6 +461,97 @@ impl Connection {
         }
 
         Ok(())
+    }
+}
+
+/// Maintains a list of servers and establishes connections.
+pub(crate) struct Connector {
+    server_addrs: Vec<ServerAddr>,
+    options: ConnectOptions,
+}
+
+impl Connector {
+    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+        loop {
+            if let Ok(inner) = self.try_connect().await {
+                return Ok(inner);
+            }
+        }
+    }
+
+    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+        let mut error = None;
+
+        for server_addr in &self.server_addrs {
+            match self.try_connect_to(server_addr).await {
+                Ok(inner) => return Ok(inner),
+                Err(inner) => error.replace(inner),
+            };
+        }
+
+        Err(error.unwrap())
+    }
+
+    pub(crate) async fn try_connect_to(
+        &self,
+        server_addr: &ServerAddr,
+    ) -> Result<(ServerInfo, Connection), io::Error> {
+        let tls_config = tls::config_tls(&self.options).await?;
+
+        let tcp_stream = TcpStream::connect((server_addr.host(), server_addr.port())).await?;
+        tcp_stream.set_nodelay(true)?;
+
+        let mut connection = Connection {
+            stream: Box::new(BufWriter::new(tcp_stream)),
+            buffer: BytesMut::new(),
+        };
+
+        let op = connection.read_op().await?;
+        let info = match op {
+            Some(ServerOp::Info(info)) => info,
+            Some(op) => {
+                return Err(io::Error::new(
+                    ErrorKind::Other,
+                    format!("expected INFO, got {:?}", op),
+                ))
+            }
+            None => {
+                return Err(io::Error::new(
+                    ErrorKind::Other,
+                    "expected INFO, got nothing",
+                ))
+            }
+        };
+
+        let tls_required =
+            self.options.tls_required || info.tls_required || server_addr.tls_required();
+
+        if tls_required {
+            let tls_config = Arc::new(tls_config);
+            let tls_connector =
+                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
+                    io::Error::new(
+                        ErrorKind::Other,
+                        format!("failed to create TLS connector from TLS config: {}", err),
+                    )
+                })?;
+
+            let domain = rustls::ServerName::try_from(info.host.as_str())
+                .or_else(|_| rustls::ServerName::try_from(server_addr.host()))
+                .map_err(|_| {
+                    io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "cannot determine hostname for TLS connection",
+                    )
+                })?;
+
+            connection = Connection {
+                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
+                buffer: BytesMut::new(),
+            };
+        };
+
+        Ok((*info, connection))
     }
 }
 
@@ -936,7 +959,12 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let connection = Connection::connect_with_options(addrs, options.clone()).await?;
+    let mut connector = Connector {
+        server_addrs: addrs.to_server_addrs()?.into_iter().collect(),
+        options: options.clone(),
+    };
+
+    let (_, connection) = connector.try_connect().await?;
     let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
     let mut connector = ConnectionHandler::new(connection, subscription_context.clone());
 
