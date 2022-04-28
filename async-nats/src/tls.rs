@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{tls, ConnectOptions};
+use crate::tls;
 use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
@@ -61,7 +61,15 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
     .await?
 }
 
-pub(crate) async fn config_tls(options: &ConnectOptions) -> io::Result<rustls::ClientConfig> {
+pub(crate) struct TlsOptions {
+    pub(crate) tls_required: bool,
+    pub(crate) certificates: Vec<PathBuf>,
+    pub(crate) client_cert: Option<PathBuf>,
+    pub(crate) client_key: Option<PathBuf>,
+    pub(crate) tls_client_config: Option<rustls::ClientConfig>,
+}
+
+pub(crate) async fn config_tls(options: &TlsOptions) -> io::Result<rustls::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
     // adds Mozilla root certs
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
