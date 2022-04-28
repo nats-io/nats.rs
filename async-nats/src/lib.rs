@@ -232,7 +232,6 @@ pub enum Command {
         max: Option<u64>,
     },
     Ping,
-    Pong,
     Flush {
         result: oneshot::Sender<io::Result<()>>,
     },
@@ -756,11 +755,6 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
-                while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
-                    self.handle_reconnect().await?;
-                }
-            }
-            Command::Pong => {
                 while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
                     self.handle_reconnect().await?;
                 }
