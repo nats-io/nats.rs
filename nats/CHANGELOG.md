@@ -1,3 +1,7 @@
+# 0.19.1
+## Fixed
+* Fix KV issues when JS domain is set by @Jarema in https://github.com/nats-io/nats.rs/pull/387
+
 # 0.19.0
 ## Overview
 Minor release with some fixes and improvements and repo restructuring.
