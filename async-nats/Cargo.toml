@@ -16,7 +16,7 @@ async-rustls = { version = "0.2.0", optional = true }
 async-oneshot = { version = "0.5.0", optional = true }
 async-std = { version = "1.10", optional = true }
 bytes = "1.1.0"
-futures = { version = "0.3.21", features = [ "unstable" ] }
+futures = "0.3.21"
 futures-sink = "0.3.21"
 futures-util = "0.3.21"
 itoa = "1"
