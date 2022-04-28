@@ -12,22 +12,25 @@ keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
-subslice = "0.2.3"
+async-rustls = { version = "0.2.0", optional = true }
+async-oneshot = { version = "0.5.0", optional = true }
+async-std = { version = "1.10", optional = true }
 bytes = "1.1.0"
-futures = "0.3.21"
+futures = { version = "0.3.21", features = [ "unstable" ] }
 futures-sink = "0.3.21"
 futures-util = "0.3.21"
+itoa = "1"
+nuid = "0.3.2"
+rustls-pemfile = "0.3.0"
 serde = { version = "1.0.136", features = ["derive"] } 
 serde_json = "1.0.79"
 serde_repr = "0.1.7"
-tokio = { version = "1.16.1", features = ["full"] }
-tokio-util = { version = "0.7.0", features = ["codec"] }
-itoa = "1"
+subslice = "0.2.3"
+tokio = { version = "1.16.1", features = ["full"], optional = true }
+tokio-rustls = { version = "0.23", optional = true }
+tokio-util = { version = "0.7.0", features = ["codec"], optional = true }
 url = "2"
-tokio-rustls = "0.23"
-rustls-pemfile = "0.3.0"
 webpki-roots = "0.22"
-nuid = "0.3.2"
 
 [dev-dependencies]
 lazy_static = "1.4.0"
@@ -36,3 +39,7 @@ url = "2.2.2"
 nuid = "0.3.1"
 json = "0.12"
 
+[features]
+default = [ "runtime-tokio" ]
+runtime-tokio = [ "tokio", "tokio-util", "tokio-rustls" ]
+runtime-async-std = [ "async-std", "async-rustls", "async-oneshot" ]
