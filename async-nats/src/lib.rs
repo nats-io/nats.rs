@@ -101,10 +101,12 @@
 //! #     Ok(())
 //! # }
 
-use futures_util::future::FutureExt;
-use futures_util::select;
-use futures_util::stream::Stream;
-use futures_util::StreamExt;
+use futures::channel::mpsc;
+use futures::future::FutureExt;
+use futures::select;
+use futures::stream::Stream;
+use futures::stream::StreamExt;
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, SinkExt};
 
 use std::collections::HashMap;
 use std::iter;
@@ -116,20 +118,47 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use subslice::SubsliceExt;
-use tokio::io::ErrorKind;
-use tokio::io::{AsyncRead, AsyncWriteExt};
-use tokio::io::{AsyncReadExt, AsyncWrite};
 use url::Url;
 
 use bytes::{Buf, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+
+#[cfg(feature = "runtime-async-std")]
+use async_std::io;
+#[cfg(feature = "runtime-async-std")]
+use async_std::io::ErrorKind;
+#[cfg(feature = "runtime-async-std")]
+use async_std::net::TcpStream;
+#[cfg(feature = "runtime-async-std")]
+use async_std::sync::Mutex;
+#[cfg(feature = "runtime-async-std")]
+use async_std::task;
+#[cfg(feature = "runtime-async-std")]
+use async_std::task::sleep;
+
+#[cfg(feature = "runtime-async-std")]
+mod oneshot {
+    pub use async_oneshot::oneshot as channel;
+    pub use async_oneshot::*;
+}
+
+#[cfg(feature = "runtime-tokio")]
 use tokio::io;
+#[cfg(feature = "runtime-tokio")]
 use tokio::io::BufWriter;
+#[cfg(feature = "runtime-tokio")]
+use tokio::io::ErrorKind;
+#[cfg(feature = "runtime-tokio")]
 use tokio::net::TcpStream;
+#[cfg(feature = "runtime-tokio")]
+use tokio::sync::oneshot;
+#[cfg(feature = "runtime-tokio")]
 use tokio::sync::Mutex;
-use tokio::sync::{mpsc, oneshot};
+#[cfg(feature = "runtime-tokio")]
 use tokio::task;
+#[cfg(feature = "runtime-tokio")]
+use tokio::time::sleep;
 
 pub type Error = Box<dyn std::error::Error>;
 
@@ -139,10 +168,12 @@ const LANG: &str = "rust";
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
 /// must be provided using `Options::tls_client_config`.
+#[cfg(feature = "runtime-tokio")]
 pub use tokio_rustls::rustls;
 
 mod options;
 pub use options::ConnectOptions;
+#[cfg(feature = "runtime-tokio")]
 mod tls;
 
 /// Information sent by the server back to this client
@@ -373,7 +404,12 @@ impl Connection {
                 return Ok(Some(op));
             }
 
-            if 0 == self.stream.read_buf(&mut self.buffer).await? {
+            #[cfg(feature = "runtime-async-std")]
+            let res = 0 == self.stream.read(&mut self.buffer).await?;
+            #[cfg(feature = "runtime-tokio")]
+            let res = 0 == self.stream.read_buf(&mut self.buffer).await?;
+
+            if res {
                 if self.buffer.is_empty() {
                     return Ok(None);
                 } else {
@@ -450,7 +486,7 @@ impl Connection {
                 self.stream.write_all(b"PONG\r\n").await?;
                 self.stream.flush().await?;
             }
-            ClientOp::Flush { result } => {
+            ClientOp::Flush { mut result } => {
                 result.send(self.stream.flush().await).map_err(|_| {
                     io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                 })?;
@@ -496,13 +532,16 @@ impl Connector {
         &self,
         server_addr: &ServerAddr,
     ) -> Result<(ServerInfo, Connection), io::Error> {
-        let tls_config = tls::config_tls(&self.options).await?;
+        //let tls_config = tls::config_tls(&self.options).await?;
 
         let tcp_stream = TcpStream::connect((server_addr.host(), server_addr.port())).await?;
         tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection {
+            #[cfg(feature = "runtime-tokio")]
             stream: Box::new(BufWriter::new(tcp_stream)),
+            #[cfg(not(feature = "runtime-tokio"))]
+            stream: Box::new(tcp_stream),
             buffer: BytesMut::new(),
         };
 
@@ -527,28 +566,29 @@ impl Connector {
             self.options.tls_required || info.tls_required || server_addr.tls_required();
 
         if tls_required {
-            let tls_config = Arc::new(tls_config);
-            let tls_connector =
-                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
-                    io::Error::new(
-                        ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {}", err),
-                    )
-                })?;
+            unimplemented!("");
+            //let tls_config = Arc::new(tls_config);
+            //let tls_connector =
+            //tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
+            //io::Error::new(
+            //ErrorKind::Other,
+            //format!("failed to create TLS connector from TLS config: {}", err),
+            //)
+            //})?;
 
-            let domain = rustls::ServerName::try_from(info.host.as_str())
-                .or_else(|_| rustls::ServerName::try_from(server_addr.host()))
-                .map_err(|_| {
-                    io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "cannot determine hostname for TLS connection",
-                    )
-                })?;
+            //let domain = rustls::ServerName::try_from(info.host.as_str())
+            //.or_else(|_| rustls::ServerName::try_from(server_addr.host()))
+            //.map_err(|_| {
+            //io::Error::new(
+            //ErrorKind::InvalidInput,
+            //"cannot determine hostname for TLS connection",
+            //)
+            //})?;
 
-            connection = Connection {
-                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
-                buffer: BytesMut::new(),
-            };
+            //connection = Connection {
+            //stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
+            //buffer: BytesMut::new(),
+            //};
         };
 
         Ok((*info, connection))
@@ -636,7 +676,7 @@ impl ConnectionHandler {
     ) -> Result<(), io::Error> {
         loop {
             select! {
-                maybe_command = receiver.recv().fuse() => {
+                maybe_command = receiver.next().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
                             println!("error handling command {}", err);
@@ -966,10 +1006,15 @@ impl Client {
     }
 
     pub async fn flush(&mut self) -> Result<(), Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.sender.send(Command::Flush { result: tx }).await?;
         // first question mark is an error from rx itself, second for error from flush.
+
+        #[cfg(feature = "runtime-tokio")]
         rx.await??;
+        #[cfg(feature = "runtime-async-std")]
+        rx.await.unwrap().unwrap();
+
         Ok(())
     }
 }
@@ -1003,8 +1048,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         ConnectionHandler::new(connection, connector, subscription_context.clone());
 
     // TODO make channel size configurable
-    let (sender, receiver) = mpsc::channel(128);
-    let client = Client::new(sender.clone(), subscription_context);
+    let (mut sender, receiver) = mpsc::channel(128);
+    let mut client = Client::new(sender.clone(), subscription_context);
     let connect_info = ConnectInfo {
         tls_required: options.tls_required,
         // FIXME(tp): have optional name
@@ -1035,11 +1080,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
 
-    tokio::spawn({
-        let sender = sender.clone();
+    task::spawn({
+        let mut sender = sender.clone();
         async move {
             loop {
-                tokio::time::sleep(options.ping_interval).await;
+                sleep(options.ping_interval).await;
                 match sender.send(Command::Ping).await {
                     Ok(()) => {}
                     Err(_) => return,
@@ -1048,9 +1093,9 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    tokio::spawn(async move {
+    task::spawn(async move {
         loop {
-            tokio::time::sleep(options.flush_interval).await;
+            sleep(options.flush_interval).await;
             match sender.send(Command::TryFlush).await {
                 Ok(()) => {}
                 Err(_) => return,
@@ -1186,8 +1231,8 @@ impl Subscriber {
 impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
-        tokio::spawn({
-            let sender = self.sender.clone();
+        task::spawn({
+            let mut sender = self.sender.clone();
             let id = self.uid;
             async move {
                 sender
@@ -1203,7 +1248,7 @@ impl Stream for Subscriber {
     type Item = Message;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
+        Stream::poll_next(Pin::new(&mut self.receiver), cx)
     }
 }
 
