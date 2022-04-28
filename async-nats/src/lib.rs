@@ -259,9 +259,6 @@ pub enum ClientOp {
     },
     Ping,
     Pong,
-    Flush {
-        result: oneshot::Sender<io::Result<()>>,
-    },
     TryFlush,
     Connect(ConnectInfo),
 }
@@ -450,17 +447,16 @@ impl Connection {
                 self.stream.write_all(b"PONG\r\n").await?;
                 self.stream.flush().await?;
             }
-            ClientOp::Flush { result } => {
-                result.send(self.stream.flush().await).map_err(|_| {
-                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                })?;
-            }
             ClientOp::TryFlush => {
                 self.stream.flush().await?;
             }
         }
 
         Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<(), io::Error> {
+        self.stream.flush().await
     }
 }
 
@@ -766,9 +762,9 @@ impl ConnectionHandler {
                 }
             }
             Command::Flush { result } => {
-                if let Err(err) = self.connection.write_op(ClientOp::Flush { result }).await {
-                    self.handle_reconnect().await?;
-                }
+                result.send(self.connection.flush().await).map_err(|_| {
+                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                })?;
             }
             Command::TryFlush => {
                 if let Err(err) = self.connection.write_op(ClientOp::TryFlush).await {
