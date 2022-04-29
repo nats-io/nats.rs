@@ -233,7 +233,7 @@ pub enum Command {
     },
     Ping,
     Flush {
-        result: oneshot::Sender<io::Result<()>>,
+        result: oneshot::Sender<Result<(), io::Error>>,
     },
     TryFlush,
     Connect(ConnectInfo),
@@ -758,9 +758,21 @@ impl ConnectionHandler {
                 }
             }
             Command::Flush { result } => {
-                result.send(self.connection.flush().await).map_err(|_| {
-                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                })?;
+                if let Err(err) = self.connection.flush().await {
+                    if let Err(err) = self.handle_reconnect().await {
+                        result.send(Err(err)).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
+                    } else if let Err(err) = self.connection.flush().await {
+                        result.send(Err(err)).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
+                    }
+                } else {
+                    result.send(Ok(())).map_err(|_| {
+                        io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                    })?;
+                }
             }
             Command::TryFlush => {
                 if let Err(err) = self.connection.write_op(ClientOp::TryFlush).await {
