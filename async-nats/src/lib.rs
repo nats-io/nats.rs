@@ -113,6 +113,7 @@ use std::option;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use subslice::SubsliceExt;
@@ -127,7 +128,6 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::io::BufWriter;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
@@ -224,12 +224,13 @@ pub enum Command {
         respond: Option<String>,
     },
     Subscribe {
-        sid: u64,
+        id: u64,
         subject: String,
         queue_group: Option<String>,
+        sender: mpsc::Sender<Message>,
     },
     Unsubscribe {
-        uid: u64,
+        id: u64,
         max: Option<u64>,
     },
     Ping,
@@ -573,69 +574,19 @@ struct Subscription {
     max: Option<u64>,
 }
 
-#[derive(Debug)]
-struct SubscriptionContext {
-    next_sid: u64,
-    next_uid: u64,
-    subscription_map: HashMap<u64, Subscription>,
-    uid_map: HashMap<u64, u64>,
-}
-
-impl SubscriptionContext {
-    fn new() -> SubscriptionContext {
-        SubscriptionContext {
-            next_sid: 1,
-            next_uid: 1,
-            subscription_map: HashMap::new(),
-            uid_map: HashMap::new(),
-        }
-    }
-
-    fn get_mut(&mut self, sid: u64) -> Option<&mut Subscription> {
-        self.subscription_map.get_mut(&sid)
-    }
-
-    fn entry(&mut self, sid: u64) -> std::collections::hash_map::Entry<u64, Subscription> {
-        self.subscription_map.entry(sid)
-    }
-
-    fn insert(&mut self, subscription: Subscription) -> u64 {
-        let sid = self.next_sid;
-        let uid = self.next_uid;
-        self.next_sid += 1;
-        self.next_uid += 1;
-
-        self.subscription_map.insert(sid, subscription);
-        self.uid_map.insert(uid, sid);
-
-        sid
-    }
-    fn remove(&mut self, sid: u64) -> bool {
-        self.subscription_map.remove(&sid).is_some()
-    }
-
-    fn get_sid(&self, uid: u64) -> Option<u64> {
-        self.uid_map.get(&uid).copied()
-    }
-}
-
 /// A connection handler which facilitates communication from channels to a single shared connection.
 pub(crate) struct ConnectionHandler {
     connection: Connection,
     connector: Connector,
-    subscription_context: Arc<Mutex<SubscriptionContext>>,
+    subscriptions: HashMap<u64, Subscription>,
 }
 
 impl ConnectionHandler {
-    pub(crate) fn new(
-        connection: Connection,
-        connector: Connector,
-        subscription_context: Arc<Mutex<SubscriptionContext>>,
-    ) -> ConnectionHandler {
+    pub(crate) fn new(connection: Connection, connector: Connector) -> ConnectionHandler {
         ConnectionHandler {
             connection,
             connector,
-            subscription_context,
+            subscriptions: HashMap::new(),
         }
     }
 
@@ -692,9 +643,7 @@ impl ConnectionHandler {
                 reply,
                 payload,
             } => {
-                let mut context = self.subscription_context.lock().await;
-
-                if let Some(subscription) = context.get_mut(sid) {
+                if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message = Message {
                         subject,
                         reply,
@@ -704,12 +653,9 @@ impl ConnectionHandler {
                     // if the channel for subscription was dropped, remove the
                     // subscription from the map and unsubscribe.
                     if subscription.sender.send(message).await.is_err() {
-                        context.remove(sid);
+                        self.subscriptions.remove(&sid);
                         self.connection
-                            .write_op(ClientOp::Unsubscribe {
-                                sid: sid,
-                                max: None,
-                            })
+                            .write_op(ClientOp::Unsubscribe { sid, max: None })
                             .await?;
                         self.connection.stream.flush().await?;
                     // if channel was open and we sent the messsage, increase the
@@ -721,7 +667,7 @@ impl ConnectionHandler {
                         // the result, `drop` the `sender` channel.
                         if let Some(max) = subscription.max {
                             if subscription.delivered.ge(&max) {
-                                context.remove(sid);
+                                self.subscriptions.remove(&sid);
                             }
                         }
                     }
@@ -738,33 +684,26 @@ impl ConnectionHandler {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
         match command {
-            Command::Unsubscribe { uid, max } => {
-                let mut context = self.subscription_context.lock().await;
-                if let Some(sid) = context.get_sid(uid) {
-                    if let Some(subscription) = context.get_mut(sid) {
-                        // check if max was passed to unsubscribe, meaning it is
-                        // unsubscribe_after.
-                        if let Some(max) = max {
-                            // if we already reached unsub_after max delivery limit, remove
-                            // `Subscription`.
-                            if subscription.delivered >= max {
-                                context.remove(sid);
-                            // otherwise just set `max` value for the `Subscription`.
-                            } else {
-                                context.entry(sid).and_modify(|sub| sub.max = Some(max));
+            Command::Unsubscribe { id, max } => {
+                if let Some(subscription) = self.subscriptions.get_mut(&id) {
+                    subscription.max = max;
+                    match subscription.max {
+                        Some(n) => {
+                            if subscription.delivered >= n {
+                                self.subscriptions.remove(&id);
                             }
-                        // if `max` is `None`, just remove the subscription.
-                        } else {
-                            context.remove(sid);
                         }
+                        None => {
+                            self.subscriptions.remove(&id);
+                        }
+                    }
 
-                        if let Err(err) = self
-                            .connection
-                            .write_op(ClientOp::Unsubscribe { sid, max })
-                            .await
-                        {
-                            println!("Send failed with {:?}", err);
-                        }
+                    if let Err(err) = self
+                        .connection
+                        .write_op(ClientOp::Unsubscribe { sid: id, max })
+                        .await
+                    {
+                        println!("Send failed with {:?}", err);
                     }
                 }
             }
@@ -796,14 +735,25 @@ impl ConnectionHandler {
                 }
             }
             Command::Subscribe {
-                sid,
+                id,
                 subject,
                 queue_group,
+                sender,
             } => {
+                let subscription = Subscription {
+                    sender,
+                    delivered: 0,
+                    max: None,
+                    subject: subject.to_owned(),
+                    queue_group: queue_group.to_owned(),
+                };
+
+                self.subscriptions.insert(id, subscription);
+
                 if let Err(err) = self
                     .connection
                     .write_op(ClientOp::Subscribe {
-                        sid,
+                        sid: id,
                         subject,
                         queue_group,
                     })
@@ -848,8 +798,7 @@ impl ConnectionHandler {
         let (_, connection) = self.connector.connect().await?;
         self.connection = connection;
 
-        let subscription_context = self.subscription_context.lock().await;
-        for (sid, subscription) in &subscription_context.subscription_map {
+        for (sid, subscription) in &self.subscriptions {
             self.connection
                 .write_op(ClientOp::Subscribe {
                     sid: *sid,
@@ -870,17 +819,14 @@ impl ConnectionHandler {
 #[derive(Clone)]
 pub struct Client {
     sender: mpsc::Sender<Command>,
-    subscription_context: Arc<Mutex<SubscriptionContext>>,
+    next_subscription_id: Arc<AtomicU64>,
 }
 
 impl Client {
-    pub(crate) fn new(
-        sender: mpsc::Sender<Command>,
-        subscription_context: Arc<Mutex<SubscriptionContext>>,
-    ) -> Client {
+    pub(crate) fn new(sender: mpsc::Sender<Command>) -> Client {
         Client {
             sender,
-            subscription_context,
+            next_subscription_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -961,28 +907,20 @@ impl Client {
         subject: String,
         queue_group: Option<String>,
     ) -> Result<Subscriber, io::Error> {
+        let id = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(16);
-
-        // Aiming to make this the only lock (aside from internal locks in channels).
-        let mut context = self.subscription_context.lock().await;
-        let sid = context.insert(Subscription {
-            sender,
-            delivered: 0,
-            max: None,
-            subject: subject.to_owned(),
-            queue_group: queue_group.to_owned(),
-        });
 
         self.sender
             .send(Command::Subscribe {
-                sid,
+                id,
                 subject,
                 queue_group,
+                sender,
             })
             .await
             .unwrap();
 
-        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+        Ok(Subscriber::new(id, self.sender.clone(), receiver))
     }
 
     pub async fn flush(&mut self) -> Result<(), Error> {
@@ -1018,13 +956,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     };
 
     let (_, connection) = connector.try_connect().await?;
-    let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
-    let mut connection_handler =
-        ConnectionHandler::new(connection, connector, subscription_context.clone());
+    let mut connection_handler = ConnectionHandler::new(connection, connector);
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
-    let client = Client::new(sender.clone(), subscription_context);
+    let client = Client::new(sender.clone());
     let connect_info = ConnectInfo {
         tls_required: options.tls_required,
         // FIXME(tp): have optional name
@@ -1123,19 +1059,19 @@ pub struct Message {
 /// # }
 /// ```
 pub struct Subscriber {
-    uid: u64,
+    id: u64,
     receiver: mpsc::Receiver<Message>,
     sender: mpsc::Sender<Command>,
 }
 
 impl Subscriber {
     fn new(
-        uid: u64,
+        id: u64,
         sender: mpsc::Sender<Command>,
         receiver: mpsc::Receiver<Message>,
     ) -> Subscriber {
         Subscriber {
-            uid,
+            id,
             sender,
             receiver,
         }
@@ -1157,7 +1093,7 @@ impl Subscriber {
     pub async fn unsubscribe(&mut self) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
-                uid: self.uid,
+                id: self.id,
                 max: None,
             })
             .await
@@ -1194,7 +1130,7 @@ impl Subscriber {
     pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
-                uid: self.uid,
+                id: self.id,
                 max: Some(unsub_after),
             })
             .await
@@ -1208,10 +1144,10 @@ impl Drop for Subscriber {
         self.receiver.close();
         tokio::spawn({
             let sender = self.sender.clone();
-            let id = self.uid;
+            let id = self.id;
             async move {
                 sender
-                    .send(Command::Unsubscribe { uid: id, max: None })
+                    .send(Command::Unsubscribe { id, max: None })
                     .await
                     .ok();
             }
