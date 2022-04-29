@@ -753,7 +753,7 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
-                while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                if let Err(err) = self.connection.write_op(ClientOp::Ping).await {
                     self.handle_reconnect().await?;
                 }
             }
