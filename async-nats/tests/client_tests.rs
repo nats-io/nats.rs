@@ -122,6 +122,27 @@ mod client {
     }
 
     #[tokio::test]
+    async fn publish_with_headers() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+
+        let mut headers = async_nats::HeaderMap::new();
+        headers.append("X-Test", b"Test".as_ref().try_into().unwrap());
+
+        client
+            .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
+            .await
+            .unwrap();
+
+        client.flush().await.unwrap();
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.headers.unwrap(), headers);
+    }
+
+    #[tokio::test]
     async fn publish_request() {
         let server = nats_server::run_basic_server();
         let mut client = async_nats::connect(server.client_url()).await.unwrap();
