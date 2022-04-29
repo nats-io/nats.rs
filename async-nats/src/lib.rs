@@ -467,11 +467,13 @@ pub(crate) struct Connector {
 
 impl Connector {
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
-        loop {
+        for _ in 0..128 {
             if let Ok(inner) = self.try_connect().await {
                 return Ok(inner);
             }
         }
+
+        Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
     }
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
