@@ -314,23 +314,24 @@ impl Connection {
         if self.buffer.starts_with(b"MSG ") {
             if let Some(len) = self.buffer.find(b"\r\n") {
                 let line = std::str::from_utf8(&self.buffer[4..len]).unwrap();
-                let args = line.split(' ').filter(|s| !s.is_empty());
-                // TODO(caspervonb) we can drop this alloc
-                let args = args.collect::<Vec<_>>();
+                let mut args = line.split(' ').filter(|s| !s.is_empty());
 
                 // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
-                let (subject, sid, reply_to, payload_len) = match args[..] {
-                    [subject, sid, payload_len] => (subject, sid, None, payload_len),
-                    [subject, sid, reply_to, payload_len] => {
-                        (subject, sid, Some(reply_to), payload_len)
-                    }
-                    _ => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "invalid number of arguments after MSG",
-                        ));
-                    }
-                };
+                let (subject, sid, reply_to, payload_len) =
+                    match (args.next(), args.next(), args.next(), args.next()) {
+                        (Some(subject), Some(sid), None, Some(payload_len)) => {
+                            (subject, sid, None, payload_len)
+                        }
+                        (Some(subject), Some(sid), Some(reply_to), Some(payload_len)) => {
+                            (subject, sid, Some(reply_to), payload_len)
+                        }
+                        _ => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                "invalid number of arguments after MSG",
+                            ));
+                        }
+                    };
 
                 let sid = u64::from_str(sid)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
