@@ -671,7 +671,14 @@ impl Connector {
 
         for server_addr in &self.server_addrs {
             match self.try_connect_to(server_addr).await {
-                Ok(inner) => return Ok(inner),
+                Ok((info, connection)) => {
+                    for url in &info.connect_urls {
+                        self.server_addrs.push(url.parse()?);
+                    }
+
+                    return Ok((info, connection));
+                }
+
                 Err(inner) => error.replace(inner),
             };
         }
