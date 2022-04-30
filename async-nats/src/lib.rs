@@ -224,13 +224,13 @@ pub enum Command {
         respond: Option<String>,
     },
     Subscribe {
-        id: u64,
+        sid: u64,
         subject: String,
         queue_group: Option<String>,
         sender: mpsc::Sender<Message>,
     },
     Unsubscribe {
-        id: u64,
+        sid: u64,
         max: Option<u64>,
     },
     Ping,
@@ -441,9 +441,9 @@ impl Connection {
                 self.stream.flush().await?;
             }
 
-            ClientOp::Unsubscribe { sid: id, max } => {
+            ClientOp::Unsubscribe { sid, max } => {
                 self.stream.write_all(b"UNSUB ").await?;
-                self.stream.write_all(format!("{}", id).as_bytes()).await?;
+                self.stream.write_all(format!("{}", sid).as_bytes()).await?;
                 if let Some(max) = max {
                     self.stream
                         .write_all(format!(" {}", max).as_bytes())
@@ -684,23 +684,23 @@ impl ConnectionHandler {
 
     async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
         match command {
-            Command::Unsubscribe { id, max } => {
-                if let Some(subscription) = self.subscriptions.get_mut(&id) {
+            Command::Unsubscribe { sid, max } => {
+                if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     subscription.max = max;
                     match subscription.max {
                         Some(n) => {
                             if subscription.delivered >= n {
-                                self.subscriptions.remove(&id);
+                                self.subscriptions.remove(&sid);
                             }
                         }
                         None => {
-                            self.subscriptions.remove(&id);
+                            self.subscriptions.remove(&sid);
                         }
                     }
 
                     if let Err(err) = self
                         .connection
-                        .write_op(ClientOp::Unsubscribe { sid: id, max })
+                        .write_op(ClientOp::Unsubscribe { sid, max })
                         .await
                     {
                         println!("Send failed with {:?}", err);
@@ -735,7 +735,7 @@ impl ConnectionHandler {
                 }
             }
             Command::Subscribe {
-                id,
+                sid,
                 subject,
                 queue_group,
                 sender,
@@ -748,12 +748,12 @@ impl ConnectionHandler {
                     queue_group: queue_group.to_owned(),
                 };
 
-                self.subscriptions.insert(id, subscription);
+                self.subscriptions.insert(sid, subscription);
 
                 if let Err(err) = self
                     .connection
                     .write_op(ClientOp::Subscribe {
-                        sid: id,
+                        sid,
                         subject,
                         queue_group,
                     })
@@ -907,12 +907,12 @@ impl Client {
         subject: String,
         queue_group: Option<String>,
     ) -> Result<Subscriber, io::Error> {
-        let id = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
+        let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(16);
 
         self.sender
             .send(Command::Subscribe {
-                id,
+                sid,
                 subject,
                 queue_group,
                 sender,
@@ -920,7 +920,7 @@ impl Client {
             .await
             .unwrap();
 
-        Ok(Subscriber::new(id, self.sender.clone(), receiver))
+        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
     pub async fn flush(&mut self) -> Result<(), Error> {
@@ -1059,19 +1059,19 @@ pub struct Message {
 /// # }
 /// ```
 pub struct Subscriber {
-    id: u64,
+    sid: u64,
     receiver: mpsc::Receiver<Message>,
     sender: mpsc::Sender<Command>,
 }
 
 impl Subscriber {
     fn new(
-        id: u64,
+        sid: u64,
         sender: mpsc::Sender<Command>,
         receiver: mpsc::Receiver<Message>,
     ) -> Subscriber {
         Subscriber {
-            id,
+            sid,
             sender,
             receiver,
         }
@@ -1093,7 +1093,7 @@ impl Subscriber {
     pub async fn unsubscribe(&mut self) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
-                id: self.id,
+                sid: self.sid,
                 max: None,
             })
             .await
@@ -1130,7 +1130,7 @@ impl Subscriber {
     pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
-                id: self.id,
+                sid: self.sid,
                 max: Some(unsub_after),
             })
             .await
@@ -1144,10 +1144,10 @@ impl Drop for Subscriber {
         self.receiver.close();
         tokio::spawn({
             let sender = self.sender.clone();
-            let id = self.id;
+            let sid = self.sid;
             async move {
                 sender
-                    .send(Command::Unsubscribe { id, max: None })
+                    .send(Command::Unsubscribe { sid, max: None })
                     .await
                     .ok();
             }
