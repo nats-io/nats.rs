@@ -106,6 +106,7 @@ use futures_util::select;
 use futures_util::stream::Stream;
 use futures_util::StreamExt;
 
+use std::cmp;
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -116,10 +117,12 @@ use std::str::{self, FromStr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use subslice::SubsliceExt;
 use tokio::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio::time::sleep;
 use url::Url;
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -480,10 +483,16 @@ pub(crate) struct Connector {
 
 impl Connector {
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
-        for _ in 0..128 {
+        for i in 0..128 {
             if let Ok(inner) = self.try_connect().await {
                 return Ok(inner);
             }
+
+            let exp: u32 = i.try_into().unwrap_or(std::u32::MAX);
+            let max = Duration::from_secs(4);
+            let duration = cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max);
+
+            sleep(duration).await;
         }
 
         Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
