@@ -213,6 +213,7 @@ pub(crate) enum ServerOp {
         reply: Option<String>,
         payload: Bytes,
     },
+    Error(String),
 }
 
 #[derive(Debug)]
@@ -358,6 +359,17 @@ impl Connection {
             }
 
             return Ok(None);
+        }
+
+        if self.buffer.starts_with(b"-ERR") {
+            if let Some(len) = self.buffer.find(b"\r\n") {
+                let line = std::str::from_utf8(&self.buffer[5..len])
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                let message = line.trim_matches('\'').to_string();
+                self.buffer.advance(len + 2);
+
+                return Ok(Some(ServerOp::Error(message)));
+            }
         }
 
         Ok(None)
