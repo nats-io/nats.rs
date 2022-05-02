@@ -654,7 +654,11 @@ impl ConnectionHandler {
                                 println!("error handling operation {}", err);
                             }
                         }
-                        Err(_) => {},
+                        Err(err) => {
+                            if let Err(err) = self.handle_reconnect().await {
+                                println!("error handling operation {}", err);
+                            }
+                        },
                     }
                 }
             }
