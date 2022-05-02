@@ -106,7 +106,8 @@ use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, SinkExt};
+use futures::SinkExt;
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use std::collections::HashMap;
 use std::iter;
@@ -124,12 +125,12 @@ use bytes::{Buf, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use async_net::TcpStream;
+
 #[cfg(feature = "runtime-async-std")]
 use async_std::io;
 #[cfg(feature = "runtime-async-std")]
 use async_std::io::ErrorKind;
-#[cfg(feature = "runtime-async-std")]
-use async_std::net::TcpStream;
 #[cfg(feature = "runtime-async-std")]
 use async_std::sync::Mutex;
 #[cfg(feature = "runtime-async-std")]
@@ -144,13 +145,11 @@ mod oneshot {
 }
 
 #[cfg(feature = "runtime-tokio")]
+use futures::io::BufWriter;
+#[cfg(feature = "runtime-tokio")]
 use tokio::io;
 #[cfg(feature = "runtime-tokio")]
-use tokio::io::BufWriter;
-#[cfg(feature = "runtime-tokio")]
 use tokio::io::ErrorKind;
-#[cfg(feature = "runtime-tokio")]
-use tokio::net::TcpStream;
 #[cfg(feature = "runtime-tokio")]
 use tokio::sync::oneshot;
 #[cfg(feature = "runtime-tokio")]
@@ -165,16 +164,14 @@ pub type Error = Box<dyn std::error::Error>;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 
+mod options;
+mod tls;
+
+pub use options::ConnectOptions;
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
 /// must be provided using `Options::tls_client_config`.
-#[cfg(feature = "runtime-tokio")]
-pub use tokio_rustls::rustls;
-
-mod options;
-pub use options::ConnectOptions;
-#[cfg(feature = "runtime-tokio")]
-mod tls;
+pub use rustls;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -404,10 +401,7 @@ impl Connection {
                 return Ok(Some(op));
             }
 
-            #[cfg(feature = "runtime-async-std")]
             let res = 0 == self.stream.read(&mut self.buffer).await?;
-            #[cfg(feature = "runtime-tokio")]
-            let res = 0 == self.stream.read_buf(&mut self.buffer).await?;
 
             if res {
                 if self.buffer.is_empty() {
@@ -435,6 +429,7 @@ impl Connection {
                 respond,
             } => {
                 let mut bufi = itoa::Buffer::new();
+
                 self.stream.write_all(b"PUB ").await?;
                 self.stream.write_all(subject.as_bytes()).await?;
                 self.stream.write_all(b" ").await?;
@@ -486,6 +481,7 @@ impl Connection {
                 self.stream.write_all(b"PONG\r\n").await?;
                 self.stream.flush().await?;
             }
+            #[allow(unused_mut)]
             ClientOp::Flush { mut result } => {
                 result.send(self.stream.flush().await).map_err(|_| {
                     io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
@@ -532,7 +528,7 @@ impl Connector {
         &self,
         server_addr: &ServerAddr,
     ) -> Result<(ServerInfo, Connection), io::Error> {
-        //let tls_config = tls::config_tls(&self.options).await?;
+        let tls_config = tls::config_tls(&self.options).await?;
 
         let tcp_stream = TcpStream::connect((server_addr.host(), server_addr.port())).await?;
         tcp_stream.set_nodelay(true)?;
@@ -566,29 +562,28 @@ impl Connector {
             self.options.tls_required || info.tls_required || server_addr.tls_required();
 
         if tls_required {
-            unimplemented!("");
-            //let tls_config = Arc::new(tls_config);
-            //let tls_connector =
-            //tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
-            //io::Error::new(
-            //ErrorKind::Other,
-            //format!("failed to create TLS connector from TLS config: {}", err),
-            //)
-            //})?;
+            use async_tls::TlsConnector;
+            use rustls::ServerName;
 
-            //let domain = rustls::ServerName::try_from(info.host.as_str())
-            //.or_else(|_| rustls::ServerName::try_from(server_addr.host()))
-            //.map_err(|_| {
-            //io::Error::new(
-            //ErrorKind::InvalidInput,
-            //"cannot determine hostname for TLS connection",
-            //)
-            //})?;
+            let tls_connector = TlsConnector::from(tls_config);
 
-            //connection = Connection {
-            //stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
-            //buffer: BytesMut::new(),
-            //};
+            let domain = match ServerName::try_from(info.host.as_str()) {
+                Ok(_) => info.host.as_str(),
+                Err(_) => match ServerName::try_from(server_addr.host()) {
+                    Ok(_) => server_addr.host(),
+                    Err(_) => {
+                        return Err(io::Error::new(
+                            ErrorKind::InvalidInput,
+                            "cannot determine hostname for TLS connection",
+                        ))
+                    }
+                },
+            };
+
+            connection = Connection {
+                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
+                buffer: BytesMut::new(),
+            };
         };
 
         Ok((*info, connection))
@@ -796,17 +791,22 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
-                while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                while self.connection.write_op(ClientOp::Ping).await.is_err() {
                     self.handle_reconnect().await?;
                 }
             }
             Command::Pong => {
-                while let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                while self.connection.write_op(ClientOp::Ping).await.is_err() {
                     self.handle_reconnect().await?;
                 }
             }
             Command::Flush { result } => {
-                if let Err(err) = self.connection.write_op(ClientOp::Flush { result }).await {
+                if self
+                    .connection
+                    .write_op(ClientOp::Flush { result })
+                    .await
+                    .is_err()
+                {
                     self.handle_reconnect().await?;
                 }
             }
@@ -851,10 +851,11 @@ impl ConnectionHandler {
                 }
             }
             Command::Connect(connect_info) => {
-                while let Err(err) = self
+                while self
                     .connection
                     .write_op(ClientOp::Connect(connect_info.clone()))
                     .await
+                    .is_err()
                 {
                     self.handle_reconnect().await?;
                 }
@@ -1444,7 +1445,7 @@ impl ToServerAddrs for str {
 impl ToServerAddrs for String {
     type Iter = option::IntoIter<ServerAddr>;
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
-        (&**self).to_server_addrs()
+        (**self).to_server_addrs()
     }
 }
 
