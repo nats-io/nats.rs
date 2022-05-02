@@ -204,7 +204,6 @@ mod client {
             client.publish("test".into(), "data".into()).await.unwrap();
         }
 
-        client.flush().await.unwrap();
         sub.unsubscribe_after(3).await.unwrap();
         client.publish("test".into(), "data".into()).await.unwrap();
         client.flush().await.unwrap();
@@ -223,7 +222,6 @@ mod client {
 
         client.publish("test".into(), "data".into()).await.unwrap();
         client.publish("test".into(), "data".into()).await.unwrap();
-        client.flush().await.unwrap();
 
         sub.unsubscribe_after(1).await.unwrap();
         client.flush().await.unwrap();
