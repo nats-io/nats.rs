@@ -12,53 +12,64 @@
 // limitations under the License.
 
 use crate::{tls, ConnectOptions};
-use std::fs::File;
-use std::io::{self, BufReader, ErrorKind};
+use rustls::{Certificate, OwnedTrustAnchor, PrivateKey};
+use std::io::Cursor;
 use std::path::PathBuf;
-use tokio_rustls::rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
-use tokio_rustls::webpki;
+
+#[cfg(feature = "runtime-async-std")]
+use async_std::fs::File;
+#[cfg(feature = "runtime-async-std")]
+use async_std::io::{self, BufReader, ErrorKind};
+#[cfg(feature = "runtime-async-std")]
+use futures::AsyncReadExt;
+
+#[cfg(feature = "runtime-tokio")]
+use tokio::fs::File;
+#[cfg(feature = "runtime-tokio")]
+use tokio::io::{self, AsyncReadExt, BufReader, ErrorKind};
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
 /// empty set of Certificates, not error.
 /// Can be used to parse only client certificates from .pem file containing both client key and certs.
 pub(crate) async fn load_certs(path: PathBuf) -> io::Result<Vec<Certificate>> {
-    tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::open(path)?;
-        let mut reader = BufReader::new(file);
-        let certs = rustls_pemfile::certs(&mut reader)?
-            .iter()
-            .map(|v| Certificate(v.clone()))
-            .collect();
-        Ok(certs)
-    })
-    .await?
+    let file = File::open(path).await?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer).await?;
+    let mut buffer = Cursor::new(buffer);
+
+    let certs = rustls_pemfile::certs(&mut buffer)?
+        .iter()
+        .map(|v| Certificate(v.clone()))
+        .collect();
+    Ok(certs)
 }
 
 /// Loads client key from a `.pem` file.
 /// Can be used to parse only client key from .pem file containing both client key and certs.
 pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
-    tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::open(path)?;
-        let mut reader = BufReader::new(file);
+    let file = File::open(path).await?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer).await?;
+    let mut buffer = Cursor::new(buffer);
 
-        loop {
-            match rustls_pemfile::read_one(&mut reader)? {
-                Some(rustls_pemfile::Item::RSAKey(key))
-                | Some(rustls_pemfile::Item::PKCS8Key(key))
-                | Some(rustls_pemfile::Item::ECKey(key)) => return Ok(PrivateKey(key)),
-                // if public key is found, don't error, just skip it and hope to find client key next.
-                Some(rustls_pemfile::Item::X509Certificate(_)) | Some(_) => {}
-                None => break,
-            }
+    loop {
+        match rustls_pemfile::read_one(&mut buffer)? {
+            Some(rustls_pemfile::Item::RSAKey(key))
+            | Some(rustls_pemfile::Item::PKCS8Key(key))
+            | Some(rustls_pemfile::Item::ECKey(key)) => return Ok(PrivateKey(key)),
+            // if public key is found, don't error, just skip it and hope to find client key next.
+            Some(rustls_pemfile::Item::X509Certificate(_)) | Some(_) => {}
+            None => break,
         }
+    }
 
-        Err(io::Error::new(
-            ErrorKind::NotFound,
-            "could not find client key in the path",
-        ))
-    })
-    .await?
+    Err(io::Error::new(
+        ErrorKind::NotFound,
+        "could not find client key in the path",
+    ))
 }
 
 pub(crate) async fn config_tls(options: &ConnectOptions) -> io::Result<rustls::ClientConfig> {
@@ -79,8 +90,13 @@ pub(crate) async fn config_tls(options: &ConnectOptions) -> io::Result<rustls::C
         } else {
             // Include user-provided certificates.
             for cafile in &options.certificates {
-                let mut pem = BufReader::new(File::open(cafile)?);
-                let certs = rustls_pemfile::certs(&mut pem)?;
+                let mut pem = BufReader::new(File::open(cafile).await?);
+                let mut buffer = Vec::new();
+                pem.read_to_end(&mut buffer).await?;
+                let mut buffer = Cursor::new(buffer);
+
+                let certs = rustls_pemfile::certs(&mut buffer)?;
+
                 let trust_anchors = certs.iter().map(|cert| {
                     let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..])
                         .map_err(|err| {
