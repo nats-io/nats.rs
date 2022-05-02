@@ -15,13 +15,9 @@ use crate::{Client, ToServerAddrs};
 use std::{fmt, path::PathBuf, time::Duration};
 
 #[cfg(feature = "runtime-async-std")]
-use async_rustls::rustls;
-#[cfg(feature = "runtime-async-std")]
 use async_std::io;
 #[cfg(feature = "runtime-tokio")]
 use tokio::io;
-#[cfg(feature = "runtime-tokio")]
-use tokio_rustls::rustls;
 
 /// Connect options. Used to connect with NATS when custom config is needed.
 /// # Examples
