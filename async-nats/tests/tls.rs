@@ -25,7 +25,11 @@ mod client {
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
+<<<<<<< HEAD
         async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+=======
+        async_nats::ConnectOptions::with_user_pass("derek".into(), "porkchop".into())
+>>>>>>> 17af705 (Fix tls tests)
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
             .add_client_certificate(
                 path.join("tests/configs/certs/client-cert.pem"),
@@ -45,7 +49,11 @@ mod client {
         // test scenario where rootCA, client certificate and client key are all in one .pem file
         tokio::time::timeout(
             tokio::time::Duration::from_secs(10),
+<<<<<<< HEAD
             async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+=======
+            async_nats::ConnectOptions::with_user_pass("derek".into(), "porkchop".into())
+>>>>>>> 17af705 (Fix tls tests)
                 .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
                 .add_client_certificate(
                     path.join("tests/configs/certs/client-all.pem"),
