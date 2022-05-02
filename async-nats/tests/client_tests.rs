@@ -267,4 +267,42 @@ mod client {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     }
+
+    #[tokio::test]
+    async fn token_auth() {
+        let server = nats_server::run_server("tests/configs/token.conf");
+        let mut nc = async_nats::ConnectOptions::with_token("s3cr3t".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "test".into()).await.unwrap();
+        nc.flush().await.unwrap();
+        assert!(sub.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        let mut nc =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t".into())
+                .connect(server.client_url())
+                .await
+                .unwrap();
+
+        let mut sub = nc.subscribe("test".into()).await.unwrap();
+        nc.publish("test".into(), "test".into()).await.unwrap();
+        nc.flush().await.unwrap();
+        assert!(sub.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth_wrong_pass() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "bad_password".into())
+            .connect(server.client_url())
+            .await
+            .unwrap_err();
+    }
 }
