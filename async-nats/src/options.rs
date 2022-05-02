@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Client, ToServerAddrs};
+use crate::{Authorization, Client, ToServerAddrs};
 use std::{fmt, path::PathBuf, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
@@ -37,6 +37,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_failed_connect: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
+    pub(crate) auth: Authorization,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
@@ -73,6 +74,7 @@ impl Default for ConnectOptions {
             retry_on_failed_connect: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
+            auth: Authorization::None,
             tls_required: false,
             certificates: Vec::new(),
             client_cert: None,
@@ -115,6 +117,41 @@ impl ConnectOptions {
     /// ```
     pub async fn connect<A: ToServerAddrs>(&mut self, addrs: A) -> io::Result<Client> {
         crate::connect_with_options(addrs, self.to_owned()).await
+    }
+
+    /// Auth against NATS Server with provided token.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc =
+    /// async_nats::ConnectOptions::with_token("t0k3n!".into()).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_token(token: String) -> Self {
+        ConnectOptions {
+            auth: Authorization::Token(token),
+            ..Default::default()
+        }
+    }
+
+    /// Auth against NATS Server with provided username and password.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into()).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_user_and_password(user: String, pass: String) -> Self {
+        ConnectOptions {
+            auth: Authorization::UserAndPassword(user, pass),
+            ..Default::default()
+        }
     }
 
     /// Loads root certificates by providing the path to them.

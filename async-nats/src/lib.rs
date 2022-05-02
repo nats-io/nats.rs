@@ -816,7 +816,7 @@ impl ConnectionHandler {
 /// Client is a `Clonable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [connect] and [ConnectOptions::connect]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Client {
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
@@ -961,7 +961,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(128);
     let client = Client::new(sender.clone());
-    let connect_info = ConnectInfo {
+    let mut connect_info = ConnectInfo {
         tls_required: options.tls_required,
         // FIXME(tp): have optional name
         name: Some("beta-rust-client".to_string()),
@@ -980,11 +980,29 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         headers: true,
         no_responders: true,
     };
-    client
-        .sender
-        .send(Command::Connect(connect_info))
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
+    match options.auth {
+        Authorization::None => {}
+        Authorization::Token(token) => connect_info.auth_token = Some(token),
+        Authorization::UserAndPassword(user, pass) => {
+            connect_info.user = Some(user);
+            connect_info.pass = Some(pass);
+        }
+    }
+    connection_handler
+        .connection
+        .write_op(ClientOp::Connect(connect_info))
+        .await?;
+    connection_handler.connection.flush().await?;
+    match connection_handler.connection.read_op().await? {
+        Some(ServerOp::Error(err)) => {
+            return Err(io::Error::new(ErrorKind::InvalidInput, err.to_string()));
+        }
+        Some(op) => {
+            connection_handler.handle_server_op(op).await?;
+        }
+        None => return Err(io::Error::new(ErrorKind::BrokenPipe, "connection aborted")),
+    }
+
     client
         .sender
         .send(Command::Ping)
@@ -1171,7 +1189,7 @@ pub enum ServerError {
 
 impl ServerError {
     fn new(error: String) -> ServerError {
-        match error.as_str() {
+        match error.to_lowercase().as_str() {
             "authorization violation" => ServerError::AuthorizationViolation,
             other => ServerError::Other(other.to_string()),
         }
@@ -1396,4 +1414,16 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         (**self).to_server_addrs()
     }
+}
+
+#[derive(Clone)]
+pub(crate) enum Authorization {
+    /// No authentication.
+    None,
+
+    /// Authenticate using a token.
+    Token(String),
+
+    /// Authenticate using a username and password.
+    UserAndPassword(String, String),
 }
