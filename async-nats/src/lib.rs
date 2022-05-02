@@ -207,6 +207,7 @@ pub(crate) enum ServerOp {
     Info(Box<ServerInfo>),
     Ping,
     Pong,
+    Error(ServerError),
     Message {
         sid: u64,
         subject: String,
@@ -293,6 +294,17 @@ impl Connection {
             self.buffer.advance(6);
 
             return Ok(Some(ServerOp::Pong));
+        }
+
+        if self.buffer.starts_with(b"-ERR") {
+            if let Some(len) = self.buffer.find(b"\r\n") {
+                let line = std::str::from_utf8(&self.buffer[5..len])
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                let error_message = line.trim_matches('\'').to_string();
+                self.buffer.advance(len + 2);
+
+                return Ok(Some(ServerOp::Error(ServerError::new(error_message))));
+            }
         }
 
         if self.buffer.starts_with(b"INFO ") {
@@ -1194,6 +1206,30 @@ impl Stream for Subscriber {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_recv(cx)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ServerError {
+    AuthorizationViolation,
+    Other(String),
+}
+
+impl ServerError {
+    fn new(error: String) -> ServerError {
+        match error.as_str() {
+            "authorization violation" => ServerError::AuthorizationViolation,
+            other => ServerError::Other(other.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for ServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
+            Self::Other(error) => write!(f, "nats: {}", error),
+        }
     }
 }
 
