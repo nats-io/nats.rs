@@ -692,24 +692,30 @@ impl Connector {
             *server_attempts += 1;
             sleep(duration).await;
 
-            match self.try_connect_to(&server_addr).await {
-                Ok((info, connection)) => {
-                    for url in &info.connect_urls {
-                        let server_addr = url.parse::<ServerAddr>()?;
+            let socket_addrs = server_addr.socket_addrs()?;
+            for socket_addr in socket_addrs {
+                match self
+                    .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
+                    .await
+                {
+                    Ok((info, connection)) => {
+                        for url in &info.connect_urls {
+                            let server_addr = url.parse::<ServerAddr>()?;
 
-                        if self.servers.contains_key(&server_addr) {
-                            self.servers.insert(server_addr, 0);
+                            if !self.servers.contains_key(&server_addr) {
+                                self.servers.insert(server_addr, 0);
+                            }
                         }
+
+                        let server_attempts = self.servers.get_mut(&server_addr).unwrap();
+                        *server_attempts = 0;
+
+                        return Ok((info, connection));
                     }
 
-                    let server_attempts = self.servers.get_mut(&server_addr).unwrap();
-                    *server_attempts = 0;
-
-                    return Ok((info, connection));
-                }
-
-                Err(inner) => error.replace(inner),
-            };
+                    Err(inner) => error.replace(inner),
+                };
+            }
         }
 
         Err(error.unwrap())
@@ -717,11 +723,13 @@ impl Connector {
 
     pub(crate) async fn try_connect_to(
         &self,
-        server_addr: &ServerAddr,
+        socket_addr: &SocketAddr,
+        tls_required: bool,
+        tls_host: &str,
     ) -> Result<(ServerInfo, Connection), io::Error> {
         let tls_config = tls::config_tls(&self.options).await?;
 
-        let tcp_stream = TcpStream::connect((server_addr.host(), server_addr.port())).await?;
+        let tcp_stream = TcpStream::connect(socket_addr).await?;
         tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection {
@@ -746,10 +754,7 @@ impl Connector {
             }
         };
 
-        let tls_required =
-            self.options.tls_required || info.tls_required || server_addr.tls_required();
-
-        if tls_required {
+        if self.options.tls_required || info.tls_required || tls_required {
             let tls_config = Arc::new(tls_config);
             let tls_connector =
                 tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
@@ -760,7 +765,7 @@ impl Connector {
                 })?;
 
             let domain = rustls::ServerName::try_from(info.host.as_str())
-                .or_else(|_| rustls::ServerName::try_from(server_addr.host()))
+                .or_else(|_| rustls::ServerName::try_from(tls_host))
                 .map_err(|_| {
                     io::Error::new(
                         ErrorKind::InvalidInput,
