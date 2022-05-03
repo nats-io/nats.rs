@@ -1133,6 +1133,26 @@ impl Client {
         }
     }
 
+    pub async fn request_with_headers(
+        &mut self,
+        subject: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<Message, Error> {
+        let inbox = self.new_inbox();
+        let mut sub = self.subscribe(inbox.clone()).await?;
+        self.publish_with_reply_and_headers(subject, inbox, headers, payload)
+            .await?;
+        self.flush().await?;
+        match sub.next().await {
+            Some(message) => Ok(message),
+            None => Err(Box::new(io::Error::new(
+                ErrorKind::BrokenPipe,
+                "did not receive any message",
+            ))),
+        }
+    }
+
     /// Create a new globally unique inbox which can be used for replies.
     ///
     /// # Examples
