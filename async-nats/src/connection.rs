@@ -1,4 +1,5 @@
 use std::str::FromStr;
+
 use subslice::SubsliceExt;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
@@ -768,7 +769,7 @@ mod write_op {
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
             buffer,
-            "CONNECT {\"verbose\":false,\"pedantic\":false,\"user_jwt\":null,\"nkey\":null,\"signature\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":false}\r\n"
+            "CONNECT {\"verbose\":false,\"pedantic\":false,\"jwt\":null,\"nkey\":null,\"sig\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":false}\r\n"
         );
     }
 }

@@ -13,7 +13,8 @@
 
 use crate::{Authorization, Client, ServerError, ToServerAddrs};
 use futures::Future;
-use std::{fmt, path::PathBuf, pin::Pin, time::Duration};
+use std::fmt::Formatter;
+use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -45,9 +46,9 @@ pub struct ConnectOptions {
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
     pub(crate) flush_interval: Duration,
     pub(crate) ping_interval: Duration,
-    pub(crate) reconnect_callback: Callback,
-    pub(crate) disconnect_callback: Callback,
-    pub(crate) error_callback: ErrorCallback,
+    pub(crate) reconnect_callback: CallbackArg0<()>,
+    pub(crate) disconnect_callback: CallbackArg0<()>,
+    pub(crate) error_callback: CallbackArg1<ServerError, ()>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -85,9 +86,13 @@ impl Default for ConnectOptions {
             tls_client_config: None,
             flush_interval: Duration::from_millis(100),
             ping_interval: Duration::from_secs(60),
-            reconnect_callback: Callback(None),
-            disconnect_callback: Callback(None),
-            error_callback: ErrorCallback(None),
+            reconnect_callback: CallbackArg0::<()>(Arc::new(Box::new(|| Box::pin(async {})))),
+            disconnect_callback: CallbackArg0::<()>(Arc::new(Box::new(|| Box::pin(async {})))),
+            error_callback: CallbackArg1::<ServerError, ()>(Arc::new(Box::new(move |error| {
+                Box::pin(async move {
+                    println!("error : {}", error);
+                })
+            }))),
         }
     }
 }
@@ -149,7 +154,8 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into()).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
+    ///     .connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -158,6 +164,102 @@ impl ConnectOptions {
             auth: Authorization::UserAndPassword(user, pass),
             ..Default::default()
         }
+    }
+
+    /// Authenticate with a JWT. Requires function to sign the server nonce.
+    /// The signing function is asynchronous
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let key_pair = std::sync::Arc::new(nkeys::KeyPair::from_seed(seed).unwrap());
+    /// // load jwt from creds file or other secure source
+    /// async fn load_jwt() -> std::io::Result<String> { todo!(); }
+    /// let jwt = load_jwt().await?;
+    /// let nc = async_nats::ConnectOptions::with_jwt(jwt,
+    ///      move |nonce| {
+    ///         let key_pair = key_pair.clone();
+    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }})
+    ///     .connect("localhost").await?;
+    /// # std::io::Result::Ok(())
+    /// # }
+    /// ```
+    pub fn with_jwt<F, Fut>(jwt: String, sign_cb: F) -> Self
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
+    {
+        let sign_cb = Arc::new(sign_cb);
+        ConnectOptions {
+            auth: Authorization::Jwt(
+                jwt,
+                CallbackArg1(Arc::new(Box::new(move |nonce: String| {
+                    let sign_cb = sign_cb.clone();
+                    Box::pin(async move {
+                        let sig = sign_cb(nonce.as_bytes().to_vec())
+                            .await
+                            .map_err(AuthError::new)?;
+                        Ok(base64_url::encode(&sig))
+                    })
+                }))),
+            ),
+            ..Default::default()
+        }
+    }
+
+    /// Authenticate with NATS using a `.creds` file.
+    /// Open the provided file, load its creds,
+    /// and perform the desired authentication
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds".into()).await?
+    ///     .connect("connect.ngs.global").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn with_credentials_file(path: PathBuf) -> io::Result<Self> {
+        let cred_file_contents = crate::auth_utils::load_creds(path).await?;
+        Self::with_credentials(&cred_file_contents)
+    }
+
+    /// Authenticate with NATS using a credential str, in the creds file format.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let creds =
+    /// "-----BEGIN NATS USER JWT-----
+    /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
+    /// ------END NATS USER JWT------
+    ///
+    /// ************************* IMPORTANT *************************
+    /// NKEY Seed printed below can be used sign and prove identity.
+    /// NKEYs are sensitive and should be treated as secrets.
+    ///
+    /// -----BEGIN USER NKEY SEED-----
+    /// SUAIO3FHUX5PNV2LQIIP7TZ3N4L7TX3W53MQGEIVYFIGA635OZCKEYHFLM
+    /// ------END USER NKEY SEED------
+    /// ";
+    ///
+    /// let nc = async_nats::ConnectOptions::with_credentials(creds)
+    ///     .expect("failed to parse static creds")
+    ///     .connect("connect.ngs.global").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_credentials(creds: &str) -> io::Result<Self> {
+        let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
+        let key_pair = std::sync::Arc::new(key_pair);
+        Ok(Self::with_jwt(jwt, move |nonce| {
+            let key_pair = key_pair.clone();
+            async move { key_pair.sign(&nonce).map_err(AuthError::new) }
+        }))
     }
 
     /// Loads root certificates by providing the path to them.
@@ -282,7 +384,8 @@ impl ConnectOptions {
         F: Fn(ServerError) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.error_callback = ErrorCallback(Some(Box::new(move |error| Box::pin(cb(error)))));
+        self.error_callback =
+            CallbackArg1::<ServerError, ()>(Arc::new(Box::new(move |error| Box::pin(cb(error)))));
         self
     }
 
@@ -325,7 +428,7 @@ impl ConnectOptions {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.reconnect_callback = Callback(Some(Box::new(move || Box::pin(cb()))));
+        self.reconnect_callback = CallbackArg0::<()>(Arc::new(Box::new(move || Box::pin(cb()))));
         self
     }
 
@@ -368,57 +471,68 @@ impl ConnectOptions {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.disconnect_callback = Callback(Some(Box::new(move || Box::pin(cb()))));
+        self.disconnect_callback = CallbackArg0::<()>(Arc::new(Box::new(move || Box::pin(cb()))));
         self
     }
 }
 
-type AsyncCallback =
-    Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
-type AsyncErrorCallback =
-    Box<dyn Fn(ServerError) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
+type AsyncCallbackArg0<T> =
+    Box<dyn Fn() -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 
-#[derive(Default)]
-pub(crate) struct Callback(Option<AsyncCallback>);
-impl Callback {
-    pub async fn call(&self) {
-        if let Some(callback) = self.0.as_ref() {
-            callback().await
-        }
+type AsyncCallbackArg1<A, T> =
+    Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
+
+#[derive(Clone)]
+pub(crate) struct CallbackArg0<T>(Arc<AsyncCallbackArg0<T>>);
+
+impl<T> CallbackArg0<T> {
+    pub async fn call(&self) -> T {
+        (self.0.as_ref())().await
     }
 }
 
-impl fmt::Debug for Callback {
+impl<T> fmt::Debug for CallbackArg0<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(
-                &"callback",
-                if self.0.is_some() { &"set" } else { &"unset" },
-            )
-            .finish()
+        f.write_str("callback")
     }
 }
 
-#[derive(Default)]
-pub(crate) struct ErrorCallback(Option<AsyncErrorCallback>);
+#[derive(Clone)]
+pub(crate) struct CallbackArg1<A, T>(Arc<AsyncCallbackArg1<A, T>>);
 
-impl ErrorCallback {
-    pub async fn call(&self, err: ServerError) {
-        if let Some(callback) = self.0.as_ref() {
-            callback(err).await
-        } else {
-            println!("error returned from server: {}", err);
-        }
+impl<A, T> CallbackArg1<A, T> {
+    pub async fn call(&self, arg: A) -> T {
+        (self.0.as_ref())(arg).await
     }
 }
 
-impl fmt::Debug for ErrorCallback {
+impl<A, T> fmt::Debug for CallbackArg1<A, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(
-                &"callback",
-                if self.0.is_some() { &"set" } else { &"unset" },
-            )
-            .finish()
+        f.write_str("callback")
     }
 }
+
+/// Error report from signing callback
+// this was needed because std::io::Error isn't Send
+#[derive(Clone)]
+pub struct AuthError(String);
+
+impl AuthError {
+    pub fn new(s: impl ToString) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&format!("AuthError({})", &self.0))
+    }
+}
+
+impl std::fmt::Debug for AuthError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&format!("AuthError({})", &self.0))
+    }
+}
+
+impl std::error::Error for AuthError {}
