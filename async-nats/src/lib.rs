@@ -470,7 +470,7 @@ impl Connection {
         Ok(())
     }
 
-    async fn flush(&mut self) -> Result<(), io::Error> {
+    pub(crate) async fn flush(&mut self) -> Result<(), io::Error> {
         self.stream.flush().await
     }
 }
@@ -636,7 +636,7 @@ impl ConnectionHandler {
             }
         }
 
-        self.connection.stream.flush().await?;
+        self.connection.flush().await?;
 
         Ok(())
     }
@@ -666,7 +666,7 @@ impl ConnectionHandler {
                         self.connection
                             .write_op(ClientOp::Unsubscribe { sid, max: None })
                             .await?;
-                        self.connection.stream.flush().await?;
+                        self.connection.flush().await?;
                     // if channel was open and we sent the messsage, increase the
                     // `delivered` counter.
                     } else {
