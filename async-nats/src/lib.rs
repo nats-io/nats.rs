@@ -645,22 +645,30 @@ impl Connection {
 
 /// Maintains a list of servers and establishes connections.
 pub(crate) struct Connector {
-    server_addrs: Vec<ServerAddr>,
+    /// A map of servers and number of connect attempts.
+    servers: HashMap<ServerAddr, usize>,
     options: TlsOptions,
 }
 
 impl Connector {
+    pub(crate) fn new<A: ToServerAddrs>(
+        addrs: A,
+        options: TlsOptions,
+    ) -> Result<Connector, io::Error> {
+        let servers = addrs
+            .to_server_addrs()?
+            .into_iter()
+            .map(|addr| (addr, 0))
+            .collect();
+
+        Ok(Connector { servers, options })
+    }
+
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
-        for i in 0..128 {
+        for _ in 0..128 {
             if let Ok(inner) = self.try_connect().await {
                 return Ok(inner);
             }
-
-            let exp: u32 = i.try_into().unwrap_or(std::u32::MAX);
-            let max = Duration::from_secs(4);
-            let duration = cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max);
-
-            sleep(duration).await;
         }
 
         Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
@@ -669,12 +677,33 @@ impl Connector {
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
         let mut error = None;
 
-        for server_addr in &self.server_addrs {
-            match self.try_connect_to(server_addr).await {
+        let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
+        for server_addr in server_addrs {
+            let server_attempts = self.servers.get_mut(&server_addr).unwrap();
+            let duration = if *server_attempts == 0 {
+                Duration::from_millis(0)
+            } else {
+                let exp: u32 = (*server_attempts - 1).try_into().unwrap_or(std::u32::MAX);
+                let max = Duration::from_secs(4);
+
+                cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+            };
+
+            *server_attempts += 1;
+            sleep(duration).await;
+
+            match self.try_connect_to(&server_addr).await {
                 Ok((info, connection)) => {
                     for url in &info.connect_urls {
-                        self.server_addrs.push(url.parse()?);
+                        let server_addr = url.parse::<ServerAddr>()?;
+
+                        if self.servers.contains_key(&server_addr) {
+                            self.servers.insert(server_addr, 0);
+                        }
                     }
+
+                    let server_attempts = self.servers.get_mut(&server_addr).unwrap();
+                    *server_attempts = 0;
 
                     return Ok((info, connection));
                 }
@@ -1224,11 +1253,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         tls_client_config: options.tls_client_config,
     };
 
-    let mut connector = Connector {
-        server_addrs: addrs.to_server_addrs()?.into_iter().collect(),
-        options: tls_options,
-    };
-
+    let mut connector = Connector::new(addrs, tls_options)?;
     let (_, connection) = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
