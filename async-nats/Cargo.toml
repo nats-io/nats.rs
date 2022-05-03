@@ -13,6 +13,7 @@ categories = ["network-programming", "api-bindings"]
 
 [dependencies]
 subslice = "0.2.3"
+base64-url = "1.4.13"
 bytes = "1.1.0"
 futures = "0.3.21"
 futures-sink = "0.3.21"

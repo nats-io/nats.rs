@@ -617,9 +617,9 @@ impl ConnectionHandler {
                                 println!("error handling operation {}", err);
                             }
                         }
-                        Err(err) => {
+                        Err(op_err) => {
                             if let Err(err) = self.handle_reconnect().await {
-                                println!("error handling operation {}", err);
+                                println!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
                     }
@@ -955,7 +955,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options: options.clone(),
     };
 
-    let (_, connection) = connector.try_connect().await?;
+    let (server_info, connection) = connector.try_connect().await?;
     let mut connection_handler = ConnectionHandler::new(connection, connector);
 
     // TODO make channel size configurable
@@ -986,6 +986,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         Authorization::UserAndPassword(user, pass) => {
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
+        }
+        Authorization::Jwt(jwt, sig_fn) => {
+            let sig = sig_fn(server_info.nonce.as_bytes())?;
+            connect_info.user_jwt = Some(jwt);
+            connect_info.signature = Some(sig);
         }
     }
     connection_handler
@@ -1416,6 +1421,8 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+pub(crate) type AuthSignatureFn = dyn Fn(&[u8]) -> std::io::Result<String> + Send + Sync;
+
 #[derive(Clone)]
 pub(crate) enum Authorization {
     /// No authentication.
@@ -1426,4 +1433,7 @@ pub(crate) enum Authorization {
 
     /// Authenticate using a username and password.
     UserAndPassword(String, String),
+
+    /// Authenticate using a jwt and a signing function
+    Jwt(String, Arc<AuthSignatureFn>),
 }

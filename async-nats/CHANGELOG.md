@@ -1,3 +1,7 @@
+# (unreleased)
+## Added
+* Add jwt authentication
+
 # 0.12.0
 ## Added
 * Add more examples and docs by @Jarema in https://github.com/nats-io/nats.rs/pull/372

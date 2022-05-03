@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{Authorization, Client, ToServerAddrs};
-use std::{fmt, path::PathBuf, time::Duration};
+use std::{fmt, path::PathBuf, sync::Arc, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -150,6 +150,34 @@ impl ConnectOptions {
     pub fn with_user_and_password(user: String, pass: String) -> Self {
         ConnectOptions {
             auth: Authorization::UserAndPassword(user, pass),
+            ..Default::default()
+        }
+    }
+
+    /// Authenticate with a JWT. Requires function to sign the server nonce.
+    ///
+    /// # Example
+    /// ```no_run
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let kp = nkeys::KeyPair::from_seed(seed).unwrap();
+    /// // load jwt from creds file or other secure source
+    /// async fn load_jwt() -> std::io::Result<String> { todo!(); }
+    /// let jwt = load_jwt().await?;
+    ///
+    /// let nc = async_nats::ConnectOptions::with_jwt(jwt, move |nonce| kp.sign(nonce).unwrap())
+    ///     .connect("localhost")?;
+    /// # std::io::Result::Ok(())
+    /// ```
+    pub fn with_jwt<S>(jwt: String, sig_cb: S) -> Self
+    where
+        //J: Fn() -> futures::future::BoxFuture<String> + Send + Sync + 'static,
+        S: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
+    {
+        ConnectOptions {
+            auth: Authorization::Jwt(
+                jwt,
+                Arc::new(move |nonce| Ok(base64_url::encode(&sig_cb(nonce)))),
+            ),
             ..Default::default()
         }
     }
