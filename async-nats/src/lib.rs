@@ -145,10 +145,13 @@ pub use tokio_rustls::rustls;
 use connection::Connection;
 pub use header::{HeaderMap, HeaderValue};
 
+pub(crate) mod auth_utils;
 mod connection;
 mod options;
 
-pub use options::ConnectOptions;
+use crate::options::CallbackArg1;
+pub use options::{AuthError, ConnectOptions};
+
 pub mod header;
 mod tls;
 
@@ -472,9 +475,9 @@ impl ConnectionHandler {
                             } else {
                             }
                         }
-                        Err(_err) => {
+                        Err(op_err) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error handling operation {}", err);
+                                println!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
                     }
@@ -896,7 +899,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     };
 
     let mut connector = Connector::new(addrs, tls_options)?;
-    let (_, connection) = connector.try_connect().await?;
+    let (server_info, connection) = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
@@ -931,6 +934,18 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
         }
+        Authorization::Jwt(jwt, sign_fn) => match sign_fn.call(server_info.nonce.clone()).await {
+            Ok(sig) => {
+                connect_info.user_jwt = Some(jwt.clone());
+                connect_info.signature = Some(sig);
+            }
+            Err(e) => {
+                println!(
+                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
+                    e
+                );
+            }
+        },
     }
     connection_handler
         .connection
@@ -1171,12 +1186,14 @@ pub struct ConnectInfo {
     pub pedantic: bool,
 
     /// User's JWT.
+    #[serde(rename = "jwt")]
     pub user_jwt: Option<String>,
 
     /// Public nkey.
     pub nkey: Option<String>,
 
     /// Signed nonce, encoded to Base64URL.
+    #[serde(rename = "sig")]
     pub signature: Option<String>,
 
     /// Optional client name.
@@ -1379,4 +1396,10 @@ pub(crate) enum Authorization {
 
     /// Authenticate using a username and password.
     UserAndPassword(String, String),
+
+    /// Authenticate using a jwt and signing function.
+    Jwt(
+        String,
+        CallbackArg1<String, std::result::Result<String, AuthError>>,
+    ),
 }
