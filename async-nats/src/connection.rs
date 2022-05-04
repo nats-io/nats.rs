@@ -222,7 +222,7 @@ impl Connection {
 
                         headers.append(
                             HeaderName::from_str(key).unwrap(),
-                            HeaderValue::from_str(&value).unwrap(),
+                            HeaderValue::from_str(value.trim()).unwrap(),
                         );
                     }
 
