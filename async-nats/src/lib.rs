@@ -839,7 +839,6 @@ impl ConnectionHandler {
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
                                 println!("error handling operation {}", err);
-                            } else {
                             }
                         }
                         Err(err) => {
@@ -1047,7 +1046,6 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.events.try_send(ServerEvent::Reconnect).ok();
         Ok(())
     }
 }
