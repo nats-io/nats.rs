@@ -331,6 +331,7 @@ mod client {
     #[tokio::test]
     async fn connection_callbacks() {
         use async_nats::ServerAddr;
+        use std::time::Duration;
 
         let mut servers = vec![
             nats_server::run_basic_server(),
@@ -340,6 +341,7 @@ mod client {
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
         let mut nc = async_nats::ConnectOptions::new()
+            .ping_interval(Duration::from_millis(100))
             .reconnect_callback(move || {
                 let tx = tx.clone();
                 async move {
