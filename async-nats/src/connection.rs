@@ -9,6 +9,7 @@ use tokio::io;
 use crate::header::{HeaderMap, HeaderName, HeaderValue};
 use crate::ClientOp;
 use crate::ServerError;
+use crate::ServerInfo;
 use crate::ServerOp;
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
@@ -376,5 +377,179 @@ impl Connection {
 
     pub(crate) async fn flush(&mut self) -> Result<(), io::Error> {
         self.stream.flush().await
+    }
+}
+
+#[cfg(test)]
+mod read_op {
+    use super::{Connection, HeaderMap, ServerError, ServerInfo, ServerOp};
+    use bytes::BytesMut;
+    use tokio::io::{self, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn ok() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        server.write_all(b"+OK\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(result, Some(ServerOp::Ok));
+    }
+
+    #[tokio::test]
+    async fn ping() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        server.write_all(b"PING\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(result, Some(ServerOp::Ping));
+    }
+
+    #[tokio::test]
+    async fn pong() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        server.write_all(b"PONG\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(result, Some(ServerOp::Pong));
+    }
+
+    #[tokio::test]
+    async fn info() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        server.write_all(b"INFO {}\r\n").await.unwrap();
+        server.flush().await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Info(Box::new(ServerInfo::default())))
+        );
+
+        server
+            .write_all(b"INFO { \"version\": \"1.0.0\" }\r\n")
+            .await
+            .unwrap();
+        server.flush().await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Info(Box::new(ServerInfo {
+                version: "1.0.0".into(),
+                ..Default::default()
+            })))
+        );
+    }
+
+    #[tokio::test]
+    async fn error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        server.write_all(b"INFO {}\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Info(Box::new(ServerInfo::default())))
+        );
+
+        server
+            .write_all(b"-ERR something went wrong\r\n")
+            .await
+            .unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Error(ServerError::Other(
+                "something went wrong".into()
+            )))
+        );
+    }
+
+    #[tokio::test]
+    async fn message() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        server
+            .write_all(b"MSG FOO.BAR 9 11\r\nHello World\r\n")
+            .await
+            .unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Message {
+                sid: 9,
+                subject: "FOO.BAR".into(),
+                reply: None,
+                headers: None,
+                payload: "Hello World".into(),
+            })
+        );
+
+        server
+            .write_all(b"MSG FOO.BAR 9 INBOX.34 11\r\nHello World\r\n")
+            .await
+            .unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Message {
+                sid: 9,
+                subject: "FOO.BAR".into(),
+                reply: Some("INBOX.34".into()),
+                headers: None,
+                payload: "Hello World".into(),
+            })
+        );
+
+        server
+            .write_all(b"HMSG FOO.BAR 10 INBOX.35 23 34\r\n")
+            .await
+            .unwrap();
+        server.write_all(b"NATS/1.0\r\n").await.unwrap();
+        server.write_all(b"Header: X\r\n").await.unwrap();
+        server.write_all(b"\r\n").await.unwrap();
+        server.write_all(b"Hello World\r\n").await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Message {
+                sid: 10,
+                subject: "FOO.BAR".into(),
+                reply: Some("INBOX.35".into()),
+                headers: Some(HeaderMap::from_iter([(
+                    "Header".parse().unwrap(),
+                    "X".parse().unwrap()
+                )])),
+                payload: "Hello World".into(),
+            })
+        );
     }
 }
