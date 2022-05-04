@@ -8,6 +8,8 @@ use tokio::io;
 
 use crate::header::{HeaderMap, HeaderName, HeaderValue};
 use crate::ClientOp;
+use crate::ConnectInfo;
+use crate::Protocol;
 use crate::ServerError;
 use crate::ServerInfo;
 use crate::ServerOp;
@@ -550,6 +552,229 @@ mod read_op {
                 )])),
                 payload: "Hello World".into(),
             })
+        );
+    }
+}
+
+#[cfg(test)]
+mod write_op {
+    use super::{ClientOp, ConnectInfo, Connection, HeaderMap, Protocol};
+    use bytes::BytesMut;
+    use tokio::io::{self, AsyncBufReadExt, BufReader};
+
+    #[tokio::test]
+    async fn publish() {
+        let (stream, server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        connection
+            .write_op(ClientOp::Publish {
+                subject: "FOO.BAR".into(),
+                payload: "Hello World".into(),
+                respond: None,
+                headers: None,
+            })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        let mut buffer = String::new();
+        let mut reader = BufReader::new(server);
+        reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "PUB FOO.BAR 11\r\nHello World\r\n");
+
+        connection
+            .write_op(ClientOp::Publish {
+                subject: "FOO.BAR".into(),
+                payload: "Hello World".into(),
+                respond: Some("INBOX.67".into()),
+                headers: None,
+            })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        buffer.clear();
+        reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "PUB FOO.BAR INBOX.67 11\r\nHello World\r\n");
+
+        connection
+            .write_op(ClientOp::Publish {
+                subject: "FOO.BAR".into(),
+                payload: "Hello World".into(),
+                respond: Some("INBOX.67".into()),
+                headers: Some(HeaderMap::from_iter([(
+                    "Header".parse().unwrap(),
+                    "X".parse().unwrap(),
+                )])),
+            })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        buffer.clear();
+        reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(
+            buffer,
+            "HPUB FOO.BAR INBOX.67 22 33\r\nNATS/1.0\r\nheader:X\r\n\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe() {
+        let (stream, server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        connection
+            .write_op(ClientOp::Subscribe {
+                sid: 11,
+                subject: "FOO.BAR".into(),
+                queue_group: None,
+            })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        let mut buffer = String::new();
+        let mut reader = BufReader::new(server);
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "SUB FOO.BAR 11\r\n");
+
+        connection
+            .write_op(ClientOp::Subscribe {
+                sid: 11,
+                subject: "FOO.BAR".into(),
+                queue_group: Some("QUEUE.GROUP".into()),
+            })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        buffer.clear();
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "SUB FOO.BAR QUEUE.GROUP 11\r\n");
+    }
+
+    #[tokio::test]
+    async fn unsubscribe() {
+        let (stream, server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        connection
+            .write_op(ClientOp::Unsubscribe { sid: 11, max: None })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        let mut buffer = String::new();
+        let mut reader = BufReader::new(server);
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "UNSUB 11\r\n");
+
+        connection
+            .write_op(ClientOp::Unsubscribe {
+                sid: 11,
+                max: Some(2),
+            })
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        buffer.clear();
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "UNSUB 11 2\r\n");
+    }
+
+    #[tokio::test]
+    async fn ping() {
+        let (stream, server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        let mut reader = BufReader::new(server);
+        let mut buffer = String::new();
+
+        connection.write_op(ClientOp::Ping).await.unwrap();
+        connection.flush().await.unwrap();
+
+        reader.read_line(&mut buffer).await.unwrap();
+
+        assert_eq!(buffer, "PING\r\n");
+    }
+
+    #[tokio::test]
+    async fn pong() {
+        let (stream, server) = io::duplex(128);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        let mut reader = BufReader::new(server);
+        let mut buffer = String::new();
+
+        connection.write_op(ClientOp::Pong).await.unwrap();
+        connection.flush().await.unwrap();
+
+        reader.read_line(&mut buffer).await.unwrap();
+
+        assert_eq!(buffer, "PONG\r\n");
+    }
+
+    #[tokio::test]
+    async fn connect() {
+        let (stream, server) = io::duplex(1024);
+        let mut connection = Connection {
+            stream: Box::new(stream),
+            buffer: BytesMut::new(),
+        };
+
+        let mut reader = BufReader::new(server);
+        let mut buffer = String::new();
+
+        connection
+            .write_op(ClientOp::Connect(ConnectInfo {
+                verbose: false,
+                pedantic: false,
+                user_jwt: None,
+                nkey: None,
+                signature: None,
+                name: None,
+                echo: false,
+                lang: "Rust".into(),
+                version: "1.0.0".into(),
+                protocol: Protocol::Dynamic,
+                tls_required: false,
+                user: None,
+                pass: None,
+                auth_token: None,
+                headers: false,
+                no_responders: false,
+            }))
+            .await
+            .unwrap();
+        connection.flush().await.unwrap();
+
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(
+            buffer,
+            "CONNECT {\"verbose\":false,\"pedantic\":false,\"user_jwt\":null,\"nkey\":null,\"signature\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":false}\r\n"
         );
     }
 }
