@@ -465,6 +465,7 @@ impl ConnectionHandler {
                 maybe_op_result = self.connection.read_op().fuse() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
+                            self.handle_disconnect().await?;
                             println!("error handling operation {}", err);
                         }
                         Ok(None) => {
