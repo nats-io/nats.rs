@@ -1029,7 +1029,7 @@ impl ConnectionHandler {
     async fn handle_disconnect(&mut self) -> io::Result<()> {
         self.events.try_send(ServerEvent::Disconnect).ok();
         self.handle_reconnect().await?;
-        self.events.try_send(ServerEvent::Reconnect).ok();
+
         Ok(())
     }
 
