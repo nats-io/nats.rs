@@ -155,7 +155,7 @@ mod tls;
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
 #[allow(unused)]
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Eq, PartialEq)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     #[serde(default)]
@@ -208,7 +208,7 @@ pub struct ServerInfo {
     pub lame_duck_mode: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ServerOp {
     Ok,
     Info(Box<ServerInfo>),
@@ -1136,7 +1136,7 @@ impl Stream for Subscriber {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerError {
     AuthorizationViolation,
     Other(String),
