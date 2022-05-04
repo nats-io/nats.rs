@@ -144,8 +144,12 @@ const LANG: &str = "rust";
 /// must be provided using `Options::tls_client_config`.
 pub use tokio_rustls::rustls;
 
+use header::HeaderName;
+pub use header::{HeaderMap, HeaderValue};
+
 mod options;
 pub use options::ConnectOptions;
+pub mod header;
 mod tls;
 
 /// Information sent by the server back to this client
@@ -216,6 +220,7 @@ pub(crate) enum ServerOp {
         subject: String,
         reply: Option<String>,
         payload: Bytes,
+        headers: Option<HeaderMap>,
     },
 }
 
@@ -225,6 +230,7 @@ pub enum Command {
         subject: String,
         payload: Bytes,
         respond: Option<String>,
+        headers: Option<HeaderMap>,
     },
     Subscribe {
         sid: u64,
@@ -251,6 +257,7 @@ pub enum ClientOp {
         subject: String,
         payload: Bytes,
         respond: Option<String>,
+        headers: Option<HeaderMap>,
     },
     Subscribe {
         sid: u64,
@@ -367,7 +374,126 @@ impl Connection {
                     return Ok(Some(ServerOp::Message {
                         sid,
                         reply: reply_to,
+                        headers: None,
                         subject,
+                        payload,
+                    }));
+                }
+            }
+
+            return Ok(None);
+        }
+
+        if self.buffer.starts_with(b"HMSG ") {
+            if let Some(len) = self.buffer.find(b"\r\n") {
+                // Extract whitespace-delimited arguments that come after "HMSG".
+                let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
+                let args = line.split_whitespace().filter(|s| !s.is_empty());
+                let args = args.collect::<Vec<_>>();
+
+                // <subject> <sid> [reply-to] <# header bytes><# total bytes>
+                let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..] {
+                    [subject, sid, num_header_bytes, num_bytes] => {
+                        (subject, sid, None, num_header_bytes, num_bytes)
+                    }
+                    [subject, sid, reply_to, num_header_bytes, num_bytes] => {
+                        (subject, sid, Some(reply_to), num_header_bytes, num_bytes)
+                    }
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "invalid number of arguments after HMSG",
+                        ));
+                    }
+                };
+
+                // Convert the slice into an owned string.
+                let subject = subject.to_string();
+
+                // Parse the subject ID.
+                let sid = u64::from_str(sid).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "cannot parse sid argument after HMSG",
+                    )
+                })?;
+
+                // Convert the slice into an owned string.
+                let reply_to = reply_to.map(ToString::to_string);
+
+                // Parse the number of payload bytes.
+                let num_header_bytes = usize::from_str(num_header_bytes).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "cannot parse the number of header bytes argument after \
+                     HMSG",
+                    )
+                })?;
+
+                // Parse the number of payload bytes.
+                let num_bytes = usize::from_str(num_bytes).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "cannot parse the number of bytes argument after HMSG",
+                    )
+                })?;
+
+                if num_bytes < num_header_bytes {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "number of header bytes was greater than or equal to the \
+                 total number of bytes after HMSG",
+                    ));
+                }
+
+                // Only advance if there is enough data for the entire operation and payload remaining.
+                if len + num_bytes + 4 <= self.buffer.remaining() {
+                    self.buffer.advance(len + 2);
+                    let buffer = self.buffer.split_to(num_header_bytes).freeze();
+                    let payload = self.buffer.split_to(num_bytes - num_header_bytes).freeze();
+
+                    let mut lines = std::str::from_utf8(&buffer).unwrap().lines().peekable();
+
+                    let version_line = lines.next().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "no header version line found")
+                    })?;
+
+                    if !version_line.starts_with("NATS/1.0") {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "header version line does not begin with nats/1.0",
+                        ));
+                    }
+
+                    let mut headers = HeaderMap::new();
+                    while let Some(line) = lines.next() {
+                        if line.is_empty() {
+                            continue;
+                        }
+
+                        let (key, value) = line.split_once(':').ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                "no header version line found",
+                            )
+                        })?;
+
+                        let mut value = String::from_str(value).unwrap();
+                        while let Some(v) = lines.next_if(|s| s.starts_with(char::is_whitespace)) {
+                            value.push_str(v);
+                        }
+
+                        headers.append(
+                            HeaderName::from_str(key).unwrap(),
+                            HeaderValue::from_str(&value).unwrap(),
+                        );
+                    }
+
+                    return Ok(Some(ServerOp::Message {
+                        sid,
+                        reply: reply_to,
+                        subject,
+                        headers: Some(headers),
                         payload,
                     }));
                 }
@@ -409,19 +535,60 @@ impl Connection {
                 subject,
                 payload,
                 respond,
+                headers,
             } => {
-                let mut bufi = itoa::Buffer::new();
-                self.stream.write_all(b"PUB ").await?;
+                if headers.is_some() {
+                    self.stream.write_all(b"HPUB ").await?;
+                } else {
+                    self.stream.write_all(b"PUB ").await?;
+                }
+
                 self.stream.write_all(subject.as_bytes()).await?;
                 self.stream.write_all(b" ").await?;
+
                 if let Some(respond) = respond {
                     self.stream.write_all(respond.as_bytes()).await?;
                     self.stream.write_all(b" ").await?;
                 }
-                self.stream
-                    .write_all(bufi.format(payload.len()).as_bytes())
-                    .await?;
-                self.stream.write_all(b"\r\n").await?;
+
+                if let Some(headers) = headers {
+                    let mut header = Vec::new();
+                    header.extend_from_slice(b"NATS/1.0\r\n");
+                    for (key, value) in headers.iter() {
+                        header.extend_from_slice(key.as_ref());
+                        header.push(b':');
+                        header.extend_from_slice(value.as_ref());
+                        header.extend_from_slice(b"\r\n");
+                    }
+
+                    header.extend_from_slice(b"\r\n");
+
+                    let mut header_len_buf = itoa::Buffer::new();
+                    self.stream
+                        .write_all(header_len_buf.format(header.len()).as_bytes())
+                        .await?;
+
+                    self.stream.write_all(b" ").await?;
+
+                    let mut total_len_buf = itoa::Buffer::new();
+                    self.stream
+                        .write_all(
+                            total_len_buf
+                                .format(header.len() + payload.len())
+                                .as_bytes(),
+                        )
+                        .await?;
+
+                    self.stream.write_all(b"\r\n").await?;
+                    self.stream.write_all(&header).await?;
+                } else {
+                    let mut len_buf = itoa::Buffer::new();
+                    self.stream
+                        .write_all(len_buf.format(payload.len()).as_bytes())
+                        .await?;
+                    self.stream.write_all(b"\r\n").await?;
+                }
+
                 self.stream.write_all(&payload).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
@@ -651,12 +818,14 @@ impl ConnectionHandler {
                 subject,
                 reply,
                 payload,
+                headers,
             } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message = Message {
                         subject,
                         reply,
                         payload,
+                        headers,
                     };
 
                     // if the channel for subscription was dropped, remove the
@@ -775,6 +944,7 @@ impl ConnectionHandler {
                 subject,
                 payload,
                 respond,
+                headers,
             } => {
                 while let Err(err) = self
                     .connection
@@ -782,6 +952,7 @@ impl ConnectionHandler {
                         subject: subject.clone(),
                         payload: payload.clone(),
                         respond: respond.clone(),
+                        headers: headers.clone(),
                     })
                     .await
                 {
@@ -845,6 +1016,24 @@ impl Client {
                 subject,
                 payload,
                 respond: None,
+                headers: None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn publish_with_headers(
+        &mut self,
+        subject: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<(), Error> {
+        self.sender
+            .send(Command::Publish {
+                subject,
+                payload,
+                respond: None,
+                headers: Some(headers),
             })
             .await?;
         Ok(())
@@ -861,6 +1050,25 @@ impl Client {
                 subject,
                 payload,
                 respond: Some(reply),
+                headers: None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn publish_with_reply_and_headers(
+        &mut self,
+        subject: String,
+        reply: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<(), Error> {
+        self.sender
+            .send(Command::Publish {
+                subject,
+                payload,
+                respond: Some(reply),
+                headers: Some(headers),
             })
             .await?;
         Ok(())
@@ -870,6 +1078,26 @@ impl Client {
         let inbox = self.new_inbox();
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply(subject, inbox, payload).await?;
+        self.flush().await?;
+        match sub.next().await {
+            Some(message) => Ok(message),
+            None => Err(Box::new(io::Error::new(
+                ErrorKind::BrokenPipe,
+                "did not receive any message",
+            ))),
+        }
+    }
+
+    pub async fn request_with_headers(
+        &mut self,
+        subject: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<Message, Error> {
+        let inbox = self.new_inbox();
+        let mut sub = self.subscribe(inbox.clone()).await?;
+        self.publish_with_reply_and_headers(subject, inbox, headers, payload)
+            .await?;
         self.flush().await?;
         match sub.next().await {
             Some(message) => Ok(message),
@@ -1070,6 +1298,7 @@ pub struct Message {
     pub subject: String,
     pub reply: Option<String>,
     pub payload: Bytes,
+    pub headers: Option<HeaderMap>,
 }
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
