@@ -15,6 +15,8 @@ mod nats_server;
 
 mod client {
 
+    use std::{collections::HashMap, time::Duration};
+
     use super::nats_server;
     use bytes::Bytes;
     use futures_util::{future::join_all, StreamExt};
@@ -119,6 +121,27 @@ mod client {
             }
         }
         assert_eq!(i, 10);
+    }
+
+    #[tokio::test]
+    async fn publish_with_headers() {
+        let server = nats_server::run_basic_server();
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+
+        let mut headers = async_nats::HeaderMap::new();
+        headers.append("X-Test", b"Test".as_ref().try_into().unwrap());
+
+        client
+            .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
+            .await
+            .unwrap();
+
+        client.flush().await.unwrap();
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.headers.unwrap(), headers);
     }
 
     #[tokio::test]
@@ -245,15 +268,16 @@ mod client {
             nats_server::run_basic_server(),
         ];
 
-        let mut client = async_nats::connect(
-            servers
-                .iter()
-                .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
-                .collect::<Vec<ServerAddr>>()
-                .as_slice(),
-        )
-        .await
-        .unwrap();
+        let mut client = async_nats::ConnectOptions::new()
+            .connect(
+                servers
+                    .iter()
+                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>()
+                    .as_slice(),
+            )
+            .await
+            .unwrap();
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
@@ -302,5 +326,51 @@ mod client {
             .connect(server.client_url())
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn connection_callbacks() {
+        let server = nats_server::run_basic_server();
+        let port = server.client_port().to_string();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
+        let mut nc = async_nats::ConnectOptions::new()
+            .reconnect_callback(move || {
+                let tx = tx.clone();
+                async move {
+                    println!("reconnection callback fired");
+                    tx.send(()).await.unwrap();
+                }
+            })
+            .disconnect_callback(move || {
+                let dc_tx = dc_tx.clone();
+                async move {
+                    println!("disconnect callback fired");
+                    dc_tx.send(()).await.unwrap();
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        println!("conncted");
+        nc.subscribe("test".to_string()).await.unwrap();
+        nc.flush().await.unwrap();
+
+        println!("dropped server {:?}", server.client_url());
+        drop(server);
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let _server = nats_server::run_server_with_port("", Some(port.as_str()));
+
+        tokio::time::timeout(Duration::from_secs(15), dc_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(15), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

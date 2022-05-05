@@ -1,6 +1,18 @@
-# (unreleased)
+# 0.13.0
 ## Added
-* Add jwt authentication
+* Add Auth - username/password & token by @Jarema in https://github.com/nats-io/nats.rs/pull/408
+* Support sending and receiving messages with headers by @caspervonb in https://github.com/nats-io/nats.rs/pull/402 
+* Add async server errors callbacks by @Jarema in https://github.com/nats-io/nats.rs/pull/397
+* Discover additional servers via INFO by @caspervonb in https://github.com/nats-io/nats.rs/pull/403
+* Resolve socket addresses during connect by @caspervonb in https://github.com/nats-io/nats.rs/pull/403
+
+## Changed
+* Wait between reconnection attempts by @caspervonb in https://github.com/nats-io/nats.rs/pull/407
+* Limit connection attempts by @caspervonb in https://github.com/nats-io/nats.rs/pull/400
+
+## Other
+* Remove redundant doctests by @Jarema in https://github.com/nats-io/nats.rs/pull/412
+* Fix connection callback tests by @Jarema in https://github.com/nats-io/nats.rs/pull/420
 
 # 0.12.0
 ## Added
