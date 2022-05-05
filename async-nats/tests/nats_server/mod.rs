@@ -66,6 +66,15 @@ impl Server {
         format!("{}127.0.0.1:{}", scheme, port)
     }
 
+    pub fn client_port(&self) -> u16 {
+        let addr = self.client_addr();
+        let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
+        let mut line = String::new();
+        r.read_line(&mut line).expect("did not receive INFO");
+        let si = json::parse(&line["INFO".len()..]).unwrap();
+        si["port"].as_u16().expect("could not parse port")
+    }
+
     // Allow user/pass override.
     pub fn client_url_with(&self, user: &str, pass: &str) -> String {
         use url::Url;
@@ -110,8 +119,12 @@ pub fn set_lame_duck_mode(s: &Server) {
         .unwrap();
 }
 
-/// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server(cfg: &str) -> Server {
+    run_server_with_port(cfg, None)
+}
+
+/// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
+pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     let id = nuid::next();
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
     let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
@@ -122,9 +135,12 @@ pub fn run_server(cfg: &str) -> Server {
     let mut cmd = Command::new("nats-server");
     cmd.arg("--store_dir")
         .arg(store_dir.as_path().to_str().unwrap())
-        .arg("-p")
-        .arg("-1")
-        .arg("-l")
+        .arg("-p");
+    match port {
+        Some(port) => cmd.arg(port),
+        None => cmd.arg("-1"),
+    };
+    cmd.arg("-l")
         .arg(logfile.as_os_str())
         .arg("-P")
         .arg(pidfile.as_os_str());
