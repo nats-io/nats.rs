@@ -366,9 +366,9 @@ mod client {
             .await
             .unwrap();
         println!("conncted");
+        drop(servers.remove(0));
         nc.subscribe("test".to_string()).await.unwrap();
         nc.flush().await.unwrap();
-        drop(servers.remove(0));
         tokio::time::sleep(Duration::from_secs(3)).await;
         println!("dropped server");
         tokio::time::timeout(Duration::from_secs(15), dc_rx.recv())
