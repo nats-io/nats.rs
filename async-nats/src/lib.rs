@@ -798,6 +798,8 @@ pub(crate) struct ConnectionHandler {
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
     events: mpsc::Sender<ServerEvent>,
+    pending_pings: usize,
+    max_pings: usize,
 }
 
 impl ConnectionHandler {
@@ -811,6 +813,8 @@ impl ConnectionHandler {
             connector,
             subscriptions: HashMap::new(),
             events,
+            pending_pings: 0,
+            max_pings: 2,
         }
     }
 
@@ -861,6 +865,9 @@ impl ConnectionHandler {
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(ClientOp::Pong).await?;
+            }
+            ServerOp::Pong => {
+                self.pending_pings -= 1;
             }
             ServerOp::Error(error) => {
                 self.events.try_send(ServerEvent::Error(error)).ok();
@@ -938,6 +945,12 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
+                self.pending_pings += 1;
+
+                if self.pending_pings > self.max_pings {
+                    self.handle_disconnect().await?;
+                }
+
                 if let Err(err) = self.connection.write_op(ClientOp::Ping).await {
                     self.handle_disconnect().await?;
                 }
@@ -1309,12 +1322,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
         None => return Err(io::Error::new(ErrorKind::BrokenPipe, "connection aborted")),
     }
-
-    client
-        .sender
-        .send(Command::Ping)
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
 
     tokio::spawn({
         let sender = sender.clone();
