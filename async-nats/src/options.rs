@@ -13,7 +13,7 @@
 
 use crate::{Authorization, Client, ServerError, ToServerAddrs};
 use futures::Future;
-use std::{fmt, path::PathBuf, pin::Pin, time::Duration};
+use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -161,6 +161,7 @@ impl ConnectOptions {
     }
 
     /// Authenticate with a JWT. Requires function to sign the server nonce.
+    /// The signing function is synchronous and should not do any blocking io.
     ///
     /// # Example
     /// ```no_run

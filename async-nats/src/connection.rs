@@ -8,10 +8,7 @@ use tokio::io;
 
 use crate::header::{HeaderMap, HeaderName, HeaderValue};
 use crate::ClientOp;
-use crate::ConnectInfo;
-use crate::Protocol;
 use crate::ServerError;
-use crate::ServerInfo;
 use crate::ServerOp;
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.

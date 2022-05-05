@@ -890,7 +890,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     };
 
     let mut connector = Connector::new(addrs, tls_options)?;
-    let (_, connection) = connector.try_connect().await?;
+    let (server_info, connection) = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
@@ -924,6 +924,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         Authorization::UserAndPassword(user, pass) => {
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
+        }
+        Authorization::Jwt(jwt, sign_fn) => {
+            let sig = (sign_fn)(server_info.nonce.as_bytes())?;
+            connect_info.user_jwt = Some(jwt);
+            connect_info.signature = Some(sig);
         }
     }
     connection_handler
@@ -1371,6 +1376,8 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+pub(crate) type AuthSignatureFn = dyn Fn(&[u8]) -> std::io::Result<String> + Send + Sync;
+
 #[derive(Clone)]
 pub(crate) enum Authorization {
     /// No authentication.
@@ -1381,4 +1388,7 @@ pub(crate) enum Authorization {
 
     /// Authenticate using a username and password.
     UserAndPassword(String, String),
+
+    /// Authenticate using a jwt and signing function.
+    Jwt(String, Arc<AuthSignatureFn>),
 }
