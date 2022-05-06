@@ -93,7 +93,7 @@
 //! # async fn main() -> Result<(), Box<dyn Error>> {
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
-//! let subscriber = client.subscribe("foo".into()).await.unwrap();
+//! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
 //! while let Some(message) = subscriber.next().await {
 //!     println!("Received message {:?}", message);
