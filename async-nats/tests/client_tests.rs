@@ -330,12 +330,8 @@ mod client {
 
     #[tokio::test]
     async fn connection_callbacks() {
-        use async_nats::ServerAddr;
-
-        let mut servers = vec![
-            nats_server::run_basic_server(),
-            nats_server::run_basic_server(),
-        ];
+        let server = nats_server::run_basic_server();
+        let port = server.client_port().to_string();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
@@ -354,21 +350,19 @@ mod client {
                     dc_tx.send(()).await.unwrap();
                 }
             })
-            .connect(
-                servers
-                    .iter()
-                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
-                    .collect::<Vec<ServerAddr>>()
-                    .as_slice(),
-            )
+            .connect(server.client_url())
             .await
             .unwrap();
         println!("conncted");
         nc.subscribe("test".to_string()).await.unwrap();
         nc.flush().await.unwrap();
-        drop(servers.remove(0));
+
+        println!("dropped server {:?}", server.client_url());
+        drop(server);
         tokio::time::sleep(Duration::from_secs(3)).await;
-        println!("dropped server");
+
+        let _server = nats_server::run_server_with_port("", Some(port.as_str()));
+
         tokio::time::timeout(Duration::from_secs(15), dc_rx.recv())
             .await
             .unwrap()
