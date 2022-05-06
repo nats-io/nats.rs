@@ -13,13 +13,7 @@
 
 use crate::{Authorization, Client, ServerError, ToServerAddrs};
 use futures::Future;
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-    pin::Pin,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 use tokio::io;
 use tokio_rustls::rustls;
 
