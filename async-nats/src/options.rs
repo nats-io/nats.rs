@@ -206,13 +206,13 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let nc = async_nats::ConnectOptions::with_credentials("path/to/my.creds").await?
+    /// let nc = async_nats::ConnectOptions::with_credentials("path/to/my.creds".into()).await?
     ///     .connect("connect.ngs.global").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn with_credentials(path: impl AsRef<Path>) -> io::Result<Self> {
-        let (jwt, kp) = crate::auth_utils::load_creds(path.as_ref().to_owned()).await?;
+    pub async fn with_credentials(path: PathBuf) -> io::Result<Self> {
+        let (jwt, kp) = crate::auth_utils::load_creds(path).await?;
         Ok(Self::with_jwt(jwt, move |nonce| {
             crate::auth_utils::sign_nonce(nonce, &kp).unwrap()
         }))
