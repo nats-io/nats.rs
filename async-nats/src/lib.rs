@@ -503,6 +503,7 @@ impl ConnectionHandler {
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(ClientOp::Pong).await?;
+                self.connection.flush().await?;
             }
             ServerOp::Pong => {
                 self.pending_pings -= 1;
@@ -606,6 +607,8 @@ impl ConnectionHandler {
                 if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
                     self.handle_disconnect().await?;
                 }
+
+                self.connection.flush().await?;
             }
             Command::Flush { result } => {
                 if let Err(_err) = self.connection.flush().await {
