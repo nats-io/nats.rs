@@ -43,3 +43,4 @@ nats-server = { path = "../nats-server" }
 [[bench]]
 name = "core_nats"
 harness = false
+lto = true
