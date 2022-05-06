@@ -24,7 +24,7 @@ mod client {
     #[tokio::test]
     async fn basic_pub_sub() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 
@@ -55,7 +55,7 @@ mod client {
         const NUM_ITEMS: usize = 20;
 
         let mut subscribers = Vec::new();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
         for _i in 0..NUM_SUBSCRIBERS {
             subscribers.push(
                 client
@@ -101,7 +101,7 @@ mod client {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let mut subscriber = client.clone().subscribe("foo".into()).await.unwrap();
 
-        let mut cloned_client = client.clone();
+        let cloned_client = client.clone();
         for _ in 0..10 {
             cloned_client
                 .publish("foo".into(), "data".into())
@@ -126,7 +126,7 @@ mod client {
     #[tokio::test]
     async fn publish_with_headers() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
 
@@ -147,12 +147,12 @@ mod client {
     #[tokio::test]
     async fn publish_request() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
         tokio::spawn({
-            let mut client = client.clone();
+            let client = client.clone();
             async move {
                 let msg = sub.next().await.unwrap();
                 client
@@ -173,12 +173,12 @@ mod client {
     #[tokio::test]
     async fn request() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
         tokio::spawn({
-            let mut client = client.clone();
+            let client = client.clone();
             async move {
                 let msg = sub.next().await.unwrap();
                 client
@@ -200,7 +200,7 @@ mod client {
     #[tokio::test]
     async fn unsubscribe() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
@@ -219,7 +219,7 @@ mod client {
     #[tokio::test]
     async fn unsubscribe_after() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
@@ -239,7 +239,7 @@ mod client {
     #[tokio::test]
     async fn unsubscribe_after_immediate() {
         let server = nats_server::run_basic_server();
-        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
@@ -268,7 +268,7 @@ mod client {
             nats_server::run_basic_server(),
         ];
 
-        let mut client = async_nats::ConnectOptions::new()
+        let client = async_nats::ConnectOptions::new()
             .connect(
                 servers
                     .iter()
@@ -293,7 +293,7 @@ mod client {
     #[tokio::test]
     async fn token_auth() {
         let server = nats_server::run_server("tests/configs/token.conf");
-        let mut nc = async_nats::ConnectOptions::with_token("s3cr3t".into())
+        let nc = async_nats::ConnectOptions::with_token("s3cr3t".into())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -307,7 +307,7 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let mut nc =
+        let nc =
             async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t".into())
                 .connect(server.client_url())
                 .await
@@ -335,7 +335,7 @@ mod client {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
-        let mut nc = async_nats::ConnectOptions::new()
+        let nc = async_nats::ConnectOptions::new()
             .reconnect_callback(move || {
                 let tx = tx.clone();
                 async move {

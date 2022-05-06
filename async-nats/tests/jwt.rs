@@ -22,7 +22,7 @@ mod client {
         let s = nats_server::run_server("tests/configs/jwt.conf");
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let mut nc =
+        let nc =
             async_nats::ConnectOptions::with_credentials(path.join("tests/configs/TestUser.creds"))
                 .await
                 .expect("loaded user creds file")
