@@ -392,7 +392,6 @@ impl Connection {
                 self.stream
                     .write_all(format!(" {}\r\n", sid).as_bytes())
                     .await?;
-                self.stream.flush().await?;
             }
 
             ClientOp::Unsubscribe { sid, max } => {
@@ -411,7 +410,6 @@ impl Connection {
             }
             ClientOp::Pong => {
                 self.stream.write_all(b"PONG\r\n").await?;
-                self.stream.flush().await?;
             }
         }
 
