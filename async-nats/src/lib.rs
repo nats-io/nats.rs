@@ -145,6 +145,7 @@ pub use tokio_rustls::rustls;
 use connection::Connection;
 pub use header::{HeaderMap, HeaderValue};
 
+pub(crate) mod auth_utils;
 mod connection;
 mod options;
 
@@ -333,9 +334,7 @@ impl Connector {
                         for url in &info.connect_urls {
                             let server_addr = url.parse::<ServerAddr>()?;
 
-                            if !self.servers.contains_key(&server_addr) {
-                                self.servers.insert(server_addr, 0);
-                            }
+                            self.servers.entry(server_addr).or_insert(0);
                         }
 
                         let server_attempts = self.servers.get_mut(&server_addr).unwrap();
@@ -926,7 +925,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connect_info.pass = Some(pass);
         }
         Authorization::Jwt(jwt, sign_fn) => {
-            let sig = (sign_fn)(server_info.nonce.as_bytes())?;
+            let sig = sign_fn(server_info.nonce.as_bytes())?;
             connect_info.user_jwt = Some(jwt);
             connect_info.signature = Some(sig);
         }
@@ -1178,12 +1177,14 @@ pub struct ConnectInfo {
     pub pedantic: bool,
 
     /// User's JWT.
+    #[serde(rename = "jwt")]
     pub user_jwt: Option<String>,
 
     /// Public nkey.
     pub nkey: Option<String>,
 
     /// Signed nonce, encoded to Base64URL.
+    #[serde(rename = "sig")]
     pub signature: Option<String>,
 
     /// Optional client name.

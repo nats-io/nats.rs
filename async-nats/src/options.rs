@@ -13,7 +13,13 @@
 
 use crate::{Authorization, Client, ServerError, ToServerAddrs};
 use futures::Future;
-use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -149,7 +155,8 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into()).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
+    ///     .connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -165,6 +172,8 @@ impl ConnectOptions {
     ///
     /// # Example
     /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let kp = nkeys::KeyPair::from_seed(seed).unwrap();
     /// // load jwt from creds file or other secure source
@@ -172,12 +181,12 @@ impl ConnectOptions {
     /// let jwt = load_jwt().await?;
     ///
     /// let nc = async_nats::ConnectOptions::with_jwt(jwt, move |nonce| kp.sign(nonce).unwrap())
-    ///     .connect("localhost")?;
+    ///     .connect("localhost").await?;
     /// # std::io::Result::Ok(())
+    /// # }
     /// ```
     pub fn with_jwt<S>(jwt: String, sig_cb: S) -> Self
     where
-        //J: Fn() -> futures::future::BoxFuture<String> + Send + Sync + 'static,
         S: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     {
         ConnectOptions {
@@ -187,6 +196,60 @@ impl ConnectOptions {
             ),
             ..Default::default()
         }
+    }
+
+    /// Authenticate with NATS using a `.creds` file.
+    /// Open the provided file, load its creds,
+    /// and perform the desired authentication
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let nc = async_nats::ConnectOptions::with_credentials("path/to/my.creds").await?
+    ///     .connect("connect.ngs.global").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn with_credentials(path: impl AsRef<Path>) -> io::Result<Self> {
+        let (jwt, kp) = crate::auth_utils::load_creds(path.as_ref().to_owned()).await?;
+        Ok(Self::with_jwt(jwt, move |nonce| {
+            crate::auth_utils::sign_nonce(nonce, &kp).unwrap()
+        }))
+    }
+
+    /// Authenticate with NATS using a static credential str, using
+    /// the creds file format.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let creds =
+    /// "-----BEGIN NATS USER JWT-----
+    /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
+    /// ------END NATS USER JWT------
+    ///
+    /// ************************* IMPORTANT *************************
+    /// NKEY Seed printed below can be used sign and prove identity.
+    /// NKEYs are sensitive and should be treated as secrets.
+    ///
+    /// -----BEGIN USER NKEY SEED-----
+    /// SUAIO3FHUX5PNV2LQIIP7TZ3N4L7TX3W53MQGEIVYFIGA635OZCKEYHFLM
+    /// ------END USER NKEY SEED------
+    /// ";
+    ///
+    /// let nc = async_nats::ConnectOptions::with_static_credentials(creds)
+    ///     .expect("failed to parse static creds")
+    ///     .connect("connect.ngs.global").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_static_credentials(creds: &str) -> io::Result<Self> {
+        let (jwt, kp) = crate::auth_utils::jwt_kp(creds)?;
+        Ok(Self::with_jwt(jwt, move |nonce| {
+            crate::auth_utils::sign_nonce(nonce, &kp).unwrap()
+        }))
     }
 
     /// Loads root certificates by providing the path to them.

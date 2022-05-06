@@ -381,7 +381,8 @@ impl Connection {
 
 #[cfg(test)]
 mod read_op {
-    use super::{Connection, HeaderMap, ServerError, ServerInfo, ServerOp};
+    use super::{Connection, HeaderMap, ServerError, ServerOp};
+    use crate::ServerInfo;
     use bytes::BytesMut;
     use tokio::io::{self, AsyncWriteExt};
 
@@ -555,7 +556,7 @@ mod read_op {
 
 #[cfg(test)]
 mod write_op {
-    use super::{ClientOp, ConnectInfo, Connection, HeaderMap, Protocol};
+    use crate::{ClientOp, ConnectInfo, Connection, HeaderMap, Protocol};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
 

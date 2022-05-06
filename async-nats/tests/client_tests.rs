@@ -15,7 +15,7 @@ mod nats_server;
 
 mod client {
 
-    use std::{collections::HashMap, time::Duration};
+    use std::time::Duration;
 
     use super::nats_server;
     use bytes::Bytes;
@@ -73,7 +73,7 @@ mod client {
         for mut subscriber in subscribers.into_iter() {
             results.push(tokio::spawn(async move {
                 let mut count = 0u32;
-                while let Ok(Some(item)) = tokio::time::timeout(
+                while let Ok(Some(_item)) = tokio::time::timeout(
                     tokio::time::Duration::from_millis(1000),
                     subscriber.next(),
                 )
