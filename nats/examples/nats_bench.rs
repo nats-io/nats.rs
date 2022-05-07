@@ -6,7 +6,6 @@ use std::{
 };
 
 use historian::Histo;
-use nats;
 use structopt::StructOpt;
 
 lazy_static::lazy_static! {
