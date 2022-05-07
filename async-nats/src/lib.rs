@@ -155,7 +155,6 @@ mod tls;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[allow(unused)]
 #[derive(Debug, Deserialize, Default, Clone, Eq, PartialEq)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
@@ -333,7 +332,6 @@ impl Connector {
                     Ok((info, connection)) => {
                         for url in &info.connect_urls {
                             let server_addr = url.parse::<ServerAddr>()?;
-
                             self.servers.entry(server_addr).or_insert(0);
                         }
 
@@ -428,6 +426,8 @@ pub(crate) struct ConnectionHandler {
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
     events: mpsc::Sender<ServerEvent>,
+    pending_pings: usize,
+    max_pings: usize,
 }
 
 impl ConnectionHandler {
@@ -441,6 +441,8 @@ impl ConnectionHandler {
             connector,
             subscriptions: HashMap::new(),
             events,
+            pending_pings: 0,
+            max_pings: 2,
         }
     }
 
@@ -472,7 +474,7 @@ impl ConnectionHandler {
                             } else {
                             }
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             if let Err(err) = self.handle_disconnect().await {
                                 println!("error handling operation {}", err);
                             }
@@ -491,6 +493,9 @@ impl ConnectionHandler {
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(ClientOp::Pong).await?;
+            }
+            ServerOp::Pong => {
+                self.pending_pings -= 1;
             }
             ServerOp::Error(error) => {
                 self.events.try_send(ServerEvent::Error(error)).ok();
@@ -568,12 +573,18 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
-                if let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                self.pending_pings += 1;
+
+                if self.pending_pings > self.max_pings {
+                    self.handle_disconnect().await?;
+                }
+
+                if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
                     self.handle_disconnect().await?;
                 }
             }
             Command::Flush { result } => {
-                if let Err(err) = self.connection.flush().await {
+                if let Err(_err) = self.connection.flush().await {
                     if let Err(err) = self.handle_disconnect().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
@@ -643,7 +654,7 @@ impl ConnectionHandler {
                 }
             }
             Command::Connect(connect_info) => {
-                while let Err(err) = self
+                while let Err(_err) = self
                     .connection
                     .write_op(ClientOp::Connect(connect_info.clone()))
                     .await
@@ -945,12 +956,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         None => return Err(io::Error::new(ErrorKind::BrokenPipe, "connection aborted")),
     }
 
-    client
-        .sender
-        .send(Command::Ping)
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
-
     tokio::spawn({
         let sender = sender.clone();
         async move {
@@ -1166,8 +1171,6 @@ impl std::fmt::Display for ServerError {
 
 /// Info to construct a CONNECT message.
 #[derive(Clone, Debug, Serialize)]
-#[doc(hidden)]
-#[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgements.
     pub verbose: bool,

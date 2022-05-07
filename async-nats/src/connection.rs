@@ -7,9 +7,7 @@ use bytes::{Buf, BytesMut};
 use tokio::io;
 
 use crate::header::{HeaderMap, HeaderName, HeaderValue};
-use crate::ClientOp;
-use crate::ServerError;
-use crate::ServerOp;
+use crate::{ClientOp, ServerError, ServerOp};
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
 pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
@@ -381,8 +379,8 @@ impl Connection {
 
 #[cfg(test)]
 mod read_op {
-    use super::{Connection, HeaderMap, ServerError, ServerOp};
-    use crate::ServerInfo;
+    use super::Connection;
+    use crate::{HeaderMap, ServerError, ServerInfo, ServerOp};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncWriteExt};
 
@@ -556,7 +554,7 @@ mod read_op {
 
 #[cfg(test)]
 mod write_op {
-    use crate::{ClientOp, ConnectInfo, Connection, HeaderMap, Protocol};
+    use super::{ClientOp, ConnectInfo, Connection, HeaderMap, Protocol};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
 
