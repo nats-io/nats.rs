@@ -146,7 +146,7 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
         .arg("-P")
         .arg(pidfile.as_os_str());
 
-    if cfg != "" {
+    if !cfg.is_empty() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         cmd.arg("-c").arg(path.join(cfg));
     }
