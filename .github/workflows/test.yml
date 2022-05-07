@@ -127,7 +127,7 @@ jobs:
         uses: actions-rs/clippy-check@v1.0.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --tests --all-features -- --deny clippy::all
+          args: --tests --examples --all-features -- --deny clippy::all
 
   check_msrv:
     name: check (msrv)
