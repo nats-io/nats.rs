@@ -554,9 +554,10 @@ mod read_op {
 
 #[cfg(test)]
 mod write_op {
-    use super::{ClientOp, ConnectInfo, Connection, HeaderMap, Protocol};
+    use super::{ClientOp, Connection, HeaderMap};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
+    use crate::{ConnectInfo, Protocol};
 
     #[tokio::test]
     async fn publish() {
