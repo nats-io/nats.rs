@@ -270,7 +270,6 @@ pub enum ClientOp {
     },
     Ping,
     Pong,
-    TryFlush,
     Connect(ConnectInfo),
 }
 
@@ -604,9 +603,7 @@ impl ConnectionHandler {
                 }
             }
             Command::TryFlush => {
-                if let Err(err) = self.connection.write_op(ClientOp::TryFlush).await {
-                    println!("Sending TryFlush failed with {:?}", err);
-                }
+                self.connection.flush().await?;
             }
             Command::Subscribe {
                 sid,
