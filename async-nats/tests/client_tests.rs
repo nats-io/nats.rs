@@ -14,12 +14,10 @@
 mod nats_server;
 
 mod client {
-
-    use std::{collections::HashMap, time::Duration};
-
     use super::nats_server;
     use bytes::Bytes;
     use futures_util::{future::join_all, StreamExt};
+    use std::time::Duration;
 
     #[tokio::test]
     async fn basic_pub_sub() {
@@ -73,7 +71,7 @@ mod client {
         for mut subscriber in subscribers.into_iter() {
             results.push(tokio::spawn(async move {
                 let mut count = 0u32;
-                while let Ok(Some(item)) = tokio::time::timeout(
+                while let Ok(Some(_)) = tokio::time::timeout(
                     tokio::time::Duration::from_millis(1000),
                     subscriber.next(),
                 )

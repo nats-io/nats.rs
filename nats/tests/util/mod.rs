@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(dead_code)]
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -131,7 +132,7 @@ pub fn run_server(cfg: &str) -> Server {
         .arg("-P")
         .arg(pidfile.as_os_str());
 
-    if cfg != "" {
+    if !cfg.is_empty() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         cmd.arg("-c").arg(path.join(cfg));
     }
