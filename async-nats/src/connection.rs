@@ -1,4 +1,5 @@
 use std::str::FromStr;
+
 use subslice::SubsliceExt;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
@@ -555,9 +556,9 @@ mod read_op {
 #[cfg(test)]
 mod write_op {
     use super::{ClientOp, Connection, HeaderMap};
+    use crate::{ConnectInfo, Protocol};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
-    use crate::{ConnectInfo, Protocol};
 
     #[tokio::test]
     async fn publish() {
