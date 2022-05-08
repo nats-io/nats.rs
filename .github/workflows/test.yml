@@ -52,6 +52,13 @@ jobs:
       - name: Install nats-server
         run: go get github.com/nats-io/nats-server/v2
 
+      - name: Run nats-server
+        shell: bash
+        run: nats-server --port 4444 --jetstream &
+
+      - name: Configure hosts
+        run: echo 'localhost:4444 demo.nats.io' | sudo tee -a /etc/hosts
+
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
