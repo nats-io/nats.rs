@@ -16,15 +16,13 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - name: Cache rust
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-rust
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
         with:
-          path: target
-          key: ${{ runner.os }}-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-
+          toolchain: stable
+          profile: minimal
+          override: true
+      - uses: Swatinem/rust-cache@v1
 
       - name: Cache go
         uses: actions/cache@v3
@@ -53,7 +51,6 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          rustup update
           cargo test --features=unstable -- --nocapture
 
   test_fault-injection:
@@ -103,26 +100,14 @@ jobs:
     name: check (lint)
     runs-on: ubuntu-latest
     steps:
-      - name: Cache rust
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-rust
-        with:
-          path: target
-          key: ${{ runner.os }}-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-
-
-      - name: Check out repository
-        uses: actions/checkout@v2
-
-      - name: Set up rust
-        uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          components: clippy
+          profile: minimal
           override: true
-
+          components: clippy
+      - uses: Swatinem/rust-cache@v1
       - name: Check lint
         uses: actions-rs/clippy-check@v1.0.7
         with:
@@ -133,18 +118,13 @@ jobs:
     name: check (msrv)
     runs-on: ubuntu-latest
     steps:
-      - name: Cache rust
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-rust
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
         with:
-          path: target
-          key: ${{ runner.os }}-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-
-
-      - name: Check out repository
-        uses: actions/checkout@v2
+          toolchain: stable
+          profile: minimal
+          override: true
+      - uses: Swatinem/rust-cache@v1
 
       - name: Check minimum supported rust Version
         run: |
@@ -157,18 +137,13 @@ jobs:
     name: check (examples)
     runs-on: ubuntu-latest
     steps:
-      - name: Cache rust
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-rust
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
         with:
-          path: target
-          key: ${{ runner.os }}-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-
-
-      - name: Check out repository
-        uses: actions/checkout@v2
+          toolchain: stable
+          profile: minimal
+          override: true
+      - uses: Swatinem/rust-cache@v1
 
       - name: Set up go
         uses: actions/setup-go@v2
@@ -181,5 +156,4 @@ jobs:
         env:
           RUST_LOG: trace
         run: |
-          rustup update
           cargo check --examples
