@@ -51,7 +51,7 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo install nextest
+          cargo install cargo-nextest
           cargo nextest run
           cargo test --doc
 
