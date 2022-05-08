@@ -59,11 +59,13 @@ jobs:
       - name: Configure hosts
         run: echo 'localhost:4444 demo.nats.io' | sudo tee -a /etc/hosts
 
+      - name: Build all
+        run: cargo build --workspace --tests --examples
+
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
         run: |
-          rustup update
           cargo test --features=unstable -- --nocapture
 
   test_fault-injection:
