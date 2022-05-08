@@ -51,7 +51,9 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test --features=unstable -- --nocapture
+          cargo install nextest
+          cargo nextest run
+          cargo test --doc
 
   test_fault-injection:
     name: test (fault-injection)
