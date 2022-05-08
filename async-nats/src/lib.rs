@@ -807,6 +807,19 @@ impl Client {
         }
     }
 
+    pub async fn request_timeout(
+        &mut self,
+        subject: String,
+        payload: Bytes,
+        timeout: Duration,
+    ) -> Result<Message, Error> {
+        match tokio::time::timeout(timeout, self.request(subject, payload)).await {
+            Err(_) => Err(Box::new(io::Error::new(ErrorKind::TimedOut, "timed out"))),
+            Ok(Ok(message)) => Ok(message),
+            Ok(Err(e)) => Err(e),
+        }
+    }
+
     /// Create a new globally unique inbox which can be used for replies.
     ///
     /// # Examples
