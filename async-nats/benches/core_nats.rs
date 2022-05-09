@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures_util::StreamExt;
+use futures::stream::StreamExt;
 
 pub fn publish(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
