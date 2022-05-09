@@ -13,7 +13,8 @@
 
 mod client {
     use bytes::Bytes;
-    use futures_util::{future::join_all, StreamExt};
+    use futures::future::join_all;
+    use futures::stream::StreamExt;
     use std::time::Duration;
 
     #[tokio::test]

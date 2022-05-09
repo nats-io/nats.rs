@@ -35,7 +35,7 @@
 //!
 //! ```
 //! use bytes::Bytes;
-//! use futures_util::StreamExt;
+//! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn example() {
@@ -85,7 +85,7 @@
 //!
 //! ```no_run
 //! # use bytes::Bytes;
-//! # use futures_util::StreamExt;
+//! # use futures::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
 //!
@@ -101,10 +101,10 @@
 //! #     Ok(())
 //! # }
 
-use futures_util::future::FutureExt;
-use futures_util::select;
-use futures_util::stream::Stream;
-use futures_util::StreamExt;
+use futures::future::FutureExt;
+use futures::select;
+use futures::stream::Stream;
+use futures::stream::StreamExt;
 use tls::TlsOptions;
 
 use std::cmp;
@@ -1020,7 +1020,7 @@ pub struct Message {
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
-/// Implements [futures_util::stream::Stream] for ergonomic async message processing.
+/// Implements [futures::stream::Stream] for ergonomic async message processing.
 ///
 /// # Examples
 /// ```
@@ -1081,7 +1081,7 @@ impl Subscriber {
     ///
     /// # Examples
     /// ```
-    /// # use futures_util::StreamExt;
+    /// # use futures::StreamExt;
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut client = async_nats::connect("demo.nats.io").await?;
