@@ -12,7 +12,6 @@
 // limitations under the License.
 
 #![cfg(feature = "unstable")]
-mod util;
 
 use nats::jetstream::StreamConfig;
 
@@ -20,7 +19,7 @@ use nats::kv::*;
 
 #[test]
 fn key_value_entry() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -77,7 +76,7 @@ fn key_value_entry() {
 
 #[test]
 fn key_value_short_history() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -104,7 +103,7 @@ fn key_value_short_history() {
 
 #[test]
 fn key_value_long_history() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -131,7 +130,7 @@ fn key_value_long_history() {
 
 #[test]
 fn key_value_watch() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -170,7 +169,7 @@ fn key_value_watch() {
 
 #[test]
 fn key_value_watch_all() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -220,7 +219,7 @@ fn key_value_watch_all() {
 
 #[test]
 fn key_value_bind() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -249,7 +248,7 @@ fn key_value_bind() {
 
 #[test]
 fn key_value_delete() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -268,7 +267,7 @@ fn key_value_delete() {
 
 #[test]
 fn key_value_purge() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -302,7 +301,7 @@ fn key_value_purge() {
 
 #[test]
 fn key_value_keys() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -345,8 +344,8 @@ fn key_value_keys() {
 // attempt to exercise all logic, just the happy path, as the other logic is exercised in the other
 // tests
 fn key_value_domain() {
-    let _server = util::run_server("tests/configs/jetstream-domain.conf");
-    let leaf_server = util::run_server("tests/configs/jetstream-domain-leaf.conf");
+    let _server = nats_server::run_server("tests/configs/jetstream-domain.conf");
+    let leaf_server = nats_server::run_server("tests/configs/jetstream-domain-leaf.conf");
     let client = nats::connect(&leaf_server.client_url()).unwrap();
     let opts = nats::jetstream::JetStreamOptions::new().domain("foobar");
     let context = nats::jetstream::JetStream::new(client, opts);

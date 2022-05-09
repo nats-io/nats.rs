@@ -11,18 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod util;
 use std::{
     sync::{atomic::AtomicUsize, Arc},
     thread,
     time::Duration,
 };
-pub use util::*;
 
 #[test]
 fn slow_consumers() {
     let dropped_messages = Arc::new(AtomicUsize::new(0));
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
     let nc = nats::Options::with_user_pass("derek", "s3cr3t!")
         .error_callback({
             let dropped_messages = dropped_messages.clone();
