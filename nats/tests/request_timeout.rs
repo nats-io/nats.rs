@@ -11,13 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod util;
 use nats::jetstream::*;
 use std::time::Duration;
 
 #[test]
 fn request_timeout() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).expect("could not connect");
     let js = nats::jetstream::new(nc);
 

@@ -16,11 +16,9 @@
 use rand::prelude::*;
 use std::io::Read;
 
-mod util;
-
 #[test]
 fn object_random() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -105,7 +103,7 @@ fn object_random() {
 
 #[test]
 fn object_sealed() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -124,7 +122,7 @@ fn object_sealed() {
 
 #[test]
 fn object_delete() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -151,7 +149,7 @@ fn object_delete() {
 
 #[test]
 fn object_multiple_delete() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -183,7 +181,7 @@ fn object_multiple_delete() {
 
 #[test]
 fn object_names() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
@@ -210,7 +208,7 @@ fn object_names() {
 
 #[test]
 fn object_watch() {
-    let server = util::run_server("tests/configs/jetstream.conf");
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 

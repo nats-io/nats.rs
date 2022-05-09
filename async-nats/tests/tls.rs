@@ -11,12 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod nats_server;
-
 mod client {
     use std::path::PathBuf;
 
-    use super::nats_server;
     #[tokio::test]
     async fn basic_tls() {
         let s = nats_server::run_server("tests/configs/tls.conf");

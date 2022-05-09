@@ -11,18 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use nats::{jetstream::JetStream, Connection, JetStreamOptions};
 use smol::future::FutureExt;
 use std::{
     io,
     time::{Duration, Instant},
 };
 
-mod util;
-pub use util::*;
-
 #[test]
 fn drop_flushes() -> io::Result<()> {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
 
     let nc1 = nats::connect(&s.client_url())?;
     let nc2 = nats::connect(&s.client_url())?;
@@ -41,7 +39,7 @@ fn drop_flushes() -> io::Result<()> {
 
 #[test]
 fn two_connections() -> io::Result<()> {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
 
     let nc1 = nats::connect(&s.client_url())?;
     let nc2 = nc1.clone();
@@ -57,7 +55,7 @@ fn two_connections() -> io::Result<()> {
 
 #[test]
 fn async_subscription_drop() -> io::Result<()> {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
 
     smol::block_on(async {
         let nc = nats::asynk::connect(s.client_url()).await?;
@@ -92,7 +90,7 @@ fn async_subscription_drop() -> io::Result<()> {
 
 #[test]
 fn shutdown_responsivness_regression_check() {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
     let conn = nats::Options::new().connect(s.client_url()).unwrap();
     conn.rtt().unwrap();
     let sub = conn.subscribe("test").unwrap();
@@ -106,7 +104,7 @@ fn shutdown_responsivness_regression_check() {
 
 #[test]
 fn drop_responsivness_regression_check() {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
     let now;
     {
         let conn = nats::Options::new().connect(s.client_url()).unwrap();
@@ -193,4 +191,13 @@ fn close_responsiveness_regression_jetstream_complex() {
         panic!("failed to unsubscribe {:?}", e);
     }
     conn.close();
+}
+
+// Helper function to return server and client.
+pub fn run_basic_jetstream() -> (nats_server::Server, Connection, JetStream) {
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = JetStream::new(nc.clone(), JetStreamOptions::default());
+
+    (s, nc, js)
 }
