@@ -1,3 +1,10 @@
+# 0.20.0
+## Overview
+A minor sync client release that adds requests with timeouts and headers.
+
+## Added
+* Add request with headers and timeouts by @Jarema in https://github.com/nats-io/nats.rs/pull/431
+
 # 0.19.1
 ## Fixed
 * Fix KV issues when JS domain is set by @Jarema in https://github.com/nats-io/nats.rs/pull/387
