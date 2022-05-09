@@ -546,7 +546,45 @@ impl Connection {
         self.request_with_headers_or_timeout(subject, None, Some(timeout), msg)
     }
 
-    fn request_with_headers_or_timeout(
+    /// Publish a message with headers on the given subject as a request and receive the
+    /// response.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// let mut headers = nats::HeaderMap::new();
+    /// headers.insert("X-key", "value".to_string());
+    /// let resp = nc.request_with_headers_or_timeout("foo", Some(&headers), Some(std::time::Duration::from_secs(2)), "Help me?")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn request_with_headers(
+        &self,
+        subject: &str,
+        msg: impl AsRef<[u8]>,
+        headers: &HeaderMap,
+    ) -> io::Result<Message> {
+        self.request_with_headers_or_timeout(subject, Some(headers), None, msg)
+    }
+
+    /// Publish a message on the given subject as a request and receive the
+    /// response. This call will return after the timeout duration if it was set to `Some` if no
+    /// response is received. It also allows passing headers.
+    ///
+    /// # Example
+    /// ```
+    /// # fn main() -> std::io::Result<()> {
+    /// # let nc = nats::connect("demo.nats.io")?;
+    /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
+    /// let mut headers = nats::HeaderMap::new();
+    /// headers.insert("X-key", "value".to_string());
+    /// let resp = nc.request_with_headers_or_timeout("foo", Some(&headers), Some(std::time::Duration::from_secs(2)), "Help me?")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn request_with_headers_or_timeout(
         &self,
         subject: &str,
         maybe_headers: Option<&HeaderMap>,
