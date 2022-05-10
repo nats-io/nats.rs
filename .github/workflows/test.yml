@@ -127,7 +127,7 @@ jobs:
         uses: actions-rs/clippy-check@v1.0.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --tests --all-features
+          args: --tests --examples --all-features -- --deny clippy::all
 
   check_msrv:
     name: check (msrv)
@@ -183,3 +183,44 @@ jobs:
         run: |
           rustup update
           cargo check --examples
+
+  benchmarks:
+    name: benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache rust
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Set up go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.16'
+
+      - name: Install nats-server
+        run: go get github.com/nats-io/nats-server/v2
+      - name: install gunplot
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gnuplot
+      - name: Run benchmarks
+        env:
+          RUST_LOG: trace
+        run: |
+          rustup update
+          cargo bench
+      - name: Archive benchmarks
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmarks-report
+          path: target/criterion
+

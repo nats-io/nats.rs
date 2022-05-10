@@ -2,5 +2,6 @@
 
 members = [
   "nats",
-  "async-nats"
+  "async-nats",
+  "nats-server"
 ]

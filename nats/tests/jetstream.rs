@@ -13,15 +13,13 @@
 
 use std::{io, time::Duration};
 
-mod util;
-use nats::jetstream;
 use nats::jetstream::*;
-pub use util::*;
+use nats::{jetstream, Connection};
 
 #[test]
 #[ignore]
 fn jetstream_not_enabled() {
-    let s = util::run_basic_server();
+    let s = nats_server::run_basic_server();
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -39,7 +37,7 @@ fn jetstream_not_enabled() {
 
 #[test]
 fn jetstream_account_not_enabled() {
-    let s = util::run_server("tests/configs/jetstream_account_not_enabled.conf");
+    let s = nats_server::run_server("tests/configs/jetstream_account_not_enabled.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -248,7 +246,7 @@ fn jetstream_publish() {
 
 #[test]
 fn jetstream_subscribe() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc.clone());
 
@@ -300,7 +298,7 @@ fn jetstream_subscribe() {
 
 #[test]
 fn jetstream_subscribe_durable() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -362,7 +360,7 @@ fn jetstream_subscribe_durable() {
 
 #[test]
 fn jetstream_queue_subscribe() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -428,7 +426,7 @@ fn jetstream_queue_subscribe() {
 /// which resulted in errors and not getting messages.
 #[test]
 fn jetstream_queue_subscribe_no_mismatch_handle() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let con = nats::connect(s.client_url()).unwrap();
     let jsm = nats::jetstream::new(con);
 
@@ -499,7 +497,7 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
 
 #[test]
 fn jetstream_flow_control() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -549,7 +547,7 @@ fn jetstream_flow_control() {
 
 #[test]
 fn jetstream_ordered() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::connect(&s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -586,7 +584,7 @@ fn jetstream_ordered() {
 
 #[test]
 fn jetstream_pull_subscribe_fetch() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
         .connect(&s.client_url())
@@ -638,7 +636,7 @@ fn jetstream_pull_subscribe_fetch() {
 
 #[test]
 fn jetstream_pull_subscribe_timeout_fetch() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
         .connect(&s.client_url())
@@ -696,7 +694,7 @@ fn jetstream_pull_subscribe_timeout_fetch() {
 
 #[test]
 fn jetstream_pull_subscribe_fetch_with_handler() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
         .connect(&s.client_url())
@@ -748,7 +746,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
 
 #[test]
 fn jetstream_pull_subscribe_ephemeral() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
         .connect(&s.client_url())
@@ -774,7 +772,7 @@ fn jetstream_pull_subscribe_ephemeral() {
 
 #[test]
 fn jetstream_pull_subscribe_bad_stream() {
-    let s = util::run_server("tests/configs/jetstream.conf");
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
         .connect(&s.client_url())
@@ -783,4 +781,13 @@ fn jetstream_pull_subscribe_bad_stream() {
 
     js.pull_subscribe("WRONG")
         .expect_err("expected not found stream for a given subject");
+}
+
+// Helper function to return server and client.
+pub fn run_basic_jetstream() -> (nats_server::Server, Connection, JetStream) {
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
+    let nc = nats::connect(&s.client_url()).unwrap();
+    let js = JetStream::new(nc.clone(), JetStreamOptions::default());
+
+    (s, nc, js)
 }

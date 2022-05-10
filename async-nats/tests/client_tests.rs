@@ -11,12 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod nats_server;
-
 mod client {
-    use super::nats_server;
     use bytes::Bytes;
-    use futures_util::{future::join_all, StreamExt};
+    use futures::future::join_all;
+    use futures::stream::StreamExt;
     use std::time::Duration;
 
     #[tokio::test]

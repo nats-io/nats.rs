@@ -14,12 +14,9 @@
 use std::io;
 use std::path::PathBuf;
 
-mod util;
-pub use util::*;
-
 #[test]
 fn basic_tls() -> io::Result<()> {
-    let s = util::run_server("tests/configs/tls.conf");
+    let s = nats_server::run_server("tests/configs/tls.conf");
 
     assert!(nats::connect("nats://127.0.0.1").is_err());
 

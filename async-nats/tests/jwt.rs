@@ -11,24 +11,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod nats_server;
-
 mod client {
     use std::path::PathBuf;
 
-    use super::nats_server;
     #[tokio::test]
     async fn jwt_auth() {
         let s = nats_server::run_server("tests/configs/jwt.conf");
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let nc =
-            async_nats::ConnectOptions::with_credentials(path.join("tests/configs/TestUser.creds"))
-                .await
-                .expect("loaded user creds file")
-                .connect(s.client_url())
-                .await
-                .unwrap();
+        let nc = async_nats::ConnectOptions::with_credentials_file(
+            path.join("tests/configs/TestUser.creds"),
+        )
+        .await
+        .expect("loaded user creds file")
+        .connect(s.client_url())
+        .await
+        .unwrap();
 
         // publish something
         nc.publish("hello".into(), "world".into())

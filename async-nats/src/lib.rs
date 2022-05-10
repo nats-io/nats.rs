@@ -35,7 +35,7 @@
 //!
 //! ```
 //! use bytes::Bytes;
-//! use futures_util::StreamExt;
+//! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn example() {
@@ -85,7 +85,7 @@
 //!
 //! ```no_run
 //! # use bytes::Bytes;
-//! # use futures_util::StreamExt;
+//! # use futures::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
 //!
@@ -101,10 +101,10 @@
 //! #     Ok(())
 //! # }
 
-use futures_util::future::FutureExt;
-use futures_util::select;
-use futures_util::stream::Stream;
-use futures_util::StreamExt;
+use futures::future::FutureExt;
+use futures::select;
+use futures::stream::Stream;
+use futures::stream::StreamExt;
 use tls::TlsOptions;
 
 use std::cmp;
@@ -149,7 +149,9 @@ pub(crate) mod auth_utils;
 mod connection;
 mod options;
 
-pub use options::ConnectOptions;
+use crate::options::CallbackArg1;
+pub use options::{AuthError, ConnectOptions};
+
 pub mod header;
 mod tls;
 
@@ -270,7 +272,6 @@ pub enum ClientOp {
     },
     Ping,
     Pong,
-    TryFlush,
     Connect(ConnectInfo),
 }
 
@@ -601,9 +602,7 @@ impl ConnectionHandler {
                 }
             }
             Command::TryFlush => {
-                if let Err(err) = self.connection.write_op(ClientOp::TryFlush).await {
-                    println!("Sending TryFlush failed with {:?}", err);
-                }
+                self.connection.flush().await?;
             }
             Command::Subscribe {
                 sid,
@@ -935,11 +934,18 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
         }
-        Authorization::Jwt(jwt, sign_fn) => {
-            let sig = sign_fn(server_info.nonce.as_bytes())?;
-            connect_info.user_jwt = Some(jwt);
-            connect_info.signature = Some(sig);
-        }
+        Authorization::Jwt(jwt, sign_fn) => match sign_fn.call(server_info.nonce.clone()).await {
+            Ok(sig) => {
+                connect_info.user_jwt = Some(jwt.clone());
+                connect_info.signature = Some(sig);
+            }
+            Err(e) => {
+                println!(
+                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
+                    e
+                );
+            }
+        },
     }
     connection_handler
         .connection
@@ -1029,7 +1035,7 @@ pub struct Message {
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
-/// Implements [futures_util::stream::Stream] for ergonomic async message processing.
+/// Implements [futures::stream::Stream] for ergonomic async message processing.
 ///
 /// # Examples
 /// ```
@@ -1090,7 +1096,7 @@ impl Subscriber {
     ///
     /// # Examples
     /// ```
-    /// # use futures_util::StreamExt;
+    /// # use futures::StreamExt;
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut client = async_nats::connect("demo.nats.io").await?;
@@ -1380,8 +1386,6 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-pub(crate) type AuthSignatureFn = dyn Fn(&[u8]) -> std::io::Result<String> + Send + Sync;
-
 #[derive(Clone)]
 pub(crate) enum Authorization {
     /// No authentication.
@@ -1394,5 +1398,8 @@ pub(crate) enum Authorization {
     UserAndPassword(String, String),
 
     /// Authenticate using a jwt and signing function.
-    Jwt(String, Arc<AuthSignatureFn>),
+    Jwt(
+        String,
+        CallbackArg1<String, std::result::Result<String, AuthError>>,
+    ),
 }

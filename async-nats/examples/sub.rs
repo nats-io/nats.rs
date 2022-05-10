@@ -1,4 +1,4 @@
-use futures_util::StreamExt;
+use futures::stream::StreamExt;
 use std::error::Error;
 use std::time::Instant;
 
