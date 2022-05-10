@@ -174,12 +174,14 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
-    /// let kp = nkeys::KeyPair::from_seed(seed).unwrap();
+    /// let key_pair = std::sync::Arc::new(nkeys::KeyPair::from_seed(seed).unwrap());
     /// // load jwt from creds file or other secure source
     /// async fn load_jwt() -> std::io::Result<String> { todo!(); }
     /// let jwt = load_jwt().await?;
-    ///
-    /// let nc = async_nats::ConnectOptions::with_jwt(jwt, async move |&nonce| kp.sign(nonce)?)
+    /// let nc = async_nats::ConnectOptions::with_jwt(jwt,
+    ///      move |nonce| {
+    ///         let key_pair = key_pair.clone();
+    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }})
     ///     .connect("localhost").await?;
     /// # std::io::Result::Ok(())
     /// # }
