@@ -149,7 +149,9 @@ pub(crate) mod auth_utils;
 mod connection;
 mod options;
 
-pub use options::ConnectOptions;
+use crate::options::CallbackArg1;
+pub use options::{AuthError, ConnectOptions};
+
 pub mod header;
 mod tls;
 
@@ -935,11 +937,18 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connect_info.user = Some(user);
             connect_info.pass = Some(pass);
         }
-        Authorization::Jwt(jwt, sign_fn) => {
-            let sig = sign_fn(server_info.nonce.as_bytes())?;
-            connect_info.user_jwt = Some(jwt);
-            connect_info.signature = Some(sig);
-        }
+        Authorization::Jwt(jwt, sign_fn) => match sign_fn.call(server_info.nonce.clone()).await {
+            Ok(sig) => {
+                connect_info.user_jwt = Some(jwt.clone());
+                connect_info.signature = Some(sig);
+            }
+            Err(e) => {
+                println!(
+                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
+                    e
+                );
+            }
+        },
     }
     connection_handler
         .connection
@@ -1380,8 +1389,6 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-pub(crate) type AuthSignatureFn = dyn Fn(&[u8]) -> std::io::Result<String> + Send + Sync;
-
 #[derive(Clone)]
 pub(crate) enum Authorization {
     /// No authentication.
@@ -1394,5 +1401,8 @@ pub(crate) enum Authorization {
     UserAndPassword(String, String),
 
     /// Authenticate using a jwt and signing function.
-    Jwt(String, Arc<AuthSignatureFn>),
+    Jwt(
+        String,
+        CallbackArg1<String, std::result::Result<String, AuthError>>,
+    ),
 }

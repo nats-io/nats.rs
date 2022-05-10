@@ -10,27 +10,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use nkeys::KeyPair;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{io, path::PathBuf};
 
-/// Loads user credentials file with jwt and key
-pub(crate) async fn load_creds(path: PathBuf) -> io::Result<(String, KeyPair)> {
-    tokio::task::spawn_blocking(move || {
-        let contents = std::fs::read_to_string(&path).map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("loading creds file '{}': {}", path.display(), err),
-            )
-        })?;
-        jwt_kp(&contents)
+/// Loads user credentials file with jwt and key. Return file contents.
+/// Uses tokio non-blocking io
+pub(crate) async fn load_creds(path: PathBuf) -> io::Result<String> {
+    tokio::fs::read_to_string(&path).await.map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("loading creds file '{}': {}", path.display(), err),
+        )
     })
-    .await?
 }
 
-pub(crate) fn jwt_kp(contents: &str) -> io::Result<(String, KeyPair)> {
+/// Parses the string, expected to be formatted as credentials file
+pub(crate) fn parse_jwt_and_key_from_creds(contents: &str) -> io::Result<(String, KeyPair)> {
     let jwt = parse_decorated_jwt(contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -49,14 +46,6 @@ pub(crate) fn jwt_kp(contents: &str) -> io::Result<(String, KeyPair)> {
         KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok((jwt, kp))
-}
-
-/// Signs nonce using an nkeys KeyPair, returning bytes
-pub(crate) fn sign_nonce(nonce: &[u8], key_pair: &KeyPair) -> io::Result<Vec<u8>> {
-    // Use the nkey to sign the nonce.
-    key_pair
-        .sign(nonce)
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
 }
 
 // This regex parses a credentials file.
