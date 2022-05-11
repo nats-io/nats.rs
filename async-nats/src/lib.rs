@@ -91,7 +91,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn Error>> {
-//! let mut client = async_nats::connect("demo.nats.io").await?;
+//! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
@@ -709,7 +709,7 @@ impl Client {
         }
     }
 
-    pub async fn publish(&mut self, subject: String, payload: Bytes) -> Result<(), Error> {
+    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), Error> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -722,7 +722,7 @@ impl Client {
     }
 
     pub async fn publish_with_headers(
-        &mut self,
+        &self,
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
@@ -739,7 +739,7 @@ impl Client {
     }
 
     pub async fn publish_with_reply(
-        &mut self,
+        &self,
         subject: String,
         reply: String,
         payload: Bytes,
@@ -756,7 +756,7 @@ impl Client {
     }
 
     pub async fn publish_with_reply_and_headers(
-        &mut self,
+        &self,
         subject: String,
         reply: String,
         headers: HeaderMap,
@@ -773,7 +773,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn request(&mut self, subject: String, payload: Bytes) -> Result<Message, Error> {
+    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
         let inbox = self.new_inbox();
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply(subject, inbox, payload).await?;
@@ -788,7 +788,7 @@ impl Client {
     }
 
     pub async fn request_with_headers(
-        &mut self,
+        &self,
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
@@ -824,14 +824,14 @@ impl Client {
     }
 
     pub async fn queue_subscribe(
-        &mut self,
+        &self,
         subject: String,
         queue_group: String,
     ) -> Result<Subscriber, io::Error> {
         self._subscribe(subject, Some(queue_group)).await
     }
 
-    pub async fn subscribe(&mut self, subject: String) -> Result<Subscriber, io::Error> {
+    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, io::Error> {
         self._subscribe(subject, None).await
     }
 
@@ -839,7 +839,7 @@ impl Client {
     //  - should there just be a single subscribe() function (would be breaking api against 0.11.0)
     //  - if queue_subscribe is a separate function, how do you want to name the private function here?
     async fn _subscribe(
-        &mut self,
+        &self,
         subject: String,
         queue_group: Option<String>,
     ) -> Result<Subscriber, io::Error> {
@@ -859,7 +859,7 @@ impl Client {
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
-    pub async fn flush(&mut self) -> Result<(), Error> {
+    pub async fn flush(&self) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sender.send(Command::Flush { result: tx }).await?;
         // first question mark is an error from rx itself, second for error from flush.
