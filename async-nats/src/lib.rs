@@ -39,7 +39,7 @@
 //!
 //! #[tokio::main]
 //! async fn example() {
-//!     let mut client = async_nats::connect("demo.nats.io").await.unwrap();
+//!     let client = async_nats::connect("demo.nats.io").await.unwrap();
 //!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
 //!     for _ in 0..10 {
@@ -70,7 +70,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn Error>> {
-//! let mut client = async_nats::connect("demo.nats.io").await?;
+//! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let subject = String::from("foo");
 //! let data = Bytes::from("bar");
@@ -1071,7 +1071,7 @@ impl Subscriber {
     /// ```
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut client = async_nats::connect("demo.nats.io").await?;
+    /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
@@ -1099,7 +1099,7 @@ impl Subscriber {
     /// # use futures::StreamExt;
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut client = async_nats::connect("demo.nats.io").await?;
+    /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// for _ in 0..3 {
     ///     client.publish("test".into(), "data".into()).await?;
