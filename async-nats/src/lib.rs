@@ -156,6 +156,7 @@ use crate::options::CallbackArg1;
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
+pub mod jetstream;
 mod tls;
 
 /// Information sent by the server back to this client
