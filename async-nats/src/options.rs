@@ -86,13 +86,13 @@ impl Default for ConnectOptions {
             tls_client_config: None,
             flush_interval: Duration::from_millis(100),
             ping_interval: Duration::from_secs(60),
-            reconnect_callback: CallbackArg0::<()>(Arc::new(Box::new(|| Box::pin(async {})))),
-            disconnect_callback: CallbackArg0::<()>(Arc::new(Box::new(|| Box::pin(async {})))),
-            error_callback: CallbackArg1::<ServerError, ()>(Arc::new(Box::new(move |error| {
+            reconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
+            disconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
+            error_callback: CallbackArg1::<ServerError, ()>(Box::new(move |error| {
                 Box::pin(async move {
                     println!("error : {}", error);
                 })
-            }))),
+            })),
         }
     }
 }
@@ -195,7 +195,7 @@ impl ConnectOptions {
         ConnectOptions {
             auth: Authorization::Jwt(
                 jwt,
-                CallbackArg1(Arc::new(Box::new(move |nonce: String| {
+                CallbackArg1(Box::new(move |nonce: String| {
                     let sign_cb = sign_cb.clone();
                     Box::pin(async move {
                         let sig = sign_cb(nonce.as_bytes().to_vec())
@@ -203,7 +203,7 @@ impl ConnectOptions {
                             .map_err(AuthError::new)?;
                         Ok(base64_url::encode(&sig))
                     })
-                }))),
+                })),
             ),
             ..Default::default()
         }
@@ -385,7 +385,7 @@ impl ConnectOptions {
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
         self.error_callback =
-            CallbackArg1::<ServerError, ()>(Arc::new(Box::new(move |error| Box::pin(cb(error)))));
+            CallbackArg1::<ServerError, ()>(Box::new(move |error| Box::pin(cb(error))));
         self
     }
 
@@ -428,7 +428,7 @@ impl ConnectOptions {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.reconnect_callback = CallbackArg0::<()>(Arc::new(Box::new(move || Box::pin(cb()))));
+        self.reconnect_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
         self
     }
 
@@ -471,7 +471,7 @@ impl ConnectOptions {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.disconnect_callback = CallbackArg0::<()>(Arc::new(Box::new(move || Box::pin(cb()))));
+        self.disconnect_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
         self
     }
 }
@@ -482,8 +482,7 @@ type AsyncCallbackArg0<T> =
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 
-#[derive(Clone)]
-pub(crate) struct CallbackArg0<T>(Arc<AsyncCallbackArg0<T>>);
+pub(crate) struct CallbackArg0<T>(AsyncCallbackArg0<T>);
 
 impl<T> CallbackArg0<T> {
     pub async fn call(&self) -> T {
@@ -497,8 +496,7 @@ impl<T> fmt::Debug for CallbackArg0<T> {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct CallbackArg1<A, T>(Arc<AsyncCallbackArg1<A, T>>);
+pub(crate) struct CallbackArg1<A, T>(AsyncCallbackArg1<A, T>);
 
 impl<A, T> CallbackArg1<A, T> {
     pub async fn call(&self, arg: A) -> T {

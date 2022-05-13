@@ -1386,7 +1386,6 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-#[derive(Clone)]
 pub(crate) enum Authorization {
     /// No authentication.
     None,
