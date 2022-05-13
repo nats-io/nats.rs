@@ -46,6 +46,7 @@ pub struct ConnectOptions {
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
     pub(crate) flush_interval: Duration,
     pub(crate) ping_interval: Duration,
+    pub(crate) sender_capacity: usize,
     pub(crate) reconnect_callback: CallbackArg0<()>,
     pub(crate) disconnect_callback: CallbackArg0<()>,
     pub(crate) lame_duck_callback: CallbackArg0<()>,
@@ -67,6 +68,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"tls_client_config", &"XXXXXXXX")
             .entry(&"flush_interval", &self.flush_interval)
             .entry(&"ping_interval", &self.ping_interval)
+            .entry(&"sender_capacity", &self.sender_capacity)
             .finish()
     }
 }
@@ -87,6 +89,7 @@ impl Default for ConnectOptions {
             tls_client_config: None,
             flush_interval: Duration::from_millis(100),
             ping_interval: Duration::from_secs(60),
+            sender_capacity: 128,
             reconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
             disconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
             lame_duck_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
@@ -520,6 +523,24 @@ impl ConnectOptions {
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
         self.lame_duck_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
+        self
+    }
+
+    /// By default, Client dispatches op's to the Client onto the channel with capacity of 128.
+    /// This option enables overriding it.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new().client_capacity(256).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+
+    /// ```
+    ///
+    pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
+        self.sender_capacity = capacity;
         self
     }
 }
