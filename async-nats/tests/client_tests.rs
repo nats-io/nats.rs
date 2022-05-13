@@ -97,7 +97,7 @@ mod client {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let mut subscriber = client.clone().subscribe("foo".into()).await.unwrap();
 
-        let mut cloned_client = client.clone();
+        let cloned_client = client.clone();
         for _ in 0..10 {
             cloned_client
                 .publish("foo".into(), "data".into())
