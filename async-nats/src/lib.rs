@@ -911,7 +911,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
 
     // TODO make channel size configurable
-    let (sender, receiver) = mpsc::channel(128);
+    let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(sender.clone());
     let mut connect_info = ConnectInfo {
