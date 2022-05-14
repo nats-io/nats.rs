@@ -206,7 +206,7 @@ pub struct ServerInfo {
     #[serde(default)]
     pub headers: bool,
     /// Whether server goes into lame duck mode.
-    #[serde(default)]
+    #[serde(default, rename = "ldm")]
     pub lame_duck_mode: bool,
 }
 
@@ -537,6 +537,12 @@ impl ConnectionHandler {
                             }
                         }
                     }
+                }
+            }
+            // TODO: we should probably update advertised server list here too.
+            ServerOp::Info(info) => {
+                if info.lame_duck_mode {
+                    self.events.send(ServerEvent::LameDuckMode).await.ok();
                 }
             }
 
@@ -966,11 +972,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         let sender = sender.clone();
         async move {
             loop {
-                tokio::time::sleep(ping_interval).await;
                 match sender.send(Command::Ping).await {
                     Ok(()) => {}
                     Err(_) => return,
                 }
+                tokio::time::sleep(ping_interval).await;
             }
         }
     });
@@ -991,6 +997,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
                 ServerEvent::Reconnect => options.reconnect_callback.call().await,
                 ServerEvent::Disconnect => options.disconnect_callback.call().await,
                 ServerEvent::Error(error) => options.error_callback.call(error).await,
+                ServerEvent::LameDuckMode => options.lame_duck_callback.call().await,
             }
         }
     });
@@ -1003,6 +1010,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 pub(crate) enum ServerEvent {
     Reconnect,
     Disconnect,
+    LameDuckMode,
     Error(ServerError),
 }
 
