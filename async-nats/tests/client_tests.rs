@@ -12,6 +12,7 @@
 // limitations under the License.
 
 mod client {
+    use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -365,6 +366,37 @@ mod client {
             .unwrap();
 
         tokio::time::timeout(Duration::from_secs(15), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg_attr(target_os = "windows", ignore)]
+    async fn lame_duck_callback() {
+        let server = nats_server::run_basic_server();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        let client = ConnectOptions::new()
+            .lame_duck_callback(move || {
+                let tx = tx.clone();
+                async move {
+                    tx.send(()).await.unwrap();
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut sub = client.subscribe("data".to_string()).await.unwrap();
+        client
+            .publish("data".to_string(), "data".into())
+            .await
+            .unwrap();
+        sub.next().await.unwrap();
+
+        nats_server::set_lame_duck_mode(&server);
+        tokio::time::timeout(Duration::from_secs(10), rx.recv())
             .await
             .unwrap()
             .unwrap();

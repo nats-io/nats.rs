@@ -48,6 +48,7 @@ pub struct ConnectOptions {
     pub(crate) ping_interval: Duration,
     pub(crate) reconnect_callback: CallbackArg0<()>,
     pub(crate) disconnect_callback: CallbackArg0<()>,
+    pub(crate) lame_duck_callback: CallbackArg0<()>,
     pub(crate) error_callback: CallbackArg1<ServerError, ()>,
 }
 
@@ -88,6 +89,7 @@ impl Default for ConnectOptions {
             ping_interval: Duration::from_secs(60),
             reconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
             disconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
+            lame_duck_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
             error_callback: CallbackArg1::<ServerError, ()>(Box::new(move |error| {
                 Box::pin(async move {
                     println!("error : {}", error);
@@ -472,6 +474,49 @@ impl ConnectOptions {
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
         self.disconnect_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
+        self
+    }
+
+    /// Registers asynchronous callback for server entering lame duck mode
+    ///
+    /// # Examples
+    /// As asynchronous callbacks are stil not in `stable` channel, here are some examples how to
+    /// work around this
+    ///
+    /// ## Basic
+    /// If you don't need to move anything into the closure, simple signature can be used:
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().lame_duck_callback(|| async {
+    /// println!("server entered lame duck mode");
+    /// }).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## Advanced
+    /// If you need to move something into the closure, here's an example how to do that
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
+    /// async_nats::ConnectOptions::new().reconnect_callback(move || {
+    ///     let tx = tx.clone();
+    ///     async move {
+    ///         tx.send("server entered lame duck mode").await.unwrap();
+    ///         }
+    /// }).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn lame_duck_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + 'static + Send + Sync,
+    {
+        self.lame_duck_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
         self
     }
 }
