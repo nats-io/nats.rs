@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::ConnectOptions;
+    use async_nats::{ConnectOptions, ServerError};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -402,6 +402,53 @@ mod client {
 
         nats_server::set_lame_duck_mode(&server);
         tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn slow_consumers() {
+        let server = nats_server::run_basic_server();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        let client = ConnectOptions::new()
+            .subscription_capacity(1)
+            .error_callback(move |err| {
+                let tx = tx.clone();
+                async move {
+                    if let ServerError::SlowConsumer(_) = err {
+                        tx.send(()).await.unwrap()
+                    }
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let _sub = client.subscribe("data".to_string()).await.unwrap();
+        client
+            .publish("data".to_string(), "data".into())
+            .await
+            .unwrap();
+        client
+            .publish("data".to_string(), "data".into())
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+        client
+            .publish("data".to_string(), "data".into())
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
