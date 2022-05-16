@@ -103,7 +103,7 @@ impl ConnectOptions {
     /// Enables customization of NATS connection.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn options() -> std::io::Result<()> {
     /// let mut options =
@@ -121,7 +121,7 @@ impl ConnectOptions {
     /// Connect to the NATS Server leveraging all passed options.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc = async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
@@ -300,7 +300,7 @@ impl ConnectOptions {
     /// Sets or disables TLS requirement. If TLS connection is impossible while `options.require_tls(true)` connection will return error.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// let nc =
@@ -318,7 +318,7 @@ impl ConnectOptions {
     /// client is sending rarely and small messages. Flush interval allows to modify that interval.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
@@ -334,7 +334,7 @@ impl ConnectOptions {
     /// Sets how often Client sends PING message to the server.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
@@ -355,7 +355,7 @@ impl ConnectOptions {
     ///
     /// ## Basic
     /// If you don't need to move anything into the closure, simple signature can be used:
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().error_callback(|error| async move {
@@ -398,8 +398,10 @@ impl ConnectOptions {
     /// work around this
     ///
     /// ## Basic
+    ///
     /// If you don't need to move anything into the closure, simple signature can be used:
-    /// ```
+    ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().reconnect_callback(|| async {
@@ -412,7 +414,7 @@ impl ConnectOptions {
     /// ## Advanced
     /// If you need to move something into the closure, here's an example how to do that
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
@@ -442,7 +444,8 @@ impl ConnectOptions {
     ///
     /// ## Basic
     /// If you don't need to move anything into the closure, simple signature can be used:
-    /// ```
+    ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().disconnect_callback(|| async {
@@ -455,7 +458,7 @@ impl ConnectOptions {
     /// ## Advanced
     /// If you need to move something into the closure, here's an example how to do that
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
