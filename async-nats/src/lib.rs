@@ -518,23 +518,27 @@ impl ConnectionHandler {
 
                     // if the channel for subscription was dropped, remove the
                     // subscription from the map and unsubscribe.
-                    if subscription.sender.send(message).await.is_err() {
-                        self.subscriptions.remove(&sid);
-                        self.connection
-                            .write_op(ClientOp::Unsubscribe { sid, max: None })
-                            .await?;
-                        self.connection.flush().await?;
-                    // if channel was open and we sent the messsage, increase the
-                    // `delivered` counter.
-                    } else {
-                        subscription.delivered += 1;
-                        // if this `Subscription` has set `max` value, check if it
-                        // was reached. If yes, remove the `Subscription` and in
-                        // the result, `drop` the `sender` channel.
-                        if let Some(max) = subscription.max {
-                            if subscription.delivered.ge(&max) {
-                                self.subscriptions.remove(&sid);
+                    match subscription.sender.try_send(message) {
+                        Ok(_) => {
+                            subscription.delivered += 1;
+                            // if this `Subscription` has set `max` value, check if it
+                            // was reached. If yes, remove the `Subscription` and in
+                            // the result, `drop` the `sender` channel.
+                            if let Some(max) = subscription.max {
+                                if subscription.delivered.ge(&max) {
+                                    self.subscriptions.remove(&sid);
+                                }
                             }
+                        }
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            self.events.send(ServerEvent::SlowConsumer(sid)).await.ok();
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            self.subscriptions.remove(&sid);
+                            self.connection
+                                .write_op(ClientOp::Unsubscribe { sid, max: None })
+                                .await?;
+                            self.connection.flush().await?;
                         }
                     }
                 }
@@ -705,13 +709,15 @@ impl ConnectionHandler {
 pub struct Client {
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
+    subscription_capacity: usize,
 }
 
 impl Client {
-    pub(crate) fn new(sender: mpsc::Sender<Command>) -> Client {
+    pub(crate) fn new(sender: mpsc::Sender<Command>, capacity: usize) -> Client {
         Client {
             sender,
             next_subscription_id: Arc::new(AtomicU64::new(0)),
+            subscription_capacity: capacity,
         }
     }
 
@@ -850,7 +856,7 @@ impl Client {
         queue_group: Option<String>,
     ) -> Result<Subscriber, io::Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel(16);
+        let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
         self.sender
             .send(Command::Subscribe {
@@ -913,7 +919,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
-    let client = Client::new(sender.clone());
+    let client = Client::new(sender.clone(), options.subscription_capacity);
     let mut connect_info = ConnectInfo {
         tls_required,
         // FIXME(tp): have optional name
@@ -998,6 +1004,12 @@ pub async fn connect_with_options<A: ToServerAddrs>(
                 ServerEvent::Disconnect => options.disconnect_callback.call().await,
                 ServerEvent::Error(error) => options.error_callback.call(error).await,
                 ServerEvent::LameDuckMode => options.lame_duck_callback.call().await,
+                ServerEvent::SlowConsumer(sid) => {
+                    options
+                        .error_callback
+                        .call(ServerError::SlowConsumer(sid))
+                        .await
+                }
             }
         }
     });
@@ -1011,6 +1023,7 @@ pub(crate) enum ServerEvent {
     Reconnect,
     Disconnect,
     LameDuckMode,
+    SlowConsumer(u64),
     Error(ServerError),
 }
 
@@ -1162,6 +1175,7 @@ impl Stream for Subscriber {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerError {
     AuthorizationViolation,
+    SlowConsumer(u64),
     Other(String),
 }
 
@@ -1178,6 +1192,7 @@ impl std::fmt::Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
+            Self::SlowConsumer(sid) => write!(f, "nats: subscription {} is a slow consumer", sid),
             Self::Other(error) => write!(f, "nats: {}", error),
         }
     }
