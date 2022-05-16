@@ -53,7 +53,7 @@ jobs:
         run: go get github.com/nats-io/nats-server/v2
 
       - name: Configure hosts
-        run: echo 'localhost:4444 demo.nats.io' | sudo tee -a /etc/hosts
+        run: echo '127.0.0.1 demo.nats.io' | sudo tee -a /etc/hosts
 
       - name: Build all
         run: cargo build --workspace --tests --examples
@@ -62,7 +62,8 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          nats-server --port 4444 --jetstream &
+          # FIXME: don't actually stasrt the server, tests will still pass.
+          nats-server --jetstream &
           cargo test --features=unstable -- --nocapture
 
   test_fault-injection:
