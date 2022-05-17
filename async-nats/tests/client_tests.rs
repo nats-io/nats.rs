@@ -256,6 +256,11 @@ mod client {
     }
 
     #[tokio::test]
+    async fn connect_domain() {
+        assert!(async_nats::connect("demo.nats.io").await.is_ok());
+    }
+
+    #[tokio::test]
     async fn reconnect_fallback() {
         use async_nats::ServerAddr;
 
