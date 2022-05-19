@@ -127,15 +127,17 @@ impl PushSubscription {
     /// # }
     /// ```
     pub fn next(&self) -> Option<Message> {
-        match self.0.messages.recv().ok() {
-            Some(message) => {
-                if self.preprocess(&message) {
-                    return self.next();
-                }
+        loop {
+            return match self.0.messages.recv().ok() {
+                Some(message) => {
+                    if self.preprocess(&message) {
+                        continue;
+                    }
 
-                Some(message)
+                    Some(message)
+                }
+                None => None,
             }
-            None => None,
         }
     }
 
@@ -159,15 +161,17 @@ impl PushSubscription {
     /// # }
     /// ```
     pub fn try_next(&self) -> Option<Message> {
-        match self.0.messages.try_recv().ok() {
-            Some(message) => {
-                if self.preprocess(&message) {
-                    return self.try_next();
-                }
+        loop {
+            return match self.0.messages.try_recv().ok() {
+                Some(message) => {
+                    if self.preprocess(&message) {
+                        continue;
+                    }
 
-                Some(message)
+                    Some(message)
+                }
+                None => None,
             }
-            None => None,
         }
     }
 
@@ -188,22 +192,24 @@ impl PushSubscription {
     /// # }
     /// ```
     pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
-        match self.0.messages.recv_timeout(timeout) {
-            Ok(message) => {
-                if self.preprocess(&message) {
-                    return self.next_timeout(timeout);
-                }
+        loop {
+            return match self.0.messages.recv_timeout(timeout) {
+                Ok(message) => {
+                    if self.preprocess(&message) {
+                        continue;
+                    }
 
-                Ok(message)
+                    Ok(message)
+                }
+                Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "next_timeout: timed out",
+                )),
+                Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "next_timeout: unsubscribed",
+                )),
             }
-            Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "next_timeout: timed out",
-            )),
-            Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "next_timeout: unsubscribed",
-            )),
         }
     }
 

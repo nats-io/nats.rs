@@ -759,29 +759,31 @@ impl Iterator for Keys {
             return None;
         }
 
-        match self.subscription.next() {
-            Some(message) => {
-                // If there are no more pending messages we'll stop after delivering the key
-                // derived from this message.
-                if let Some(info) = message.jetstream_message_info() {
-                    if info.pending == 0 {
-                        self.done = true;
+        loop {
+            return match self.subscription.next() {
+                Some(message) => {
+                    // If there are no more pending messages we'll stop after delivering the key
+                    // derived from this message.
+                    if let Some(info) = message.jetstream_message_info() {
+                        if info.pending == 0 {
+                            self.done = true;
+                        }
                     }
-                }
 
-                // We are only interested in unique current keys from subjects so we skip delete
-                // and purge markers.
-                let operation = kv_operation_from_maybe_headers(message.headers.as_ref());
-                if operation != Operation::Put {
-                    return self.next();
-                }
+                    // We are only interested in unique current keys from subjects so we skip delete
+                    // and purge markers.
+                    let operation = kv_operation_from_maybe_headers(message.headers.as_ref());
+                    if operation != Operation::Put {
+                        continue;
+                    }
 
-                message
-                    .subject
-                    .strip_prefix(&self.prefix)
-                    .map(|s| s.to_string())
+                    message
+                        .subject
+                        .strip_prefix(&self.prefix)
+                        .map(|s| s.to_string())
+                }
+                None => None,
             }
-            None => None,
         }
     }
 }

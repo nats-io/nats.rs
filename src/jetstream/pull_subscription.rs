@@ -316,27 +316,29 @@ impl PullSubscription {
     /// # }
     /// ```
     pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
-        match self.0.messages.recv_timeout(timeout) {
-            Ok(message) => {
-                if message.is_no_messages() {
-                    return self.next_timeout(timeout);
+        loop {
+            return match self.0.messages.recv_timeout(timeout) {
+                Ok(message) => {
+                    if message.is_no_messages() {
+                        continue;
+                    }
+                    if message.is_request_timeout() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "next_timeout: Pull Request timed out",
+                        ));
+                    }
+                    Ok(message)
                 }
-                if message.is_request_timeout() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "next_timeout: Pull Request timed out",
-                    ));
-                }
-                Ok(message)
+                Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "next_timeout: timed out",
+                )),
+                Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "next_timeout: unsubscribed",
+                )),
             }
-            Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "next_timeout: timed out",
-            )),
-            Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "next_timeout: unsubscribed",
-            )),
         }
     }
 
