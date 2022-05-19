@@ -780,11 +780,10 @@ impl Iterator for Keys {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-
         loop {
+            if self.done {
+                return None;
+            }
             return match self.subscription.next() {
                 Some(message) => {
                     // If there are no more pending messages we'll stop after delivering the key
