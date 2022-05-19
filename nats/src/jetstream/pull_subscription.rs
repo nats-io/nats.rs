@@ -338,7 +338,7 @@ impl PullSubscription {
                     io::ErrorKind::Other,
                     "next_timeout: unsubscribed",
                 )),
-            }
+            };
         }
     }
 

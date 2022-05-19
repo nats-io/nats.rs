@@ -137,7 +137,7 @@ impl PushSubscription {
                     Some(message)
                 }
                 None => None,
-            }
+            };
         }
     }
 
@@ -171,7 +171,7 @@ impl PushSubscription {
                     Some(message)
                 }
                 None => None,
-            }
+            };
         }
     }
 
@@ -209,7 +209,7 @@ impl PushSubscription {
                     io::ErrorKind::Other,
                     "next_timeout: unsubscribed",
                 )),
-            }
+            };
         }
     }
 
