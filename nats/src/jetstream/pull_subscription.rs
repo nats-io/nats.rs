@@ -13,7 +13,7 @@
 
 use std::io;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::jetstream::{ConsumerInfo, ConsumerOwnership, JetStream};
 use crate::Message;
@@ -315,11 +315,13 @@ impl PullSubscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
+    pub fn next_timeout(&self, mut timeout: Duration) -> io::Result<Message> {
         loop {
+            let start = Instant::now();
             return match self.0.messages.recv_timeout(timeout) {
                 Ok(message) => {
                     if message.is_no_messages() {
+                        timeout = timeout.saturating_sub(start.elapsed());
                         continue;
                     }
                     if message.is_request_timeout() {

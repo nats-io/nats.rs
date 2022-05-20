@@ -15,7 +15,7 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel as channel;
 
@@ -191,11 +191,13 @@ impl PushSubscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
+    pub fn next_timeout(&self, mut timeout: Duration) -> io::Result<Message> {
         loop {
+            let start = Instant::now();
             return match self.0.messages.recv_timeout(timeout) {
                 Ok(message) => {
                     if self.preprocess(&message) {
+                        timeout = timeout.saturating_sub(start.elapsed());
                         continue;
                     }
 
