@@ -1,3 +1,10 @@
+# 0.20.1
+## Overview
+A patch release fixing stack overflow happening when there was kv watcher for a key that did not change for a long time.
+
+## Fixed
+* Remove recursive calls by @segfaultdoc in https://github.com/nats-io/nats.rs/pull/448
+
 # 0.20.0
 ## Overview
 A minor sync client release that adds requests with timeouts and headers.
