@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::num::{NonZeroU16, NonZeroU8};
 use std::str::FromStr;
 
 use subslice::SubsliceExt;
@@ -114,6 +114,8 @@ impl Connection {
                         headers: None,
                         subject,
                         payload,
+                        status: None,
+                        description: None,
                     }));
                 }
             }
@@ -203,20 +205,31 @@ impl Connection {
                     }
 
                     let mut headers = HeaderMap::new();
+                    let mut maybe_status: Option<NonZeroU16> = None;
+                    let mut maybe_description: Option<String> = None;
                     if let Some(slice) = version_line.get("NATS/1.0".len()..).map(|s| s.trim()) {
                         match slice.split_once(' ') {
                             Some((status, description)) => {
                                 if !status.is_empty() {
-                                    headers.append("Status", status.trim().try_into().unwrap());
+                                    maybe_status = Some(status.trim().parse().map_err(|_| {
+                                        std::io::Error::new(
+                                            io::ErrorKind::Other,
+                                            "could not covert Description header into header value",
+                                        )
+                                    })?);
                                 }
                                 if !description.is_empty() {
-                                    headers
-                                        .append("Description", status.trim().try_into().unwrap());
+                                    maybe_description = Some(description.trim().to_string());
                                 }
                             }
                             None => {
                                 if !slice.is_empty() {
-                                    headers.append("Status", slice.try_into().unwrap());
+                                    maybe_status = Some(slice.trim().parse().map_err(|_| {
+                                        std::io::Error::new(
+                                            io::ErrorKind::Other,
+                                            "could not covert Description header into header value",
+                                        )
+                                    })?);
                                 }
                             }
                         }
@@ -251,6 +264,8 @@ impl Connection {
                         subject,
                         headers: Some(headers),
                         payload,
+                        status: maybe_status,
+                        description: maybe_description,
                     }));
                 }
             }
@@ -524,6 +539,8 @@ mod read_op {
                 reply: None,
                 headers: None,
                 payload: "Hello World".into(),
+                status: None,
+                description: None,
             })
         );
 
@@ -541,6 +558,8 @@ mod read_op {
                 reply: Some("INBOX.34".into()),
                 headers: None,
                 payload: "Hello World".into(),
+                status: None,
+                description: None,
             })
         );
 
@@ -565,6 +584,8 @@ mod read_op {
                     "X".parse().unwrap()
                 )])),
                 payload: "Hello World".into(),
+                status: None,
+                description: None,
             })
         );
     }
@@ -780,7 +801,7 @@ mod write_op {
                 pass: None,
                 auth_token: None,
                 headers: false,
-                no_responders: true,
+                no_responders: false,
             }))
             .await
             .unwrap();
@@ -789,7 +810,7 @@ mod write_op {
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
             buffer,
-            "CONNECT {\"verbose\":false,\"pedantic\":false,\"jwt\":null,\"nkey\":null,\"sig\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":true}\r\n"
+            "CONNECT {\"verbose\":false,\"pedantic\":false,\"jwt\":null,\"nkey\":null,\"sig\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":false}\r\n"
         );
     }
 }
