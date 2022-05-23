@@ -111,6 +111,9 @@ use std::cmp;
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::num::NonZeroU128;
+use std::num::NonZeroU16;
+use std::num::NonZeroU8;
 use std::option;
 use std::pin::Pin;
 use std::slice;
@@ -223,6 +226,8 @@ pub(crate) enum ServerOp {
         reply: Option<String>,
         payload: Bytes,
         headers: Option<HeaderMap>,
+        status: Option<NonZeroU16>,
+        description: Option<String>,
     },
 }
 
@@ -507,6 +512,8 @@ impl ConnectionHandler {
                 reply,
                 payload,
                 headers,
+                status,
+                description,
             } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message = Message {
@@ -514,6 +521,8 @@ impl ConnectionHandler {
                         reply,
                         payload,
                         headers,
+                        status,
+                        description,
                     };
 
                     // if the channel for subscription was dropped, remove the
@@ -791,7 +800,15 @@ impl Client {
         self.publish_with_reply(subject, inbox, payload).await?;
         self.flush().await?;
         match sub.next().await {
-            Some(message) => Ok(message),
+            Some(message) => {
+                if message.is_no_responders() {
+                    return Err(Box::new(std::io::Error::new(
+                        ErrorKind::NotFound,
+                        "nats: no responders",
+                    )));
+                }
+                Ok(message)
+            }
             None => Err(Box::new(io::Error::new(
                 ErrorKind::BrokenPipe,
                 "did not receive any message",
@@ -811,7 +828,15 @@ impl Client {
             .await?;
         self.flush().await?;
         match sub.next().await {
-            Some(message) => Ok(message),
+            Some(message) => {
+                if message.is_no_responders() {
+                    return Err(Box::new(std::io::Error::new(
+                        ErrorKind::NotFound,
+                        "nats: no responders",
+                    )));
+                }
+                Ok(message)
+            }
             None => Err(Box::new(io::Error::new(
                 ErrorKind::BrokenPipe,
                 "did not receive any message",
@@ -1052,7 +1077,23 @@ pub struct Message {
     pub reply: Option<String>,
     pub payload: Bytes,
     pub headers: Option<HeaderMap>,
+    status: Option<NonZeroU16>,
+    description: Option<String>,
 }
+
+impl Message {
+    fn is_no_responders(&self) -> bool {
+        if !self.payload.is_empty() {
+            return false;
+        }
+        if self.status == NonZeroU16::new(NO_RESPONDERS) {
+            return true;
+        }
+        false
+    }
+}
+
+const NO_RESPONDERS: u16 = 503;
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
