@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::str::FromStr;
 
 use subslice::SubsliceExt;
@@ -202,6 +203,25 @@ impl Connection {
                     }
 
                     let mut headers = HeaderMap::new();
+                    if let Some(slice) = version_line.get("NATS/1.0".len()..).map(|s| s.trim()) {
+                        match slice.split_once(' ') {
+                            Some((status, description)) => {
+                                if !status.is_empty() {
+                                    headers.append("Status", status.trim().try_into().unwrap());
+                                }
+                                if !description.is_empty() {
+                                    headers
+                                        .append("Description", status.trim().try_into().unwrap());
+                                }
+                            }
+                            None => {
+                                if !slice.is_empty() {
+                                    headers.append("Status", slice.try_into().unwrap());
+                                }
+                            }
+                        }
+                    }
+
                     while let Some(line) = lines.next() {
                         if line.is_empty() {
                             continue;
@@ -760,7 +780,7 @@ mod write_op {
                 pass: None,
                 auth_token: None,
                 headers: false,
-                no_responders: false,
+                no_responders: true,
             }))
             .await
             .unwrap();
@@ -769,7 +789,7 @@ mod write_op {
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
             buffer,
-            "CONNECT {\"verbose\":false,\"pedantic\":false,\"jwt\":null,\"nkey\":null,\"sig\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":false}\r\n"
+            "CONNECT {\"verbose\":false,\"pedantic\":false,\"jwt\":null,\"nkey\":null,\"sig\":null,\"name\":null,\"echo\":false,\"lang\":\"Rust\",\"version\":\"1.0.0\",\"protocol\":1,\"tls_required\":false,\"user\":null,\"pass\":null,\"auth_token\":null,\"headers\":false,\"no_responders\":true}\r\n"
         );
     }
 }

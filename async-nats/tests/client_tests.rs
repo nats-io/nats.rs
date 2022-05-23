@@ -193,6 +193,23 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+    #[tokio::test]
+    async fn request_no_responders() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let resp = tokio::time::timeout(
+            tokio::time::Duration::from_millis(500),
+            client.request("test".into(), "request".into()),
+        )
+        .await
+        .unwrap();
+        println!(
+            "headers: {:?}",
+            resp.unwrap().headers.unwrap().get("Status").unwrap()
+        );
+        // assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
+    }
 
     #[tokio::test]
     async fn unsubscribe() {
