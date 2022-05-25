@@ -1,3 +1,15 @@
+# 0.14.0
+## Added
+* Add no responders handling by @Jarema in https://github.com/nats-io/nats.rs/pull/450
+* Add client jwt authentication by @stevelr  in https://github.com/nats-io/nats.rs/pull/433
+* Add lame duck mode support by @Jarema in https://github.com/nats-io/nats.rs/pull/438
+* Add slow consumers support by @Jarema in https://github.com/nats-io/nats.rs/pull/444
+* Add tracking maximum number of pending pings by @caspervonb  https://github.com/nats-io/nats.rs/pull/419
+
+## Changed
+* `Client` doesn't need to be mutable self by @stevelr  in https://github.com/nats-io/nats.rs/pull/434
+* Make send buffer configurable by @Jarema in https://github.com/nats-io/nats.rs/pull/437
+
 # 0.13.0
 ## Added
 * Add Auth - username/password & token by @Jarema in https://github.com/nats-io/nats.rs/pull/408
