@@ -135,7 +135,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
-pub type Error = Box<dyn std::error::Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
