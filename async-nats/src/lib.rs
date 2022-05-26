@@ -697,6 +697,9 @@ impl ConnectionHandler {
         let (_, connection) = self.connector.connect().await?;
         self.connection = connection;
 
+        self.subscriptions
+            .retain(|_, subscription| !subscription.sender.is_closed());
+
         for (sid, subscription) in &self.subscriptions {
             self.connection
                 .write_op(ClientOp::Subscribe {
