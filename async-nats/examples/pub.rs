@@ -1,9 +1,8 @@
 use bytes::Bytes;
-use std::error::Error;
 use std::time::Instant;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("nats://localhost:4222").await?;
 
     let now = Instant::now();
