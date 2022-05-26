@@ -69,7 +69,7 @@
 //! # use std::time::Instant;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> Result<(), Box<dyn Error>> {
+//! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let subject = String::from("foo");
@@ -913,7 +913,7 @@ impl Client {
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
@@ -1061,7 +1061,7 @@ pub(crate) enum ServerEvent {
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
@@ -1102,7 +1102,7 @@ const NO_RESPONDERS: u16 = 503;
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
 /// # nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
@@ -1160,7 +1160,7 @@ impl Subscriber {
     /// ```
     /// # use futures::StreamExt;
     /// # #[tokio::main]
-    /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn unsubscribe() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// for _ in 0..3 {
