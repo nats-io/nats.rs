@@ -11,11 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::{self, ErrorKind};
+
 use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json;
+
+use super::stream::{StreamConfig, StreamInfo};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -44,5 +48,26 @@ impl Context {
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
+    }
+
+    pub async fn create_stream<S>(&mut self, stream_config: S) -> Result<StreamInfo, Error>
+    where
+        StreamConfig: From<S>,
+    {
+        let config: StreamConfig = stream_config.into();
+        if config.name.is_empty() {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::InvalidInput,
+                "the stream name must not be empty",
+            )));
+        }
+        let subject = format!("{}.STREAM.CREATE.{}", self.prefix, config.name);
+        match self.request(subject, &config).await? {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!("nats: error while creating stream: {}", error.code),
+            ))),
+            Response::Ok(info) => Ok(info),
+        }
     }
 }
