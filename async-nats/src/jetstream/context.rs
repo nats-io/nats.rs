@@ -33,11 +33,7 @@ impl Context {
     }
 
     /// Send a request to the jetstream JSON API.
-    pub async fn request<T, V>(
-        &mut self,
-        subject: String,
-        payload: &T,
-    ) -> Result<Response<V>, Error>
+    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<Response<V>, Error>
     where
         T: ?Sized + Serialize,
         V: DeserializeOwned,
