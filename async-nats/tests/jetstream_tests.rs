@@ -80,4 +80,17 @@ mod jetstream {
 
         context.create_stream("events").await.unwrap();
     }
+
+    #[tokio::test]
+    async fn get_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let mut context = async_nats::jetstream::new(client);
+
+        context.create_stream("events").await.unwrap();
+        assert_eq!(
+            context.get_stream("events").await.unwrap().info.config.name,
+            "events".to_string()
+        );
+    }
 }

@@ -70,4 +70,28 @@ impl Context {
             Response::Ok(info) => Ok(info),
         }
     }
+
+    pub async fn get_stream<T: AsRef<str>>(&mut self, stream: T) -> Result<Stream, Error> {
+        let stream = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::InvalidInput,
+                "the stream name must not be empty",
+            )));
+        }
+
+        let subject = format!("{}.STREAM.INFO.{}", self.prefix, stream);
+        let request: Response<StreamInfo> = self.request(subject, &()).await?;
+        match request {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!("nats: error while creating stream: {}", error.code),
+            ))),
+            Response::Ok(info) => Ok(Stream { info }),
+        }
+    }
+}
+
+pub struct Stream {
+    pub info: StreamInfo,
 }
