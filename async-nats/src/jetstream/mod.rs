@@ -15,6 +15,7 @@ use crate::Client;
 
 pub mod context;
 pub mod response;
+pub mod stream;
 pub use context::Context;
 
 pub fn new(client: Client) -> Context {

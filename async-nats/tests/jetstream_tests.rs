@@ -71,4 +71,13 @@ mod jetstream {
 
         assert!(matches!(response, Response::Err { .. }));
     }
+
+    #[tokio::test]
+    async fn add_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let mut context = async_nats::jetstream::new(client);
+
+        context.create_stream("events").await.unwrap();
+    }
 }
