@@ -23,10 +23,37 @@ pub struct AccountInfo {
 }
 
 mod jetstream {
-
     use super::*;
+    use async_nats::header::HeaderMap;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::StreamConfig;
+
+    #[tokio::test]
+    async fn publish_with_headers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(StreamConfig {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let headers = HeaderMap::new();
+        let payload = b"Hello JetStream";
+
+        let ack = context
+            .publish_with_headers("foo".into(), headers, payload.as_ref().into())
+            .await
+            .unwrap();
+
+        assert_eq!(ack.stream, "TEST");
+        assert_eq!(ack.sequence, 1);
+    }
 
     #[tokio::test]
     async fn request() {
