@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 /// contains info about the `JetStream` usage from the current account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -24,6 +23,7 @@ pub struct AccountInfo {
 }
 
 mod jetstream {
+
     use super::*;
     use async_nats::jetstream::response::Response;
 
@@ -92,5 +92,15 @@ mod jetstream {
             context.get_stream("events").await.unwrap().info.config.name,
             "events".to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn delete_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let mut context = async_nats::jetstream::new(client);
+
+        context.create_stream("events").await.unwrap();
+        assert!(context.delete_stream("events").await.unwrap().success);
     }
 }

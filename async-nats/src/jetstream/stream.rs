@@ -169,6 +169,11 @@ pub struct StreamInfo {
     pub state: StreamState,
 }
 
+#[derive(Deserialize)]
+pub struct DeleteResponse {
+    pub success: bool,
+}
+
 /// information about the given stream.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct StreamState {

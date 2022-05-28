@@ -17,9 +17,9 @@ use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json;
+use serde_json::{self, json};
 
-use super::stream::{StreamConfig, StreamInfo};
+use super::stream::{DeleteResponse, StreamConfig, StreamInfo};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -88,6 +88,30 @@ impl Context {
                 format!("nats: error while creating stream: {}", error.code),
             ))),
             Response::Ok(info) => Ok(Stream { info }),
+        }
+    }
+
+    pub async fn delete_stream<T: AsRef<str>>(
+        &mut self,
+        stream: T,
+    ) -> Result<DeleteResponse, Error> {
+        let stream = stream.as_ref();
+        if stream.is_empty() {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::InvalidInput,
+                "the stream name must not be empty",
+            )));
+        }
+        let subject = format!("{}.STREAM.DELETE.{}", self.prefix, stream);
+        match self.request(subject, &json!({})).await? {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while deleting a stream: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(delete_response) => Ok(delete_response),
         }
     }
 }
