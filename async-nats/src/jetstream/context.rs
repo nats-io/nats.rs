@@ -19,7 +19,7 @@ use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json;
 
-use super::stream::{StreamConfig, StreamInfo};
+use super::stream::{Stream, StreamConfig, StreamInfo};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -90,8 +90,4 @@ impl Context {
             Response::Ok(info) => Ok(Stream { info }),
         }
     }
-}
-
-pub struct Stream {
-    pub info: StreamInfo,
 }
