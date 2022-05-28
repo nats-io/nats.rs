@@ -170,7 +170,7 @@ pub struct StreamInfo {
 }
 
 #[derive(Deserialize)]
-pub struct DeleteResponse {
+pub struct DeleteStatus {
     pub success: bool,
 }
 

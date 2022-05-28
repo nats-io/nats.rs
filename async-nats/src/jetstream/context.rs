@@ -19,7 +19,7 @@ use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 
-use super::stream::{DeleteResponse, StreamConfig, StreamInfo};
+use super::stream::{DeleteStatus, StreamConfig, StreamInfo};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -50,7 +50,7 @@ impl Context {
         Ok(response)
     }
 
-    pub async fn create_stream<S>(&mut self, stream_config: S) -> Result<StreamInfo, Error>
+    pub async fn create_stream<S>(&self, stream_config: S) -> Result<StreamInfo, Error>
     where
         StreamConfig: From<S>,
     {
@@ -71,7 +71,7 @@ impl Context {
         }
     }
 
-    pub async fn get_stream<T: AsRef<str>>(&mut self, stream: T) -> Result<Stream, Error> {
+    pub async fn get_stream<T: AsRef<str>>(&self, stream: T) -> Result<Stream, Error> {
         let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(Box::new(io::Error::new(
@@ -91,10 +91,7 @@ impl Context {
         }
     }
 
-    pub async fn delete_stream<T: AsRef<str>>(
-        &mut self,
-        stream: T,
-    ) -> Result<DeleteResponse, Error> {
+    pub async fn delete_stream<T: AsRef<str>>(&self, stream: T) -> Result<DeleteStatus, Error> {
         let stream = stream.as_ref();
         if stream.is_empty() {
             return Err(Box::new(io::Error::new(
@@ -112,6 +109,20 @@ impl Context {
                 ),
             ))),
             Response::Ok(delete_response) => Ok(delete_response),
+        }
+    }
+
+    pub async fn update_stream(&self, config: &StreamConfig) -> Result<StreamInfo, Error> {
+        let subject = format!("{}.STREAM.UPDATE.{}", self.prefix, config.name);
+        match self.request(subject, config).await? {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while deleting a stream: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(info) => Ok(info),
         }
     }
 }
