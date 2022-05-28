@@ -56,6 +56,32 @@ impl Context {
         }
     }
 
+    /// Publish a message with headers
+    pub async fn publish_with_headers(
+        &self,
+        subject: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<PublishAck, Error> {
+        let message = self
+            .client
+            .request_with_headers(subject, headers, payload)
+            .await?;
+        let response = serde_json::from_slice(message.payload.as_ref())?;
+
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while publishing message: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+
+            Response::Ok(publish_ack) => Ok(publish_ack),
+        }
+    }
+
     /// Send a request to the jetstream JSON API.
     pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<Response<V>, Error>
     where
