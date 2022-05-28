@@ -269,6 +269,7 @@ mod client {
     }
 
     #[tokio::test]
+    #[ignore] // temporarily ignored due to DNS issues on github actions
     async fn connect_domain() {
         assert!(async_nats::connect("demo.nats.io").await.is_ok());
     }
