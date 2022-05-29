@@ -19,7 +19,7 @@ use bytes::Bytes;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 
-use super::stream::{Stream, DeleteStatus, StreamConfig, StreamInfo};
+use super::stream::{DeleteStatus, Stream, StreamConfig, StreamInfo};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
