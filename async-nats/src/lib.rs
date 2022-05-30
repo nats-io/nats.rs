@@ -1140,6 +1140,7 @@ impl Subscriber {
     /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
     ///
     /// # Examples
+    ///
     /// ```
     /// # use futures::StreamExt;
     /// # #[tokio::main]
@@ -1147,10 +1148,10 @@ impl Subscriber {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// for _ in 0..3 {
-    ///     client.publish("test".into(), "data".into()).await?;
+    ///     client.publish("unsubscribe_after".into(), "data".into()).await?;
     /// }
     ///
-    /// let mut sub = client.subscribe("test".into()).await?;
+    /// let mut sub = client.subscribe("unsubscribe_after".into()).await?;
     /// sub.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
