@@ -20,7 +20,7 @@ use tokio_rustls::rustls;
 
 /// Connect options. Used to connect with NATS when custom config is needed.
 /// # Examples
-/// ```
+/// ```no_run
 /// # #[tokio::main]
 /// # async fn options() -> std::io::Result<()> {
 /// let mut options =
@@ -390,7 +390,7 @@ impl ConnectOptions {
     /// ## Advanced
     /// If you need to move something into the closure, here's an example how to do that
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
@@ -510,7 +510,7 @@ impl ConnectOptions {
     ///
     /// ## Basic
     /// If you don't need to move anything into the closure, simple signature can be used:
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().lame_duck_callback(|| async {
@@ -523,7 +523,7 @@ impl ConnectOptions {
     /// ## Advanced
     /// If you need to move something into the closure, here's an example how to do that
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
@@ -549,13 +549,12 @@ impl ConnectOptions {
     /// This option enables overriding it.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// async_nats::ConnectOptions::new().client_capacity(256).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
-
     /// ```
     ///
     pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
