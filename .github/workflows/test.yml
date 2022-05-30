@@ -52,6 +52,7 @@ jobs:
       - name: Install nats-server
         run: go get github.com/nats-io/nats-server/v2
 
+      - run: curl https://demo.nats.io:8222/varz
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
