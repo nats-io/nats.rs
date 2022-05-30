@@ -17,8 +17,7 @@ use std::path::PathBuf;
 #[test]
 fn basic_tls() -> io::Result<()> {
     let s = nats_server::run_server("tests/configs/tls.conf");
-
-    assert!(nats::connect("nats://127.0.0.1").is_err());
+    assert!(nats::connect(s.client_url()).is_err());
 
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
