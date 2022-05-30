@@ -74,7 +74,8 @@ jobs:
           RUST_BACKTRACE: 1
         run: |
           # FIXME: don't actually stasrt the server, tests will still pass.
-          nats-server --jetstream &
+          nats-server --jetstream --port=4222 &
+          sleep 5
           cargo test --features=unstable -- --nocapture
 
   test_fault-injection:
