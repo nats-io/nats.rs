@@ -58,11 +58,11 @@ jobs:
 
       - name: Configure hosts
         run: |
-          if [[ -f "C:\\Windows" ]] then;
+          if [[ -f "C:\\Windows" ]]; then
             echo '127.0.0.1 demo.nats.io' >> "C:\\Windows\\System32\\drivers\\etc\\hosts"
           fi
 
-          if [[ -f "/etc" ]] then;
+          if [[ -f "/etc" ]]; then
             echo '127.0.0.1 demo.nats.io' >> "/etc/hosts"
           fi
 
