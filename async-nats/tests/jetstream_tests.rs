@@ -25,8 +25,35 @@ pub struct AccountInfo {
 mod jetstream {
 
     use super::*;
-    use async_nats::jetstream::{response::Response, stream::StreamConfig};
+    use async_nats::jetstream::response::Response;
+    use async_nats::jetstream::stream::{StreamConfig, StreamInfo};
+    use bytes::Bytes;
 
+    #[tokio::test]
+    async fn request() {
+        let client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let mut context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(StreamConfig {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"Hello JetStream";
+
+        // Basic publish like NATS core.
+        let ack = context
+            .publish("foo".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        assert_eq!(ack.stream, "TEST");
+        assert_eq!(ack.sequence, 1);
+    }
+  
     #[tokio::test]
     async fn request_ok() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -94,7 +121,6 @@ mod jetstream {
         );
     }
 
-    #[tokio::test]
     async fn delete_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();

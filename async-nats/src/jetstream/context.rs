@@ -13,6 +13,8 @@
 
 use std::io::{self, ErrorKind};
 
+use crate::header::HeaderMap;
+use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
@@ -33,6 +35,24 @@ impl Context {
         Context {
             client,
             prefix: "$JS.API".to_string(),
+        }
+    }
+
+    /// Publish a message
+    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
+        let message = self.client.request(subject, payload).await?;
+        let response = serde_json::from_slice(message.payload.as_ref())?;
+
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while publishing message: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+
+            Response::Ok(publish_ack) => Ok(publish_ack),
         }
     }
 
