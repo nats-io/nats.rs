@@ -157,7 +157,10 @@ pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
 pub mod jetstream;
+pub mod message;
 mod tls;
+
+pub use message::Message;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -1074,30 +1077,6 @@ pub(crate) enum ServerEvent {
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
-
-#[derive(Debug)]
-pub struct Message {
-    pub subject: String,
-    pub reply: Option<String>,
-    pub payload: Bytes,
-    pub headers: Option<HeaderMap>,
-    status: Option<NonZeroU16>,
-    description: Option<String>,
-}
-
-impl Message {
-    fn is_no_responders(&self) -> bool {
-        if !self.payload.is_empty() {
-            return false;
-        }
-        if self.status == NonZeroU16::new(NO_RESPONDERS) {
-            return true;
-        }
-        false
-    }
-}
-
-const NO_RESPONDERS: u16 = 503;
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///

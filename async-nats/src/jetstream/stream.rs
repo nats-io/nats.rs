@@ -15,6 +15,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use time::serde::rfc3339;
 
+pub struct Stream {
+    pub info: StreamInfo,
+}
+
 /// `StreamConfig` determines the properties for a stream.
 /// There are sensible defaults for most. If no subjects are
 /// given the name will be used as the only subject.
@@ -167,6 +171,11 @@ pub struct StreamInfo {
     pub created: DateTime,
     /// Various metrics associated with this stream
     pub state: StreamState,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteStatus {
+    pub success: bool,
 }
 
 /// information about the given stream.

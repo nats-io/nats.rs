@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2022 The& NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 /// contains info about the `JetStream` usage from the current account.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -24,11 +23,37 @@ pub struct AccountInfo {
 }
 
 mod jetstream {
+
     use super::*;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{StreamConfig, StreamInfo};
     use bytes::Bytes;
 
+    #[tokio::test]
+    async fn request() {
+        let client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let mut context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(StreamConfig {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"Hello JetStream";
+
+        // Basic publish like NATS core.
+        let ack = context
+            .publish("foo".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        assert_eq!(ack.stream, "TEST");
+        assert_eq!(ack.sequence, 1);
+    }
+  
     #[tokio::test]
     async fn request_ok() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -78,7 +103,7 @@ mod jetstream {
     async fn add_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
-        let mut context = async_nats::jetstream::new(client);
+        let context = async_nats::jetstream::new(client);
 
         context.create_stream("events").await.unwrap();
     }
@@ -87,7 +112,7 @@ mod jetstream {
     async fn get_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
-        let mut context = async_nats::jetstream::new(client);
+        let context = async_nats::jetstream::new(client);
 
         context.create_stream("events").await.unwrap();
         assert_eq!(
@@ -96,28 +121,33 @@ mod jetstream {
         );
     }
 
-    #[tokio::test]
-    async fn request() {
-        let client = async_nats::connect("nats://localhost:4222").await.unwrap();
-        let mut context = async_nats::jetstream::new(client);
+    async fn delete_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
 
-        let stream = context
-            .create_stream(StreamConfig {
-                name: "TEST".to_string(),
-                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+        context.create_stream("events").await.unwrap();
+        assert!(context.delete_stream("events").await.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn update_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let info2 = context.create_stream("events").await.unwrap();
+        let info = context
+            .update_stream(&StreamConfig {
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
                 ..Default::default()
             })
             .await
             .unwrap();
-
-        let payload = b"Hello JetStream";
-
-        // Basic publish like NATS core.
-        let ack = context
-            .publish("foo".into(), payload.as_ref().into())
-            .await
-            .unwrap();
-        assert_eq!(ack.stream, "TEST");
-        assert_eq!(ack.sequence, 1);
+        context.update_stream(&info2.config).await.unwrap();
+        assert_eq!(info.config.max_messages, 1000);
+        assert_eq!(info.config.max_messages_per_subject, 100);
     }
 }
