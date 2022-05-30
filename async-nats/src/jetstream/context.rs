@@ -85,7 +85,10 @@ impl Context {
         match self.request(subject, &config).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
-                format!("nats: error while creating stream: {}", error.code),
+                format!(
+                    "nats: error while creating stream: {}, {}",
+                    error.code, error.description
+                ),
             ))),
             Response::Ok(info) => Ok(info),
         }
@@ -105,7 +108,10 @@ impl Context {
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
-                format!("nats: error while creating stream: {}", error.code),
+                format!(
+                    "nats: error while getting stream: {}, {}",
+                    error.code, error.description
+                ),
             ))),
             Response::Ok(info) => Ok(Stream { info }),
         }
@@ -124,7 +130,7 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while deleting a stream: {}, {}",
+                    "nats: error while deleting stream: {}, {}",
                     error.code, error.description
                 ),
             ))),
@@ -138,7 +144,7 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while deleting a stream: {}, {}",
+                    "nats: error while updating stream: {}, {}",
                     error.code, error.description
                 ),
             ))),
