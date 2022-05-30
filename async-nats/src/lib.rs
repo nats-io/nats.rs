@@ -33,7 +33,7 @@
 //!
 //! ### Complete example
 //!
-//! ```
+//! ```no_run
 //! use bytes::Bytes;
 //! use futures::StreamExt;
 //!
@@ -63,7 +63,7 @@
 //!
 //! ### Publish
 //!
-//! ```
+//! ```no_run
 //! # use bytes::Bytes;
 //! # use std::error::Error;
 //! # use std::time::Instant;
@@ -854,7 +854,7 @@ impl Client {
     /// Create a new globally unique inbox which can be used for replies.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// # let mut nc = async_nats::connect("demo.nats.io").await?;
@@ -918,7 +918,7 @@ impl Client {
 /// configuration.
 ///
 /// # Examples
-/// ```
+/// ```no_run
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
@@ -1066,7 +1066,7 @@ pub(crate) enum ServerEvent {
 /// To have customized NATS connection, check [ConnectOptions].
 ///
 /// # Examples
-/// ```
+/// ```no_run
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
@@ -1083,7 +1083,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 /// Implements [futures::stream::Stream] for ergonomic async message processing.
 ///
 /// # Examples
-/// ```
+/// ```no_run
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
@@ -1113,7 +1113,7 @@ impl Subscriber {
     /// Unsubscribes from subscription, draining all remaining messages.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -1140,7 +1140,7 @@ impl Subscriber {
     /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # use futures::StreamExt;
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), async_nats::Error> {
