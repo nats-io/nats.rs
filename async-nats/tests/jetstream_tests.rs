@@ -100,12 +100,20 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn add_stream() {
+    async fn create_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
         context.create_stream("events").await.unwrap();
+
+        context
+            .create_stream(&StreamConfig {
+                name: "events2".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -121,6 +129,40 @@ mod jetstream {
         );
     }
 
+    #[tokio::test]
+    async fn get_or_create_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context.create_stream("events").await.unwrap();
+        assert_eq!(
+            context
+                .get_or_create_stream("events")
+                .await
+                .unwrap()
+                .info
+                .config
+                .name,
+            "events".to_string()
+        );
+
+        assert_eq!(
+            context
+                .get_or_create_stream(&StreamConfig {
+                    name: "events2".to_string(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .info
+                .config
+                .name,
+            "events2".to_string()
+        );
+    }
+
+    #[tokio::test]
     async fn delete_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();

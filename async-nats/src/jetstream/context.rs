@@ -117,6 +117,31 @@ impl Context {
         }
     }
 
+    pub async fn get_or_create_stream<S>(&self, stream_config: S) -> Result<Stream, Error>
+    where
+        S: Into<StreamConfig>,
+    {
+        let config: StreamConfig = stream_config.into();
+        let subject = format!("{}.STREAM.INFO.{}", self.prefix, config.name);
+
+        let request: Response<StreamInfo> = self.request(subject, &()).await?;
+
+        match request {
+            Response::Err { error } if error.code == 404 => self
+                .create_stream(&config)
+                .await
+                .map(|info| Stream { info }),
+            Response::Err { error } => Err(Box::new(io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting or creating stream: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(info) => Ok(Stream { info }),
+        }
+    }
+
     pub async fn delete_stream<T: AsRef<str>>(&self, stream: T) -> Result<DeleteStatus, Error> {
         let stream = stream.as_ref();
         if stream.is_empty() {
