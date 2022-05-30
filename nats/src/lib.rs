@@ -51,7 +51,7 @@
 //!
 //! ### Publish
 //!
-//! ```
+//! ```no_run
 //! # fn main() -> std::io::Result<()> {
 //! let nc = nats::connect("demo.nats.io")?;
 //! nc.publish("my.subject", "Hello World!")?;
@@ -372,19 +372,19 @@ impl Drop for Inner {
 /// # Examples
 ///
 /// If no scheme is provided the `nats://` scheme is assumed. The default port is `4222`.
-/// ```
+/// ```no_run
 /// let nc = nats::connect("demo.nats.io")?;
 /// # Ok::<(), std::io::Error>(())
 /// ```
 ///
 /// It is possible to provide several URLs as a comma separated list.
-/// ```
+/// ```no_run
 /// let nc = nats::connect("demo.nats.io,tls://demo.nats.io:4443")?;
 /// # Ok::<(), std::io::Error>(())
 /// ```
 ///
 /// Alternatively, an array of strings can be passed.
-/// ```
+/// ```no_run
 /// # use nats::IntoServerList;
 /// let nc = nats::connect(&["demo.nats.io", "tls://demo.nats.io:4443"])?;
 /// # Ok::<(), std::io::Error>(())
@@ -392,7 +392,7 @@ impl Drop for Inner {
 ///
 /// Instead of using strings, [`ServerAddress`]es can be used directly as well. This is handy for
 /// validating user input.
-/// ```
+/// ```no_run
 /// use std::io;
 /// use structopt::StructOpt;
 /// use nats::ServerAddress;
@@ -430,7 +430,7 @@ impl Connection {
     /// Create a subscription for the given NATS connection.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.subscribe("foo")?;
@@ -444,7 +444,7 @@ impl Connection {
     /// Create a queue subscription for the given NATS connection.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.queue_subscribe("foo", "production")?;
@@ -458,7 +458,7 @@ impl Connection {
     /// Publish a message on the given subject.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.publish("foo", "Hello World!")?;
@@ -473,7 +473,7 @@ impl Connection {
     /// responses.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
@@ -496,7 +496,7 @@ impl Connection {
     /// Create a new globally unique inbox which can be used for replies.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let reply = nc.new_inbox();
@@ -512,7 +512,7 @@ impl Connection {
     /// response.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
@@ -529,7 +529,7 @@ impl Connection {
     /// response is received.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
@@ -550,7 +550,7 @@ impl Connection {
     /// response.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
@@ -574,7 +574,7 @@ impl Connection {
     /// response is received. It also allows passing headers.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
@@ -619,7 +619,7 @@ impl Connection {
     /// responses.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
@@ -644,7 +644,7 @@ impl Connection {
     /// the connection to the server is lost.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.flush()?;
@@ -662,7 +662,7 @@ impl Connection {
     /// `BrokenPipe` if the connection to the server is lost.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.flush()?;
@@ -683,7 +683,7 @@ impl Connection {
     /// shutting down.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// nc.close();
@@ -700,7 +700,7 @@ impl Connection {
     /// the server takes more than 10 seconds to respond.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// println!("server rtt: {:?}", nc.rtt());
@@ -745,7 +745,7 @@ impl Connection {
     /// Returns the client IP as known by the server.
     /// Supported as of server version 2.1.6.
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// println!("ip: {:?}", nc.client_ip());
@@ -782,7 +782,7 @@ impl Connection {
     /// Returns the client ID as known by the most recently connected server.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// println!("ip: {:?}", nc.client_id());
@@ -806,7 +806,7 @@ impl Connection {
     /// afterward.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
@@ -865,7 +865,7 @@ impl Connection {
     /// connected server will accept.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::connect("demo.nats.io")?;
     /// println!("max payload: {:?}", nc.max_payload());

@@ -165,7 +165,7 @@ impl JetStreamOptions {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// let options = nats::JetStreamOptions::new();
     /// ```
     pub fn new() -> JetStreamOptions {
@@ -176,7 +176,7 @@ impl JetStreamOptions {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// let options = nats::JetStreamOptions::new()
     ///     .api_prefix("some_exported_prefix".to_string());
     /// ```
@@ -193,7 +193,7 @@ impl JetStreamOptions {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// let options = nats::JetStreamOptions::new()
     ///   .domain("some_domain");
     /// ```
@@ -671,7 +671,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -690,7 +690,7 @@ impl JetStream {
     /// Creates a pull subscription.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -830,7 +830,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
