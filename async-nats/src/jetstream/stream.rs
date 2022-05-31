@@ -10,13 +10,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
+use std::{io::ErrorKind, time::Duration};
 
+use crate::Error;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use time::serde::rfc3339;
+
+use super::{
+    consumer::{ConsumerConfig, ConsumerInfo},
+    response::Response,
+    Context,
+};
 
 pub struct Stream {
     pub info: StreamInfo,
+    pub(crate) prefix: String,
+    pub(crate) context: Context,
+}
+
+impl Stream {
+    pub async fn create_consumer<C: Into<ConsumerConfig>>(
+        &self,
+        config: C,
+    ) -> Result<ConsumerInfo, Error> {
+        let config = config.into();
+        let subject = if let Some(ref durable_name) = config.durable_name {
+            format!(
+                "{}.CONSUMER.DURABLE.CREATE.{}.{}",
+                self.prefix, self.info.config.name, durable_name
+            )
+        } else {
+            format!("{}.CONSUMER.CREATE.{}", self.prefix, self.info.config.name)
+        };
+
+        match self
+            .context
+            .request(
+                subject,
+                &json!({"stream_name": self.info.config.name.clone(), "config": config}),
+            )
+            .await?
+        {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while creating stream: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(info) => Ok(info),
+        }
+    }
 }
 
 /// `StreamConfig` determines the properties for a stream.
@@ -158,8 +203,6 @@ impl Default for StorageType {
         StorageType::File
     }
 }
-/// A UTC time
-pub type DateTime = time::OffsetDateTime;
 
 /// Shows config and current state for this stream.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -168,7 +211,7 @@ pub struct StreamInfo {
     pub config: StreamConfig,
     /// The time that this stream was created
     #[serde(with = "rfc3339")]
-    pub created: DateTime,
+    pub created: time::OffsetDateTime,
     /// Various metrics associated with this stream
     pub state: StreamState,
 }
@@ -190,13 +233,13 @@ pub struct StreamState {
     pub first_sequence: u64,
     /// The time associated with the oldest message still present in this stream
     #[serde(with = "rfc3339", rename = "first_ts")]
-    pub first_timestamp: DateTime,
+    pub first_timestamp: time::OffsetDateTime,
     /// The last sequence number assigned to a message in this stream
     #[serde(rename = "last_seq")]
     pub last_sequence: u64,
     /// The time that the last message was received by this stream
     #[serde(with = "rfc3339", rename = "last_ts")]
-    pub last_timestamp: DateTime,
+    pub last_timestamp: time::OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
 }

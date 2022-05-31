@@ -25,8 +25,10 @@ pub struct AccountInfo {
 mod jetstream {
     use super::*;
     use async_nats::header::HeaderMap;
+    use async_nats::jetstream::consumer::{ConsumerConfig, DeliverPolicy};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::StreamConfig;
+    use time::OffsetDateTime;
 
     #[tokio::test]
     async fn publish_with_headers() {
@@ -218,5 +220,38 @@ mod jetstream {
         context.update_stream(&info2.config).await.unwrap();
         assert_eq!(info.config.max_messages, 1000);
         assert_eq!(info.config.max_messages_per_subject, 100);
+    }
+
+    #[tokio::test]
+    async fn create_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        // durable consumer
+        context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(&ConsumerConfig {
+                durable_name: Some("durable".to_string()),
+                deliver_policy: DeliverPolicy::ByStartSequence { start_sequence: 10 },
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // ephemeral consumer
+        context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(&ConsumerConfig {
+                deliver_policy: DeliverPolicy::ByStartTime {
+                    start_time: OffsetDateTime::now_utc(),
+                },
+                ..Default::default()
+            })
+            .await
+            .unwrap();
     }
 }
