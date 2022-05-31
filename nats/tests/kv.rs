@@ -343,6 +343,7 @@ fn key_value_keys() {
 // Sanity check that everything works if you are using a JS domain across leaf nodes. This does not
 // attempt to exercise all logic, just the happy path, as the other logic is exercised in the other
 // tests
+#[ignore]
 fn key_value_domain() {
     let _server = nats_server::run_server("tests/configs/jetstream-domain.conf");
     let leaf_server = nats_server::run_server("tests/configs/jetstream-domain-leaf.conf");
