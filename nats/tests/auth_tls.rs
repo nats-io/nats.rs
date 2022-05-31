@@ -16,9 +16,8 @@ use std::path::PathBuf;
 
 #[test]
 fn basic_tls() -> io::Result<()> {
-    let s = nats_server::run_server("tests/configs/tls.conf");
-
-    assert!(nats::connect("nats://127.0.0.1").is_err());
+    let server = nats_server::run_server("tests/configs/tls.conf");
+    assert!(nats::connect(server.client_url()).is_err());
 
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
@@ -28,7 +27,7 @@ fn basic_tls() -> io::Result<()> {
             path.join("tests/configs/certs/client-cert.pem"),
             path.join("tests/configs/certs/client-key.pem"),
         )
-        .connect(&s.client_url())?;
+        .connect(&server.client_url())?;
 
     // test scenario where rootCA, client certificate and client key are all in one .pem file
     nats::Options::with_user_pass("derek", "porkchop")
@@ -37,7 +36,7 @@ fn basic_tls() -> io::Result<()> {
             path.join("tests/configs/certs/client-all.pem"),
             path.join("tests/configs/certs/client-all.pem"),
         )
-        .connect(&s.client_url())?;
+        .connect(&server.client_url())?;
 
     Ok(())
 }

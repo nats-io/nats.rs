@@ -16,9 +16,8 @@ mod client {
 
     #[tokio::test]
     async fn basic_tls() {
-        let s = nats_server::run_server("tests/configs/tls.conf");
-
-        assert!(async_nats::connect("nats://127.0.0.1").await.is_err());
+        let server = nats_server::run_server("tests/configs/tls.conf");
+        assert!(async_nats::connect(&server.client_url()).await.is_err());
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
@@ -29,7 +28,7 @@ mod client {
                 path.join("tests/configs/certs/client-key.pem"),
             )
             .require_tls(true)
-            .connect(s.client_url())
+            .connect(server.client_url())
             .await
             .unwrap();
     }
