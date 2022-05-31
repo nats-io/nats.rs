@@ -151,11 +151,11 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
+    /// # context.add_stream("timeout_fetch")?;
     /// # for _ in 0..20 {
-    /// #    context.publish("next", "hello")?;
+    /// #    context.publish("timeout_fetch", "hello")?;
     /// # }
-    /// let consumer = context.pull_subscribe("next")?;
+    /// let consumer = context.pull_subscribe("timeout_fetch")?;
     ///
     /// // pass just number of messages to be fetched
     /// for message in consumer.timeout_fetch(10, Duration::from_millis(100))? {
@@ -199,8 +199,11 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
-    /// let consumer = context.pull_subscribe("next")?;
+    /// # context.add_stream("fetch_with_handler")?;
+    /// # for _ in 0..20 {
+    /// #    context.publish("fetch_with_handler", "hello")?;
+    /// # }
+    /// let consumer = context.pull_subscribe("fetch_with_handler")?;
     ///
     /// consumer.fetch_with_handler(10, |message| {
     ///     println!("received message: {:?}", message);
@@ -271,9 +274,9 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
-    /// context.publish("next", "hello")?;
-    /// let consumer = context.pull_subscribe("foo")?;
+    /// # context.add_stream("try_next")?;
+    /// context.publish("try_next", "hello")?;
+    /// let consumer = context.pull_subscribe("try_next")?;
     /// consumer.request_batch(1)?;
     /// let message = consumer.try_next();
     /// println!("Received message: {:?}", message);
@@ -299,10 +302,10 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
-    /// # context.publish("next", "hello")?;
-    /// # context.publish("next", "hello")?;
-    /// let consumer = context.pull_subscribe("foo")?;
+    /// # context.add_stream("next_timeout")?;
+    /// # context.publish("next_timeout", "hello")?;
+    /// # context.publish("next_timeout", "hello")?;
+    /// let consumer = context.pull_subscribe("next_timeout")?;
     ///
     /// consumer.request_batch(1)?;
     ///
@@ -355,9 +358,9 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
+    /// # context.add_stream("request_batch")?;
     ///
-    /// let consumer = context.pull_subscribe("next")?;
+    /// let consumer = context.pull_subscribe("request_batch")?;
     /// // request specific number of messages.
     /// consumer.request_batch(10)?;
     ///
@@ -403,12 +406,12 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client.clone());
     /// #
-    /// # context.add_stream("next")?;
+    /// # context.add_stream("iter")?;
     /// # for i in 0..20 {
-    /// # client.publish("next", b"data")?;
+    /// # client.publish("iter", b"data")?;
     /// # }
     ///
-    /// let consumer = context.pull_subscribe("next")?;
+    /// let consumer = context.pull_subscribe("iter")?;
     /// // request specific number of messages.
     /// consumer.request_batch(10)?;
     ///

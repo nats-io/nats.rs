@@ -184,7 +184,8 @@ impl PushSubscription {
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
-    /// # let subscription = context.subscribe("foo")?;
+    /// # context.add_stream("next_timeout");
+    /// # let subscription = context.subscribe("next_timeout")?;
     /// if let Ok(message) = subscription.next_timeout(std::time::Duration::from_secs(1)) {
     ///     println!("Received {}", message);
     /// }
@@ -488,8 +489,8 @@ impl PushSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("foo")?;
-    /// let subscription = context.subscribe("foo")?;
+    /// # context.add_stream("consumer_info")?;
+    /// let subscription = context.subscribe("consumer_info")?;
     /// let info = subscription.consumer_info()?;
     /// # Ok(())
     /// # }
