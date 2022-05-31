@@ -1115,7 +1115,7 @@ impl Subscriber {
     /// # Examples
     /// ```
     /// # #[tokio::main]
-    /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
@@ -1143,16 +1143,16 @@ impl Subscriber {
     /// ```
     /// # use futures::StreamExt;
     /// # #[tokio::main]
-    /// # async fn unsubscribe() -> Result<(), async_nats::Error> {
+    /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    ///
-    /// for _ in 0..3 {
-    ///     client.publish("test".into(), "data".into()).await?;
-    /// }
     ///
     /// let mut sub = client.subscribe("test".into()).await?;
     /// sub.unsubscribe_after(3).await?;
     /// client.flush().await?;
+    ///
+    /// for _ in 0..3 {
+    ///     client.publish("test".into(), "data".into()).await?;
+    /// }
     ///
     /// while let Some(message) = sub.next().await {
     ///     println!("message received: {:?}", message);
