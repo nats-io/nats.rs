@@ -1147,13 +1147,13 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
+    /// let mut sub = client.subscribe("unsubscribe_after".into()).await?;
+    /// sub.unsubscribe_after(2).await?;
+    /// client.flush().await?;
+    ///
     /// for _ in 0..3 {
     ///     client.publish("unsubscribe_after".into(), "data".into()).await?;
     /// }
-    ///
-    /// let mut sub = client.subscribe("unsubscribe_after".into()).await?;
-    /// sub.unsubscribe_after(3).await?;
-    /// client.flush().await?;
     ///
     /// while let Some(message) = sub.next().await {
     ///     println!("message received: {:?}", message);
