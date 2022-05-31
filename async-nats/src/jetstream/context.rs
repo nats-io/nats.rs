@@ -13,11 +13,11 @@
 
 use std::io::{self, ErrorKind};
 
-use crate::header::HeaderMap;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
+use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 
@@ -27,7 +27,7 @@ use super::stream::{DeleteStatus, Stream, StreamConfig, StreamInfo};
 #[derive(Debug, Clone)]
 pub struct Context {
     client: Client,
-    prefix: String,
+    pub(crate) prefix: String,
 }
 
 impl Context {
@@ -139,7 +139,11 @@ impl Context {
                     error.code, error.description
                 ),
             ))),
-            Response::Ok(info) => Ok(Stream { info }),
+            Response::Ok(info) => Ok(Stream {
+                context: self.clone(),
+                info,
+                prefix: self.prefix.clone(),
+            }),
         }
     }
 
@@ -153,10 +157,13 @@ impl Context {
         let request: Response<StreamInfo> = self.request(subject, &()).await?;
 
         match request {
-            Response::Err { error } if error.code == 404 => self
-                .create_stream(&config)
-                .await
-                .map(|info| Stream { info }),
+            Response::Err { error } if error.code == 404 => {
+                self.create_stream(&config).await.map(|info| Stream {
+                    context: self.clone(),
+                    info,
+                    prefix: self.prefix.clone(),
+                })
+            }
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(
@@ -164,7 +171,11 @@ impl Context {
                     error.code, error.description
                 ),
             ))),
-            Response::Ok(info) => Ok(Stream { info }),
+            Response::Ok(info) => Ok(Stream {
+                context: self.clone(),
+                info,
+                prefix: self.prefix.clone(),
+            }),
         }
     }
 

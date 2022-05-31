@@ -13,6 +13,7 @@
 
 use crate::Client;
 
+pub mod consumer;
 pub mod context;
 pub mod publish;
 pub mod response;
