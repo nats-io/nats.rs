@@ -366,7 +366,7 @@ impl Options {
     /// Add a name option to this configuration.
     ///
     /// # Example
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .with_name("My App")
@@ -382,7 +382,7 @@ impl Options {
     /// Select option to not deliver messages that we have published.
     ///
     /// # Example
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .no_echo()
@@ -403,7 +403,7 @@ impl Options {
     /// connection attempt.
     ///
     /// # Example
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .retry_on_failed_connect()
@@ -424,7 +424,7 @@ impl Options {
     /// If None then there is no maximum number of attempts.
     ///
     /// # Example
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .max_reconnects(3)
@@ -444,7 +444,7 @@ impl Options {
     /// The default value is 8mb.
     ///
     /// # Example
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .reconnect_buffer_size(64 * 1024)
@@ -467,7 +467,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// let options = nats::Options::new();
     /// let nc = options.connect("demo.nats.io")?;
     /// # Ok::<(), std::io::Error>(())
@@ -477,7 +477,7 @@ impl Options {
     /// Using the [`Options::tls_required()`] method can ensure that all servers are connected
     /// to with TLS, if that is your intention.
     ///
-    /// ```no_run
+    /// ```
     /// let options = nats::Options::new();
     /// let nc = options.connect("nats://demo.nats.io:4222,tls://demo.nats.io:4443")?;
     /// # Ok::<(), std::io::Error>(())
@@ -491,7 +491,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .error_callback(|err| println!("connection received an error: {}", err))
@@ -512,7 +512,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .disconnect_callback(|| println!("connection has been lost"))
@@ -533,7 +533,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .reconnect_callback(|| println!("connection has been reestablished"))
@@ -555,7 +555,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .close_callback(|| println!("connection has been closed"))
@@ -577,7 +577,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// let nc = nats::Options::new()
     ///     .lame_duck_callback(|| println!("server entered lame duck mode"))
@@ -606,7 +606,7 @@ impl Options {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # use std::time::Duration;
     /// let nc = nats::Options::new()
