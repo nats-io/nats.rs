@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test_matrix:
     name: test (${{ matrix.os }})
@@ -52,11 +56,21 @@ jobs:
       - name: Install nats-server
         run: go get github.com/nats-io/nats-server/v2
 
+      - name: Configure nats hosts
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "127.0.0.1 demo.nats.io" >> "C:\\Windows\\System32\\drivers\\etc\\hosts"
+            cmd "/c ipconfig /flushdns"
+          else
+            echo "127.0.0.1 demo.nats.io" | sudo tee -a /etc/hosts
+          fi
+
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
         run: |
           rustup update
+          nats-server --jetstream --port=4222 &
           cargo test --features=unstable -- --nocapture
 
   test_fault-injection:
