@@ -158,9 +158,11 @@ pub use options::{AuthError, ConnectOptions};
 pub mod header;
 pub mod jetstream;
 pub mod message;
+pub mod status;
 mod tls;
 
 pub use message::Message;
+pub use status::StatusCode;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
@@ -230,7 +232,7 @@ pub(crate) enum ServerOp {
         reply: Option<String>,
         payload: Bytes,
         headers: Option<HeaderMap>,
-        status: Option<NonZeroU16>,
+        status: Option<StatusCode>,
         description: Option<String>,
     },
 }
@@ -811,7 +813,7 @@ impl Client {
         self.flush().await?;
         match sub.next().await {
             Some(message) => {
-                if message.is_no_responders() {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(Box::new(std::io::Error::new(
                         ErrorKind::NotFound,
                         "nats: no responders",
@@ -839,7 +841,7 @@ impl Client {
         self.flush().await?;
         match sub.next().await {
             Some(message) => {
-                if message.is_no_responders() {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(Box::new(std::io::Error::new(
                         ErrorKind::NotFound,
                         "nats: no responders",
