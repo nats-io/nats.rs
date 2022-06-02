@@ -22,6 +22,7 @@ use bytes::{Buf, BytesMut};
 use tokio::io;
 
 use crate::header::{HeaderMap, HeaderName, HeaderValue};
+use crate::status::StatusCode;
 use crate::{ClientOp, ServerError, ServerOp};
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
@@ -218,7 +219,7 @@ impl Connection {
                     }
 
                     let mut headers = HeaderMap::new();
-                    let mut maybe_status: Option<NonZeroU16> = None;
+                    let mut maybe_status: Option<StatusCode> = None;
                     let mut maybe_description: Option<String> = None;
                     if let Some(slice) = version_line.get("NATS/1.0".len()..).map(|s| s.trim()) {
                         match slice.split_once(' ') {
