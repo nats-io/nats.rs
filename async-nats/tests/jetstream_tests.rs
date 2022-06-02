@@ -25,7 +25,10 @@ pub struct AccountInfo {
 mod jetstream {
     use super::*;
     use async_nats::header::HeaderMap;
-    use async_nats::jetstream::consumer::{ConsumerConfig, DeliverPolicy};
+    use async_nats::jetstream::consumer::{
+        Consumer, ConsumerConfig, DeliverPolicy, PullConsumer, PullConsumerConfig, PushConsumer,
+        PushConsumerConfig,
+    };
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::StreamConfig;
     use time::OffsetDateTime;
@@ -253,5 +256,38 @@ mod jetstream {
             })
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("stream").await.unwrap();
+        stream
+            .create_consumer(&ConsumerConfig {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream
+            .create_consumer(&ConsumerConfig {
+                durable_name: Some("push".to_string()),
+                deliver_subject: Some("subject".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+        consumer.pull();
+
+        let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
+        consumer.push();
+
+        let consumer = stream.get_consumer("pull").await.unwrap();
+        consumer.pull();
     }
 }

@@ -18,7 +18,7 @@ use serde_json::json;
 use time::serde::rfc3339;
 
 use super::{
-    consumer::{ConsumerConfig, ConsumerInfo},
+    consumer::{Consumer, ConsumerConfig, ConsumerInfo, FromConsumer, IntoConsumerConfig},
     response::Response,
     Context,
 };
@@ -61,6 +61,35 @@ impl Stream {
             ))),
             Response::Ok(info) => Ok(info),
         }
+    }
+
+    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<ConsumerInfo, Error> {
+        let name = name.as_ref();
+
+        let subject = format!(
+            "{}.CONSUMER.INFO.{}.{}",
+            self.prefix, self.info.config.name, name
+        );
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok(info) => Ok(info),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting consumer info: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+        }
+    }
+
+    pub async fn get_consumer<T: FromConsumer + IntoConsumerConfig>(
+        &self,
+        name: &str,
+    ) -> Result<Consumer<T>, Error> {
+        let info = self.consumer_info(name).await?;
+
+        Ok(Consumer::new(T::try_from_consumer_config(info.config)?))
     }
 }
 
