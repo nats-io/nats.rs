@@ -34,6 +34,7 @@ webpki-roots = "0.22"
 nuid = "0.3.2"
 serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
+async-stream = "0.3.3"
 
 [dev-dependencies]
 lazy_static = "1.4.0"

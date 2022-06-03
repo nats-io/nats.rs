@@ -23,14 +23,18 @@ pub struct AccountInfo {
 }
 
 mod jetstream {
+
     use super::*;
     use async_nats::header::HeaderMap;
+    use async_nats::jetstream::consumer::pull::{BatchConfig, Config};
     use async_nats::jetstream::consumer::{
-        ConsumerConfig, DeliverPolicy, PullConsumer, PullConsumerConfig, PushConsumer,
-        PushConsumerConfig,
+        self, DeliverPolicy, PullConsumer, PushConsumer, PushConsumerConfig,
     };
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream::StreamConfig;
+    use async_nats::jetstream::stream;
+    use async_nats::ConnectOptions;
+    use futures::pin_mut;
+    use futures::stream::StreamExt;
     use time::OffsetDateTime;
 
     #[tokio::test]
@@ -40,7 +44,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         let _stream = context
-            .create_stream(StreamConfig {
+            .create_stream(stream::Config {
                 name: "TEST".to_string(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
                 ..Default::default()
@@ -67,7 +71,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         context
-            .create_stream(StreamConfig {
+            .create_stream(stream::Config {
                 name: "TEST".to_string(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
                 ..Default::default()
@@ -140,7 +144,7 @@ mod jetstream {
         context.create_stream("events").await.unwrap();
 
         context
-            .create_stream(&StreamConfig {
+            .create_stream(&stream::Config {
                 name: "events2".to_string(),
                 ..Default::default()
             })
@@ -181,7 +185,7 @@ mod jetstream {
 
         assert_eq!(
             context
-                .get_or_create_stream(&StreamConfig {
+                .get_or_create_stream(&stream::Config {
                     name: "events2".to_string(),
                     ..Default::default()
                 })
@@ -212,7 +216,7 @@ mod jetstream {
 
         let info2 = context.create_stream("events").await.unwrap();
         let info = context
-            .update_stream(&StreamConfig {
+            .update_stream(&stream::Config {
                 name: "events".to_string(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
@@ -236,7 +240,7 @@ mod jetstream {
             .get_or_create_stream("events")
             .await
             .unwrap()
-            .create_consumer(ConsumerConfig {
+            .create_consumer(Config {
                 durable_name: Some("durable".to_string()),
                 deliver_policy: DeliverPolicy::ByStartSequence { start_sequence: 10 },
                 ..Default::default()
@@ -248,7 +252,7 @@ mod jetstream {
             .get_or_create_stream("events")
             .await
             .unwrap()
-            .create_consumer(&ConsumerConfig {
+            .create_consumer(&Config {
                 deliver_policy: DeliverPolicy::ByStartTime {
                     start_time: OffsetDateTime::now_utc(),
                 },
@@ -261,7 +265,7 @@ mod jetstream {
             .get_or_create_stream("events")
             .await
             .unwrap()
-            .create_consumer(&PullConsumerConfig {
+            .create_consumer(&consumer::pull::Config {
                 durable_name: Some("pull_explicit".to_string()),
                 ..Default::default()
             })
@@ -276,17 +280,14 @@ mod jetstream {
 
         let stream = context.get_or_create_stream("events").await.unwrap();
         stream
-            .create_consumer(ConsumerConfig {
+            .create_consumer(Config {
                 durable_name: Some("consumer".to_string()),
                 ..Default::default()
             })
             .await
             .unwrap();
         stream.delete_consumer("consumer").await.unwrap();
-        assert!(stream
-            .get_consumer::<PullConsumerConfig>("consumer")
-            .await
-            .is_err());
+        assert!(stream.get_consumer::<Config>("consumer").await.is_err());
     }
 
     #[tokio::test]
@@ -297,7 +298,7 @@ mod jetstream {
 
         let stream = context.get_or_create_stream("stream").await.unwrap();
         stream
-            .create_consumer(ConsumerConfig {
+            .create_consumer(Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -313,13 +314,11 @@ mod jetstream {
             .unwrap();
 
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
-        consumer.pull();
 
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
-        consumer.push();
 
-        let consumer = stream.get_consumer("pull").await.unwrap();
-        consumer.pull();
+        let mut consumer = stream.get_consumer("pull").await.unwrap();
+        consumer.fetch(10).await.unwrap();
     }
 
     #[tokio::test]
@@ -332,9 +331,9 @@ mod jetstream {
 
         // this creates the consumer
         let _consumer: PullConsumer = stream
-            .get_or_create_consumer::<PullConsumerConfig>(
+            .get_or_create_consumer::<consumer::pull::Config>(
                 "consumer",
-                PullConsumerConfig {
+                consumer::pull::Config {
                     durable_name: Some("consumer".to_string()),
                     ..Default::default()
                 },
@@ -343,21 +342,185 @@ mod jetstream {
             .unwrap();
 
         // check if consumer is there
-        stream
-            .get_consumer::<PullConsumerConfig>("consumer")
-            .await
-            .unwrap();
+        stream.get_consumer::<Config>("consumer").await.unwrap();
 
         // bind to previously created consumer.
         stream
-            .get_or_create_consumer::<PullConsumerConfig>(
+            .get_or_create_consumer::<Config>(
                 "consumer",
-                PullConsumerConfig {
+                Config {
                     durable_name: Some("consumer".to_string()),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn request_batch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("stream").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
+        consumer
+            .request_batch(
+                BatchConfig {
+                    batch: 10,
+                    expires: None,
+                    no_wait: false,
+                    ..Default::default()
+                },
+                "inbox".to_string(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn pull_process() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut consumer = stream.get_consumer("pull").await.unwrap();
+
+        for _ in 0..1000 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let iter = consumer.process(50);
+
+        pin_mut!(iter);
+
+        let mut i = 0;
+        while (iter.next().await).is_some() {
+            i += 1;
+            if i >= 1000 {
+                return;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_fetch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut consumer = stream.get_consumer("pull").await.unwrap();
+
+        for _ in 0..10 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let mut iter = consumer.fetch(100).await.unwrap();
+
+        let mut i = 0;
+        while (iter.next().await).is_some() {
+            i += 1;
+        }
+        assert_eq!(i, 10);
+    }
+    #[tokio::test]
+    async fn pull_batch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut consumer = stream.get_consumer("pull").await.unwrap();
+
+        for _ in 0..100 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let mut iter = consumer.batch(100, Some(10000000000)).await.unwrap();
+
+        let mut i = 0;
+        while (iter.next().await).is_some() {
+            i += 1;
+            if i >= 100 {
+                return;
+            }
+        }
     }
 }

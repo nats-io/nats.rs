@@ -238,7 +238,9 @@ impl TryFrom<u16> for StatusCode {
 }
 
 impl StatusCode {
+    pub const IDLE_HEARBEAT: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(100) });
     pub const OK: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(200) });
     pub const NOT_FOUND: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(404) });
+    pub const TIMEOUT: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(408) });
     pub const NO_RESPONDERS: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(503) });
 }

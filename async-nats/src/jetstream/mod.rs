@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::Client;
+use crate::{Client, Message};
 
 pub mod consumer;
 pub mod context;
@@ -23,4 +23,18 @@ pub use context::Context;
 
 pub fn new(client: Client) -> Context {
     Context::new(client)
+}
+
+#[derive(Debug)]
+pub struct JetStreamMessage {
+    pub message: Message,
+    pub context: Context,
+}
+
+impl std::ops::Deref for JetStreamMessage {
+    type Target = Message;
+
+    fn deref(&self) -> &Self::Target {
+        &self.message
+    }
 }

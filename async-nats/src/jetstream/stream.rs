@@ -21,7 +21,7 @@ use serde_json::json;
 use time::serde::rfc3339;
 
 use super::{
-    consumer::{Consumer, ConsumerConfig, ConsumerInfo, FromConsumer, IntoConsumerConfig},
+    consumer::{Consumer, FromConsumer, Info, IntoConsumerConfig},
     response::Response,
     Context,
 };
@@ -33,10 +33,7 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub async fn create_consumer<C: IntoConsumerConfig>(
-        &self,
-        config: C,
-    ) -> Result<ConsumerInfo, Error> {
+    pub async fn create_consumer<C: IntoConsumerConfig>(&self, config: C) -> Result<Info, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
@@ -66,7 +63,7 @@ impl Stream {
         }
     }
 
-    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<ConsumerInfo, Error> {
+    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<Info, Error> {
         let name = name.as_ref();
 
         let subject = format!(
@@ -92,7 +89,11 @@ impl Stream {
     ) -> Result<Consumer<T>, Error> {
         let info = self.consumer_info(name).await?;
 
-        Ok(Consumer::new(T::try_from_consumer_config(info.config)?))
+        Ok(Consumer::new(
+            T::try_from_consumer_config(info.config.clone())?,
+            info,
+            self.context.clone(),
+        ))
     }
 
     pub async fn get_or_create_consumer<T: FromConsumer + IntoConsumerConfig>(
@@ -109,7 +110,13 @@ impl Stream {
             Response::Err { error } if error.code == 404 => self
                 .create_consumer(config.into_consumer_config())
                 .await
-                .map(|info| Consumer::new(T::try_from_consumer_config(info.config).unwrap())),
+                .map(|info| {
+                    Consumer::new(
+                        T::try_from_consumer_config(info.config.clone()).unwrap(),
+                        info,
+                        self.context.clone(),
+                    )
+                }),
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(
@@ -117,9 +124,11 @@ impl Stream {
                     error.code, error.description
                 ),
             ))),
-            Response::Ok::<ConsumerInfo>(info) => {
-                Ok(Consumer::new(T::try_from_consumer_config(info.config)?))
-            }
+            Response::Ok::<Info>(info) => Ok(Consumer::new(
+                T::try_from_consumer_config(info.config.clone())?,
+                info,
+                self.context.clone(),
+            )),
         }
     }
 
@@ -146,7 +155,7 @@ impl Stream {
 /// There are sensible defaults for most. If no subjects are
 /// given the name will be used as the only subject.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct StreamConfig {
+pub struct Config {
     /// A name for the Stream. Must not have spaces, tabs or period `.` characters
     pub name: String,
     /// How large the Stream may become in total bytes before the configured discard policy kicks in
@@ -208,15 +217,15 @@ pub struct StreamConfig {
     pub deny_purge: bool,
 }
 
-impl From<&StreamConfig> for StreamConfig {
-    fn from(sc: &StreamConfig) -> StreamConfig {
+impl From<&Config> for Config {
+    fn from(sc: &Config) -> Config {
         sc.clone()
     }
 }
 
-impl From<&str> for StreamConfig {
-    fn from(s: &str) -> StreamConfig {
-        StreamConfig {
+impl From<&str> for Config {
+    fn from(s: &str) -> Config {
+        Config {
             name: s.to_string(),
             ..Default::default()
         }
@@ -286,7 +295,7 @@ impl Default for StorageType {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StreamInfo {
     /// The configuration associated with this stream
-    pub config: StreamConfig,
+    pub config: Config,
     /// The time that this stream was created
     #[serde(with = "rfc3339")]
     pub created: time::OffsetDateTime,
