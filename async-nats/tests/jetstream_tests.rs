@@ -257,6 +257,26 @@ mod jetstream {
             .await
             .unwrap();
     }
+    #[tokio::test]
+    async fn delete_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("events").await.unwrap();
+        stream
+            .create_consumer(ConsumerConfig {
+                durable_name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream.delete_consumer("consumer").await.unwrap();
+        assert!(stream
+            .get_consumer::<PullConsumerConfig>("consumer")
+            .await
+            .is_err());
+    }
 
     #[tokio::test]
     async fn get_consumer() {
