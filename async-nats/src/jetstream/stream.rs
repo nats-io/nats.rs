@@ -10,7 +10,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{io::ErrorKind, time::Duration};
+use std::{
+    io::{self, ErrorKind},
+    time::Duration,
+};
 
 use crate::Error;
 use serde::{Deserialize, Serialize};
@@ -91,6 +94,35 @@ impl Stream {
 
         Ok(Consumer::new(T::try_from_consumer_config(info.config)?))
     }
+
+    pub async fn get_or_create_consumer<T: FromConsumer + IntoConsumerConfig>(
+        &self,
+        name: &str,
+        config: T,
+    ) -> Result<Consumer<T>, Error> {
+        let subject = format!(
+            "{}.CONSUMER.INFO.{}.{}",
+            self.prefix, self.info.config.name, name
+        );
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Err { error } if error.code == 404 => self
+                .create_consumer(config.into_consumer_config())
+                .await
+                .map(|info| Consumer::new(T::try_from_consumer_config(info.config).unwrap())),
+            Response::Err { error } => Err(Box::new(io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting or creating stream: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok::<ConsumerInfo>(info) => {
+                Ok(Consumer::new(T::try_from_consumer_config(info.config)?))
+            }
+        }
+    }
+
 }
 
 /// `StreamConfig` determines the properties for a stream.
