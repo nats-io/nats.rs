@@ -10,63 +10,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod pull;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use time::serde::rfc3339;
 
-use crate::Error;
+use crate::{Error, Subscriber};
+
+use super::Context;
 
 pub trait IntoConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig;
+    fn into_consumer_config(self) -> Config;
 }
 
 pub struct Consumer<T: IntoConsumerConfig> {
-    config: T,
+    pub(crate) context: Context,
+    pub(crate) config: T,
+    pub(crate) info: Info,
 }
 
 impl<T: IntoConsumerConfig> Consumer<T> {
-    pub fn new(config: T) -> Self {
-        Self { config }
+    pub fn new(config: T, info: Info, context: Context) -> Self {
+        Self {
+            config,
+            info,
+            context,
+        }
     }
 }
 
 pub trait FromConsumer {
-    fn try_from_consumer_config(config: ConsumerConfig) -> Result<Self, Error>
+    fn try_from_consumer_config(config: Config) -> Result<Self, Error>
     where
         Self: Sized;
 }
 
-impl FromConsumer for PullConsumerConfig {
-    fn try_from_consumer_config(config: ConsumerConfig) -> Result<Self, Error> {
-        if config.deliver_subject.is_some() {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "pull consumer cannot have delivery subject",
-            )));
-        }
-        Ok(PullConsumerConfig {
-            durable_name: config.durable_name,
-            description: config.description,
-            deliver_policy: config.deliver_policy,
-            ack_policy: config.ack_policy,
-            ack_wait: config.ack_wait,
-            max_deliver: config.max_deliver,
-            filter_subject: config.filter_subject,
-            replay_policy: config.replay_policy,
-            rate_limit: config.rate_limit,
-            sample_frequency: config.sample_frequency,
-            max_waiting: config.max_waiting,
-            max_ack_pending: config.max_ack_pending,
-            headers_only: config.headers_only,
-            max_batch: config.max_batch,
-            max_expires: config.max_expires,
-            inactive_threshold: config.inactive_threshold,
-        })
-    }
-}
 impl FromConsumer for PushConsumerConfig {
-    fn try_from_consumer_config(config: ConsumerConfig) -> Result<Self, Error> {
+    fn try_from_consumer_config(config: Config) -> Result<Self, Error> {
         if config.deliver_subject.is_none() {
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -102,18 +83,12 @@ impl Consumer<PushConsumerConfig> {
     }
 }
 
-impl Consumer<PullConsumerConfig> {
-    pub fn pull(&self) {
-        println!("pull");
-    }
-}
-
-pub type PullConsumer = Consumer<PullConsumerConfig>;
+pub type PullConsumer = Consumer<self::pull::Config>;
 pub type PushConsumer = Consumer<PushConsumerConfig>;
 
 /// Information about a consumer
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct ConsumerInfo {
+pub struct Info {
     /// The stream being consumed
     pub stream_name: String,
     /// The consumer's unique name
@@ -122,7 +97,7 @@ pub struct ConsumerInfo {
     #[serde(with = "rfc3339")]
     pub created: time::OffsetDateTime,
     /// The consumer's configuration
-    pub config: ConsumerConfig,
+    pub config: Config,
     /// Statistics for delivered messages
     pub delivered: SequencePair,
     /// Statistics for acknowleged messages
@@ -264,8 +239,8 @@ pub struct PushConsumerConfig {
 }
 
 impl IntoConsumerConfig for PushConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig {
-        ConsumerConfig {
+    fn into_consumer_config(self) -> Config {
+        Config {
             deliver_subject: self.deliver_subject,
             durable_name: self.durable_name,
             description: self.description,
@@ -290,106 +265,7 @@ impl IntoConsumerConfig for PushConsumerConfig {
     }
 }
 impl IntoConsumerConfig for &PushConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig {
-        self.clone().into_consumer_config()
-    }
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct PullConsumerConfig {
-    /// Setting `durable_name` to `Some(...)` will cause this consumer
-    /// to be "durable". This may be a good choice for workloads that
-    /// benefit from the `JetStream` server or cluster remembering the
-    /// progress of consumers for fault tolerance purposes. If a consumer
-    /// crashes, the `JetStream` server or cluster will remember which
-    /// messages the consumer acknowledged. When the consumer recovers,
-    /// this information will allow the consumer to resume processing
-    /// where it left off. If you're unsure, set this to `Some(...)`.
-    ///
-    /// Setting `durable_name` to `None` will cause this consumer to
-    /// be "ephemeral". This may be a good choice for workloads where
-    /// you don't need the `JetStream` server to remember the consumer's
-    /// progress in the case of a crash, such as certain "high churn"
-    /// workloads or workloads where a crashed instance is not required
-    /// to recover.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub durable_name: Option<String>,
-    /// A short description of the purpose of this consumer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Allows for a variety of options that determine how this consumer will receive messages
-    #[serde(flatten)]
-    pub deliver_policy: DeliverPolicy,
-    /// How messages should be acknowledged
-    pub ack_policy: AckPolicy,
-    /// How long to allow messages to remain un-acknowledged before attempting redelivery
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
-    pub ack_wait: Duration,
-    /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub max_deliver: i64,
-    /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub filter_subject: String,
-    /// Whether messages are sent as quickly as possible or at the rate of receipt
-    pub replay_policy: ReplayPolicy,
-    /// The rate of message delivery in bits per second
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub sample_frequency: u8,
-    /// The maximum number of waiting consumers.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub max_waiting: i64,
-    /// The maximum number of unacknowledged messages that may be
-    /// in-flight before pausing sending additional messages to
-    /// this consumer.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub max_ack_pending: i64,
-    /// Only deliver headers without payloads.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub headers_only: bool,
-    /// Maximum size of a request batch
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub max_batch: i64,
-    /// Maximum value for request exiration
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
-    pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
-    pub inactive_threshold: Duration,
-}
-
-impl IntoConsumerConfig for PullConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig {
-        ConsumerConfig {
-            deliver_subject: None,
-            durable_name: self.durable_name,
-            description: self.description,
-            deliver_group: None,
-            deliver_policy: self.deliver_policy,
-            ack_policy: self.ack_policy,
-            ack_wait: self.ack_wait,
-            max_deliver: self.max_deliver,
-            filter_subject: self.filter_subject,
-            replay_policy: self.replay_policy,
-            rate_limit: self.rate_limit,
-            sample_frequency: self.sample_frequency,
-            max_waiting: self.max_waiting,
-            max_ack_pending: self.max_ack_pending,
-            headers_only: self.headers_only,
-            flow_control: false,
-            idle_heartbeat: Duration::default(),
-            max_batch: self.max_batch,
-            max_expires: self.max_expires,
-            inactive_threshold: self.inactive_threshold,
-        }
-    }
-}
-
-impl IntoConsumerConfig for &PullConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig {
+    fn into_consumer_config(self) -> Config {
         self.clone().into_consumer_config()
     }
 }
@@ -398,7 +274,7 @@ impl IntoConsumerConfig for &PullConsumerConfig {
 /// `durable_name` and `deliver_subject` fields have a particularly
 /// strong influence on the consumer's overall behavior.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct ConsumerConfig {
+pub struct Config {
     /// Setting `deliver_subject` to `Some(...)` will cause this consumer
     /// to be "push-based". This is analogous in some ways to a normal
     /// NATS subscription (rather than a queue subscriber) in that the
@@ -505,34 +381,34 @@ pub struct ConsumerConfig {
     pub inactive_threshold: Duration,
 }
 
-impl From<&ConsumerConfig> for ConsumerConfig {
-    fn from(cc: &ConsumerConfig) -> ConsumerConfig {
+impl From<&Config> for Config {
+    fn from(cc: &Config) -> Config {
         cc.clone()
     }
 }
 
-impl From<&str> for ConsumerConfig {
-    fn from(s: &str) -> ConsumerConfig {
-        ConsumerConfig {
+impl From<&str> for Config {
+    fn from(s: &str) -> Config {
+        Config {
             durable_name: Some(s.to_string()),
             ..Default::default()
         }
     }
 }
 
-impl IntoConsumerConfig for ConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig {
+impl IntoConsumerConfig for Config {
+    fn into_consumer_config(self) -> Config {
         self
     }
 }
-impl IntoConsumerConfig for &ConsumerConfig {
-    fn into_consumer_config(self) -> ConsumerConfig {
+impl IntoConsumerConfig for &Config {
+    fn into_consumer_config(self) -> Config {
         self.clone()
     }
 }
 
-impl FromConsumer for ConsumerConfig {
-    fn try_from_consumer_config(config: ConsumerConfig) -> Result<Self, Error>
+impl FromConsumer for Config {
+    fn try_from_consumer_config(config: Config) -> Result<Self, Error>
     where
         Self: Sized,
     {
@@ -625,7 +501,6 @@ impl Default for ReplayPolicy {
         ReplayPolicy::Instant
     }
 }
-
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }

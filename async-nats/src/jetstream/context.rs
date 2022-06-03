@@ -21,12 +21,12 @@ use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 
-use super::stream::{DeleteStatus, Stream, StreamConfig, StreamInfo};
+use super::stream::{Config, DeleteStatus, Stream, StreamInfo};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
 pub struct Context {
-    client: Client,
+    pub(crate) client: Client,
     pub(crate) prefix: String,
 }
 
@@ -98,9 +98,9 @@ impl Context {
 
     pub async fn create_stream<S>(&self, stream_config: S) -> Result<StreamInfo, Error>
     where
-        StreamConfig: From<S>,
+        Config: From<S>,
     {
-        let config: StreamConfig = stream_config.into();
+        let config: Config = stream_config.into();
         if config.name.is_empty() {
             return Err(Box::new(io::Error::new(
                 ErrorKind::InvalidInput,
@@ -149,9 +149,9 @@ impl Context {
 
     pub async fn get_or_create_stream<S>(&self, stream_config: S) -> Result<Stream, Error>
     where
-        S: Into<StreamConfig>,
+        S: Into<Config>,
     {
-        let config: StreamConfig = stream_config.into();
+        let config: Config = stream_config.into();
         let subject = format!("{}.STREAM.INFO.{}", self.prefix, config.name);
 
         let request: Response<StreamInfo> = self.request(subject, &()).await?;
@@ -200,7 +200,7 @@ impl Context {
         }
     }
 
-    pub async fn update_stream(&self, config: &StreamConfig) -> Result<StreamInfo, Error> {
+    pub async fn update_stream(&self, config: &Config) -> Result<StreamInfo, Error> {
         let subject = format!("{}.STREAM.UPDATE.{}", self.prefix, config.name);
         match self.request(subject, config).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
