@@ -123,6 +123,23 @@ impl Stream {
         }
     }
 
+    pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
+        let subject = format!(
+            "{}.CONSUMER.DELETE.{}.{}",
+            self.prefix, self.info.config.name, name
+        );
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok(delete_status) => Ok(delete_status),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while deleting consumer: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+        }
+    }
 }
 
 /// `StreamConfig` determines the properties for a stream.
