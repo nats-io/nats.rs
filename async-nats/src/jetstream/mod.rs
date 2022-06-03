@@ -52,6 +52,7 @@ use crate::{Client, Message};
 
 pub mod consumer;
 pub mod context;
+pub mod error;
 pub mod publish;
 pub mod response;
 pub mod stream;

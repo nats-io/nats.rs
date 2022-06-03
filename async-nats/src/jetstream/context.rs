@@ -18,7 +18,7 @@ use std::io::{self, ErrorKind};
 
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{Client, Error};
+use crate::Client;
 use bytes::Bytes;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
