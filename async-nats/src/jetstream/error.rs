@@ -10,9 +10,8 @@ pub struct Error {
 }
 
 enum ErrorData<C> {
-    Raw(i32),
-    Simple(ErrorCode),
-    Custom(C),
+    Protocol(StatusCode, ErrorCode, String),
+    Custom(Custom),
 }
 
 #[derive(Debug)]
@@ -65,8 +64,8 @@ pub enum ErrorCode {
     StreamMessageExceedsMaximum = 10054,
     /// Generic template creation failed string
     StreamTemplateCreate = 10066,
-    /// Invalid JSON
-    InvalidJSON = 10025,
+    /// Invalid Json
+    InvalidJson = 10025,
     /// Stream external delivery prefix {prefix} must not contain wildcards
     StreamInvalidExternalDeliverySubject = 10024,
     /// Restore failed: {err}
@@ -245,17 +244,17 @@ pub enum ErrorCode {
     Other,
 }
 
-impl From<ErrorKind> for Error {
-    /// Converts an [`ErrorKind`] into an [`Error`].
+impl From<ErrorCode> for Error {
+    /// Converts an [`ErrorCode`] into an [`Error`].
     ///
     /// This conversion creates a new error with a simple representation of error kind.
     ///
     /// # Examples
     ///
     /// ```
-    /// use async_nats::jetstream::{Error, ErrorKind};
+    /// use async_nats::jetstream::{Error, ErrorCode};
     ///
-    /// let not_found = ErrorKind::NotFound;
+    /// let not_found = ErrorCode::NotFound;
     /// let error = Error::from(not_found);
     /// assert_eq!("entity not found", format!("{error}"));
     /// ```
@@ -267,23 +266,29 @@ impl From<ErrorKind> for Error {
     }
 }
 
+impl Error {}
+
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self.data {
-            ErrorData::Raw(..) => None,
-            ErrorData::Simple(..) => None,
+            ErrorData::Request(..) => None,
             ErrorData::Custom(c) => c.error.source(),
         }
     }
 }
 
 impl Error {
+    pub fn new(status: StatusCode, error: ErrorCode) {}
+
     pub fn other<E>(error: E) -> Error
     where
         E: Into<Box<dyn error::Error + Send + Sync>>,
     {
         Self {
-            data: ErrorData::Custom { kind: ErrorCode::Other, error }},
+            data: ErrorData::Custom {
+                code: ErrorCode::Other,
+                error,
+            },
         }
     }
 }
