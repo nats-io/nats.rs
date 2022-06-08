@@ -33,11 +33,11 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub async fn create_consumer<C: Into<ConsumerConfig>>(
+    pub async fn create_consumer<C: IntoConsumerConfig>(
         &self,
         config: C,
     ) -> Result<ConsumerInfo, Error> {
-        let config = config.into();
+        let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
                 "{}.CONSUMER.DURABLE.CREATE.{}.{}",
