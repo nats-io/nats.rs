@@ -289,6 +289,11 @@ impl IntoConsumerConfig for PushConsumerConfig {
         }
     }
 }
+impl IntoConsumerConfig for &PushConsumerConfig {
+    fn into_consumer_config(self) -> ConsumerConfig {
+        self.clone().into_consumer_config()
+    }
+}
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PullConsumerConfig {
@@ -380,6 +385,12 @@ impl IntoConsumerConfig for PullConsumerConfig {
             max_expires: self.max_expires,
             inactive_threshold: self.inactive_threshold,
         }
+    }
+}
+
+impl IntoConsumerConfig for &PullConsumerConfig {
+    fn into_consumer_config(self) -> ConsumerConfig {
+        self.clone().into_consumer_config()
     }
 }
 
@@ -506,6 +517,26 @@ impl From<&str> for ConsumerConfig {
             durable_name: Some(s.to_string()),
             ..Default::default()
         }
+    }
+}
+
+impl IntoConsumerConfig for ConsumerConfig {
+    fn into_consumer_config(self) -> ConsumerConfig {
+        self
+    }
+}
+impl IntoConsumerConfig for &ConsumerConfig {
+    fn into_consumer_config(self) -> ConsumerConfig {
+        self.clone()
+    }
+}
+
+impl FromConsumer for ConsumerConfig {
+    fn try_from_consumer_config(config: ConsumerConfig) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
+        Ok(config)
     }
 }
 
