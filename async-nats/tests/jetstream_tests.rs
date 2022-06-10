@@ -226,6 +226,23 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn get_raw_message() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("events").await.unwrap();
+        let payload = b"payload";
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let raw_message = stream.get_raw_message(publish_ack.sequence).await.unwrap();
+        assert_eq!(raw_message.sequence, publish_ack.sequence);
+    }
+
+    #[tokio::test]
     async fn create_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
