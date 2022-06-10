@@ -1,3 +1,4 @@
+use crate::status::StatusCode;
 use std::error;
 
 /// The error type for jetstream operations and associated types.
@@ -6,18 +7,21 @@ use std::error;
 /// `Error` can be created with crafted error messages and a particular value of [`ErrorCode`].
 ///
 pub struct Error {
-    data: ErrorData,
+    data: Inner,
 }
 
-enum ErrorData<C> {
-    Protocol(StatusCode, ErrorCode, String),
-    Custom(Custom),
-}
-
-#[derive(Debug)]
-struct Custom {
-    code: ErrorCode,
-    error: Box<dyn error::Error + Send + Sync>,
+/// Inner representation for ['Error']
+enum Inner {
+    Protocol {
+        status: StatusCode,
+        error: ErrorCode,
+        description: String,
+    },
+    Custom {
+        status: StatusCode,
+        error: ErrorCode,
+        value: Box<dyn error::Error + Send + Sync>,
+    },
 }
 
 /// `ErrorCode` which can be returned from a server an a response when an error occurs.
@@ -259,20 +263,18 @@ impl From<ErrorCode> for Error {
     /// assert_eq!("entity not found", format!("{error}"));
     /// ```
     #[inline]
-    fn from(code: ErrorCode) -> Error {
+    fn from(error: ErrorCode) -> Error {
         Error {
-            data: ErrorData::Code(code),
+            data: ErrorData::Custom(code),
         }
     }
 }
 
-impl Error {}
-
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self.data {
-            ErrorData::Request(..) => None,
-            ErrorData::Custom(c) => c.error.source(),
+            ErrorData::Protocol { .. } => None,
+            ErrorData::Custom { value, .. } => value.source(),
         }
     }
 }
@@ -280,14 +282,15 @@ impl error::Error for Error {
 impl Error {
     pub fn new(status: StatusCode, error: ErrorCode) {}
 
-    pub fn other<E>(error: E) -> Error
+    pub fn other<E>(value: E) -> Error
     where
         E: Into<Box<dyn error::Error + Send + Sync>>,
     {
         Self {
             data: ErrorData::Custom {
-                code: ErrorCode::Other,
-                error,
+                status: StatusCode::Other,
+                error: ErrorCode::Other,
+                value,
             },
         }
     }
