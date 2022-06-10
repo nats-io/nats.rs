@@ -41,7 +41,7 @@ pub fn publish(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
-                    let mut nc = async_nats::connect(server.client_url()).await.unwrap();
+                    let nc = async_nats::connect(server.client_url()).await.unwrap();
                     nc.publish("data".to_string(), "data".into()).await.unwrap();
                     nc.flush().await.unwrap();
                     nc
@@ -73,10 +73,10 @@ pub fn subscribe(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
-                    let mut nc = async_nats::connect(server.client_url()).await.unwrap();
+                    let nc = async_nats::connect(server.client_url()).await.unwrap();
 
                     tokio::task::spawn({
-                        let mut nc = nc.clone();
+                        let nc = nc.clone();
                         async move {
                             let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
                             let msg = &bmsg[0..*size].to_vec();
@@ -102,7 +102,7 @@ pub fn subscribe(c: &mut Criterion) {
     }
     subscribe_amount_group.finish();
 }
-async fn publish_1000_messages(mut nc: async_nats::Client, msg: &'_ [u8]) {
+async fn publish_1000_messages(nc: async_nats::Client, msg: &'_ [u8]) {
     let msg = msg.to_vec();
     for _i in 0..1000 {
         nc.publish("bench".into(), msg.clone().into())
@@ -112,7 +112,7 @@ async fn publish_1000_messages(mut nc: async_nats::Client, msg: &'_ [u8]) {
     nc.flush().await.unwrap();
 }
 
-async fn subscribe_1000_messages(mut nc: async_nats::Client) {
+async fn subscribe_1000_messages(nc: async_nats::Client) {
     let mut sub = nc.subscribe("bench".into()).await.unwrap();
     for _ in 0..1000 {
         sub.next().await.unwrap();

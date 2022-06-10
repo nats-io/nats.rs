@@ -1,7 +1,6 @@
 use crate::header::HeaderMap;
 use crate::status::StatusCode;
 use bytes::Bytes;
-use std::num::NonZeroU16;
 
 #[derive(Debug)]
 pub struct Message {
@@ -10,5 +9,5 @@ pub struct Message {
     pub payload: Bytes,
     pub headers: Option<HeaderMap>,
     pub status: Option<StatusCode>,
-    pub(crate) description: Option<String>,
+    pub description: Option<String>,
 }

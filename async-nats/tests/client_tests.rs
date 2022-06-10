@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::{ConnectOptions, Message, ServerError};
+    use async_nats::{ConnectOptions, ServerError};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
