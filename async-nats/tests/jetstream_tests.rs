@@ -313,9 +313,8 @@ mod jetstream {
             .await
             .unwrap();
 
-        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
-
-        let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
+        let _consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+        let _consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
 
         let mut consumer = stream.get_consumer("pull").await.unwrap();
         consumer.fetch(10).await.unwrap();

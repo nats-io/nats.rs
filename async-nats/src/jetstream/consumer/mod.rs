@@ -16,14 +16,14 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use time::serde::rfc3339;
 
-use crate::{Error, Subscriber};
-
 use super::Context;
+use crate::Error;
 
 pub trait IntoConsumerConfig {
     fn into_consumer_config(self) -> Config;
 }
 
+#[allow(dead_code)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
