@@ -32,6 +32,25 @@ pub struct Stream {
 }
 
 impl Stream {
+    /// Get a message from the stream.
+    pub async fn get_message(&self, sequence: u64) -> Result<MessageStatus, Error> {
+        let subject = format!("{}.STREAM.MSG.GET.{}", self.prefix, &self.info.config.name);
+        let payload = json!({
+            "seq": sequence,
+        });
+
+        match self.context.request(subject, &payload).await? {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while creating stream: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(status) => Ok(status),
+        }
+    }
+
     pub async fn create_consumer<C: IntoConsumerConfig>(&self, config: C) -> Result<Info, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
@@ -319,6 +338,36 @@ pub struct StreamState {
     pub last_timestamp: time::OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
+}
+
+/// A raw stream message in the representation it is stored.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Message {
+    /// Subject of the message.
+    #[serde(rename = "subject")]
+    pub subject: String,
+
+    /// Sequence of the message.
+    #[serde(rename = "seq")]
+    pub sequence: u64,
+
+    /// Data of the mssage.
+    #[serde(default, rename = "data")]
+    pub data: String,
+
+    /// Raw header string, if any.
+    #[serde(default, rename = "hdrs")]
+    pub headers: Option<String>,
+
+    /// The time the message was published.
+    #[serde(rename = "time", with = "rfc3339")]
+    pub time: time::OffsetDateTime,
+}
+
+/// Helper type to deserialize and flatten message requests
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MessageStatus {
+    pub message: Message,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
