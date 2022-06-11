@@ -48,8 +48,8 @@ impl Consumer<Config> {
         Ok(())
     }
 
-    pub async fn fetch(&mut self, batch: usize) -> Result<BatchIter, Error> {
-        BatchIter::batch(
+    pub async fn fetch(&mut self, batch: usize) -> Result<Batch, Error> {
+        Batch::batch(
             BatchConfig {
                 batch,
                 expires: None,
@@ -61,12 +61,8 @@ impl Consumer<Config> {
         .await
     }
 
-    pub async fn batch(
-        &mut self,
-        batch: usize,
-        expires: Option<usize>,
-    ) -> Result<BatchIter, Error> {
-        BatchIter::batch(
+    pub async fn batch(&mut self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
+        Batch::batch(
             BatchConfig {
                 batch,
                 expires,
@@ -135,22 +131,19 @@ impl Consumer<Config> {
     }
 }
 
-pub struct BatchIter {
+pub struct Batch {
     pending_messages: usize,
     subscriber: Subscriber,
     context: Context,
 }
 
-impl<'a> BatchIter {
-    async fn batch(
-        batch: BatchConfig,
-        consumer: &'a mut Consumer<Config>,
-    ) -> Result<BatchIter, Error> {
+impl<'a> Batch {
+    async fn batch(batch: BatchConfig, consumer: &'a mut Consumer<Config>) -> Result<Batch, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
 
-        Ok(BatchIter {
+        Ok(Batch {
             pending_messages: batch.batch,
             subscriber: subscription,
             context: consumer.context.clone(),
@@ -158,7 +151,7 @@ impl<'a> BatchIter {
     }
 }
 
-impl Stream for BatchIter {
+impl Stream for Batch {
     type Item = Result<JetStreamMessage, Error>;
 
     fn poll_next(
