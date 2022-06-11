@@ -214,7 +214,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let info2 = context.create_stream("events").await.unwrap();
+        let _stream = context.create_stream("events").await.unwrap();
         let info = context
             .update_stream(&stream::Config {
                 name: "events".to_string(),
@@ -224,7 +224,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        context.update_stream(&info2.config).await.unwrap();
+        context.update_stream(&info.config).await.unwrap();
         assert_eq!(info.config.max_messages, 1000);
         assert_eq!(info.config.max_messages_per_subject, 100);
     }
