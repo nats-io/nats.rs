@@ -96,7 +96,7 @@ impl Context {
         Ok(response)
     }
 
-    pub async fn create_stream<S>(&self, stream_config: S) -> Result<StreamInfo, Error>
+    pub async fn create_stream<S>(&self, stream_config: S) -> Result<Stream, Error>
     where
         Config: From<S>,
     {
@@ -108,7 +108,9 @@ impl Context {
             )));
         }
         let subject = format!("{}.STREAM.CREATE.{}", self.prefix, config.name);
-        match self.request(subject, &config).await? {
+        let response: Response<StreamInfo> = self.request(subject, &config).await?;
+
+        match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
@@ -116,7 +118,11 @@ impl Context {
                     error.code, error.description
                 ),
             ))),
-            Response::Ok(info) => Ok(info),
+            Response::Ok(info) => Ok(Stream {
+                context: self.clone(),
+                prefix: self.prefix.clone(),
+                info,
+            }),
         }
     }
 
@@ -155,15 +161,8 @@ impl Context {
         let subject = format!("{}.STREAM.INFO.{}", self.prefix, config.name);
 
         let request: Response<StreamInfo> = self.request(subject, &()).await?;
-
         match request {
-            Response::Err { error } if error.code == 404 => {
-                self.create_stream(&config).await.map(|info| Stream {
-                    context: self.clone(),
-                    info,
-                    prefix: self.prefix.clone(),
-                })
-            }
+            Response::Err { error } if error.code == 404 => self.create_stream(&config).await,
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(
