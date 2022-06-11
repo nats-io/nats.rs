@@ -168,27 +168,22 @@ impl Stream for BatchIter {
         if self.pending_messages == 0 {
             return std::task::Poll::Ready(None);
         }
+
         match self.subscriber.receiver.poll_recv(cx) {
-            std::task::Poll::Ready(message) => {
-                if let Some(mut message) = message {
-                    message.status = match message.status.unwrap_or(StatusCode::OK) {
-                        StatusCode::TIMEOUT => {
-                            return Poll::Ready(None);
-                        }
-                        StatusCode::IDLE_HEARBEAT => {
-                            return std::task::Poll::Pending;
-                        }
-                        status => Some(status),
-                    };
-                    self.pending_messages -= 1;
-                    Poll::Ready(Some(Ok(JetStreamMessage {
-                        context: self.context.clone(),
-                        message,
-                    })))
-                } else {
-                    Poll::Ready(None)
-                }
-            }
+            Poll::Ready(maybe_message) => match maybe_message {
+                Some(message) => match message.status.unwrap_or(StatusCode::OK) {
+                    StatusCode::TIMEOUT => Poll::Ready(None),
+                    StatusCode::IDLE_HEARBEAT => Poll::Pending,
+                    _ => {
+                        self.pending_messages -= 1;
+                        Poll::Ready(Some(Ok(JetStreamMessage {
+                            context: self.context.clone(),
+                            message,
+                        })))
+                    }
+                },
+                None => Poll::Ready(None),
+            },
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
