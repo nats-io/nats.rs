@@ -418,6 +418,7 @@ mod jetstream {
         pin_mut!(iter);
 
         let mut i = 0;
+
         while (iter.next().await).is_some() {
             i += 1;
             if i >= 1000 {
