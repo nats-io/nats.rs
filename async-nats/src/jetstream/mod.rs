@@ -21,8 +21,62 @@ pub mod stream;
 
 pub use context::Context;
 
+/// Creates a new JetStream [Context] that provides JetStream API for managming and using [Stream],
+/// [Consumer], key value and object store.
+///
+/// # Examples:
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+///
+/// let client = async_nats::connect("localhost:4222").await?;
+/// let jetstream = async_nats::jetstream::new(client);
+///
+/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn new(client: Client) -> Context {
     Context::new(client)
+}
+
+/// Creates a new JetStream [Context] with given JetStteam domain.
+///
+/// # Examples:
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+///
+/// let client = async_nats::connect("localhost:4222").await?;
+/// let jetstream = async_nats::jetstream::with_domain(client, "hub");
+///
+/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
+    context::Context::with_domain(client, domain)
+}
+
+/// Creates a new JetStream [Context] with given JetStream prefix.
+/// By default it is `$JS.API`.
+/// # Examples:
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+///
+/// let client = async_nats::connect("localhost:4222").await?;
+/// let jetstream = async_nats::jetstream::with_prefix(client, "JS.acc@hub.API");
+///
+/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub fn with_prefix(client: Client, prefix: &str) -> Context {
+    context::Context::with_prefix(client, prefix)
 }
 
 #[derive(Debug)]

@@ -31,10 +31,24 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(client: Client) -> Context {
+    pub(crate) fn new(client: Client) -> Context {
         Context {
             client,
             prefix: "$JS.API".to_string(),
+        }
+    }
+
+    pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
+        Context {
+            client,
+            prefix: prefix.to_string(),
+        }
+    }
+
+    pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
+        Context {
+            client,
+            prefix: format!("$JS.{}.API", domain.as_ref()),
         }
     }
 
