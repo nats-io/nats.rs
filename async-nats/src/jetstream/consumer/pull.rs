@@ -48,10 +48,10 @@ impl Consumer<Config> {
         Ok(())
     }
 
-    pub async fn fetch(&mut self, batch: usize) -> Result<Batch, Error> {
+    pub async fn fetch(&mut self, limit: usize) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
-                batch,
+                limit,
                 expires: None,
                 no_wait: true,
                 ..Default::default()
@@ -61,10 +61,10 @@ impl Consumer<Config> {
         .await
     }
 
-    pub async fn batch(&mut self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
+    pub async fn batch(&mut self, limit: usize, expires: Option<usize>) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
-                batch,
+                limit,
                 expires,
                 no_wait: false,
                 idle_heartbeat: Duration::default(),
@@ -77,26 +77,26 @@ impl Consumer<Config> {
 
     pub fn process(
         &'_ mut self,
-        batch: usize,
+        limit: usize,
     ) -> impl Stream<Item = Result<Option<JetStreamMessage>, Error>> + '_ {
         try_stream! {
             let inbox = self.context.client.new_inbox();
             let mut sub = self.context.client.subscribe(inbox.clone()).await?;
 
             self.request_batch(BatchConfig {
-                batch: batch,
+                limit,
                 expires: None,
                 no_wait: false,
                 ..Default::default()
             }, inbox.clone())
             .await?;
-            let mut remaining = batch;
+            let mut remaining = limit;
             while let Some(mut message) = sub.next().await {
                 message.status = match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => {
-                        remaining = batch;
+                        remaining = limit;
                         self.request_batch(BatchConfig {
-                            batch: batch,
+                            limit,
                             expires: None,
                             no_wait: false,
                             ..Default::default()
@@ -118,13 +118,13 @@ impl Consumer<Config> {
 
                 if remaining == 0 {
                     self.request_batch(BatchConfig {
-                        batch: batch,
+                        limit,
                         expires: None,
                         no_wait: false,
                         ..Default::default()
                     }, inbox.clone())
                     .await?;
-                    remaining = batch;
+                    remaining = limit;
                 }
             }
         }
@@ -144,7 +144,7 @@ impl<'a> Batch {
         consumer.request_batch(batch, inbox.clone()).await?;
 
         Ok(Batch {
-            pending_messages: batch.batch,
+            pending_messages: batch.limit,
             subscriber: subscription,
             context: consumer.context.clone(),
         })
@@ -186,7 +186,8 @@ impl Stream for Batch {
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct BatchConfig {
     /// The number of messages that are being requested to be delivered.
-    pub batch: usize,
+    #[serde(rename = "batch")]
+    pub limit: usize,
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
