@@ -28,8 +28,6 @@ use super::{
 
 pub struct Stream {
     pub info: StreamInfo,
-    #[allow(dead_code)]
-    pub(crate) prefix: String,
     pub(crate) context: Context,
 }
 

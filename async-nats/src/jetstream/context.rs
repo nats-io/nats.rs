@@ -137,7 +137,6 @@ impl Context {
             ))),
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
-                prefix: self.prefix.clone(),
                 info,
             }),
         }
@@ -165,7 +164,6 @@ impl Context {
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
-                prefix: self.prefix.clone(),
             }),
         }
     }
@@ -190,7 +188,6 @@ impl Context {
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
-                prefix: self.prefix.clone(),
             }),
         }
     }
