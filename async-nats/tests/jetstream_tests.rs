@@ -96,10 +96,8 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let response: Response<AccountInfo> = context
-            .request("$JS.API.INFO".to_string(), &())
-            .await
-            .unwrap();
+        let response: Response<AccountInfo> =
+            context.request("INFO".to_string(), &()).await.unwrap();
 
         assert!(matches!(response, Response::Ok { .. }));
     }
@@ -111,7 +109,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         let response: Response<AccountInfo> = context
-            .request("$JS.API.STREAM.INFO.nonexisting".to_string(), &())
+            .request("STREAM.INFO.nonexisting".to_string(), &())
             .await
             .unwrap();
 
@@ -127,10 +125,8 @@ mod jetstream {
         let client = async_nats::connect("nats://localhost:4222").await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let response: Response<AccountInfo> = context
-            .request("$JS.API.FONI".to_string(), &())
-            .await
-            .unwrap();
+        let response: Response<AccountInfo> =
+            context.request("API.FONI".to_string(), &()).await.unwrap();
 
         assert!(matches!(response, Response::Err { .. }));
     }
