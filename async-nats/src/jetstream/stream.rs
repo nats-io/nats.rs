@@ -28,6 +28,7 @@ use super::{
 
 pub struct Stream {
     pub info: StreamInfo,
+    #[allow(dead_code)]
     pub(crate) prefix: String,
     pub(crate) context: Context,
 }
@@ -37,11 +38,11 @@ impl Stream {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
-                "{}.CONSUMER.DURABLE.CREATE.{}.{}",
-                self.prefix, self.info.config.name, durable_name
+                "CONSUMER.DURABLE.CREATE.{}.{}",
+                self.info.config.name, durable_name
             )
         } else {
-            format!("{}.CONSUMER.CREATE.{}", self.prefix, self.info.config.name)
+            format!("CONSUMER.CREATE.{}", self.info.config.name)
         };
 
         match self
@@ -66,10 +67,7 @@ impl Stream {
     pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<Info, Error> {
         let name = name.as_ref();
 
-        let subject = format!(
-            "{}.CONSUMER.INFO.{}.{}",
-            self.prefix, self.info.config.name, name
-        );
+        let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(info) => Ok(info),
@@ -101,10 +99,7 @@ impl Stream {
         name: &str,
         config: T,
     ) -> Result<Consumer<T>, Error> {
-        let subject = format!(
-            "{}.CONSUMER.INFO.{}.{}",
-            self.prefix, self.info.config.name, name
-        );
+        let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Err { error } if error.code == 404 => self
@@ -133,10 +128,7 @@ impl Stream {
     }
 
     pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
-        let subject = format!(
-            "{}.CONSUMER.DELETE.{}.{}",
-            self.prefix, self.info.config.name, name
-        );
+        let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),

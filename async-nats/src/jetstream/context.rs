@@ -104,7 +104,10 @@ impl Context {
     {
         let request = serde_json::to_vec(&payload).map(Bytes::from)?;
 
-        let message = self.client.request(subject, request).await?;
+        let message = self
+            .client
+            .request(format!("{}.{}", self.prefix, subject), request)
+            .await?;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
@@ -121,7 +124,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("{}.STREAM.CREATE.{}", self.prefix, config.name);
+        let subject = format!("STREAM.CREATE.{}", config.name);
         let response: Response<StreamInfo> = self.request(subject, &config).await?;
 
         match response {
@@ -149,7 +152,7 @@ impl Context {
             )));
         }
 
-        let subject = format!("{}.STREAM.INFO.{}", self.prefix, stream);
+        let subject = format!("STREAM.INFO.{}", stream);
         let request: Response<StreamInfo> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -172,7 +175,7 @@ impl Context {
         S: Into<Config>,
     {
         let config: Config = stream_config.into();
-        let subject = format!("{}.STREAM.INFO.{}", self.prefix, config.name);
+        let subject = format!("STREAM.INFO.{}", config.name);
 
         let request: Response<StreamInfo> = self.request(subject, &()).await?;
         match request {
@@ -200,7 +203,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("{}.STREAM.DELETE.{}", self.prefix, stream);
+        let subject = format!("STREAM.DELETE.{}", stream);
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -214,7 +217,7 @@ impl Context {
     }
 
     pub async fn update_stream(&self, config: &Config) -> Result<StreamInfo, Error> {
-        let subject = format!("{}.STREAM.UPDATE.{}", self.prefix, config.name);
+        let subject = format!("STREAM.UPDATE.{}", config.name);
         match self.request(subject, config).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
