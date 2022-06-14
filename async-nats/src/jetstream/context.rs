@@ -13,6 +13,7 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
+use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
 
 use crate::jetstream::publish::PublishAck;
@@ -327,7 +328,11 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn update_stream(&self, config: &Config) -> Result<StreamInfo, Error> {
+    pub async fn update_stream<S>(&self, config: S) -> Result<StreamInfo, Error>
+    where
+        S: Borrow<Config>,
+    {
+        let config = config.borrow();
         let subject = format!("STREAM.UPDATE.{}", config.name);
         match self.request(subject, config).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(

@@ -212,7 +212,7 @@ mod jetstream {
 
         let _stream = context.create_stream("events").await.unwrap();
         let info = context
-            .update_stream(&stream::Config {
+            .update_stream(stream::Config {
                 name: "events".to_string(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
