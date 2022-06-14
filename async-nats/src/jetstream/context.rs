@@ -110,10 +110,12 @@ impl Context {
             .request(format!("{}.{}", self.prefix, subject), request)
             .await?;
 
-        if message.status == Some(StatusCode::NO_RESPONDERS) {
+        let status = message.status.unwrap_or(StatusCode::OK);
+        if status.is_server_error() {
+            // TODO(caspervonb) return jetstream::Error with a status code when that type lands.
             return Err(Box::new(std::io::Error::new(
-                ErrorKind::NotFound,
-                "nats: no responders",
+                ErrorKind::Other,
+                format!("nats: request failed with status code {:?}", status),
             )));
         }
 

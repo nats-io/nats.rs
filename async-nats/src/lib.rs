@@ -809,15 +809,7 @@ impl Client {
         self.publish_with_reply(subject, inbox, payload).await?;
         self.flush().await?;
         match sub.next().await {
-            Some(message) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
-                }
-                Ok(message)
-            }
+            Some(message) => Ok(message),
             None => Err(Box::new(io::Error::new(
                 ErrorKind::BrokenPipe,
                 "did not receive any message",
