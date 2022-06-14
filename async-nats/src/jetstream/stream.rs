@@ -136,12 +136,7 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let mut consumer = stream.get_consumer("pull").await?;
-    /// let messages = consumer.process(50);
-    /// futures::pin_mut!(messages);
-    /// while let Some(message) = messages.next().await {
-    ///     println!("message received: {:?}", message?);
-    /// }
+    /// let mut consumer: consumer::PullConsumer = stream.get_consumer("pull").await?;
     /// # Ok(())
     /// # }
     /// ```
