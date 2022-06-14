@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::{ConnectOptions, ServerError};
+    use async_nats::{status::StatusCode, ConnectOptions, ServerError};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -193,18 +193,17 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+
     #[tokio::test]
     async fn request_no_responders() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        tokio::time::timeout(
-            tokio::time::Duration::from_millis(300),
-            client.request("test".into(), "request".into()),
-        )
-        .await
-        .unwrap()
-        .unwrap_err();
+        let message = client
+            .request("test".into(), "request".into())
+            .await
+            .unwrap();
+        assert_eq!(message.status, Some(StatusCode::NO_RESPONDERS));
     }
 
     #[tokio::test]

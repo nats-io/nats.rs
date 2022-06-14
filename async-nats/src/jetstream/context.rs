@@ -15,6 +15,7 @@ use std::io::{self, ErrorKind};
 
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
+use crate::status::StatusCode;
 use crate::{Client, Error};
 use bytes::Bytes;
 use http::HeaderMap;
@@ -108,6 +109,14 @@ impl Context {
             .client
             .request(format!("{}.{}", self.prefix, subject), request)
             .await?;
+
+        if message.status == Some(StatusCode::NO_RESPONDERS) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::NotFound,
+                "nats: no responders",
+            )));
+        }
+
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
