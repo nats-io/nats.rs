@@ -23,6 +23,8 @@
 //! # #[tokio::main]
 //! # async fn mains() -> Result<(), async_nats::Error> {
 //! use futures::StreamExt;
+//! use futures::TryStreamExt;
+//!
 //! let client = async_nats::connect("localhost:4222").await?;
 //! let jetstream = async_nats::jetstream::new(client);
 //!
@@ -39,10 +41,11 @@
 //!     ..Default::default()
 //! }).await?;
 //!
-//! let messages = consumer.process(50);
-//! futures::pin_mut!(messages);
-//! while let Some(message) = messages.next().await {
-//!     println!("message receiver: {:?}", message?);
+//! let mut batches = consumer.process(50)?.take(10);
+//! while let Ok(Some(mut batch)) = batches.try_next().await {
+//!     while let Some(Ok(message)) = batch.next().await {
+//!         println!("message receiver: {:?}", message);
+//!     }
 //! }
 //! Ok(())
 //! # }

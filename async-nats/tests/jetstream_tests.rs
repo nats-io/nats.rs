@@ -31,8 +31,8 @@ mod jetstream {
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream;
     use async_nats::ConnectOptions;
-    use futures::pin_mut;
-    use futures::stream::StreamExt;
+    use bytes::Bytes;
+    use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
 
     #[tokio::test]
@@ -411,16 +411,10 @@ mod jetstream {
                 .unwrap();
         }
 
-        let iter = consumer.process(50);
-
-        pin_mut!(iter);
-
-        let mut i = 0;
-
-        while (iter.next().await).is_some() {
-            i += 1;
-            if i >= 1000 {
-                return;
+        let mut iter = consumer.process(50).unwrap().take(10);
+        while let Ok(Some(mut batch)) = iter.try_next().await {
+            while let Ok(Some(message)) = batch.try_next().await {
+                assert_eq!(message.payload, Bytes::from(b"dat".as_ref()));
             }
         }
     }

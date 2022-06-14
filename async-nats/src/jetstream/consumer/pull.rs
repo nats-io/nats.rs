@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::Bytes;
+use futures::future::BoxFuture;
 use std::{task::Poll, time::Duration};
 
-use async_stream::try_stream;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
@@ -23,9 +24,6 @@ use crate::{
 };
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
-
-use futures::StreamExt;
-
 use jetstream::consumer;
 
 impl Consumer<Config> {
@@ -75,59 +73,26 @@ impl Consumer<Config> {
         .await
     }
 
-    pub fn process(
-        &'_ mut self,
-        batch: usize,
-    ) -> impl Stream<Item = Result<Option<JetStreamMessage>, Error>> + '_ {
-        try_stream! {
-            let inbox = self.context.client.new_inbox();
-            let mut sub = self.context.client.subscribe(inbox.clone()).await?;
+    pub fn process(&'_ mut self, batch: usize) -> Result<Process, Error> {
+        let context = self.context.clone();
+        let subject = format!(
+            "{}.CONSUMER.MSG.NEXT.{}.{}",
+            self.context.prefix, self.info.stream_name, self.info.name
+        );
 
-            self.request_batch(BatchConfig {
-                batch: batch,
-                expires: None,
-                no_wait: false,
-                ..Default::default()
-            }, inbox.clone())
-            .await?;
-            let mut remaining = batch;
-            while let Some(mut message) = sub.next().await {
-                message.status = match message.status.unwrap_or(StatusCode::OK) {
-                    StatusCode::TIMEOUT => {
-                        remaining = batch;
-                        self.request_batch(BatchConfig {
-                            batch: batch,
-                            expires: None,
-                            no_wait: false,
-                            ..Default::default()
-                        }, inbox.clone())
-                        .await?;
-                        continue;
-                    }
-                    StatusCode::IDLE_HEARBEAT => {
-                        continue;
-                    }
-                    status => Some(status),
-                };
+        let request = serde_json::to_vec(&BatchConfig {
+            batch,
+            ..Default::default()
+        })
+        .map(Bytes::from)?;
 
-                remaining -= 1;
-                yield Some(JetStreamMessage {
-                    context: self.context.clone(),
-                    message: message,
-                });
-
-                if remaining == 0 {
-                    self.request_batch(BatchConfig {
-                        batch: batch,
-                        expires: None,
-                        no_wait: false,
-                        ..Default::default()
-                    }, inbox.clone())
-                    .await?;
-                    remaining = batch;
-                }
-            }
-        }
+        Ok(Process {
+            context,
+            subject,
+            request,
+            pending_messages: batch,
+            next: None,
+        })
     }
 }
 
@@ -178,6 +143,64 @@ impl Stream for Batch {
                 None => Poll::Ready(None),
             },
             std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+pub struct Process<'a> {
+    context: Context,
+    subject: String,
+    request: Bytes,
+    pending_messages: usize,
+    next: Option<BoxFuture<'a, Result<Batch, Error>>>,
+}
+
+impl<'a> Stream for Process<'a> {
+    type Item = Result<Batch, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.next.as_mut() {
+            None => {
+                let context = self.context.clone();
+                let subject = self.subject.clone();
+                let request = self.request.clone();
+                let pending_messages = self.pending_messages;
+
+                self.next = Some(Box::pin(async move {
+                    let inbox = context.client.new_inbox();
+                    let subscriber = context.client.subscribe(inbox.clone()).await?;
+
+                    context
+                        .client
+                        .publish_with_reply(subject, inbox, request)
+                        .await?;
+
+                    Ok(Batch {
+                        pending_messages,
+                        subscriber,
+                        context,
+                    })
+                }));
+
+                match self.next.as_mut().unwrap().as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        self.next = None;
+                        Poll::Ready(Some(result))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+
+            Some(next) => match next.as_mut().poll(cx) {
+                Poll::Ready(result) => {
+                    self.next = None;
+                    Poll::Ready(Some(result))
+                }
+                Poll::Pending => Poll::Pending,
+            },
         }
     }
 }
