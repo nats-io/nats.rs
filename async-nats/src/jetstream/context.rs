@@ -10,6 +10,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+//! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
 use std::io::{self, ErrorKind};
 
@@ -346,7 +348,7 @@ impl Context {
     ///
     /// # Examples:
     ///
-    /// ```
+    /// ```no_run
     /// # use async_nats::jetstream::stream::StreamInfo;
     /// # use async_nats::jetstream::response::Response;
     /// # #[tokio::main]
