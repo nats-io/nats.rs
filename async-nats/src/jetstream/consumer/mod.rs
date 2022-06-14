@@ -9,6 +9,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+//! Push and [Pull][PullConsumer] [Consumer] API.
 
 pub mod pull;
 use std::time::Duration;
@@ -40,6 +42,10 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     }
 }
 
+/// Trait used to convert generic [Stream Config][crate::jetstream::consumer::Config] into either
+/// [Pull][crate::jetstream::consumer::pull::Config] or
+/// [Push][crate::jetstream::consumer::PushConsumerConfig] config. It validates if given config is
+/// a valid target one.
 pub trait FromConsumer {
     fn try_from_consumer_config(config: Config) -> Result<Self, Error>
     where

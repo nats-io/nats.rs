@@ -1,3 +1,4 @@
+//! Publish `JetStream` messages.
 use serde::{Deserialize, Serialize};
 use std::ops::Not;
 
