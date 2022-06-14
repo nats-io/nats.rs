@@ -61,8 +61,8 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while publishing message: {}, {}",
-                    error.code, error.description
+                    "nats: error while publishing message: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
 
@@ -87,8 +87,8 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while publishing message: {}, {}",
-                    error.code, error.description
+                    "nats: error while publishing message: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
 
@@ -131,8 +131,8 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while creating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while creating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(info) => Ok(Stream {
@@ -157,8 +157,8 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while getting stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while getting stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(info) => Ok(Stream {
@@ -177,12 +177,12 @@ impl Context {
 
         let request: Response<StreamInfo> = self.request(subject, &()).await?;
         match request {
-            Response::Err { error } if error.code == 404 => self.create_stream(&config).await,
+            Response::Err { error } if error.status == 404 => self.create_stream(&config).await,
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while getting or creating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while getting or creating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(info) => Ok(Stream {
@@ -205,8 +205,8 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while deleting stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while deleting stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(delete_response) => Ok(delete_response),
@@ -219,8 +219,8 @@ impl Context {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while updating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while updating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(info) => Ok(info),

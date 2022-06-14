@@ -54,8 +54,8 @@ impl Stream {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while creating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while creating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(info) => Ok(info),
@@ -72,8 +72,8 @@ impl Stream {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while getting consumer info: {}, {}",
-                    error.code, error.description
+                    "nats: error while getting consumer info: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
         }
@@ -100,7 +100,7 @@ impl Stream {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
-            Response::Err { error } if error.code == 404 => self
+            Response::Err { error } if error.status == 404 => self
                 .create_consumer(config.into_consumer_config())
                 .await
                 .map(|info| {
@@ -113,8 +113,8 @@ impl Stream {
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while getting or creating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while getting or creating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok::<Info>(info) => Ok(Consumer::new(
@@ -133,8 +133,8 @@ impl Stream {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while deleting consumer: {}, {}",
-                    error.code, error.description
+                    "nats: error while deleting consumer: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
         }
