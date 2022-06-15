@@ -24,7 +24,7 @@ use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 
-use super::stream::{Config, DeleteStatus, Stream, StreamInfo};
+use super::stream::{Config, DeleteStatus, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -167,7 +167,7 @@ impl Context {
             )));
         }
         let subject = format!("STREAM.CREATE.{}", config.name);
-        let response: Response<StreamInfo> = self.request(subject, &config).await?;
+        let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -209,7 +209,7 @@ impl Context {
         }
 
         let subject = format!("STREAM.INFO.{}", stream);
-        let request: Response<StreamInfo> = self.request(subject, &()).await?;
+        let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -253,7 +253,7 @@ impl Context {
         let config: Config = stream_config.into();
         let subject = format!("STREAM.INFO.{}", config.name);
 
-        let request: Response<StreamInfo> = self.request(subject, &()).await?;
+        let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } if error.status == 404 => self.create_stream(&config).await,
             Response::Err { error } => Err(Box::new(io::Error::new(
@@ -328,7 +328,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn update_stream<S>(&self, config: S) -> Result<StreamInfo, Error>
+    pub async fn update_stream<S>(&self, config: S) -> Result<Info, Error>
     where
         S: Borrow<Config>,
     {
@@ -354,14 +354,14 @@ impl Context {
     /// # Examples:
     ///
     /// ```no_run
-    /// # use async_nats::jetstream::stream::StreamInfo;
+    /// # use async_nats::jetstream::stream::Info;
     /// # use async_nats::jetstream::response::Response;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let response: Response<StreamInfo> = jetstream
+    /// let response: Response<Info> = jetstream
     /// .request("STREAM.INFO.events".to_string(), &()).await?;
     /// # Ok(())
     /// # }

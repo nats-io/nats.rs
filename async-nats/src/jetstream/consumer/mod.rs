@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use time::serde::rfc3339;
 
 use super::Context;
+use crate::jetstream::consumer;
 use crate::Error;
 
 pub trait IntoConsumerConfig {
@@ -34,7 +35,7 @@ pub struct Consumer<T: IntoConsumerConfig> {
 }
 
 impl<T: IntoConsumerConfig> Consumer<T> {
-    pub fn new(config: T, info: Info, context: Context) -> Self {
+    pub fn new(config: T, info: consumer::Info, context: Context) -> Self {
         Self {
             config,
             info,
@@ -48,7 +49,7 @@ impl<T: IntoConsumerConfig> Consumer<T> {
 /// [Push][crate::jetstream::consumer::PushConsumerConfig] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
-    fn try_from_consumer_config(config: Config) -> Result<Self, Error>
+    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
     where
         Self: Sized;
 }
