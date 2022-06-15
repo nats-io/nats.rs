@@ -23,7 +23,7 @@ use serde_json::json;
 use time::serde::rfc3339;
 
 use super::{
-    consumer::{Consumer, FromConsumer, Info, IntoConsumerConfig},
+    consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
     response::Response,
     Context,
 };
@@ -31,7 +31,7 @@ use super::{
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug)]
 pub struct Stream {
-    pub info: StreamInfo,
+    pub info: Info,
     pub(crate) context: Context,
 }
 
@@ -56,7 +56,10 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn create_consumer<C: IntoConsumerConfig>(&self, config: C) -> Result<Info, Error> {
+    pub async fn create_consumer<C: IntoConsumerConfig>(
+        &self,
+        config: C,
+    ) -> Result<consumer::Info, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
@@ -102,7 +105,7 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<Info, Error> {
+    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<consumer::Info, Error> {
         let name = name.as_ref();
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
@@ -202,7 +205,7 @@ impl Stream {
                     error.code, error.status, error.description
                 ),
             ))),
-            Response::Ok::<Info>(info) => Ok(Consumer::new(
+            Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
                 T::try_from_consumer_config(info.config.clone())?,
                 info,
                 self.context.clone(),
@@ -385,7 +388,7 @@ impl Default for StorageType {
 
 /// Shows config and current state for this stream.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct StreamInfo {
+pub struct Info {
     /// The configuration associated with this stream
     pub config: Config,
     /// The time that this stream was created
