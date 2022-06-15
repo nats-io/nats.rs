@@ -395,7 +395,7 @@ pub struct Info {
     #[serde(with = "rfc3339")]
     pub created: time::OffsetDateTime,
     /// Various metrics associated with this stream
-    pub state: StreamState,
+    pub state: State,
 }
 
 #[derive(Deserialize)]
@@ -405,7 +405,7 @@ pub struct DeleteStatus {
 
 /// information about the given stream.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct StreamState {
+pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
     /// The number of bytes of all messages contained in this stream
