@@ -33,6 +33,7 @@ use std::task::Poll;
 use std::time::Duration;
 use tracing::debug;
 
+use super::consumer::{Consumer, FromConsumer, IntoConsumerConfig};
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{self, Config, DeleteStatus, DiscardPolicy, External, Info, Stream};
@@ -750,6 +751,58 @@ impl Context {
     //         .await
     //         .and_then(|info| Ok(()))
     // }
+
+    /// Get a [crate::jetstream::consumer::Consumer] straight from [Context], without binding to a [Stream] first.
+    ///
+    /// It has one less interaction with the server when binding to only one
+    /// [crate::jetstream::consumer::Consumer].
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream.get_consumer_from_stream("consumer", "stream").await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_consumer_from_stream<T, C, S>(
+        &self,
+        consumer: C,
+        stream: S,
+    ) -> Result<Consumer<T>, Error>
+    where
+        T: FromConsumer + IntoConsumerConfig,
+        S: AsRef<str>,
+        C: AsRef<str>,
+    {
+        let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
+
+        let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
+            Response::Ok(info) => info,
+            Response::Err { error } => {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "nats: error while getting consumer info: {}, {}, {}",
+                        error.code, error.status, error.description
+                    ),
+                )))
+            }
+        };
+
+        Ok(Consumer::new(
+            T::try_from_consumer_config(info.config.clone())?,
+            info,
+            self.clone(),
+        ))
+    }
 
     /// Send a request to the jetstream JSON API.
     ///
