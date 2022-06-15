@@ -27,9 +27,7 @@ mod jetstream {
     use super::*;
     use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::pull::{BatchConfig, Config};
-    use async_nats::jetstream::consumer::{
-        self, DeliverPolicy, PullConsumer, PushConsumer, PushConsumerConfig,
-    };
+    use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream;
     use async_nats::ConnectOptions;
@@ -301,7 +299,7 @@ mod jetstream {
             .await
             .unwrap();
         stream
-            .create_consumer(&PushConsumerConfig {
+            .create_consumer(&consumer::push::Config {
                 durable_name: Some("push".to_string()),
                 deliver_subject: Some("subject".to_string()),
                 ..Default::default()
