@@ -1,11 +1,13 @@
 use crate::status::StatusCode;
 use std::error;
+use std::fmt;
 
 /// The error type for jetstream operations and associated types.
 ///
 /// Errors mostly originate from the server, but custom instances of
 /// `Error` can be created with crafted error messages and a particular value of [`ErrorCode`].
 ///
+#[derive(Debug)]
 pub struct Error {
     code: Option<ErrorCode>,
     status: Option<StatusCode>,
@@ -233,8 +235,6 @@ pub enum ErrorCode {
     ConsumerDescriptionTooLong = 10107,
     /// Header size exceeds maximum allowed of 64k
     StreamHeaderExceedsMaximum = 10097,
-    /// Unknown error
-    Unknown,
 }
 
 impl From<ErrorCode> for Error {
@@ -259,6 +259,16 @@ impl From<ErrorCode> for Error {
             description: None,
             source: None,
         }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            fmt,
+            "{:?} {:?} {:?} {:?}",
+            self.code, self.status, self.description, self.source
+        );
     }
 }
 
