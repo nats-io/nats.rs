@@ -10,6 +10,43 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+//! JetStream is a NATS built-in persistence layer providing
+//! [Streams][crate::jetstream::stream::Stream] with *at least once*
+//! and *exactly once* semantics.
+//!
+//! To start, create a new [Context] which is an entrypoint to `JetStream` API.
+//!
+//! # Examples:
+//!
+//! ```no_run
+//! # #[tokio::main]
+//! # async fn mains() -> Result<(), async_nats::Error> {
+//! use futures::StreamExt;
+//! let client = async_nats::connect("localhost:4222").await?;
+//! let jetstream = async_nats::jetstream::new(client);
+//!
+//! let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+//!     name: "events".to_string(),
+//!     max_messages: 10_000,
+//!     ..Default::default()
+//! }).await?;
+//!
+//! jetstream.publish("events".to_string(), "data".into()).await?;
+//!
+//! let mut consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+//!     durable_name: Some("consumer".to_string()),
+//!     ..Default::default()
+//! }).await?;
+//!
+//! let messages = consumer.process(50);
+//! futures::pin_mut!(messages);
+//! while let Some(message) = messages.next().await {
+//!     println!("message receiver: {:?}", message?);
+//! }
+//! Ok(())
+//! # }
+//! ```
 
 use crate::{Client, Message};
 
@@ -21,8 +58,8 @@ pub mod stream;
 
 pub use context::Context;
 
-/// Creates a new JetStream [Context] that provides JetStream API for managming and using [Stream],
-/// [Consumer], key value and object store.
+/// Creates a new JetStream [Context] that provides JetStream API for managming and using [Streams][crate::jetstream::stream::Stream],
+/// [Consumers][crate::jetstream::consumer::Consumer], key value and object store.
 ///
 /// # Examples:
 ///

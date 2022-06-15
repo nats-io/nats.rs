@@ -27,9 +27,7 @@ mod jetstream {
     use super::*;
     use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::pull::{BatchConfig, Config};
-    use async_nats::jetstream::consumer::{
-        self, DeliverPolicy, PullConsumer, PushConsumer, PushConsumerConfig,
-    };
+    use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream;
     use async_nats::ConnectOptions;
@@ -212,7 +210,7 @@ mod jetstream {
 
         let _stream = context.create_stream("events").await.unwrap();
         let info = context
-            .update_stream(&stream::Config {
+            .update_stream(stream::Config {
                 name: "events".to_string(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
@@ -318,7 +316,7 @@ mod jetstream {
             .await
             .unwrap();
         stream
-            .create_consumer(&PushConsumerConfig {
+            .create_consumer(&consumer::push::Config {
                 durable_name: Some("push".to_string()),
                 deliver_subject: Some("subject".to_string()),
                 ..Default::default()
@@ -435,6 +433,7 @@ mod jetstream {
         pin_mut!(iter);
 
         let mut i = 0;
+
         while (iter.next().await).is_some() {
             i += 1;
             if i >= 1000 {

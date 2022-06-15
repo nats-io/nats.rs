@@ -9,6 +9,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+//! Manage operations on a [Stream], create/delete/update [Consumer][crate::jetstream::consumer::Consumer].
 
 use std::{
     io::{self, ErrorKind},
@@ -21,13 +23,15 @@ use serde_json::json;
 use time::serde::rfc3339;
 
 use super::{
-    consumer::{Consumer, FromConsumer, Info, IntoConsumerConfig},
+    consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
     response::Response,
     Context,
 };
 
+/// Handle to operations that can be performed on a `Stream`.
+#[derive(Debug)]
 pub struct Stream {
-    pub info: StreamInfo,
+    pub info: Info,
     pub(crate) context: Context,
 }
 
@@ -52,7 +56,30 @@ impl Stream {
         }
     }
 
-    pub async fn create_consumer<C: IntoConsumerConfig>(&self, config: C) -> Result<Info, Error> {
+    /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
+    /// returns the info from the server about created [Consumer][Consumer]
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// let info = stream.create_consumer(consumer::pull::Config {
+    ///     durable_name: Some("pull".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_consumer<C: IntoConsumerConfig>(
+        &self,
+        config: C,
+    ) -> Result<consumer::Info, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
@@ -74,15 +101,31 @@ impl Stream {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while creating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while creating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
             Response::Ok(info) => Ok(info),
         }
     }
 
-    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<Info, Error> {
+    /// Retrieve [Info] about [Consumer] from the server.
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// let info = stream.consumer_info("pull").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<consumer::Info, Error> {
         let name = name.as_ref();
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
@@ -92,13 +135,36 @@ impl Stream {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while getting consumer info: {}, {}",
-                    error.code, error.description
+                    "nats: error while getting consumer info: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
         }
     }
 
+    /// Get [Consumer] from the the server. [Consumer] iterators can be used to retrieve
+    /// [Messages][crate::jetstream::JetStreamMessage] for a given [Consumer].
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// let mut consumer = stream.get_consumer("pull").await?;
+    /// let messages = consumer.process(50);
+    /// futures::pin_mut!(messages);
+    /// while let Some(message) = messages.next().await {
+    ///     println!("message received: {:?}", message?);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_consumer<T: FromConsumer + IntoConsumerConfig>(
         &self,
         name: &str,
@@ -112,6 +178,28 @@ impl Stream {
         ))
     }
 
+    /// Create a [Consumer] with the given configuration if it is not present on the server. Returns a handle to the [Consumer].
+    ///
+    /// Note: This does not validate if the [Consumer] on the server is compatible with the configuration passed in except Push/Pull compatibility.
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// let mut consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
+    ///     durable_name: Some("pull".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_or_create_consumer<T: FromConsumer + IntoConsumerConfig>(
         &self,
         name: &str,
@@ -120,7 +208,7 @@ impl Stream {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
-            Response::Err { error } if error.code == 404 => self
+            Response::Err { error } if error.status == 404 => self
                 .create_consumer(config.into_consumer_config())
                 .await
                 .map(|info| {
@@ -133,11 +221,11 @@ impl Stream {
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while getting or creating stream: {}, {}",
-                    error.code, error.description
+                    "nats: error while getting or creating stream: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
-            Response::Ok::<Info>(info) => Ok(Consumer::new(
+            Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
                 T::try_from_consumer_config(info.config.clone())?,
                 info,
                 self.context.clone(),
@@ -145,6 +233,23 @@ impl Stream {
         }
     }
 
+    /// Delete a [Consumer] from the server.
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// jetstream.get_stream("events").await?
+    ///     .delete_consumer("pull").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
         let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
 
@@ -153,8 +258,8 @@ impl Stream {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 format!(
-                    "nats: error while deleting consumer: {}, {}",
-                    error.code, error.description
+                    "nats: error while deleting consumer: {}, {}, {}",
+                    error.code, error.status, error.description
                 ),
             ))),
         }
@@ -303,7 +408,7 @@ impl Default for StorageType {
 
 /// Shows config and current state for this stream.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct StreamInfo {
+pub struct Info {
     /// The configuration associated with this stream
     pub config: Config,
     /// The time that this stream was created

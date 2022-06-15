@@ -16,8 +16,13 @@ use serde::Deserialize;
 /// An error description returned in a response to a jetstream request.
 #[derive(Debug, Deserialize)]
 pub struct Error {
-    /// Code
+    /// Error code
+    #[serde(rename = "err_code")]
     pub code: u64,
+
+    /// Status code
+    #[serde(rename = "code")]
+    pub status: u16,
 
     /// Description
     pub description: String,
