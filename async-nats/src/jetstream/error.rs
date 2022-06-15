@@ -298,4 +298,16 @@ impl Error {
             source: Some(source.into()),
         }
     }
+
+    pub fn code(&self) -> Option<ErrorCode> {
+        self.code
+    }
+
+    pub fn status(&self) -> Option<StatusCode> {
+        self.status
+    }
+
+    pub fn description(&self) -> Option<String> {
+        self.description
+    }
 }
