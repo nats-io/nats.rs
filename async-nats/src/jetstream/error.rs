@@ -12,7 +12,7 @@ pub struct Error {
     code: Option<ErrorCode>,
     status: Option<StatusCode>,
     description: Option<String>,
-    source: Option<Box<dyn error::Error + Send + Sync>>,
+    source: Option<Box<dyn error::Error + 'static>>,
 }
 
 /// Specialized `ErrorCode` which can be returned from a server an a response when an error occurs.
@@ -240,16 +240,15 @@ pub enum ErrorCode {
 impl From<ErrorCode> for Error {
     /// Converts an [`ErrorCode`] into an [`Error`].
     ///
-    /// This conversion creates a new error with a simple representation of error kind.
+    /// This conversion creates a new error with the given error code.
     ///
     /// # Examples
     ///
     /// ```
     /// use async_nats::jetstream::{Error, ErrorCode};
     ///
-    /// let not_found = ErrorCode::NotFound;
-    /// let error = Error::from(not_found);
-    /// assert_eq!("entity not found", format!("{error}"));
+    /// let stream_not_found = ErrorCode::StreamNotFound;
+    /// let error = Error::from(stream_not_found);
     /// ```
     #[inline]
     fn from(code: ErrorCode) -> Error {
@@ -268,13 +267,13 @@ impl fmt::Display for Error {
             fmt,
             "{:?} {:?} {:?} {:?}",
             self.code, self.status, self.description, self.source
-        );
+        )
     }
 }
 
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.source
+        self.source.as_ref().map(Box::as_ref)
     }
 }
 
@@ -296,7 +295,7 @@ impl Error {
             code: None,
             status: None,
             description: None,
-            source: Some(source),
+            source: Some(source.into()),
         }
     }
 }
