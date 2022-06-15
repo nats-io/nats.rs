@@ -352,9 +352,9 @@ pub struct RawMessage {
     #[serde(rename = "seq")]
     pub sequence: u64,
 
-    /// Data of the mssage.
+    /// Raw payload of the message as a base64 encoded string.
     #[serde(default, rename = "data")]
-    pub data: String,
+    pub payload: String,
 
     /// Raw header string, if any.
     #[serde(default, rename = "hdrs")]
