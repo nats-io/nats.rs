@@ -7,24 +7,13 @@ use std::error;
 /// `Error` can be created with crafted error messages and a particular value of [`ErrorCode`].
 ///
 pub struct Error {
-    data: Inner,
+    code: Option<ErrorCode>,
+    status: Option<StatusCode>,
+    description: Option<String>,
+    source: Option<Box<dyn error::Error + Send + Sync>>,
 }
 
-/// Inner representation for ['Error']
-enum Inner {
-    Protocol {
-        status: StatusCode,
-        error: ErrorCode,
-        description: String,
-    },
-    Custom {
-        status: StatusCode,
-        error: ErrorCode,
-        value: Box<dyn error::Error + Send + Sync>,
-    },
-}
-
-/// `ErrorCode` which can be returned from a server an a response when an error occurs.
+/// Specialized `ErrorCode` which can be returned from a server an a response when an error occurs.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum ErrorCode {
@@ -245,7 +234,7 @@ pub enum ErrorCode {
     /// Header size exceeds maximum allowed of 64k
     StreamHeaderExceedsMaximum = 10097,
     /// Unknown error
-    Other,
+    Unknown,
 }
 
 impl From<ErrorCode> for Error {
@@ -263,35 +252,41 @@ impl From<ErrorCode> for Error {
     /// assert_eq!("entity not found", format!("{error}"));
     /// ```
     #[inline]
-    fn from(error: ErrorCode) -> Error {
+    fn from(code: ErrorCode) -> Error {
         Error {
-            data: ErrorData::Custom(code),
+            code: Some(code),
+            status: None,
+            description: None,
+            source: None,
         }
     }
 }
 
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match self.data {
-            ErrorData::Protocol { .. } => None,
-            ErrorData::Custom { value, .. } => value.source(),
-        }
+        self.source
     }
 }
 
 impl Error {
-    pub fn new(status: StatusCode, error: ErrorCode) {}
+    pub fn new(code: ErrorCode, status: StatusCode, description: String) -> Error {
+        Error {
+            code: Some(code),
+            status: Some(status),
+            description: Some(description),
+            source: None,
+        }
+    }
 
-    pub fn other<E>(value: E) -> Error
+    pub fn other<E>(source: E) -> Error
     where
         E: Into<Box<dyn error::Error + Send + Sync>>,
     {
-        Self {
-            data: ErrorData::Custom {
-                status: StatusCode::Other,
-                error: ErrorCode::Other,
-                value,
-            },
+        Error {
+            code: None,
+            status: None,
+            description: None,
+            source: Some(source),
         }
     }
 }
