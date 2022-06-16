@@ -203,6 +203,7 @@ impl Connection {
                     self.buffer.advance(len + 2);
                     let buffer = self.buffer.split_to(num_header_bytes).freeze();
                     let payload = self.buffer.split_to(num_bytes - num_header_bytes).freeze();
+                    self.buffer.advance(2);
 
                     let mut lines = std::str::from_utf8(&buffer).unwrap().lines().peekable();
 
@@ -424,7 +425,7 @@ impl Connection {
 #[cfg(test)]
 mod read_op {
     use super::Connection;
-    use crate::{HeaderMap, ServerError, ServerInfo, ServerOp};
+    use crate::{HeaderMap, ServerError, ServerInfo, ServerOp, StatusCode};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncWriteExt};
 
@@ -595,6 +596,76 @@ mod read_op {
                     "X".parse().unwrap()
                 )])),
                 payload: "Hello World".into(),
+                status: None,
+                description: None,
+            })
+        );
+
+        server
+            .write_all(b"HMSG FOO.BAR 10 INBOX.35 23 34\r\n")
+            .await
+            .unwrap();
+        server.write_all(b"NATS/1.0\r\n").await.unwrap();
+        server.write_all(b"Header: Y\r\n").await.unwrap();
+        server.write_all(b"\r\n").await.unwrap();
+        server.write_all(b"Hello World\r\n").await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Message {
+                sid: 10,
+                subject: "FOO.BAR".into(),
+                reply: Some("INBOX.35".into()),
+                headers: Some(HeaderMap::from_iter([(
+                    "Header".parse().unwrap(),
+                    "Y".parse().unwrap()
+                )])),
+                payload: "Hello World".into(),
+                status: None,
+                description: None,
+            })
+        );
+
+        server
+            .write_all(b"HMSG FOO.BAR 10 INBOX.35 28 28\r\n")
+            .await
+            .unwrap();
+        server
+            .write_all(b"NATS/1.0 404 No Messages\r\n")
+            .await
+            .unwrap();
+        server.write_all(b"\r\n").await.unwrap();
+        server.write_all(b"\r\n").await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Message {
+                sid: 10,
+                subject: "FOO.BAR".into(),
+                reply: Some("INBOX.35".into()),
+                headers: Some(HeaderMap::default()),
+                payload: "".into(),
+                status: Some(StatusCode::NOT_FOUND),
+                description: Some("No Messages".to_string()),
+            })
+        );
+
+        server
+            .write_all(b"MSG FOO.BAR 9 11\r\nHello Again\r\n")
+            .await
+            .unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Message {
+                sid: 9,
+                subject: "FOO.BAR".into(),
+                reply: None,
+                headers: None,
+                payload: "Hello Again".into(),
                 status: None,
                 description: None,
             })
