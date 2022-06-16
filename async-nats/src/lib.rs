@@ -401,14 +401,21 @@ impl Connector {
                     )
                 })?;
 
-            let domain = rustls::ServerName::try_from(info.host.as_str())
-                .or_else(|_| rustls::ServerName::try_from(tls_host))
-                .map_err(|_| {
-                    io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "cannot determine hostname for TLS connection",
-                    )
-                })?;
+            // Use the server-advertised hostname to validate if given as a hostname, not an IP address
+            let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
+                rustls::ServerName::try_from(info.host.as_str())
+            {
+                server_hostname
+            } else if let Ok(tls_hostname @ rustls::ServerName::DnsName(_)) =
+                rustls::ServerName::try_from(tls_host)
+            {
+                tls_hostname
+            } else {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "cannot determine hostname for TLS connection",
+                ));
+            };
 
             connection = Connection {
                 stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
