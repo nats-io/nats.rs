@@ -51,7 +51,7 @@
 //! # }
 //! ```
 
-use crate::{Client, Message};
+use crate::Client;
 
 pub mod consumer;
 pub mod context;
@@ -120,13 +120,13 @@ pub fn with_prefix(client: Client, prefix: &str) -> Context {
 }
 
 #[derive(Debug)]
-pub struct JetStreamMessage {
-    pub message: Message,
+pub struct Message {
+    pub message: crate::Message,
     pub context: Context,
 }
 
-impl std::ops::Deref for JetStreamMessage {
-    type Target = Message;
+impl std::ops::Deref for Message {
+    type Target = crate::Message;
 
     fn deref(&self) -> &Self::Target {
         &self.message
