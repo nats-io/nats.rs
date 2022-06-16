@@ -604,12 +604,17 @@ impl ServerAddress {
         self.0.scheme() == "tls"
     }
 
+    /// Returns if the server url had embedded username and password.
+    pub fn has_user_pass(&self) -> bool {
+        self.0.username() != ""
+    }
+
     pub(crate) fn auth(&self) -> AuthStyle {
         if let Some(password) = self.0.password() {
-            if self.0.username() != "" {
-                AuthStyle::UserPass(self.0.username().to_string(), password.to_string())
-            } else {
+            if self.0.username() == "" {
                 AuthStyle::NoAuth
+            } else {
+                AuthStyle::UserPass(self.0.username().to_string(), password.to_string())
             }
         } else if "" != self.0.username() {
             AuthStyle::Token(self.0.username().to_string())
@@ -722,6 +727,8 @@ mod tests {
     #[test]
     fn server_address_user_auth() {
         let address = ServerAddress::from_str("nats://myuser:mypass@localhost").unwrap();
-        assert!(matches!(address.auth(), AuthStyle::UserPass(username, password) if &username == "myuser" && &password == "mypass"));
+        assert!(
+            matches!(address.auth(), AuthStyle::UserPass(username, password) if &username == "myuser" && &password == "mypass")
+        );
     }
 }
