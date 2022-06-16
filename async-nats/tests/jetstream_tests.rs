@@ -511,4 +511,40 @@ mod jetstream {
             }
         }
     }
+
+    #[tokio::test]
+    async fn consumer_info() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+        assert_eq!(
+            consumer.info().await.unwrap().clone(),
+            consumer.cached_info().clone()
+        );
+    }
 }
