@@ -261,6 +261,30 @@ impl From<ErrorCode> for Error {
     }
 }
 
+impl From<StatusCode> for Error {
+    /// Converts a [`StatusCode`] into an [`Error`].
+    ///
+    /// This conversion creates a new error with the given status code.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_nats::jetstream::{Error, ErrorCode};
+    ///
+    /// let no_responders = StatusCode::NO_RESPONDERS;
+    /// let error = Error::from(no_responders);
+    /// ```
+    #[inline]
+    fn from(status: StatusCode) -> Error {
+        Error {
+            code: None,
+            status: Some(status),
+            description: None,
+            source: None,
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(
