@@ -132,3 +132,9 @@ impl std::ops::Deref for Message {
         &self.message
     }
 }
+
+impl From<Message> for crate::Message {
+    fn from(source: Message) -> crate::Message {
+        source.message
+    }
+}
