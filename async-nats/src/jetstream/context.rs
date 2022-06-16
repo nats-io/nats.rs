@@ -13,9 +13,6 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
-use std::borrow::Borrow;
-use std::io::{self, ErrorKind};
-
 use crate::jetstream::error::Error;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
@@ -24,6 +21,7 @@ use bytes::Bytes;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
+use std::borrow::Borrow;
 
 use super::stream::{Config, DeleteStatus, Info, Stream};
 
