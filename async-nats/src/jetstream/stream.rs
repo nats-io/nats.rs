@@ -136,7 +136,7 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let mut consumer: consumer::PullConsumer = stream.get_consumer("pull").await?;
+    /// let consumer: consumer::PullConsumer = stream.get_consumer("pull").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -168,7 +168,7 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let mut consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
+    /// let consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
     ///     durable_name: Some("pull".to_string()),
     ///     ..Default::default()
     /// }).await?;

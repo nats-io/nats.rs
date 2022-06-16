@@ -46,7 +46,7 @@ impl Consumer<Config> {
         Ok(())
     }
 
-    pub async fn fetch(&mut self, batch: usize) -> Result<Batch, Error> {
+    pub async fn fetch(&self, batch: usize) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
                 batch,
@@ -59,7 +59,7 @@ impl Consumer<Config> {
         .await
     }
 
-    pub async fn batch(&mut self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
+    pub async fn batch(&self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
                 batch,
@@ -73,7 +73,7 @@ impl Consumer<Config> {
         .await
     }
 
-    pub fn process(&'_ mut self, batch: usize) -> Result<Process, Error> {
+    pub fn process(&self, batch: usize) -> Result<Process, Error> {
         let context = self.context.clone();
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
@@ -103,7 +103,7 @@ pub struct Batch {
 }
 
 impl<'a> Batch {
-    async fn batch(batch: BatchConfig, consumer: &'a mut Consumer<Config>) -> Result<Batch, Error> {
+    async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
