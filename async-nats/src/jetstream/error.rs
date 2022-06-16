@@ -160,17 +160,17 @@ pub enum ErrorCode {
     /// Deliver subject not valid
     SnapshotDeliverSubjectInvalid = 10015,
     /// General stream failure string
-    StreamGeneralErrorF = 10051,
+    StreamGeneralError = 10051,
     /// Stream configuration validation error string
-    StreamInvalidConfigF = 10052,
+    StreamInvalidConfig = 10052,
     /// Replicas > 1 not supported in non-clustered mode
     StreamReplicasNotSupported = 10074,
     /// Generic message deletion failure error string
-    StreamMessageDeleteFailedF = 10057,
+    StreamMessageDeleteFailed = 10057,
     /// Peer remap failed
     PeerRemap = 10075,
     /// Generic error when storing a message failed
-    StreamStoreFailedF = 10077,
+    StreamStoreFailed = 10077,
     /// Consumer config required
     ConsumerConfigRequired = 10078,
     /// Consumer deliver subject has wildcards
