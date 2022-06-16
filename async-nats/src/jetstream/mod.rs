@@ -51,7 +51,7 @@
 //! # }
 //! ```
 
-use crate::{Client, Message};
+use crate::{Client, Error};
 
 pub mod consumer;
 pub mod context;

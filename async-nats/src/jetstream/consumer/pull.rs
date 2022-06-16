@@ -19,7 +19,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    jetstream::{self, Context, JetStreamMessage},
+    jetstream::{self, Context, Message},
     Error, StatusCode, Subscriber,
 };
 
@@ -117,7 +117,7 @@ impl<'a> Batch {
 }
 
 impl Stream for Batch {
-    type Item = Result<JetStreamMessage, Error>;
+    type Item = Result<jetstream::Message, Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -134,7 +134,7 @@ impl Stream for Batch {
                     StatusCode::IDLE_HEARBEAT => Poll::Pending,
                     _ => {
                         self.pending_messages -= 1;
-                        Poll::Ready(Some(Ok(JetStreamMessage {
+                        Poll::Ready(Some(Ok(jetstream::Message {
                             context: self.context.clone(),
                             message,
                         })))
