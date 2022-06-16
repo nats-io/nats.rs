@@ -16,6 +16,7 @@
 use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
 
+use crate::jetstream::error::Error;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::Client;
@@ -77,14 +78,11 @@ impl Context {
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while publishing message: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-
+            Response::Err { error } => Err(Error::new(
+                error.code.into(),
+                error.status.into(),
+                error.description,
+            )),
             Response::Ok(publish_ack) => Ok(publish_ack),
         }
     }

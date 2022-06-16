@@ -58,6 +58,7 @@ pub mod response;
 pub mod stream;
 
 pub use context::Context;
+pub use error::Error;
 
 /// Creates a new JetStream [Context] that provides JetStream API for managming and using [Streams][crate::jetstream::stream::Stream],
 /// [Consumers][crate::jetstream::consumer::Consumer], key value and object store.
