@@ -310,7 +310,7 @@ mod jetstream {
         let _consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
         let _consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
 
-        let mut consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
         consumer.fetch(10).await.unwrap();
     }
 
@@ -402,7 +402,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let mut consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
 
         for _ in 0..1000 {
             context
@@ -447,7 +447,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let mut consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
 
         for _ in 0..10 {
             context
@@ -492,7 +492,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let mut consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
 
         for _ in 0..100 {
             context

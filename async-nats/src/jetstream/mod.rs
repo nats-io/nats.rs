@@ -36,7 +36,7 @@
 //!
 //! jetstream.publish("events".to_string(), "data".into()).await?;
 //!
-//! let mut consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+//! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
 //!     durable_name: Some("consumer".to_string()),
 //!     ..Default::default()
 //! }).await?;
