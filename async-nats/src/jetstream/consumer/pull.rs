@@ -19,7 +19,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    jetstream::{self, Context, Message},
+    jetstream::{self, Context},
     Error, StatusCode, Subscriber,
 };
 
