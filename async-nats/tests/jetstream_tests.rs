@@ -380,7 +380,7 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn pull_process() {
+    async fn pull_sequence() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
@@ -411,7 +411,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut iter = consumer.process(50).unwrap().take(10);
+        let mut iter = consumer.sequence(50).unwrap().take(10);
         while let Ok(Some(mut batch)) = iter.try_next().await {
             while let Ok(Some(message)) = batch.try_next().await {
                 assert_eq!(message.payload, Bytes::from(b"dat".as_ref()));

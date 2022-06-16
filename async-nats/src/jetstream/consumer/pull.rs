@@ -73,7 +73,7 @@ impl Consumer<Config> {
         .await
     }
 
-    pub fn process(&self, batch: usize) -> Result<Process, Error> {
+    pub fn sequence(&self, batch: usize) -> Result<Sequence, Error> {
         let context = self.context.clone();
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
@@ -86,7 +86,7 @@ impl Consumer<Config> {
         })
         .map(Bytes::from)?;
 
-        Ok(Process {
+        Ok(Sequence {
             context,
             subject,
             request,
@@ -147,7 +147,7 @@ impl Stream for Batch {
     }
 }
 
-pub struct Process<'a> {
+pub struct Sequence<'a> {
     context: Context,
     subject: String,
     request: Bytes,
@@ -155,7 +155,7 @@ pub struct Process<'a> {
     next: Option<BoxFuture<'a, Result<Batch, Error>>>,
 }
 
-impl<'a> Stream for Process<'a> {
+impl<'a> Stream for Sequence<'a> {
     type Item = Result<Batch, Error>;
 
     fn poll_next(
