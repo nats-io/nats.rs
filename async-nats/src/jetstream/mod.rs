@@ -41,7 +41,7 @@
 //!     ..Default::default()
 //! }).await?;
 //!
-//! let mut batches = consumer.process(50)?.take(10);
+//! let mut batches = consumer.sequence(50)?.take(10);
 //! while let Ok(Some(mut batch)) = batches.try_next().await {
 //!     while let Some(Ok(message)) = batch.next().await {
 //!         println!("message receiver: {:?}", message);
