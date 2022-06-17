@@ -28,7 +28,7 @@ mod jetstream {
 
     use super::*;
     use async_nats::header::HeaderMap;
-    use async_nats::jetstream::consumer::pull::{BatchConfig, Config};
+    use async_nats::jetstream::consumer::pull::Config;
     use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream;
@@ -347,35 +347,6 @@ mod jetstream {
                     durable_name: Some("consumer".to_string()),
                     ..Default::default()
                 },
-            )
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn request_batch() {
-        let server = nats_server::run_server("tests/configs/jetstream.conf");
-        let client = async_nats::connect(server.client_url()).await.unwrap();
-        let context = async_nats::jetstream::new(client);
-
-        let stream = context.get_or_create_stream("stream").await.unwrap();
-        stream
-            .create_consumer(&Config {
-                durable_name: Some("pull".to_string()),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        let consumer = stream.get_consumer("pull").await.unwrap();
-        consumer
-            .request_batch(
-                BatchConfig {
-                    batch: 10,
-                    expires: None,
-                    no_wait: false,
-                    ..Default::default()
-                },
-                "inbox".to_string(),
             )
             .await
             .unwrap();

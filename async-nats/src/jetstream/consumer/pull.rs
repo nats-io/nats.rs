@@ -68,7 +68,7 @@ impl Consumer<Config> {
         Ok(try_flatten)
     }
 
-    pub async fn request_batch<I: Into<BatchConfig>>(
+    pub(crate) async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
         inbox: String,
