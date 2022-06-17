@@ -60,7 +60,7 @@ impl Context {
     ///
     /// If the stream does not exist, `no responders` error will be returned.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -94,7 +94,7 @@ impl Context {
     ///
     /// If the stream does not exist, `no responders` error will be returned.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -136,7 +136,7 @@ impl Context {
     /// Create a JetStream [Stream] with given config and return a handle to it.
     /// That handle can be used to manage and use [Consumer][crate::jetstream::consumer::Consumer].
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -187,7 +187,7 @@ impl Context {
     /// Checks for [Stream] existence on the server and returns handle to it.
     /// That handle can be used to manage and use [Consumer][crate::jetstream::consumer::Consumer].
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -229,7 +229,7 @@ impl Context {
     ///
     /// Note: This does not validate if the Stream on the server is compatible with the configuration passed in.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -272,7 +272,7 @@ impl Context {
 
     /// Deletes a [Stream] with a given name.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -309,7 +309,7 @@ impl Context {
     /// Updates a [Stream] with a given config. If specific field cannot be updated,
     /// error is returned.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -351,7 +351,7 @@ impl Context {
     /// This is a low level API used mostly internally, that should be used only in
     /// specific cases when this crate API on [Consumer][crate::jetstream::consumer::Consumer] or [Stream] does not provide needed functionality.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # use async_nats::jetstream::stream::Info;

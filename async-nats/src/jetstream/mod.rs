@@ -17,7 +17,7 @@
 //!
 //! To start, create a new [Context] which is an entrypoint to `JetStream` API.
 //!
-//! # Examples:
+//! # Examples
 //!
 //! ```no_run
 //! # #[tokio::main]
@@ -64,7 +64,7 @@ pub use context::Context;
 /// Creates a new JetStream [Context] that provides JetStream API for managming and using [Streams][crate::jetstream::stream::Stream],
 /// [Consumers][crate::jetstream::consumer::Consumer], key value and object store.
 ///
-/// # Examples:
+/// # Examples
 ///
 /// ```no_run
 /// # #[tokio::main]
@@ -83,7 +83,7 @@ pub fn new(client: Client) -> Context {
 
 /// Creates a new JetStream [Context] with given JetStteam domain.
 ///
-/// # Examples:
+/// # Examples
 ///
 /// ```no_run
 /// # #[tokio::main]
@@ -102,7 +102,7 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
 
 /// Creates a new JetStream [Context] with given JetStream prefix.
 /// By default it is `$JS.API`.
-/// # Examples:
+/// # Examples
 ///
 /// ```no_run
 /// # #[tokio::main]
