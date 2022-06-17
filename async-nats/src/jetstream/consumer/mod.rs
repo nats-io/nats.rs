@@ -50,7 +50,7 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// Retrieves `info` about [Consumer] from the server, updates the cached `info` inside
     /// [Consumer] and returns it.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -89,7 +89,7 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// Cache is either from initial creation/retrival of the [Consumer] or last call to
     /// [Consumer::info].
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]

@@ -39,7 +39,7 @@ impl Stream {
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -91,7 +91,7 @@ impl Stream {
 
     /// Retrieve [Info] about [Consumer] from the server.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -125,7 +125,7 @@ impl Stream {
     /// Get [Consumer] from the the server. [Consumer] iterators can be used to retrieve
     /// [Messages][crate::jetstream::JetStreamMessage] for a given [Consumer].
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -157,7 +157,7 @@ impl Stream {
     ///
     /// Note: This does not validate if the [Consumer] on the server is compatible with the configuration passed in except Push/Pull compatibility.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -210,7 +210,7 @@ impl Stream {
 
     /// Delete a [Consumer] from the server.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
