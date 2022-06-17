@@ -13,9 +13,9 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
+use futures::stream::{self, TryStreamExt};
 use std::{task::Poll, time::Duration};
 
-use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -27,6 +27,47 @@ use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig
 use jetstream::consumer;
 
 impl Consumer<Config> {
+    /// Returns a stream of message request results
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    ///
+    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+    ///     durable_name: Some("consumer".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let mut messages = consumer.stream()?.take(100);
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///   println!("got message {:?}", message);
+    ///   message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
+    pub fn stream(&self) -> Result<Stream, Error> {
+        let sequence = self.sequence(10)?;
+        let try_flatten = sequence.try_flatten();
+
+        Ok(try_flatten)
+    }
+
     pub async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
@@ -116,7 +157,7 @@ impl<'a> Batch {
     }
 }
 
-impl Stream for Batch {
+impl futures::Stream for Batch {
     type Item = Result<jetstream::Message, Error>;
 
     fn poll_next(
@@ -155,7 +196,7 @@ pub struct Sequence<'a> {
     next: Option<BoxFuture<'a, Result<Batch, Error>>>,
 }
 
-impl<'a> Stream for Sequence<'a> {
+impl<'a> futures::Stream for Sequence<'a> {
     type Item = Result<Batch, Error>;
 
     fn poll_next(
@@ -204,6 +245,8 @@ impl<'a> Stream for Sequence<'a> {
         }
     }
 }
+
+pub type Stream<'a> = stream::TryFlatten<Sequence<'a>>;
 
 /// Used for next Pull Request for Pull Consumer
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
