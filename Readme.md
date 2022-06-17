@@ -49,6 +49,8 @@ New bleeding edge experimental async Tokio-based NATS client.
 Currently supports:
 
 * Core NATS
+* JetStream Pull Consumers API
+* JetStream Management API
 
 And should soon catch up with in terms of feature parity with synchronous client.
 When it reaches feature parity with `nats` crate, synchronous wrapper over `async-nats` will
