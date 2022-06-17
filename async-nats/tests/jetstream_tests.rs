@@ -422,6 +422,44 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn pull_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
+
+        for _ in 0..1000 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let mut iter = consumer.stream().unwrap().take(1000);
+        while let Some(result) = iter.next().await {
+            assert!(result.is_ok());
+        }
+    }
+
+    #[tokio::test]
     async fn pull_fetch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
