@@ -459,7 +459,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-/// Iterator that retrieves messages unless `no messages` or `request timeout` is enocuntered, or
+/// Iterator that retrieves messages unless `no messages` or `request timeout` is encountered, or
 /// timeout is reached.
 pub struct TimeoutIter<'a> {
     subscription: &'a PullSubscription,
