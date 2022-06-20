@@ -113,7 +113,7 @@ impl<T: IntoConsumerConfig> Consumer<T> {
 
 /// Trait used to convert generic [Stream Config][crate::jetstream::consumer::Config] into either
 /// [Pull][crate::jetstream::consumer::pull::Config] or
-/// [Push][crate::jetstream::consumer::PushConsumerConfig] config. It validates if given config is
+/// [Push][crate::jetstream::consumer::push::Config] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
     fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
