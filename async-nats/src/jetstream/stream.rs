@@ -123,7 +123,7 @@ impl Stream {
     }
 
     /// Get [Consumer] from the the server. [Consumer] iterators can be used to retrieve
-    /// [Messages][crate::jetstream::JetStreamMessage] for a given [Consumer].
+    /// [Messages][crate::jetstream::Message] for a given [Consumer].
     ///
     /// # Examples
     ///
