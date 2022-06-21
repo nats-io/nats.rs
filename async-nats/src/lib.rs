@@ -90,7 +90,7 @@
 //! # use std::time::Instant;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> Result<(), Box<dyn Error>> {
+//! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
@@ -930,7 +930,7 @@ impl Subscriber {
     /// # Examples
     /// ```
     /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;

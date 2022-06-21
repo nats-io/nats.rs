@@ -157,7 +157,7 @@ impl Client {
     /// # Examples
     /// ```
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::Error> {
     /// # let mut nc = async_nats::connect("demo.nats.io").await?;
     /// let reply = nc.new_inbox();
     /// let rsub = nc.subscribe(reply).await?;
@@ -172,11 +172,11 @@ impl Client {
         &self,
         subject: String,
         queue_group: String,
-    ) -> Result<Subscriber, io::Error> {
+    ) -> Result<Subscriber, Error> {
         self._subscribe(subject, Some(queue_group)).await
     }
 
-    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, io::Error> {
+    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
         self._subscribe(subject, None).await
     }
 
@@ -187,7 +187,7 @@ impl Client {
         &self,
         subject: String,
         queue_group: Option<String>,
-    ) -> Result<Subscriber, io::Error> {
+    ) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -198,8 +198,7 @@ impl Client {
                 queue_group,
                 sender,
             })
-            .await
-            .unwrap();
+            .await?;
 
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
