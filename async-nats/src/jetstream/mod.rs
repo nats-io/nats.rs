@@ -93,6 +93,7 @@ pub mod stream;
 
 use bytes::Bytes;
 pub use context::Context;
+use futures::future::TryFutureExt;
 use futures::StreamExt;
 
 /// Creates a new JetStream [Context] that provides JetStream API for managming and using [Streams][crate::jetstream::stream::Stream],
@@ -205,6 +206,7 @@ impl Message {
             self.context
                 .client
                 .publish(reply.to_string(), "".into())
+                .map_err(Error::from)
                 .await
         } else {
             Err(Box::new(std::io::Error::new(
@@ -243,6 +245,7 @@ impl Message {
             self.context
                 .client
                 .publish(reply.to_string(), kind.into())
+                .map_err(Error::from)
                 .await
         } else {
             Err(Box::new(std::io::Error::new(

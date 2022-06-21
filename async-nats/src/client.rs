@@ -13,11 +13,32 @@
 
 use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
 use bytes::Bytes;
+use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
+use std::error;
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
+
+/// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
+/// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
+pub struct PublishError(mpsc::error::SendError<Command>);
+
+impl fmt::Debug for PublishError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublishError").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for PublishError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        "publishing on a closed client".fmt(f)
+    }
+}
+
+impl error::Error for PublishError {}
 
 /// Client is a `Clonable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
@@ -38,7 +59,7 @@ impl Client {
         }
     }
 
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), Error> {
+    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -46,6 +67,7 @@ impl Client {
                 respond: None,
                 headers: None,
             })
+            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -63,6 +85,7 @@ impl Client {
                 respond: None,
                 headers: Some(headers),
             })
+            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -80,6 +103,7 @@ impl Client {
                 respond: Some(reply),
                 headers: None,
             })
+            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -90,7 +114,7 @@ impl Client {
         reply: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -98,6 +122,7 @@ impl Client {
                 respond: Some(reply),
                 headers: Some(headers),
             })
+            .map_err(PublishError)
             .await?;
         Ok(())
     }
