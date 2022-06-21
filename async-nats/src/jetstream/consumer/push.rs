@@ -10,19 +10,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
+use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
+use crate::{
+    jetstream::{self, Context, Error, Message},
+    Subscriber,
+};
 
 use serde::{Deserialize, Serialize};
-
-use crate::{jetstream, Error};
-
-use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
+use std::pin::Pin;
+use std::task::{self, Poll};
+use std::time::Duration;
 
 impl Consumer<Config> {
-    pub fn push(&self) {
-        println!("push");
+    pub async fn stream(&self) -> Result<Stream, Error> {
+        let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
+        let subscriber = self.context.client.subscribe(deliver_subject).await?;
+
+        Ok(Stream {
+            context: self.context.clone(),
+            subscriber,
+        })
     }
 }
+
+pub struct Stream {
+    context: Context,
+    subscriber: Subscriber,
+}
+
+impl futures::Stream for Stream {
+    type Item = Message;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.subscriber.receiver.poll_recv(cx) {
+            Poll::Ready(maybe_message) => match maybe_message {
+                Some(message) => match message.status {
+                    Some(_) => Poll::Pending,
+                    None => Poll::Ready(Some(jetstream::Message {
+                        context: self.context.clone(),
+                        message,
+                    })),
+                },
+                None => Poll::Ready(None),
+            },
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 /// Configuration for consumers. From a high level, the
 /// Configuration for consumers. From a high level, the
 /// `durable_name` and `deliver_subject` fields have a particularly
