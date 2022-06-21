@@ -38,6 +38,19 @@ mod jetstream {
     use time::OffsetDateTime;
 
     #[tokio::test]
+    async fn query_account_requests() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let account = context.query_account().await.unwrap();
+        assert_eq!(account.requests.total, 0);
+
+        let account = context.query_account().await.unwrap();
+        assert_eq!(account.requests.total, 1);
+    }
+
+    #[tokio::test]
     async fn publish_with_headers() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();

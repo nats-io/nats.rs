@@ -13,9 +13,7 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
-use std::borrow::Borrow;
-use std::io::{self, ErrorKind};
-
+use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{Client, Error};
@@ -23,6 +21,8 @@ use bytes::Bytes;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
+use std::borrow::Borrow;
+use std::io::{self, ErrorKind};
 
 use super::stream::{Config, DeleteStatus, Info, Stream};
 
@@ -130,6 +130,22 @@ impl Context {
             ))),
 
             Response::Ok(publish_ack) => Ok(publish_ack),
+        }
+    }
+
+    /// Query the server for account information
+    pub async fn query_account(&self) -> Result<Account, Error> {
+        let response: Response<Account> = self.request("INFO".into(), b"").await?;
+
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while querying account information: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+            Response::Ok(account) => Ok(account),
         }
     }
 

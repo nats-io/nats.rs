@@ -85,6 +85,7 @@
 
 use crate::{Client, Error};
 
+pub mod account;
 pub mod consumer;
 pub mod context;
 pub mod publish;
