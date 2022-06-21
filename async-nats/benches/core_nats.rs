@@ -41,7 +41,12 @@ pub fn publish(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
-                    let nc = async_nats::connect(server.client_url()).await.unwrap();
+                    let nc = async_nats::ConnectOptions::new()
+                        .client_capacity(100_000)
+                        .subscription_capacity(100_000)
+                        .connect(server.client_url())
+                        .await
+                        .unwrap();
                     nc.publish("data".to_string(), "data".into()).await.unwrap();
                     nc.flush().await.unwrap();
                     nc
@@ -73,7 +78,12 @@ pub fn subscribe(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
-                    let nc = async_nats::connect(server.client_url()).await.unwrap();
+                    let nc = async_nats::ConnectOptions::new()
+                        .client_capacity(100_000)
+                        .subscription_capacity(100_000)
+                        .connect(server.client_url())
+                        .await
+                        .unwrap();
 
                     tokio::task::spawn({
                         let nc = nc.clone();
