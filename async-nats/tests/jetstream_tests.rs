@@ -511,12 +511,10 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_with_config(consumer::pull::BatchConfig {
-                batch: 25,
-                expires: Some(Duration::from_millis(100).as_nanos().try_into().unwrap()),
-                no_wait: false,
-                ..Default::default()
-            })
+            .stream_builder()
+            .max_messages_per_batch(25)
+            .expires(Duration::from_millis(100))
+            .into_stream()
             .await
             .unwrap()
             .take(100);
@@ -565,13 +563,11 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_with_config(consumer::pull::BatchConfig {
-                batch: 25,
-                expires: Some(Duration::from_millis(5000).as_nanos().try_into().unwrap()),
-                no_wait: false,
-                max_bytes: 0,
-                idle_heartbeat: Duration::from_millis(10),
-            })
+            .stream_builder()
+            .max_messages_per_batch(25)
+            .expires(Duration::from_millis(500))
+            .hearbeat(Duration::from_millis(10))
+            .into_stream()
             .await
             .unwrap()
             .take(100);
