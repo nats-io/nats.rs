@@ -700,3 +700,36 @@ impl IntoServerList for io::Result<Vec<ServerAddress>> {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ServerAddress;
+    use url::Url;
+
+    #[test]
+    fn url_host_ipv6() {
+        let url: Url = "nats://[::]".parse().expect("valid url");
+
+        let addr = ServerAddress::from_url(url).expect("valid URL");
+
+        assert_eq!(addr.host(), "::")
+    }
+
+    #[test]
+    fn url_host_ipv4() {
+        let url: Url = "nats://127.0.0.1".parse().expect("valid url");
+
+        let addr = ServerAddress::from_url(url).expect("valid URL");
+
+        assert_eq!(addr.host(), "127.0.0.1")
+    }
+
+    #[test]
+    fn url_host_domain() {
+        let url: Url = "nats://example.com".parse().expect("valid url");
+
+        let addr = ServerAddress::from_url(url).expect("valid URL");
+
+        assert_eq!(addr.host(), "example.com")
+    }
+}

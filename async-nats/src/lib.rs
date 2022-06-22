@@ -1147,3 +1147,36 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
         (**self).to_server_addrs()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ServerAddr;
+    use url::Url;
+
+    #[test]
+    fn url_host_ipv6() {
+        let url: Url = "nats://[::]".parse().expect("valid url");
+
+        let addr = ServerAddr::from_url(url).expect("valid URL");
+
+        assert_eq!(addr.host(), "::")
+    }
+
+    #[test]
+    fn url_host_ipv4() {
+        let url: Url = "nats://127.0.0.1".parse().expect("valid url");
+
+        let addr = ServerAddr::from_url(url).expect("valid URL");
+
+        assert_eq!(addr.host(), "127.0.0.1")
+    }
+
+    #[test]
+    fn url_host_domain() {
+        let url: Url = "nats://example.com".parse().expect("valid url");
+
+        let addr = ServerAddr::from_url(url).expect("valid URL");
+
+        assert_eq!(addr.host(), "example.com")
+    }
+}
