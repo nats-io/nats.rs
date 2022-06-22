@@ -6,6 +6,17 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  RUSTFLAGS: "-D warnings"
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test_matrix:
     name: test (${{ matrix.os }})
@@ -16,15 +27,21 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v2
+
       - name: Cache rust
         uses: actions/cache@v3
         env:
           cache-name: cache-rust
         with:
-          path: target
-          key: ${{ runner.os }}-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.toml') }}
 
       - name: Cache go
         uses: actions/cache@v3
@@ -38,9 +55,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Check out repository
-        uses: actions/checkout@v2
-
       - name: Set up go
         uses: actions/setup-go@v2
         with:
@@ -49,11 +63,21 @@ jobs:
       - name: Install nats-server
         run: go get github.com/nats-io/nats-server/v2
 
+      - name: Configure nats hosts
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "127.0.0.1 demo.nats.io" >> "C:\\Windows\\System32\\drivers\\etc\\hosts"
+            cmd "/c ipconfig /flushdns"
+          else
+            echo "127.0.0.1 demo.nats.io" | sudo tee -a /etc/hosts
+          fi
+
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
         run: |
           rustup update
+          nats-server --jetstream --port=4222 &
           cargo test --features=unstable -- --nocapture
 
   test_fault-injection:
@@ -79,44 +103,6 @@ jobs:
         run: |
           rustup update
           cargo test reconnect_test --features=fault_injection -- --ignored
-
-  test_documentation:
-    name: test (documentation)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Cache rust
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-rust
-        with:
-          path: target
-          key: ${{ runner.os }}-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-
-
-      - name: Check out repository
-        uses: actions/checkout@v2
-
-      - name: Set up go
-        uses: actions/setup-go@v2
-        with:
-          go-version: '1.16'
-
-      - name: install nats-server
-        run: go get github.com/nats-io/nats-server/v2@v2.7.4
-
-      - name: Start nats-server
-        run: nats-server --jetstream &
-
-      - name: Configure nats-server
-        run: echo 'localhost:4444 demo.nats.io' | sudo tee -a /etc/hosts
-
-      - name: Run documentation tests
-        env:
-          RUST_LOG: trace
-        run: |
-          rustup update
-          cargo test --doc
 
   check_format:
     name: check (format)
@@ -165,7 +151,7 @@ jobs:
         uses: actions-rs/clippy-check@v1.0.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --tests --all-features
+          args: --tests --examples --all-features -- --deny clippy::all
 
   check_msrv:
     name: check (msrv)
@@ -221,3 +207,44 @@ jobs:
         run: |
           rustup update
           cargo check --examples
+
+  benchmarks:
+    name: benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache rust
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Set up go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.16'
+
+      - name: Install nats-server
+        run: go get github.com/nats-io/nats-server/v2
+      - name: install gunplot
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gnuplot
+      - name: Run benchmarks
+        env:
+          RUST_LOG: trace
+        run: |
+          rustup update
+          cargo bench
+      - name: Archive benchmarks
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmarks-report
+          path: target/criterion
+

@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(dead_code)]
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -66,12 +67,29 @@ impl Server {
         format!("{}127.0.0.1:{}", scheme, port)
     }
 
+    pub fn client_port(&self) -> u16 {
+        let addr = self.client_addr();
+        let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
+        let mut line = String::new();
+        r.read_line(&mut line).expect("did not receive INFO");
+        let si = json::parse(&line["INFO".len()..]).unwrap();
+        si["port"].as_u16().expect("could not parse port")
+    }
+
     // Allow user/pass override.
     pub fn client_url_with(&self, user: &str, pass: &str) -> String {
         use url::Url;
         let mut url = Url::parse(&self.client_url()).expect("could not parse");
         url.set_username(user).ok();
         url.set_password(Some(pass)).ok();
+        url.as_str().to_string()
+    }
+
+    // Allow token override.
+    pub fn client_url_with_token(&self, token: &str) -> String {
+        use url::Url;
+        let mut url = Url::parse(&self.client_url()).expect("could not parse");
+        url.set_username(token).ok();
         url.as_str().to_string()
     }
 
@@ -110,8 +128,12 @@ pub fn set_lame_duck_mode(s: &Server) {
         .unwrap();
 }
 
-/// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server(cfg: &str) -> Server {
+    run_server_with_port(cfg, None)
+}
+
+/// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
+pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     let id = nuid::next();
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
     let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
@@ -122,16 +144,18 @@ pub fn run_server(cfg: &str) -> Server {
     let mut cmd = Command::new("nats-server");
     cmd.arg("--store_dir")
         .arg(store_dir.as_path().to_str().unwrap())
-        .arg("-p")
-        .arg("-1")
-        .arg("-l")
+        .arg("-p");
+    match port {
+        Some(port) => cmd.arg(port),
+        None => cmd.arg("-1"),
+    };
+    cmd.arg("-l")
         .arg(logfile.as_os_str())
         .arg("-P")
         .arg(pidfile.as_os_str());
 
-    if cfg != "" {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        cmd.arg("-c").arg(path.join(cfg));
+    if !cfg.is_empty() {
+        cmd.arg("-c").arg(cfg);
     }
 
     let child = cmd.spawn().unwrap();

@@ -11,34 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod nats_server;
-
 mod client {
     use std::path::PathBuf;
 
-    use super::nats_server;
     #[tokio::test]
     async fn basic_tls() {
-        let s = nats_server::run_server("tests/configs/tls.conf");
-
-        assert!(async_nats::connect("nats://127.0.0.1").await.is_err());
+        let server = nats_server::run_server("tests/configs/tls.conf");
+        assert!(async_nats::connect(&server.client_url()).await.is_err());
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(10),
-            async_nats::ConnectOptions::new()
-                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
-                .add_client_certificate(
-                    path.join("tests/configs/certs/client-cert.pem"),
-                    path.join("tests/configs/certs/client-key.pem"),
-                )
-                .require_tls(true)
-                .connect(&s.client_url()),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+            .add_client_certificate(
+                path.join("tests/configs/certs/client-cert.pem"),
+                path.join("tests/configs/certs/client-key.pem"),
+            )
+            .require_tls(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -49,7 +41,7 @@ mod client {
         // test scenario where rootCA, client certificate and client key are all in one .pem file
         tokio::time::timeout(
             tokio::time::Duration::from_secs(10),
-            async_nats::ConnectOptions::new()
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
                 .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
                 .add_client_certificate(
                     path.join("tests/configs/certs/client-all.pem"),

@@ -35,11 +35,11 @@
 //!
 //! ```
 //! use bytes::Bytes;
-//! use futures_util::StreamExt;
+//! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn example() {
-//!     let mut client = async_nats::connect("demo.nats.io").await.unwrap();
+//!     let client = async_nats::connect("demo.nats.io").await.unwrap();
 //!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
 //!     for _ in 0..10 {
@@ -69,8 +69,8 @@
 //! # use std::time::Instant;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> Result<(), Box<dyn Error>> {
-//! let mut client = async_nats::connect("demo.nats.io").await?;
+//! # async fn main() -> Result<(), async_nats::Error> {
+//! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let subject = String::from("foo");
 //! let data = Bytes::from("bar");
@@ -85,13 +85,13 @@
 //!
 //! ```no_run
 //! # use bytes::Bytes;
-//! # use futures_util::StreamExt;
+//! # use futures::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> Result<(), Box<dyn Error>> {
-//! let mut client = async_nats::connect("demo.nats.io").await?;
+//! # async fn main() -> Result<(), async_nats::Error> {
+//! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
@@ -101,11 +101,12 @@
 //! #     Ok(())
 //! # }
 
-use futures_util::future::FutureExt;
-use futures_util::select;
-use futures_util::stream::Stream;
-use futures_util::StreamExt;
+use futures::future::FutureExt;
+use futures::select;
+use futures::stream::Stream;
+use tls::TlsOptions;
 
+use std::cmp;
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -115,23 +116,21 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use subslice::SubsliceExt;
+use std::time::Duration;
 use tokio::io::ErrorKind;
-use tokio::io::{AsyncRead, AsyncWriteExt};
-use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio::time::sleep;
 use url::{Host, Url};
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::io::BufWriter;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
-pub type Error = Box<dyn std::error::Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
@@ -141,14 +140,30 @@ const LANG: &str = "rust";
 /// must be provided using `Options::tls_client_config`.
 pub use tokio_rustls::rustls;
 
+use connection::Connection;
+pub use header::{HeaderMap, HeaderValue};
+
+pub(crate) mod auth_utils;
+mod client;
+mod connection;
 mod options;
-pub use options::*;
+
+use crate::options::CallbackArg1;
+pub use client::Client;
+pub use options::{AuthError, ConnectOptions};
+
+pub mod header;
+pub mod jetstream;
+pub mod message;
+pub mod status;
 mod tls;
+
+pub use message::Message;
+pub use status::StatusCode;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[allow(unused)]
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Eq, PartialEq)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     #[serde(default)]
@@ -197,22 +212,52 @@ pub struct ServerInfo {
     #[serde(default)]
     pub headers: bool,
     /// Whether server goes into lame duck mode.
-    #[serde(default)]
+    #[serde(default, rename = "ldm")]
     pub lame_duck_mode: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ServerOp {
     Ok,
     Info(Box<ServerInfo>),
     Ping,
     Pong,
+    Error(ServerError),
     Message {
         sid: u64,
         subject: String,
         reply: Option<String>,
         payload: Bytes,
+        headers: Option<HeaderMap>,
+        status: Option<StatusCode>,
+        description: Option<String>,
     },
+}
+
+#[derive(Debug)]
+pub enum Command {
+    Publish {
+        subject: String,
+        payload: Bytes,
+        respond: Option<String>,
+        headers: Option<HeaderMap>,
+    },
+    Subscribe {
+        sid: u64,
+        subject: String,
+        queue_group: Option<String>,
+        sender: mpsc::Sender<Message>,
+    },
+    Unsubscribe {
+        sid: u64,
+        max: Option<u64>,
+    },
+    Ping,
+    Flush {
+        result: oneshot::Sender<Result<(), io::Error>>,
+    },
+    TryFlush,
+    Connect(ConnectInfo),
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -222,52 +267,106 @@ pub enum ClientOp {
         subject: String,
         payload: Bytes,
         respond: Option<String>,
+        headers: Option<HeaderMap>,
     },
     Subscribe {
         sid: u64,
         subject: String,
+        queue_group: Option<String>,
     },
     Unsubscribe {
-        id: u64,
+        sid: u64,
+        max: Option<u64>,
     },
     Ping,
     Pong,
-    Flush {
-        result: oneshot::Sender<io::Result<()>>,
-    },
-    TryFlush,
     Connect(ConnectInfo),
 }
 
-/// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
-trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
-
-/// Blanked implementation that applies to both TLS and non-TLS `TcpStream`.
-impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
-
-/// A framed connection
-pub(crate) struct Connection {
-    stream: Box<dyn AsyncReadWrite>,
-    buffer: BytesMut,
+/// Maintains a list of servers and establishes connections.
+pub(crate) struct Connector {
+    /// A map of servers and number of connect attempts.
+    servers: HashMap<ServerAddr, usize>,
+    options: TlsOptions,
 }
 
-/// Internal representation of the connection.
-/// Helds connection with NATS Server and communicates with `Client` via channels.
-impl Connection {
-    pub(crate) async fn connect_with_options<A: ToServerAddrs>(
+impl Connector {
+    pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
-        options: options::ConnectOptions,
-    ) -> io::Result<Connection> {
-        let addr = addrs.to_server_addrs()?.into_iter().next().ok_or_else(|| {
-            io::Error::new(
-                ErrorKind::Other,
-                "did not found a single url in the url list",
-            )
-        })?;
+        options: TlsOptions,
+    ) -> Result<Connector, io::Error> {
+        let servers = addrs
+            .to_server_addrs()?
+            .into_iter()
+            .map(|addr| (addr, 0))
+            .collect();
 
-        let tls_config = tls::config_tls(&options).await?;
+        Ok(Connector { servers, options })
+    }
 
-        let tcp_stream = TcpStream::connect((addr.host(), addr.port())).await?;
+    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+        for _ in 0..128 {
+            if let Ok(inner) = self.try_connect().await {
+                return Ok(inner);
+            }
+        }
+
+        Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
+    }
+
+    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+        let mut error = None;
+
+        let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
+        for server_addr in server_addrs {
+            let server_attempts = self.servers.get_mut(&server_addr).unwrap();
+            let duration = if *server_attempts == 0 {
+                Duration::from_millis(0)
+            } else {
+                let exp: u32 = (*server_attempts - 1).try_into().unwrap_or(std::u32::MAX);
+                let max = Duration::from_secs(4);
+
+                cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+            };
+
+            *server_attempts += 1;
+            sleep(duration).await;
+
+            let socket_addrs = server_addr.socket_addrs()?;
+            for socket_addr in socket_addrs {
+                match self
+                    .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
+                    .await
+                {
+                    Ok((info, connection)) => {
+                        for url in &info.connect_urls {
+                            let server_addr = url.parse::<ServerAddr>()?;
+                            self.servers.entry(server_addr).or_insert(0);
+                        }
+
+                        let server_attempts = self.servers.get_mut(&server_addr).unwrap();
+                        *server_attempts = 0;
+
+                        return Ok((info, connection));
+                    }
+
+                    Err(inner) => error.replace(inner),
+                };
+            }
+        }
+
+        Err(error.unwrap())
+    }
+
+    pub(crate) async fn try_connect_to(
+        &self,
+        socket_addr: &SocketAddr,
+        tls_required: bool,
+        tls_host: &str,
+    ) -> Result<(ServerInfo, Connection), io::Error> {
+        let tls_config = tls::config_tls(&self.options).await?;
+
+        let tcp_stream = TcpStream::connect(socket_addr).await?;
         tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection {
@@ -292,9 +391,7 @@ impl Connection {
             }
         };
 
-        let tls_required = options.tls_required || info.tls_required || addr.tls_required();
-
-        if tls_required {
+        if self.options.tls_required || info.tls_required || tls_required {
             let tls_config = Arc::new(tls_config);
             let tls_connector =
                 tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
@@ -304,460 +401,341 @@ impl Connection {
                     )
                 })?;
 
-            let domain = rustls::ServerName::try_from(info.host.as_str())
-                .or_else(|_| rustls::ServerName::try_from(addr.host()))
-                .map_err(|_| {
-                    io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "cannot determine hostname for TLS connection",
-                    )
-                })?;
+            // Use the server-advertised hostname to validate if given as a hostname, not an IP address
+            let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
+                rustls::ServerName::try_from(info.host.as_str())
+            {
+                server_hostname
+            } else if let Ok(tls_hostname @ rustls::ServerName::DnsName(_)) =
+                rustls::ServerName::try_from(tls_host)
+            {
+                tls_hostname
+            } else {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "cannot determine hostname for TLS connection",
+                ));
+            };
 
-            return Ok(Connection {
+            connection = Connection {
                 stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
                 buffer: BytesMut::new(),
-            });
+            };
         };
 
-        Ok(connection)
-    }
-
-    pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        if self.buffer.starts_with(b"+OK\r\n") {
-            self.buffer.advance(5);
-            return Ok(Some(ServerOp::Ok));
-        }
-
-        if self.buffer.starts_with(b"PING\r\n") {
-            self.buffer.advance(6);
-
-            return Ok(Some(ServerOp::Ping));
-        }
-
-        if self.buffer.starts_with(b"PONG\r\n") {
-            self.buffer.advance(6);
-
-            return Ok(Some(ServerOp::Pong));
-        }
-
-        if self.buffer.starts_with(b"INFO ") {
-            if let Some(len) = self.buffer.find(b"\r\n") {
-                let line = std::str::from_utf8(&self.buffer[5..len])
-                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-
-                let server_info = serde_json::from_str(line)
-                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-
-                self.buffer.advance(len + 2);
-
-                return Ok(Some(ServerOp::Info(Box::new(server_info))));
-            }
-
-            return Ok(None);
-        }
-
-        if self.buffer.starts_with(b"MSG ") {
-            if let Some(len) = self.buffer.find(b"\r\n") {
-                let line = std::str::from_utf8(&self.buffer[4..len]).unwrap();
-                let args = line.split(' ').filter(|s| !s.is_empty());
-                // TODO(caspervonb) we can drop this alloc
-                let args = args.collect::<Vec<_>>();
-
-                // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
-                let (subject, sid, reply_to, payload_len) = match args[..] {
-                    [subject, sid, payload_len] => (subject, sid, None, payload_len),
-                    [subject, sid, reply_to, payload_len] => {
-                        (subject, sid, Some(reply_to), payload_len)
-                    }
-                    _ => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "invalid number of arguments after MSG",
-                        ));
-                    }
-                };
-
-                let sid = u64::from_str(sid)
-                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-
-                // Parse the number of payload bytes.
-                let payload_len = usize::from_str(payload_len)
-                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-
-                // Only advance if there is enough data for the entire operation and payload remaining.
-                if len + payload_len + 4 <= self.buffer.remaining() {
-                    let subject = subject.to_owned();
-                    let reply_to = reply_to.map(String::from);
-
-                    self.buffer.advance(len + 2);
-                    let payload = self.buffer.split_to(payload_len).freeze();
-                    self.buffer.advance(2);
-
-                    return Ok(Some(ServerOp::Message {
-                        sid,
-                        reply: reply_to,
-                        subject,
-                        payload,
-                    }));
-                }
-            }
-
-            return Ok(None);
-        }
-
-        Ok(None)
-    }
-
-    pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        loop {
-            if let Some(op) = self.try_read_op()? {
-                return Ok(Some(op));
-            }
-
-            if 0 == self.stream.read_buf(&mut self.buffer).await? {
-                if self.buffer.is_empty() {
-                    return Ok(None);
-                } else {
-                    return Err(io::Error::new(io::ErrorKind::ConnectionReset, ""));
-                }
-            }
-        }
-    }
-
-    pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
-        match item {
-            ClientOp::Connect(connect_info) => {
-                let op = format!(
-                    "CONNECT {}\r\n",
-                    serde_json::to_string(&connect_info)
-                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
-                );
-                self.stream.write_all(op.as_bytes()).await?;
-            }
-            ClientOp::Publish {
-                subject,
-                payload,
-                respond,
-            } => {
-                let mut bufi = itoa::Buffer::new();
-                self.stream.write_all(b"PUB ").await?;
-                self.stream.write_all(subject.as_bytes()).await?;
-                self.stream.write_all(b" ").await?;
-                if let Some(respond) = respond {
-                    self.stream.write_all(respond.as_bytes()).await?;
-                    self.stream.write_all(b" ").await?;
-                }
-                self.stream
-                    .write_all(bufi.format(payload.len()).as_bytes())
-                    .await?;
-                self.stream.write_all(b"\r\n").await?;
-                self.stream.write_all(&payload).await?;
-                self.stream.write_all(b"\r\n").await?;
-            }
-
-            ClientOp::Subscribe { sid, subject } => {
-                self.stream.write_all(b"SUB ").await?;
-                self.stream.write_all(subject.as_bytes()).await?;
-                self.stream
-                    .write_all(format!(" {}\r\n", sid).as_bytes())
-                    .await?;
-                self.stream.flush().await?;
-            }
-
-            ClientOp::Unsubscribe { id } => {
-                self.stream.write_all(b"UNSUB ").await?;
-                self.stream
-                    .write_all(format!("{}\r\n", id).as_bytes())
-                    .await?;
-            }
-            ClientOp::Ping => {
-                self.stream.write_all(b"PING\r\n").await?;
-                self.stream.flush().await?;
-            }
-            ClientOp::Pong => {
-                self.stream.write_all(b"PONG\r\n").await?;
-                self.stream.flush().await?;
-            }
-            ClientOp::Flush { result } => {
-                result.send(self.stream.flush().await).map_err(|_| {
-                    io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                })?;
-            }
-            ClientOp::TryFlush => {
-                self.stream.flush().await?;
-            }
-        }
-
-        Ok(())
+        Ok((*info, connection))
     }
 }
 
 #[derive(Debug)]
 struct Subscription {
+    subject: String,
     sender: mpsc::Sender<Message>,
+    queue_group: Option<String>,
+    delivered: u64,
+    max: Option<u64>,
 }
 
-#[derive(Debug)]
-struct SubscriptionContext {
-    next_sid: u64,
-    next_uid: u64,
-    subscription_map: HashMap<u64, Subscription>,
-    uid_map: HashMap<u64, u64>,
-}
-
-impl SubscriptionContext {
-    fn new() -> SubscriptionContext {
-        SubscriptionContext {
-            next_sid: 1,
-            next_uid: 1,
-            subscription_map: HashMap::new(),
-            uid_map: HashMap::new(),
-        }
-    }
-
-    fn get(&mut self, sid: u64) -> Option<&Subscription> {
-        self.subscription_map.get(&sid)
-    }
-
-    fn insert(&mut self, subscription: Subscription) -> u64 {
-        let sid = self.next_sid;
-        let uid = self.next_uid;
-        self.next_sid += 1;
-        self.next_uid += 1;
-
-        self.subscription_map.insert(sid, subscription);
-        self.uid_map.insert(uid, sid);
-
-        sid
-    }
-    fn remove(&mut self, sid: u64) -> bool {
-        self.subscription_map.remove(&sid).is_some()
-    }
-
-    fn get_sid(&self, uid: u64) -> Option<u64> {
-        self.uid_map.get(&uid).copied()
-    }
-}
-
-/// A connector which facilitates communication from channels to a single shared connection.
-/// The connector takes ownership of the channel.
-///
-/// The type will probably not be public.
-pub(crate) struct Connector {
+/// A connection handler which facilitates communication from channels to a single shared connection.
+pub(crate) struct ConnectionHandler {
     connection: Connection,
-    subscription_context: Arc<Mutex<SubscriptionContext>>,
+    connector: Connector,
+    subscriptions: HashMap<u64, Subscription>,
+    events: mpsc::Sender<ServerEvent>,
+    pending_pings: usize,
+    max_pings: usize,
 }
 
-impl Connector {
+impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
-        subscription_context: Arc<Mutex<SubscriptionContext>>,
-    ) -> Connector {
-        Connector {
+        connector: Connector,
+        events: mpsc::Sender<ServerEvent>,
+    ) -> ConnectionHandler {
+        ConnectionHandler {
             connection,
-            subscription_context,
+            connector,
+            subscriptions: HashMap::new(),
+            events,
+            pending_pings: 0,
+            max_pings: 2,
         }
     }
 
     pub async fn process(
         &mut self,
-        mut receiver: mpsc::Receiver<ClientOp>,
+        mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
         loop {
             select! {
-                maybe_op = receiver.recv().fuse() => {
-                    match maybe_op {
-                        Some(op) => {
-                            // until we have separeted commands and op, let's just intercept
-                            // Unsubscibe and replace Subscription uid with sid
-                            if let ClientOp::Unsubscribe{id} = op {
-                                let mut  context = self.subscription_context.lock().await;
-                                let sid = {
-                                    let sid = context.get_sid(id);
-                                    match sid {
-                                        Some(sid) => sid,
-                                        None => continue
-                                    }
-                                };
+                maybe_command = receiver.recv().fuse() => {
+                    match maybe_command {
+                        Some(command) => if let Err(err) = self.handle_command(command).await {
+                            println!("error handling command {}", err);
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                }
 
-                                context.remove(sid);
-
-                                if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid }).await {
-                                    println!("Send failed with {:?}", err);
-                                }
-                                continue
-
+                maybe_op_result = self.connection.read_op().fuse() => {
+                    match maybe_op_result {
+                        Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
+                            println!("error handling operation {}", err);
+                        }
+                        Ok(None) => {
+                            if let Err(err) = self.handle_disconnect().await {
+                                println!("error handling operation {}", err);
+                            } else {
                             }
-                            if let Err(err) = self.connection.write_op(op).await {
-                                println!("Send failed with {:?}", err);
+                        }
+                        Err(op_err) => {
+                            if let Err(err) = self.handle_disconnect().await {
+                                println!("error reconnecting {}. original error={}", err, op_err);
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        self.connection.flush().await?;
+
+        Ok(())
+    }
+
+    async fn handle_server_op(&mut self, server_op: ServerOp) -> Result<(), io::Error> {
+        match server_op {
+            ServerOp::Ping => {
+                self.connection.write_op(ClientOp::Pong).await?;
+                self.connection.flush().await?;
+            }
+            ServerOp::Pong => {
+                self.pending_pings -= 1;
+            }
+            ServerOp::Error(error) => {
+                self.events.try_send(ServerEvent::Error(error)).ok();
+            }
+            ServerOp::Message {
+                sid,
+                subject,
+                reply,
+                payload,
+                headers,
+                status,
+                description,
+            } => {
+                if let Some(subscription) = self.subscriptions.get_mut(&sid) {
+                    let message = Message {
+                        subject,
+                        reply,
+                        payload,
+                        headers,
+                        status,
+                        description,
+                    };
+
+                    // if the channel for subscription was dropped, remove the
+                    // subscription from the map and unsubscribe.
+                    match subscription.sender.try_send(message) {
+                        Ok(_) => {
+                            subscription.delivered += 1;
+                            // if this `Subscription` has set `max` value, check if it
+                            // was reached. If yes, remove the `Subscription` and in
+                            // the result, `drop` the `sender` channel.
+                            if let Some(max) = subscription.max {
+                                if subscription.delivered.ge(&max) {
+                                    self.subscriptions.remove(&sid);
+                                }
+                            }
+                        }
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            self.events.send(ServerEvent::SlowConsumer(sid)).await.ok();
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            self.subscriptions.remove(&sid);
+                            self.connection
+                                .write_op(ClientOp::Unsubscribe { sid, max: None })
+                                .await?;
+                            self.connection.flush().await?;
+                        }
+                    }
+                }
+            }
+            // TODO: we should probably update advertised server list here too.
+            ServerOp::Info(info) => {
+                if info.lame_duck_mode {
+                    self.events.send(ServerEvent::LameDuckMode).await.ok();
+                }
+            }
+
+            _ => {
+                // TODO: don't ignore.
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
+        match command {
+            Command::Unsubscribe { sid, max } => {
+                if let Some(subscription) = self.subscriptions.get_mut(&sid) {
+                    subscription.max = max;
+                    match subscription.max {
+                        Some(n) => {
+                            if subscription.delivered >= n {
+                                self.subscriptions.remove(&sid);
                             }
                         }
                         None => {
-                            println!("Sender closed");
-                            // Sender dropped, return.
-                            break
+                            self.subscriptions.remove(&sid);
                         }
                     }
-                }
 
-                result = self.connection.read_op().fuse() => {
-                    if let Ok(maybe_op) = result {
-                        match maybe_op {
-                            Some(ServerOp::Ping) => {
-                                self.connection.write_op(ClientOp::Pong).await?;
-                            }
-                            Some(ServerOp::Message { sid, subject, reply, payload }) => {
-                                let mut context = self.subscription_context.lock().await;
-                                if let Some(subscription) = context.get(sid) {
-                                    let message = Message {
-                                        subject,
-                                        reply,
-                                        payload,
-                                    };
-
-                                    // if the channel for subscription was dropped, remove the
-                                    // subscription from the map and unsubscribe.
-                                    if subscription.sender.send(message).await.is_err() {
-                                        context.remove(sid);
-                                        self.connection.write_op(ClientOp::Unsubscribe { id: sid }).await?;
-                                        self.connection.stream.flush().await?;
-                                    }
-
-                                }
-                            }
-
-                            None => {
-                                return Ok(())
-                            }
-
-                            _ => {
-                                // ignore.
-                            }
-                        }
+                    if let Err(err) = self
+                        .connection
+                        .write_op(ClientOp::Unsubscribe { sid, max })
+                        .await
+                    {
+                        println!("Send failed with {:?}", err);
                     }
                 }
-
-
             }
-            // ...
-        }
+            Command::Ping => {
+                self.pending_pings += 1;
 
-        self.connection.stream.flush().await?;
+                if self.pending_pings > self.max_pings {
+                    self.handle_disconnect().await?;
+                }
 
-        Ok(())
-    }
-}
+                if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
+                    self.handle_disconnect().await?;
+                }
 
-/// Client is a `Clonable` handle to NATS connection.
-/// Client should not be created directly. Instead, one of two methods can be used:
-/// [connect] and [ConnectOptions::connect]
-#[derive(Clone)]
-pub struct Client {
-    sender: mpsc::Sender<ClientOp>,
-    subscription_context: Arc<Mutex<SubscriptionContext>>,
-}
+                self.connection.flush().await?;
+            }
+            Command::Flush { result } => {
+                if let Err(_err) = self.connection.flush().await {
+                    if let Err(err) = self.handle_disconnect().await {
+                        result.send(Err(err)).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
+                    } else if let Err(err) = self.connection.flush().await {
+                        result.send(Err(err)).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
+                    }
+                } else {
+                    result.send(Ok(())).map_err(|_| {
+                        io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                    })?;
+                }
+            }
+            Command::TryFlush => {
+                self.connection.flush().await?;
+            }
+            Command::Subscribe {
+                sid,
+                subject,
+                queue_group,
+                sender,
+            } => {
+                let subscription = Subscription {
+                    sender,
+                    delivered: 0,
+                    max: None,
+                    subject: subject.to_owned(),
+                    queue_group: queue_group.to_owned(),
+                };
 
-impl Client {
-    pub(crate) fn new(
-        sender: mpsc::Sender<ClientOp>,
-        subscription_context: Arc<Mutex<SubscriptionContext>>,
-    ) -> Client {
-        Client {
-            sender,
-            subscription_context,
-        }
-    }
+                self.subscriptions.insert(sid, subscription);
 
-    pub async fn publish(&mut self, subject: String, payload: Bytes) -> Result<(), Error> {
-        self.sender
-            .send(ClientOp::Publish {
+                if let Err(err) = self
+                    .connection
+                    .write_op(ClientOp::Subscribe {
+                        sid,
+                        subject,
+                        queue_group,
+                    })
+                    .await
+                {
+                    println!("Sending Subscribe failed with {:?}", err);
+                }
+            }
+            Command::Publish {
                 subject,
                 payload,
-                respond: None,
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub async fn publish_with_reply(
-        &mut self,
-        subject: String,
-        reply: String,
-        payload: Bytes,
-    ) -> Result<(), Error> {
-        self.sender
-            .send(ClientOp::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub async fn request(&mut self, subject: String, payload: Bytes) -> Result<Message, Error> {
-        let inbox = self.new_inbox();
-        let mut sub = self.subscribe(inbox.clone()).await?;
-        self.publish_with_reply(subject, inbox, payload).await?;
-        self.flush().await?;
-        match sub.next().await {
-            Some(message) => Ok(message),
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
+                respond,
+                headers,
+            } => {
+                while let Err(err) = self
+                    .connection
+                    .write_op(ClientOp::Publish {
+                        subject: subject.clone(),
+                        payload: payload.clone(),
+                        respond: respond.clone(),
+                        headers: headers.clone(),
+                    })
+                    .await
+                {
+                    self.handle_disconnect().await?;
+                    println!("Sending Publish failed with {:?}", err);
+                }
+            }
+            Command::Connect(connect_info) => {
+                while let Err(_err) = self
+                    .connection
+                    .write_op(ClientOp::Connect(connect_info.clone()))
+                    .await
+                {
+                    self.handle_disconnect().await?;
+                }
+            }
         }
+
+        Ok(())
     }
 
-    /// Create a new globally unique inbox which can be used for replies.
-    ///
-    /// # Examples
-    /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
-    /// # let mut nc = async_nats::connect("demo.nats.io").await?;
-    /// let reply = nc.new_inbox();
-    /// let rsub = nc.subscribe(reply).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}", nuid::next())
+    async fn handle_disconnect(&mut self) -> io::Result<()> {
+        self.events.try_send(ServerEvent::Disconnect).ok();
+        self.handle_reconnect().await?;
+
+        Ok(())
     }
 
-    pub async fn subscribe(&mut self, subject: String) -> Result<Subscriber, io::Error> {
-        let (sender, receiver) = mpsc::channel(16);
+    async fn handle_reconnect(&mut self) -> Result<(), io::Error> {
+        let (_, connection) = self.connector.connect().await?;
+        self.connection = connection;
 
-        // Aiming to make this the only lock (aside from internal locks in channels).
-        let mut context = self.subscription_context.lock().await;
-        let sid = context.insert(Subscription { sender });
+        self.subscriptions
+            .retain(|_, subscription| !subscription.sender.is_closed());
 
-        self.sender
-            .send(ClientOp::Subscribe { sid, subject })
-            .await
-            .unwrap();
-
-        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
-    }
-
-    pub async fn flush(&mut self) -> Result<(), Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sender.send(ClientOp::Flush { result: tx }).await?;
-        // first question mark is an error from rx itself, second for error from flush.
-        rx.await??;
+        for (sid, subscription) in &self.subscriptions {
+            self.connection
+                .write_op(ClientOp::Subscribe {
+                    sid: *sid,
+                    subject: subscription.subject.to_owned(),
+                    queue_group: subscription.queue_group.to_owned(),
+                })
+                .await
+                .unwrap();
+        }
+        self.events.try_send(ServerEvent::Reconnect).ok();
         Ok(())
     }
 }
 
-/// Connets to the NATS with specified options.
+/// Connects to NATS with specified options.
 ///
-/// It is generally advised to use [ConnectOptions] instead, as it provides builder for whole
+/// It is generally advised to use [ConnectOptions] instead, as it provides a builder for whole
 /// configuration.
 ///
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
@@ -767,15 +745,30 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let connection = Connection::connect_with_options(addrs, options.clone()).await?;
-    let subscription_context = Arc::new(Mutex::new(SubscriptionContext::new()));
-    let mut connector = Connector::new(connection, subscription_context.clone());
+    let tls_required = options.tls_required;
+    let ping_interval = options.ping_interval;
+    let flush_interval = options.flush_interval;
+
+    let tls_options = TlsOptions {
+        tls_required: options.tls_required,
+        certificates: options.certificates,
+        client_key: options.client_key,
+        client_cert: options.client_cert,
+        tls_client_config: options.tls_client_config,
+    };
+
+    let mut connector = Connector::new(addrs, tls_options)?;
+    let (server_info, connection) = connector.try_connect().await?;
+    let (events_tx, mut events_rx) = mpsc::channel(128);
+
+    let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
 
     // TODO make channel size configurable
-    let (sender, receiver) = mpsc::channel(128);
-    let client = Client::new(sender.clone(), subscription_context);
-    let connect_info = ConnectInfo {
-        tls_required: options.tls_required,
+    let (sender, receiver) = mpsc::channel(options.sender_capacity);
+
+    let client = Client::new(sender.clone(), options.subscription_capacity);
+    let mut connect_info = ConnectInfo {
+        tls_required,
         // FIXME(tp): have optional name
         name: Some("beta-rust-client".to_string()),
         pedantic: false,
@@ -793,43 +786,92 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         headers: true,
         no_responders: true,
     };
-    client
-        .sender
-        .send(ClientOp::Connect(connect_info))
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send connect"))?;
-    client
-        .sender
-        .send(ClientOp::Ping)
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to send ping"))?;
+    match options.auth {
+        Authorization::None => {}
+        Authorization::Token(token) => connect_info.auth_token = Some(token),
+        Authorization::UserAndPassword(user, pass) => {
+            connect_info.user = Some(user);
+            connect_info.pass = Some(pass);
+        }
+        Authorization::Jwt(jwt, sign_fn) => match sign_fn.call(server_info.nonce.clone()).await {
+            Ok(sig) => {
+                connect_info.user_jwt = Some(jwt.clone());
+                connect_info.signature = Some(sig);
+            }
+            Err(e) => {
+                println!(
+                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
+                    e
+                );
+            }
+        },
+    }
+    connection_handler
+        .connection
+        .write_op(ClientOp::Connect(connect_info))
+        .await?;
+    connection_handler.connection.flush().await?;
+    match connection_handler.connection.read_op().await? {
+        Some(ServerOp::Error(err)) => {
+            return Err(io::Error::new(ErrorKind::InvalidInput, err.to_string()));
+        }
+        Some(op) => {
+            connection_handler.handle_server_op(op).await?;
+        }
+        None => return Err(io::Error::new(ErrorKind::BrokenPipe, "connection aborted")),
+    }
 
     tokio::spawn({
         let sender = sender.clone();
         async move {
             loop {
-                tokio::time::sleep(options.ping_interval).await;
-                match sender.send(ClientOp::Ping).await {
+                match sender.send(Command::Ping).await {
                     Ok(()) => {}
                     Err(_) => return,
                 }
+                tokio::time::sleep(ping_interval).await;
             }
         }
     });
 
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(options.flush_interval).await;
-            match sender.send(ClientOp::TryFlush).await {
+            tokio::time::sleep(flush_interval).await;
+            match sender.send(Command::TryFlush).await {
                 Ok(()) => {}
                 Err(_) => return,
             }
         }
     });
 
-    task::spawn(async move { connector.process(receiver).await });
+    task::spawn(async move {
+        while let Some(event) = events_rx.recv().await {
+            match event {
+                ServerEvent::Reconnect => options.reconnect_callback.call().await,
+                ServerEvent::Disconnect => options.disconnect_callback.call().await,
+                ServerEvent::Error(error) => options.error_callback.call(error).await,
+                ServerEvent::LameDuckMode => options.lame_duck_callback.call().await,
+                ServerEvent::SlowConsumer(sid) => {
+                    options
+                        .error_callback
+                        .call(ServerError::SlowConsumer(sid))
+                        .await
+                }
+            }
+        }
+    });
+
+    task::spawn(async move { connection_handler.process(receiver).await });
 
     Ok(client)
+}
+
+pub(crate) enum ServerEvent {
+    Reconnect,
+    Disconnect,
+    LameDuckMode,
+    SlowConsumer(u64),
+    Error(ServerError),
 }
 
 /// Connects to NATS with default config.
@@ -841,7 +883,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
@@ -851,40 +893,33 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
 
-#[derive(Debug)]
-pub struct Message {
-    pub subject: String,
-    pub reply: Option<String>,
-    pub payload: Bytes,
-}
-
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
-/// Implements [futures_util::stream::Stream] for ergonomic async message processing.
+/// Implements [futures::stream::Stream] for ergonomic async message processing.
 ///
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn main() ->  Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
 /// # nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
 pub struct Subscriber {
-    uid: u64,
+    sid: u64,
     receiver: mpsc::Receiver<Message>,
-    sender: mpsc::Sender<ClientOp>,
+    sender: mpsc::Sender<Command>,
 }
 
 impl Subscriber {
     fn new(
-        uid: u64,
-        sender: mpsc::Sender<ClientOp>,
+        sid: u64,
+        sender: mpsc::Sender<Command>,
         receiver: mpsc::Receiver<Message>,
     ) -> Subscriber {
         Subscriber {
-            uid,
+            sid,
             sender,
             receiver,
         }
@@ -895,16 +930,60 @@ impl Subscriber {
     /// # Examples
     /// ```
     /// # #[tokio::main]
-    /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut client = async_nats::connect("demo.nats.io").await?;
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
-    ///  subscriber.unsubscribe();
+    ///  subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
-    pub fn unsubscribe(self) {
-        drop(self)
+    pub async fn unsubscribe(&mut self) -> io::Result<()> {
+        self.sender
+            .send(Command::Unsubscribe {
+                sid: self.sid,
+                max: None,
+            })
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+        self.receiver.close();
+        Ok(())
+    }
+
+    /// Unsubscribes from subscription after reaching given number of messages.
+    /// This is the total number of messages received by this subcsription in it's whole
+    /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures::StreamExt;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    ///
+    /// let mut sub = client.subscribe("test".into()).await?;
+    /// sub.unsubscribe_after(3).await?;
+    /// client.flush().await?;
+    ///
+    /// for _ in 0..3 {
+    ///     client.publish("test".into(), "data".into()).await?;
+    /// }
+    ///
+    /// while let Some(message) = sub.next().await {
+    ///     println!("message received: {:?}", message);
+    /// }
+    /// println!("no more messages, unsubscribed");
+    /// # Ok(())
+    /// # }
+    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
+        self.sender
+            .send(Command::Unsubscribe {
+                sid: self.sid,
+                max: Some(unsub_after),
+            })
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+        Ok(())
     }
 }
 
@@ -913,9 +992,12 @@ impl Drop for Subscriber {
         self.receiver.close();
         tokio::spawn({
             let sender = self.sender.clone();
-            let id = self.uid;
+            let sid = self.sid;
             async move {
-                sender.send(ClientOp::Unsubscribe { id }).await.ok();
+                sender
+                    .send(Command::Unsubscribe { sid, max: None })
+                    .await
+                    .ok();
             }
         });
     }
@@ -929,10 +1011,34 @@ impl Stream for Subscriber {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ServerError {
+    AuthorizationViolation,
+    SlowConsumer(u64),
+    Other(String),
+}
+
+impl ServerError {
+    fn new(error: String) -> ServerError {
+        match error.to_lowercase().as_str() {
+            "authorization violation" => ServerError::AuthorizationViolation,
+            other => ServerError::Other(other.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for ServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
+            Self::SlowConsumer(sid) => write!(f, "nats: subscription {} is a slow consumer", sid),
+            Self::Other(error) => write!(f, "nats: {}", error),
+        }
+    }
+}
+
 /// Info to construct a CONNECT message.
 #[derive(Clone, Debug, Serialize)]
-#[doc(hidden)]
-#[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgements.
     pub verbose: bool,
@@ -942,12 +1048,14 @@ pub struct ConnectInfo {
     pub pedantic: bool,
 
     /// User's JWT.
+    #[serde(rename = "jwt")]
     pub user_jwt: Option<String>,
 
     /// Public nkey.
     pub nkey: Option<String>,
 
     /// Signed nonce, encoded to Base64URL.
+    #[serde(rename = "sig")]
     pub signature: Option<String>,
 
     /// Optional client name.
@@ -1148,35 +1256,42 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+pub(crate) enum Authorization {
+    /// No authentication.
+    None,
+
+    /// Authenticate using a token.
+    Token(String),
+
+    /// Authenticate using a username and password.
+    UserAndPassword(String, String),
+
+    /// Authenticate using a jwt and signing function.
+    Jwt(
+        String,
+        CallbackArg1<String, std::result::Result<String, AuthError>>,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ServerAddr;
-    use url::Url;
+    use super::*;
 
     #[test]
-    fn url_host_ipv6() {
-        let url: Url = "nats://[::]".parse().expect("valid url");
-
-        let addr = ServerAddr::from_url(url).expect("valid URL");
-
-        assert_eq!(addr.host(), "::")
+    fn server_address_ipv6() {
+        let address = ServerAddr::from_str("nats://[::]").unwrap();
+        assert_eq!(address.host(), "::")
     }
 
     #[test]
-    fn url_host_ipv4() {
-        let url: Url = "nats://127.0.0.1".parse().expect("valid url");
-
-        let addr = ServerAddr::from_url(url).expect("valid URL");
-
-        assert_eq!(addr.host(), "127.0.0.1")
+    fn serverr_address_ipv4() {
+        let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
+        assert_eq!(address.host(), "127.0.0.1")
     }
 
     #[test]
-    fn url_host_domain() {
-        let url: Url = "nats://example.com".parse().expect("valid url");
-
-        let addr = ServerAddr::from_url(url).expect("valid URL");
-
-        assert_eq!(addr.host(), "example.com")
+    fn serverr_address_domain() {
+        let address = ServerAddr::from_str("nats://example.com").unwrap();
+        assert_eq!(address.host(), "example.com")
     }
 }

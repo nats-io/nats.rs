@@ -13,7 +13,7 @@
 
 use std::io;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::jetstream::{ConsumerInfo, ConsumerOwnership, JetStream};
 use crate::Message;
@@ -151,11 +151,11 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
+    /// # context.add_stream("timeout_fetch")?;
     /// # for _ in 0..20 {
-    /// #    context.publish("next", "hello")?;
+    /// #    context.publish("timeout_fetch", "hello")?;
     /// # }
-    /// let consumer = context.pull_subscribe("next")?;
+    /// let consumer = context.pull_subscribe("timeout_fetch")?;
     ///
     /// // pass just number of messages to be fetched
     /// for message in consumer.timeout_fetch(10, Duration::from_millis(100))? {
@@ -199,8 +199,11 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
-    /// let consumer = context.pull_subscribe("next")?;
+    /// # context.add_stream("fetch_with_handler")?;
+    /// # for _ in 0..20 {
+    /// #    context.publish("fetch_with_handler", "hello")?;
+    /// # }
+    /// let consumer = context.pull_subscribe("fetch_with_handler")?;
     ///
     /// consumer.fetch_with_handler(10, |message| {
     ///     println!("received message: {:?}", message);
@@ -271,9 +274,9 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
-    /// context.publish("next", "hello")?;
-    /// let consumer = context.pull_subscribe("foo")?;
+    /// # context.add_stream("try_next")?;
+    /// context.publish("try_next", "hello")?;
+    /// let consumer = context.pull_subscribe("try_next")?;
     /// consumer.request_batch(1)?;
     /// let message = consumer.try_next();
     /// println!("Received message: {:?}", message);
@@ -299,10 +302,10 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
-    /// # context.publish("next", "hello")?;
-    /// # context.publish("next", "hello")?;
-    /// let consumer = context.pull_subscribe("foo")?;
+    /// # context.add_stream("next_timeout")?;
+    /// # context.publish("next_timeout", "hello")?;
+    /// # context.publish("next_timeout", "hello")?;
+    /// let consumer = context.pull_subscribe("next_timeout")?;
     ///
     /// consumer.request_batch(1)?;
     ///
@@ -315,28 +318,32 @@ impl PullSubscription {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn next_timeout(&self, timeout: Duration) -> io::Result<Message> {
-        match self.0.messages.recv_timeout(timeout) {
-            Ok(message) => {
-                if message.is_no_messages() {
-                    return self.next_timeout(timeout);
+    pub fn next_timeout(&self, mut timeout: Duration) -> io::Result<Message> {
+        loop {
+            let start = Instant::now();
+            return match self.0.messages.recv_timeout(timeout) {
+                Ok(message) => {
+                    if message.is_no_messages() {
+                        timeout = timeout.saturating_sub(start.elapsed());
+                        continue;
+                    }
+                    if message.is_request_timeout() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "next_timeout: Pull Request timed out",
+                        ));
+                    }
+                    Ok(message)
                 }
-                if message.is_request_timeout() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "next_timeout: Pull Request timed out",
-                    ));
-                }
-                Ok(message)
-            }
-            Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "next_timeout: timed out",
-            )),
-            Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "next_timeout: unsubscribed",
-            )),
+                Err(channel::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "next_timeout: timed out",
+                )),
+                Err(channel::RecvTimeoutError::Disconnected) => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "next_timeout: unsubscribed",
+                )),
+            };
         }
     }
 
@@ -351,9 +358,9 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// #
-    /// # context.add_stream("next")?;
+    /// # context.add_stream("request_batch")?;
     ///
-    /// let consumer = context.pull_subscribe("next")?;
+    /// let consumer = context.pull_subscribe("request_batch")?;
     /// // request specific number of messages.
     /// consumer.request_batch(10)?;
     ///
@@ -399,12 +406,12 @@ impl PullSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client.clone());
     /// #
-    /// # context.add_stream("next")?;
+    /// # context.add_stream("iter")?;
     /// # for i in 0..20 {
-    /// # client.publish("next", b"data")?;
+    /// # client.publish("iter", b"data")?;
     /// # }
     ///
-    /// let consumer = context.pull_subscribe("next")?;
+    /// let consumer = context.pull_subscribe("iter")?;
     /// // request specific number of messages.
     /// consumer.request_batch(10)?;
     ///
@@ -452,7 +459,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-/// Iterator that retrieves messages unless `no messages` or `request timeout` is enocuntered, or
+/// Iterator that retrieves messages unless `no messages` or `request timeout` is encountered, or
 /// timeout is reached.
 pub struct TimeoutIter<'a> {
     subscription: &'a PullSubscription,

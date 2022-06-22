@@ -1,4 +1,3 @@
-use nats;
 use quicli::prelude::*;
 use structopt::{clap::ArgGroup, StructOpt};
 

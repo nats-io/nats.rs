@@ -1,3 +1,25 @@
+# 0.21.0
+## Added
+* Allow tokens in connection strings and add tests by @paulgb in https://github.com/nats-io/nats.rs/pull/506
+
+# 0.20.1
+## Overview
+A patch release fixing stack overflow happening when there was kv watcher for a key that did not change for a long time.
+
+## Fixed
+* Remove recursive calls by @segfaultdoc in https://github.com/nats-io/nats.rs/pull/448
+
+# 0.20.0
+## Overview
+A minor sync client release that adds requests with timeouts and headers.
+
+## Added
+* Add request with headers and timeouts by @Jarema in https://github.com/nats-io/nats.rs/pull/431
+
+# 0.19.1
+## Fixed
+* Fix KV issues when JS domain is set by @Jarema in https://github.com/nats-io/nats.rs/pull/387
+
 # 0.19.0
 ## Overview
 Minor release with some fixes and improvements and repo restructuring.

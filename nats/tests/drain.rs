@@ -11,12 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod util;
-pub use util::*;
-
 #[test]
 fn drain() {
-    let s = run_basic_server();
+    let s = nats_server::run_basic_server();
     let nc = nats::connect(s.client_url()).unwrap();
 
     let sub = nc.subscribe("test").unwrap();
