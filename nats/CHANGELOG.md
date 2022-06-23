@@ -1,3 +1,7 @@
+# 0.21.0
+## Added
+* Allow tokens in connection strings and add tests by @paulgb in https://github.com/nats-io/nats.rs/pull/506
+
 # 0.20.1
 ## Overview
 A patch release fixing stack overflow happening when there was kv watcher for a key that did not change for a long time.

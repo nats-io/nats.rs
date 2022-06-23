@@ -83,7 +83,7 @@ impl Stream {
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -135,7 +135,7 @@ impl Stream {
 
     /// Retrieve [Info] about [Consumer] from the server.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -167,9 +167,9 @@ impl Stream {
     }
 
     /// Get [Consumer] from the the server. [Consumer] iterators can be used to retrieve
-    /// [Messages][crate::jetstream::JetStreamMessage] for a given [Consumer].
+    /// [Messages][crate::jetstream::Message] for a given [Consumer].
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -180,12 +180,7 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let mut consumer = stream.get_consumer("pull").await?;
-    /// let messages = consumer.process(50);
-    /// futures::pin_mut!(messages);
-    /// while let Some(message) = messages.next().await {
-    ///     println!("message received: {:?}", message?);
-    /// }
+    /// let consumer: consumer::PullConsumer = stream.get_consumer("pull").await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -206,7 +201,7 @@ impl Stream {
     ///
     /// Note: This does not validate if the [Consumer] on the server is compatible with the configuration passed in except Push/Pull compatibility.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -217,7 +212,7 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let mut consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
+    /// let consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
     ///     durable_name: Some("pull".to_string()),
     ///     ..Default::default()
     /// }).await?;
@@ -259,7 +254,7 @@ impl Stream {
 
     /// Delete a [Consumer] from the server.
     ///
-    /// # Examples:
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -439,7 +434,7 @@ pub struct Info {
     #[serde(with = "rfc3339")]
     pub created: time::OffsetDateTime,
     /// Various metrics associated with this stream
-    pub state: StreamState,
+    pub state: State,
 }
 
 #[derive(Deserialize)]
@@ -449,7 +444,7 @@ pub struct DeleteStatus {
 
 /// information about the given stream.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct StreamState {
+pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
     /// The number of bytes of all messages contained in this stream

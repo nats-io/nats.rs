@@ -269,9 +269,18 @@ mod client {
     }
 
     #[tokio::test]
-    #[ignore] // temporarily ignored due to DNS issues on github actions
     async fn connect_domain() {
         assert!(async_nats::connect("demo.nats.io").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn connect_invalid_tls_over_ip() {
+        let server = nats_server::run_basic_server();
+        assert!(async_nats::ConnectOptions::new()
+            .require_tls(true)
+            .connect(server.client_url())
+            .await
+            .is_err());
     }
 
     #[tokio::test]

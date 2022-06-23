@@ -11,25 +11,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::stream::{self, TryStreamExt};
 use std::{task::Poll, time::Duration};
 
-use async_stream::try_stream;
-use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    jetstream::{self, Context, JetStreamMessage},
+    jetstream::{self, Context},
     Error, StatusCode, Subscriber,
 };
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
-
-use futures::StreamExt;
-
 use jetstream::consumer;
 
 impl Consumer<Config> {
-    pub async fn request_batch<I: Into<BatchConfig>>(
+    /// Returns a stream of message request results
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    ///
+    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+    ///     durable_name: Some("consumer".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let mut messages = consumer.stream()?.take(100);
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///   println!("got message {:?}", message);
+    ///   message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
+    pub fn stream(&self) -> Result<Stream, Error> {
+        let sequence = self.sequence(10)?;
+        let try_flatten = sequence.try_flatten();
+
+        Ok(try_flatten)
+    }
+
+    pub(crate) async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
         inbox: String,
@@ -48,7 +87,7 @@ impl Consumer<Config> {
         Ok(())
     }
 
-    pub async fn fetch(&mut self, batch: usize) -> Result<Batch, Error> {
+    pub async fn fetch(&self, batch: usize) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
                 batch,
@@ -61,7 +100,7 @@ impl Consumer<Config> {
         .await
     }
 
-    pub async fn batch(&mut self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
+    pub async fn batch(&self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
                 batch,
@@ -75,59 +114,26 @@ impl Consumer<Config> {
         .await
     }
 
-    pub fn process(
-        &'_ mut self,
-        batch: usize,
-    ) -> impl Stream<Item = Result<Option<JetStreamMessage>, Error>> + '_ {
-        try_stream! {
-            let inbox = self.context.client.new_inbox();
-            let mut sub = self.context.client.subscribe(inbox.clone()).await?;
+    pub fn sequence(&self, batch: usize) -> Result<Sequence, Error> {
+        let context = self.context.clone();
+        let subject = format!(
+            "{}.CONSUMER.MSG.NEXT.{}.{}",
+            self.context.prefix, self.info.stream_name, self.info.name
+        );
 
-            self.request_batch(BatchConfig {
-                batch: batch,
-                expires: None,
-                no_wait: false,
-                ..Default::default()
-            }, inbox.clone())
-            .await?;
-            let mut remaining = batch;
-            while let Some(mut message) = sub.next().await {
-                message.status = match message.status.unwrap_or(StatusCode::OK) {
-                    StatusCode::TIMEOUT => {
-                        remaining = batch;
-                        self.request_batch(BatchConfig {
-                            batch: batch,
-                            expires: None,
-                            no_wait: false,
-                            ..Default::default()
-                        }, inbox.clone())
-                        .await?;
-                        continue;
-                    }
-                    StatusCode::IDLE_HEARBEAT => {
-                        continue;
-                    }
-                    status => Some(status),
-                };
+        let request = serde_json::to_vec(&BatchConfig {
+            batch,
+            ..Default::default()
+        })
+        .map(Bytes::from)?;
 
-                remaining -= 1;
-                yield Some(JetStreamMessage {
-                    context: self.context.clone(),
-                    message: message,
-                });
-
-                if remaining == 0 {
-                    self.request_batch(BatchConfig {
-                        batch: batch,
-                        expires: None,
-                        no_wait: false,
-                        ..Default::default()
-                    }, inbox.clone())
-                    .await?;
-                    remaining = batch;
-                }
-            }
-        }
+        Ok(Sequence {
+            context,
+            subject,
+            request,
+            pending_messages: batch,
+            next: None,
+        })
     }
 }
 
@@ -138,7 +144,7 @@ pub struct Batch {
 }
 
 impl<'a> Batch {
-    async fn batch(batch: BatchConfig, consumer: &'a mut Consumer<Config>) -> Result<Batch, Error> {
+    async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
@@ -151,8 +157,8 @@ impl<'a> Batch {
     }
 }
 
-impl Stream for Batch {
-    type Item = Result<JetStreamMessage, Error>;
+impl futures::Stream for Batch {
+    type Item = Result<jetstream::Message, Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -169,7 +175,7 @@ impl Stream for Batch {
                     StatusCode::IDLE_HEARBEAT => Poll::Pending,
                     _ => {
                         self.pending_messages -= 1;
-                        Poll::Ready(Some(Ok(JetStreamMessage {
+                        Poll::Ready(Some(Ok(jetstream::Message {
                             context: self.context.clone(),
                             message,
                         })))
@@ -181,6 +187,66 @@ impl Stream for Batch {
         }
     }
 }
+
+pub struct Sequence<'a> {
+    context: Context,
+    subject: String,
+    request: Bytes,
+    pending_messages: usize,
+    next: Option<BoxFuture<'a, Result<Batch, Error>>>,
+}
+
+impl<'a> futures::Stream for Sequence<'a> {
+    type Item = Result<Batch, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.next.as_mut() {
+            None => {
+                let context = self.context.clone();
+                let subject = self.subject.clone();
+                let request = self.request.clone();
+                let pending_messages = self.pending_messages;
+
+                self.next = Some(Box::pin(async move {
+                    let inbox = context.client.new_inbox();
+                    let subscriber = context.client.subscribe(inbox.clone()).await?;
+
+                    context
+                        .client
+                        .publish_with_reply(subject, inbox, request)
+                        .await?;
+
+                    Ok(Batch {
+                        pending_messages,
+                        subscriber,
+                        context,
+                    })
+                }));
+
+                match self.next.as_mut().unwrap().as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        self.next = None;
+                        Poll::Ready(Some(result))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+
+            Some(next) => match next.as_mut().poll(cx) {
+                Poll::Ready(result) => {
+                    self.next = None;
+                    Poll::Ready(Some(result))
+                }
+                Poll::Pending => Poll::Pending,
+            },
+        }
+    }
+}
+
+pub type Stream<'a> = stream::TryFlatten<Sequence<'a>>;
 
 /// Used for next Pull Request for Pull Consumer
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]

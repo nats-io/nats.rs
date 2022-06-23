@@ -14,11 +14,14 @@
 
 pub mod pull;
 pub mod push;
+use std::io::ErrorKind;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use time::serde::rfc3339;
 
+use super::response::Response;
 use super::Context;
 use crate::jetstream::consumer;
 use crate::Error;
@@ -43,10 +46,74 @@ impl<T: IntoConsumerConfig> Consumer<T> {
         }
     }
 }
+impl<T: IntoConsumerConfig> Consumer<T> {
+    /// Retrieves `info` about [Consumer] from the server, updates the cached `info` inside
+    /// [Consumer] and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut consumer: PullConsumer = jetstream
+    ///     .get_stream("events").await?
+    ///     .get_consumer("pull").await?;
+    ///
+    /// let info = consumer.info().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn info(&mut self) -> Result<&consumer::Info, Error> {
+        let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok::<Info>(info) => {
+                self.info = info;
+                Ok(&self.info)
+            }
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting consumer info: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+        }
+    }
+
+    /// Returns cached [Info] for the [Consumer].
+    /// Cache is either from initial creation/retrival of the [Consumer] or last call to
+    /// [Consumer::info].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events").await?
+    ///     .get_consumer("pull").await?;
+    ///
+    /// let info = consumer.cached_info();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn cached_info(&self) -> &consumer::Info {
+        &self.info
+    }
+}
 
 /// Trait used to convert generic [Stream Config][crate::jetstream::consumer::Config] into either
 /// [Pull][crate::jetstream::consumer::pull::Config] or
-/// [Push][crate::jetstream::consumer::PushConsumerConfig] config. It validates if given config is
+/// [Push][crate::jetstream::consumer::push::Config] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
     fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>

@@ -85,6 +85,14 @@ impl Server {
         url.as_str().to_string()
     }
 
+    // Allow token override.
+    pub fn client_url_with_token(&self, token: &str) -> String {
+        use url::Url;
+        let mut url = Url::parse(&self.client_url()).expect("could not parse");
+        url.set_username(token).ok();
+        url.as_str().to_string()
+    }
+
     // Grab client addr from logs.
     fn client_addr(&self) -> String {
         // We may need to wait for log to be present.

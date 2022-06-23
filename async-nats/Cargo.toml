@@ -1,7 +1,7 @@
 [package]
 name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "A async Rust NATS client"
 license = "Apache-2.0"
@@ -34,14 +34,8 @@ webpki-roots = "0.22"
 nuid = "0.3.2"
 serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
-async-stream = "0.3.3"
 
 [dev-dependencies]
-lazy_static = "1.4.0"
-regex = { version = "1.5.4", default-features = false, features = ["std", "unicode-perl"] }
-url = "2.2.2"
-nuid = "0.3.1"
-json = "0.12"
 criterion =  { version = "0.3", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 

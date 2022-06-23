@@ -285,8 +285,15 @@ impl Connector {
             no_responders: true,
         };
 
+        let server_auth = server.auth();
+        let auth = if let AuthStyle::NoAuth = server_auth {
+            &self.options.auth
+        } else {
+            &server_auth
+        };
+
         // Fill in the info that authenticates the client.
-        match &self.options.auth {
+        match auth {
             AuthStyle::NoAuth => {}
             AuthStyle::UserPass(user, pass) => {
                 connect_info.user = Some(SecureString::from(user.to_string()));
@@ -307,12 +314,6 @@ impl Connector {
                 connect_info.nkey = Some(nkey);
                 connect_info.signature = Some(sig);
             }
-        }
-
-        // If our server url had embedded username, check that here.
-        if server.has_user_pass() {
-            connect_info.user = server.username();
-            connect_info.pass = server.password();
         }
 
         // Send CONNECT and PING messages.
@@ -608,6 +609,20 @@ impl ServerAddress {
         self.0.username() != ""
     }
 
+    pub(crate) fn auth(&self) -> AuthStyle {
+        if let Some(password) = self.0.password() {
+            if self.0.username() == "" {
+                AuthStyle::NoAuth
+            } else {
+                AuthStyle::UserPass(self.0.username().to_string(), password.to_string())
+            }
+        } else if "" != self.0.username() {
+            AuthStyle::Token(self.0.username().to_string())
+        } else {
+            AuthStyle::NoAuth
+        }
+    }
+
     /// Returns the host.
     pub fn host(&self) -> &str {
         self.0.host_str().unwrap()
@@ -690,5 +705,30 @@ impl IntoServerList for Vec<ServerAddress> {
 impl IntoServerList for io::Result<Vec<ServerAddress>> {
     fn into_server_list(self) -> io::Result<Vec<ServerAddress>> {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_address_no_auth() {
+        let address = ServerAddress::from_str("nats://localhost").unwrap();
+        assert!(matches!(address.auth(), AuthStyle::NoAuth));
+    }
+
+    #[test]
+    fn server_address_token_auth() {
+        let address = ServerAddress::from_str("nats://mytoken@localhost").unwrap();
+        assert!(matches!(address.auth(), AuthStyle::Token(token) if &token == "mytoken"));
+    }
+
+    #[test]
+    fn server_address_user_auth() {
+        let address = ServerAddress::from_str("nats://myuser:mypass@localhost").unwrap();
+        assert!(
+            matches!(address.auth(), AuthStyle::UserPass(username, password) if &username == "myuser" && &password == "mypass")
+        );
     }
 }
