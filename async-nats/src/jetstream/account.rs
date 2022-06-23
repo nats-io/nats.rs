@@ -39,21 +39,31 @@ pub struct Tier {
     pub streams: usize,
     /// Number of active Consumers
     pub consumers: usize,
-    ///
+    /// Limits imposed on this tier.
     pub limits: Limits,
+    /// Number of requests received.
+    #[serde(rename = "api")]
     pub requests: Requests,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Account {
+    /// Memory stoage being used for Stream Message storage
     pub memory: u64,
+    /// File Storage being used for Stream Message storage
     pub storage: u64,
+    /// Number of active Streams
     pub streams: usize,
+    /// Number of active Consumers
     pub consumers: usize,
+    /// The JetStream domain this account is in
     pub domain: Option<String>,
+    /// Limits imposed on this account.
     pub limits: Limits,
+    /// Number of requests received.
     #[serde(rename = "api")]
     pub requests: Requests,
+    /// Tiers associated with this account.
     #[serde(default)]
     pub tiers: HashMap<String, Tier>,
 }
