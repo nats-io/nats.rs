@@ -1,16 +1,32 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::Deserializer, Deserialize, Serialize};
 use std::collections::HashMap;
+
+fn negative_as_none<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let n = i64::deserialize(deserializer)?;
+    if n.is_negative() {
+        Ok(None)
+    } else {
+        Ok(Some(n))
+    }
+}
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     /// Maximum memory for this account (-1 if no limit)
-    pub max_memory: i64,
+    #[serde(deserialize_with = "negative_as_none")]
+    pub max_memory: Option<i64>,
     /// Maximum storage for this account (-1 if no limit)
-    pub max_storage: i64,
+    #[serde(deserialize_with = "negative_as_none")]
+    pub max_storage: Option<i64>,
     /// Maximum streams for this account (-1 if no limit)
-    pub max_streams: i64,
+    #[serde(deserialize_with = "negative_as_none")]
+    pub max_streams: Option<i64>,
     /// Maximum consumers for this account (-1 if no limit)
-    pub max_consumers: i64,
+    #[serde(deserialize_with = "negative_as_none")]
+    pub max_consumers: Option<i64>,
     /// Indicates if Streams created in this account requires the max_bytes property set
     pub max_bytes_required: bool,
     /// The maximum number of outstanding ACKs any consumer may configure
