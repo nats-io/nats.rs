@@ -471,7 +471,7 @@ pub struct RawMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetRawMessage {
+struct GetRawMessage {
     pub message: RawMessage,
 }
 
