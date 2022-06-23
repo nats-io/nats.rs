@@ -15,16 +15,16 @@ where
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum memory for this account (-1 if no limit)
+    /// The maximum amount of Memory storage Stream Messages may consume
     #[serde(deserialize_with = "negative_as_none")]
     pub max_memory: Option<i64>,
-    /// Maximum storage for this account (-1 if no limit)
+    /// The maximum amount of File storage Stream Messages may consume
     #[serde(deserialize_with = "negative_as_none")]
     pub max_storage: Option<i64>,
-    /// Maximum streams for this account (-1 if no limit)
+    /// The maximum number of Streams an account can create
     #[serde(deserialize_with = "negative_as_none")]
     pub max_streams: Option<i64>,
-    /// Maximum consumers for this account (-1 if no limit)
+    /// The maximum number of Consumer an account can create
     #[serde(deserialize_with = "negative_as_none")]
     pub max_consumers: Option<i64>,
     /// Indicates if Streams created in this account requires the max_bytes property set
@@ -32,9 +32,10 @@ pub struct Limits {
     /// The maximum number of outstanding ACKs any consumer may configure
     pub max_ack_pending: i64,
     /// The maximum size any single memory stream may be
-    pub memory_max_stream_bytes: i64,
+    #[serde(deserialize_with = "negative_as_none")]
+    pub memory_max_stream_bytes: Option<i64>,
     /// The maximum size any single storage based stream may be
-    pub storage_max_stream_bytes: i64,
+    pub storage_max_stream_bytes: Option<i64>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
