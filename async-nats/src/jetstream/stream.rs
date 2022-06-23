@@ -37,6 +37,30 @@ pub struct Stream {
 
 impl Stream {
     /// Get a raw message from the stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    ///
+    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
+    /// println!("Retreived raw message {:?}", raw_message);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, Error> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
