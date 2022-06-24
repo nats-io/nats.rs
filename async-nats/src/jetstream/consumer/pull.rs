@@ -336,13 +336,16 @@ impl<'a> futures::Stream for Stream<'a> {
             },
         }
         loop {
+            println!("start of loop, pending: {}", self.pending_messages);
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
+                            println!("TIMEOUT HIT");
                             self.pending_messages = 0;
                             match self.request.as_mut() {
                                 None => {
+                                    println!("No request. Lets send one");
                                     let context = self.context.clone();
                                     let inbox = self.inbox.clone();
                                     let subject = self.subject.clone();
@@ -365,6 +368,7 @@ impl<'a> futures::Stream for Stream<'a> {
                                             Poll::Ready(result) => {
                                                 self.request = None;
                                                 result?;
+                                                println!("request send succesfully");
                                             }
                                             Poll::Pending => {}
                                         }
@@ -373,6 +377,7 @@ impl<'a> futures::Stream for Stream<'a> {
 
                                 Some(request) => match request.as_mut().poll(cx) {
                                     Poll::Ready(result) => {
+                                        println!("previous request send succesfully");
                                         self.request = None;
                                         result?;
                                     }
@@ -380,6 +385,7 @@ impl<'a> futures::Stream for Stream<'a> {
                                 },
                             }
                             self.pending_messages = self.batch_config.batch;
+                            println!("processing of loop with fresh request done");
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {}

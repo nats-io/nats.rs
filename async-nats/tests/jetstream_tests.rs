@@ -461,7 +461,10 @@ mod jetstream {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 context
-                    .publish("events".to_string(), format!("i: {}", i).into())
+                    .publish(
+                        "events".to_string(),
+                        format!("timeout test message: {}", i).into(),
+                    )
                     .await
                     .unwrap();
             }
@@ -512,7 +515,10 @@ mod jetstream {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
                 context
-                    .publish("events".to_string(), format!("i: {}", i).into())
+                    .publish(
+                        "events".to_string(),
+                        format!("hearbeat message: {}", i).into(),
+                    )
                     .await
                     .unwrap();
             }
