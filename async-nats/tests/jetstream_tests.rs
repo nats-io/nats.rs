@@ -469,11 +469,11 @@ mod jetstream {
 
         let mut iter = consumer
             .stream_with_config(consumer::pull::BatchConfig {
-                batch: 100,
-                expires: Some(Duration::from_millis(250).as_nanos().try_into().unwrap()),
+                batch: 25,
+                expires: Some(Duration::from_millis(100).as_nanos().try_into().unwrap()),
                 no_wait: false,
                 max_bytes: 0,
-                idle_heartbeat: Duration::from_millis(25),
+                idle_heartbeat: Duration::from_millis(45),
             })
             .await
             .unwrap()
