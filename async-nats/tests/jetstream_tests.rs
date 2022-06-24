@@ -472,8 +472,7 @@ mod jetstream {
                 batch: 25,
                 expires: Some(Duration::from_millis(100).as_nanos().try_into().unwrap()),
                 no_wait: false,
-                max_bytes: 0,
-                idle_heartbeat: Duration::from_millis(45),
+                ..Default::default()
             })
             .await
             .unwrap()
@@ -484,6 +483,57 @@ mod jetstream {
         }
     }
 
+    #[tokio::test]
+    async fn pull_stream_with_hearbeat() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(&Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
+
+        tokio::task::spawn(async move {
+            for i in 0..100 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                context
+                    .publish("events".to_string(), format!("i: {}", i).into())
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let mut iter = consumer
+            .stream_with_config(consumer::pull::BatchConfig {
+                batch: 25,
+                expires: Some(Duration::from_millis(1000).as_nanos().try_into().unwrap()),
+                no_wait: false,
+                max_bytes: 0,
+                idle_heartbeat: Duration::from_millis(10),
+            })
+            .await
+            .unwrap()
+            .take(100);
+        while let Some(result) = iter.next().await {
+            println!("MESSAGE: {:?}", result);
+            result.unwrap().ack().await.unwrap();
+        }
+    }
     #[tokio::test]
     async fn pull_fetch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
