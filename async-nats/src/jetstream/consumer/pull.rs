@@ -362,7 +362,7 @@ impl<'a> futures::Stream for Stream<'a> {
                                         let request =
                                             serde_json::to_vec(&batch).map(Bytes::from)?;
 
-                                        println!("sending pull request: {:?}", batch);
+                                        println!("sending pull request: {:?}", request);
                                         context
                                             .client
                                             .publish_with_reply(subject, inbox, request)
@@ -415,7 +415,7 @@ impl<'a> futures::Stream for Stream<'a> {
                 },
                 Poll::Pending => {
                     println!("pending message");
-                    continue;
+                    return std::task::Poll::Pending;
                 }
             }
         }
