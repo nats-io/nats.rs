@@ -415,7 +415,7 @@ impl<'a> futures::Stream for Stream<'a> {
                 },
                 Poll::Pending => {
                     println!("pending message");
-                    return std::task::Poll::Pending;
+                    continue;
                 }
             }
         }
