@@ -460,14 +460,16 @@ mod jetstream {
         tokio::task::spawn(async move {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                context
+                let ack = context
                     .publish(
                         "events".to_string(),
                         format!("timeout test message: {}", i).into(),
                     )
                     .await
                     .unwrap();
+                println!("ack from publish {}: {:?}", i, ack);
             }
+            println!("send all 100 messages to jetstream");
         });
 
         let mut iter = consumer

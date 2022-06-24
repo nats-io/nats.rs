@@ -362,6 +362,7 @@ impl<'a> futures::Stream for Stream<'a> {
                                         let request =
                                             serde_json::to_vec(&batch).map(Bytes::from)?;
 
+                                        println!("sending pull request: {:?}", batch);
                                         context
                                             .client
                                             .publish_with_reply(subject, inbox, request)
@@ -389,14 +390,18 @@ impl<'a> futures::Stream for Stream<'a> {
                                         result?;
                                         println!("previous request send without error");
                                     }
-                                    Poll::Pending => {}
+                                    Poll::Pending => {
+                                        println!("pending request");
+                                    }
                                 },
                             }
                             self.pending_messages = self.batch_config.batch;
                             println!("processing of loop with fresh request done");
                             continue;
                         }
-                        StatusCode::IDLE_HEARBEAT => {}
+                        StatusCode::IDLE_HEARBEAT => {
+                            println!("IDLE hearbeat");
+                        }
                         _ => {
                             println!("new message, returning it");
                             self.pending_messages -= 1;
@@ -408,7 +413,8 @@ impl<'a> futures::Stream for Stream<'a> {
                     },
                     None => return Poll::Ready(None),
                 },
-                std::task::Poll::Pending => {
+                Poll::Pending => {
+                    println!("pending message");
                     return std::task::Poll::Pending;
                 }
             }
