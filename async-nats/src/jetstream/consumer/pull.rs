@@ -296,13 +296,17 @@ impl<'a> futures::Stream for Stream<'a> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        println!("fresh poll");
+
         match self.request.as_mut() {
             None => {
+                println!("request is NONE");
                 let context = self.context.clone();
                 let inbox = self.inbox.clone();
                 let subject = self.subject.clone();
 
                 if self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100) {
+                    println!("conditions for fresh request met");
                     let batch = self.batch_config;
                     self.pending_messages += batch.batch;
                     self.request = Some(Box::pin(async move {
@@ -312,6 +316,7 @@ impl<'a> futures::Stream for Stream<'a> {
                             .client
                             .publish_with_reply(subject, inbox, request)
                             .await?;
+                        println!("new request published (from NONE)");
                         Ok(())
                     }));
                 }
@@ -321,6 +326,7 @@ impl<'a> futures::Stream for Stream<'a> {
                         Poll::Ready(result) => {
                             self.request = None;
                             result?;
+                            println!("new request successfuly send (FROM NONE)");
                         }
                         Poll::Pending => {}
                     }
@@ -366,6 +372,7 @@ impl<'a> futures::Stream for Stream<'a> {
                                     if let Some(request) = self.request.as_mut() {
                                         match request.as_mut().poll(cx) {
                                             Poll::Ready(result) => {
+                                                println!("request send, checking error");
                                                 self.request = None;
                                                 result?;
                                                 println!("request send succesfully");
@@ -377,9 +384,10 @@ impl<'a> futures::Stream for Stream<'a> {
 
                                 Some(request) => match request.as_mut().poll(cx) {
                                     Poll::Ready(result) => {
-                                        println!("previous request send succesfully");
+                                        println!("previous request send");
                                         self.request = None;
                                         result?;
+                                        println!("previous request send without error");
                                     }
                                     Poll::Pending => {}
                                 },
@@ -390,6 +398,7 @@ impl<'a> futures::Stream for Stream<'a> {
                         }
                         StatusCode::IDLE_HEARBEAT => {}
                         _ => {
+                            println!("new message, returning it");
                             self.pending_messages -= 1;
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
