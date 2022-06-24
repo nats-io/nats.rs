@@ -521,7 +521,7 @@ mod jetstream {
         let mut iter = consumer
             .stream_with_config(consumer::pull::BatchConfig {
                 batch: 25,
-                expires: Some(Duration::from_millis(1000).as_nanos().try_into().unwrap()),
+                expires: Some(Duration::from_millis(5000).as_nanos().try_into().unwrap()),
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_millis(10),
