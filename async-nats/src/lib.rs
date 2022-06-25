@@ -538,6 +538,7 @@ impl ConnectionHandler {
 
                     // if the channel for subscription was dropped, remove the
                     // subscription from the map and unsubscribe.
+                    println!("TRY_SEND {:?}", message);
                     match subscription.sender.try_send(message) {
                         Ok(_) => {
                             subscription.delivered += 1;
