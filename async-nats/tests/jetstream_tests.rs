@@ -302,8 +302,8 @@ mod jetstream {
             .unwrap();
         stream
             .create_consumer(&consumer::push::Config {
+                deliver_subject: "subject".to_string(),
                 durable_name: Some("push".to_string()),
-                deliver_subject: Some("subject".to_string()),
                 ..Default::default()
             })
             .await
