@@ -325,8 +325,8 @@ impl<'a> futures::Stream for Stream<'a> {
                     match request.as_mut().poll(cx) {
                         Poll::Ready(result) => {
                             self.request = None;
-                            result?;
                             println!("new request successfuly send (FROM NONE)");
+                            result?;
                         }
                         Poll::Pending => {}
                     }
@@ -341,7 +341,19 @@ impl<'a> futures::Stream for Stream<'a> {
                 Poll::Pending => {}
             },
         }
+
         loop {
+            if let Some(request) = self.request.as_mut() {
+                match request.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        self.request = None;
+                        println!("new request successfuly sendt from loop");
+                        result?;
+                    }
+                    Poll::Pending => {}
+                }
+            }
+
             println!("start of loop, pending: {}", self.pending_messages);
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
