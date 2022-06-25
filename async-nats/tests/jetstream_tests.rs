@@ -435,6 +435,7 @@ mod jetstream {
 
         let mut messages = consumer.stream().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
+            assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }
     }
@@ -477,6 +478,7 @@ mod jetstream {
 
         let mut messages = consumer.stream().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
+            assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }
     }
