@@ -296,63 +296,80 @@ impl<'a> futures::Stream for Stream<'a> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let message_poll: Poll<Option<Self::Item>> = match self.subscriber.receiver.poll_recv(cx) {
-            Poll::Ready(maybe_message) => match maybe_message {
-                Some(message) => match message.status {
-                    Some(StatusCode::TIMEOUT) => {
-                        self.pending_messages = 0;
+        let mut try_next = true;
+        while try_next {
+            let message_poll = match self.subscriber.receiver.poll_recv(cx) {
+                Poll::Ready(maybe_message) => match maybe_message {
+                    Some(message) => match message.status {
+                        Some(StatusCode::TIMEOUT) => {
+                            println!("GOT TIMEOUT MESSAGE");
+                            self.pending_messages = 0;
 
-                        Poll::Pending
-                    }
-                    Some(_) => Poll::Pending,
-                    None => {
-                        self.pending_messages -= 1;
+                            Poll::Pending
+                        }
+                        Some(_) => Poll::Pending,
+                        None => {
+                            self.pending_messages -= 1;
 
-                        Poll::Ready(Some(Ok(jetstream::Message {
-                            context: self.context.clone(),
-                            message,
-                        })))
-                    }
+                            Poll::Ready(Some(Ok(jetstream::Message {
+                                context: self.context.clone(),
+                                message,
+                            })))
+                        }
+                    },
+                    None => Poll::Ready(None),
                 },
-                None => Poll::Ready(None),
-            },
 
-            Poll::Pending => Poll::Pending,
-        };
+                Poll::Pending => {
+                    try_next = false;
 
-        let batch_config = self.batch_config;
-        let needs_more_messages =
-            self.pending_messages < std::cmp::min(batch_config.batch / 2, 100);
-
-        if self.request.is_none() && needs_more_messages {
-            let context = self.context.clone();
-            let inbox = self.inbox.clone();
-            let subject = self.subject.clone();
-
-            self.pending_messages += batch_config.batch;
-            self.request = Some(Box::pin(async move {
-                let request = serde_json::to_vec(&batch_config).map(Bytes::from)?;
-
-                context
-                    .client
-                    .publish_with_reply(subject, inbox, request)
-                    .await?;
-
-                Ok(())
-            }));
-        }
-
-        if let Some(request) = self.request.as_mut() {
-            if let Poll::Ready(result) = request.as_mut().poll(cx) {
-                self.request = None;
-
-                if let Err(err) = result {
-                    return Poll::Ready(Some(Err(err)));
+                    Poll::Pending
                 }
+            };
+
+            println!("POLL {:?}", message_poll);
+
+            let batch_config = self.batch_config;
+            let needs_more_messages =
+                self.pending_messages < std::cmp::min(batch_config.batch / 2, 100);
+
+            if self.request.is_none() && needs_more_messages {
+                println!("SENDING REQUEST");
+                let context = self.context.clone();
+                let inbox = self.inbox.clone();
+                let subject = self.subject.clone();
+
+                self.pending_messages += batch_config.batch;
+                self.request = Some(Box::pin(async move {
+                    let request = serde_json::to_vec(&batch_config).map(Bytes::from)?;
+
+                    context
+                        .client
+                        .publish_with_reply(subject, inbox, request)
+                        .await?;
+
+                    Ok(())
+                }));
+            }
+
+            if let Some(request) = self.request.as_mut() {
+                println!("POLLING REQUEST");
+                if let Poll::Ready(result) = request.as_mut().poll(cx) {
+                    println!("REQUEST DONE");
+                    self.request = None;
+
+                    if let Err(err) = result {
+                        return Poll::Ready(Some(Err(err)));
+                    }
+                }
+            }
+
+            if message_poll.is_ready() {
+                return message_poll;
             }
         }
 
-        message_poll
+        Poll::Pending
     }
 }
 
