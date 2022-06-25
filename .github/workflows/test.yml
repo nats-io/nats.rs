@@ -78,7 +78,7 @@ jobs:
         run: |
           rustup update
           nats-server --jetstream --port=4222 &
-          cargo test pull_stream_with_timeout -- --nocapture
+          cargo test with_timeout -- --nocapture
 
   test_fault-injection:
     name: test (fault-injection)
