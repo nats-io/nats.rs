@@ -552,9 +552,11 @@ impl ConnectionHandler {
                             }
                         }
                         Err(mpsc::error::TrySendError::Full(_)) => {
+                            println!("CAN'T SEND: FULL");
                             self.events.send(ServerEvent::SlowConsumer(sid)).await.ok();
                         }
                         Err(mpsc::error::TrySendError::Closed(_)) => {
+                            println!("CAN'T SEND: CLOSED");
                             self.subscriptions.remove(&sid);
                             self.connection
                                 .write_op(ClientOp::Unsubscribe { sid, max: None })
