@@ -84,7 +84,7 @@ impl Connection {
 
         if self.buffer.starts_with(b"MSG ") {
             let line = str::from_utf8(&self.buffer[4..len]).unwrap();
-            println!("GOT MSG: {:?}", line);
+            println!("MSG: {:?}", line);
             let args = line.split(' ').filter(|s| !s.is_empty());
             // TODO(caspervonb) we can drop this alloc
             let args = args.collect::<Vec<_>>();
@@ -140,6 +140,8 @@ impl Connection {
             let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
             let args = line.split_whitespace().filter(|s| !s.is_empty());
             let args = args.collect::<Vec<_>>();
+
+            println!("HMSG: {:?}", line);
 
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
             let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..] {
@@ -323,8 +325,10 @@ impl Connection {
                 headers,
             } => {
                 if headers.is_some() {
+                    println!("HPUB {}", subject);
                     self.stream.write_all(b"HPUB ").await?;
                 } else {
+                    println!("PUB {}", subject);
                     self.stream.write_all(b"PUB ").await?;
                 }
 
