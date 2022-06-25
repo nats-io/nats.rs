@@ -343,6 +343,8 @@ impl<'a> futures::Stream for Stream<'a> {
                 self.request = Some(Box::pin(async move {
                     let request = serde_json::to_vec(&batch_config).map(Bytes::from)?;
 
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
                     context
                         .client
                         .publish_with_reply(subject, inbox, request)
