@@ -28,7 +28,6 @@ mod jetstream {
 
     use super::*;
     use async_nats::header::HeaderMap;
-    use async_nats::jetstream::consumer::pull::Config;
     use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream;
@@ -249,7 +248,7 @@ mod jetstream {
             .get_or_create_stream("events")
             .await
             .unwrap()
-            .create_consumer(Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("durable".to_string()),
                 deliver_policy: DeliverPolicy::ByStartSequence { start_sequence: 10 },
                 ..Default::default()
@@ -261,7 +260,7 @@ mod jetstream {
             .get_or_create_stream("events")
             .await
             .unwrap()
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 deliver_policy: DeliverPolicy::ByStartTime {
                     start_time: OffsetDateTime::now_utc(),
                 },
@@ -274,7 +273,7 @@ mod jetstream {
             .get_or_create_stream("events")
             .await
             .unwrap()
-            .create_consumer(&consumer::pull::Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull_explicit".to_string()),
                 ..Default::default()
             })
@@ -289,14 +288,17 @@ mod jetstream {
 
         let stream = context.get_or_create_stream("events").await.unwrap();
         stream
-            .create_consumer(Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("consumer".to_string()),
                 ..Default::default()
             })
             .await
             .unwrap();
         stream.delete_consumer("consumer").await.unwrap();
-        assert!(stream.get_consumer::<Config>("consumer").await.is_err());
+        assert!(stream
+            .get_consumer::<consumer::pull::Config>("consumer")
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -307,14 +309,15 @@ mod jetstream {
 
         let stream = context.get_or_create_stream("stream").await.unwrap();
         stream
-            .create_consumer(Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
             .await
             .unwrap();
+
         stream
-            .create_consumer(&consumer::push::Config {
+            .create_consumer(consumer::push::Config {
                 durable_name: Some("push".to_string()),
                 deliver_subject: Some("subject".to_string()),
                 ..Default::default()
@@ -350,13 +353,16 @@ mod jetstream {
             .unwrap();
 
         // check if consumer is there
-        stream.get_consumer::<Config>("consumer").await.unwrap();
+        stream
+            .get_consumer::<consumer::pull::Config>("consumer")
+            .await
+            .unwrap();
 
         // bind to previously created consumer.
         stream
-            .get_or_create_consumer::<Config>(
+            .get_or_create_consumer::<consumer::pull::Config>(
                 "consumer",
-                Config {
+                consumer::pull::Config {
                     durable_name: Some("consumer".to_string()),
                     ..Default::default()
                 },
@@ -382,7 +388,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -422,7 +428,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -465,7 +471,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -521,7 +527,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -580,7 +586,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -625,7 +631,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -673,7 +679,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -709,7 +715,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
