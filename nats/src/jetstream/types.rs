@@ -390,6 +390,8 @@ pub struct StreamInfo {
     pub created: DateTime,
     /// Various metrics associated with this stream
     pub state: StreamState,
+    /// Information about the stream's cluster
+    pub cluster: ClusterInfo,
 }
 
 /// Information about a received message
@@ -708,11 +710,23 @@ pub struct ConsumerInfo {
     pub push_bound: bool,
 }
 
-/// Information about the consumer's associated `JetStream` cluster
+/// Information about the stream's, consumer's associated `JetStream` cluster
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterInfo {
+    /// The name of cluster
+    pub name: String,
     /// The leader of the cluster
     pub leader: String,
+    /// The replica state of cluster
+    pub replicas: Vec<ClusterReplicas>
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+struct ClusterReplicas {
+    /// The server's name, which is on this cluster (out of the leader)
+    pub name: String,
+    pub current: bool,
+    pub active: usize
 }
 
 /// Information about a consumer and the stream it is consuming
