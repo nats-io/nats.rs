@@ -727,13 +727,13 @@ pub struct PeerInfo {
     /// The server name of the peer.
     pub name: String,
     /// Indicates if the server is up to date and synchronised.
-    pub current: Option<bool>,
+    pub current: bool,
     /// Nanoseconds since this peer was last seen.
     pub active: usize,
     /// Indicates the node is considered offline by the group.
     pub offline: Option<bool>,
     //// How many uncommitted operations this peer is behind the leader.
-    pub lag: i64,
+    pub lag: Option<i64>,
 }
 
 /// Information about a consumer and the stream it is consuming
