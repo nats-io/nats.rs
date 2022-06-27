@@ -84,7 +84,6 @@ impl Connection {
 
         if self.buffer.starts_with(b"MSG ") {
             let line = str::from_utf8(&self.buffer[4..len]).unwrap();
-            println!("GOT MSG: {:?}", line);
             let args = line.split(' ').filter(|s| !s.is_empty());
             // TODO(caspervonb) we can drop this alloc
             let args = args.collect::<Vec<_>>();
@@ -121,7 +120,6 @@ impl Connection {
 
             self.buffer.advance(len + 2);
             let payload = self.buffer.split_to(payload_len).freeze();
-            println!("message payload: {:?}", &payload);
             self.buffer.advance(2);
 
             return Ok(Some(ServerOp::Message {

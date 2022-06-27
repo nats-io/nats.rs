@@ -296,12 +296,9 @@ impl<'a> futures::Stream for Stream<'a> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        println!("fresh poll");
-
         loop {
             match self.request.as_mut() {
                 None => {
-                    println!("request is NONE");
                     let context = self.context.clone();
                     let inbox = self.inbox.clone();
                     let subject = self.subject.clone();
@@ -310,7 +307,6 @@ impl<'a> futures::Stream for Stream<'a> {
                         self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100);
 
                     if next_request_threshold {
-                        println!("conditions for fresh request met");
                         let batch = self.batch_config;
                         self.pending_messages += batch.batch;
                         self.request = Some(Box::pin(async move {
@@ -320,7 +316,6 @@ impl<'a> futures::Stream for Stream<'a> {
                                 .client
                                 .publish_with_reply(subject, inbox, request)
                                 .await?;
-                            println!("new request published (from NONE)");
                             Ok(())
                         }));
                     }
@@ -330,7 +325,6 @@ impl<'a> futures::Stream for Stream<'a> {
                             Poll::Ready(result) => {
                                 self.request = None;
                                 result?;
-                                println!("new request successfuly send (FROM NONE)");
                             }
                             Poll::Pending => {}
                         }
@@ -345,21 +339,15 @@ impl<'a> futures::Stream for Stream<'a> {
                     Poll::Pending => {}
                 },
             }
-            println!("start of loop, pending: {}", self.pending_messages);
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
-                            println!("TIMEOUT HIT");
                             self.pending_messages = 0;
-                            println!("processing of loop with fresh request done");
                             continue;
                         }
-                        StatusCode::IDLE_HEARBEAT => {
-                            println!("IDLE hearbeat");
-                        }
+                        StatusCode::IDLE_HEARBEAT => {}
                         _ => {
-                            println!("new message, returning it");
                             self.pending_messages -= 1;
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
@@ -370,7 +358,6 @@ impl<'a> futures::Stream for Stream<'a> {
                     None => return Poll::Ready(None),
                 },
                 Poll::Pending => {
-                    println!("pending message");
                     return std::task::Poll::Pending;
                 }
             }
