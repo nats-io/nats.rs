@@ -119,7 +119,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::ErrorKind;
 use tokio::time::sleep;
-use url::Url;
+use url::{Host, Url};
 
 use bytes::{Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
@@ -1165,7 +1165,15 @@ impl ServerAddr {
 
     /// Returns the host.
     pub fn host(&self) -> &str {
-        self.0.host_str().unwrap()
+        match self.0.host() {
+            Some(Host::Domain(_)) | Some(Host::Ipv4 { .. }) => self.0.host_str().unwrap(),
+            // `host_str()` for Ipv6 includes the []s
+            Some(Host::Ipv6 { .. }) => {
+                let host = self.0.host_str().unwrap();
+                &host[1..host.len() - 1]
+            }
+            None => "",
+        }
     }
 
     /// Returns the port.
@@ -1263,4 +1271,27 @@ pub(crate) enum Authorization {
         String,
         CallbackArg1<String, std::result::Result<String, AuthError>>,
     ),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_address_ipv6() {
+        let address = ServerAddr::from_str("nats://[::]").unwrap();
+        assert_eq!(address.host(), "::")
+    }
+
+    #[test]
+    fn serverr_address_ipv4() {
+        let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
+        assert_eq!(address.host(), "127.0.0.1")
+    }
+
+    #[test]
+    fn serverr_address_domain() {
+        let address = ServerAddr::from_str("nats://example.com").unwrap();
+        assert_eq!(address.host(), "example.com")
+    }
 }
