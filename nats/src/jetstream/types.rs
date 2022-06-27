@@ -722,7 +722,7 @@ pub struct ClusterInfo {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-struct ClusterReplicas {
+pub struct ClusterReplicas {
     /// The server's name, which is on this cluster (out of the leader)
     pub name: String,
     pub current: bool,
