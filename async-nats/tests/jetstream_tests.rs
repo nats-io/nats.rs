@@ -471,7 +471,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
@@ -527,7 +527,7 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&Config {
+            .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
