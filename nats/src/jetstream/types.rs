@@ -726,7 +726,7 @@ pub struct ClusterReplicas {
     /// The server's name, which is on this cluster (out of the leader)
     pub name: String,
     pub current: bool,
-    pub active: usize
+    pub active: usize,
 }
 
 /// Information about a consumer and the stream it is consuming
