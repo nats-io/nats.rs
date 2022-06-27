@@ -305,7 +305,10 @@ impl<'a> futures::Stream for Stream<'a> {
                 let inbox = self.inbox.clone();
                 let subject = self.subject.clone();
 
-                if self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100) {
+                let next_request_threshold =
+                    self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100);
+
+                if next_request_threshold {
                     println!("conditions for fresh request met");
                     let batch = self.batch_config;
                     self.pending_messages += batch.batch;
