@@ -433,6 +433,9 @@ mod jetstream {
     }
 
     #[tokio::test]
+    // Test ignored until Server issue around sending Pull Request immediately after getting
+    // 408 timeout is resolved.
+    #[ignore]
     async fn pull_stream_with_timeout() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
