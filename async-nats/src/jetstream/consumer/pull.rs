@@ -298,53 +298,53 @@ impl<'a> futures::Stream for Stream<'a> {
     ) -> std::task::Poll<Option<Self::Item>> {
         println!("fresh poll");
 
-        match self.request.as_mut() {
-            None => {
-                println!("request is NONE");
-                let context = self.context.clone();
-                let inbox = self.inbox.clone();
-                let subject = self.subject.clone();
+        loop {
+            match self.request.as_mut() {
+                None => {
+                    println!("request is NONE");
+                    let context = self.context.clone();
+                    let inbox = self.inbox.clone();
+                    let subject = self.subject.clone();
 
-                let next_request_threshold =
-                    self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100);
+                    let next_request_threshold =
+                        self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100);
 
-                if next_request_threshold {
-                    println!("conditions for fresh request met");
-                    let batch = self.batch_config;
-                    self.pending_messages += batch.batch;
-                    self.request = Some(Box::pin(async move {
-                        let request = serde_json::to_vec(&batch).map(Bytes::from)?;
+                    if next_request_threshold {
+                        println!("conditions for fresh request met");
+                        let batch = self.batch_config;
+                        self.pending_messages += batch.batch;
+                        self.request = Some(Box::pin(async move {
+                            let request = serde_json::to_vec(&batch).map(Bytes::from)?;
 
-                        context
-                            .client
-                            .publish_with_reply(subject, inbox, request)
-                            .await?;
-                        println!("new request published (from NONE)");
-                        Ok(())
-                    }));
-                }
+                            context
+                                .client
+                                .publish_with_reply(subject, inbox, request)
+                                .await?;
+                            println!("new request published (from NONE)");
+                            Ok(())
+                        }));
+                    }
 
-                if let Some(request) = self.request.as_mut() {
-                    match request.as_mut().poll(cx) {
-                        Poll::Ready(result) => {
-                            self.request = None;
-                            result?;
-                            println!("new request successfuly send (FROM NONE)");
+                    if let Some(request) = self.request.as_mut() {
+                        match request.as_mut().poll(cx) {
+                            Poll::Ready(result) => {
+                                self.request = None;
+                                result?;
+                                println!("new request successfuly send (FROM NONE)");
+                            }
+                            Poll::Pending => {}
                         }
-                        Poll::Pending => {}
                     }
                 }
-            }
 
-            Some(request) => match request.as_mut().poll(cx) {
-                Poll::Ready(result) => {
-                    self.request = None;
-                    result?;
-                }
-                Poll::Pending => {}
-            },
-        }
-        loop {
+                Some(request) => match request.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        self.request = None;
+                        result?;
+                    }
+                    Poll::Pending => {}
+                },
+            }
             println!("start of loop, pending: {}", self.pending_messages);
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
@@ -352,53 +352,6 @@ impl<'a> futures::Stream for Stream<'a> {
                         StatusCode::TIMEOUT => {
                             println!("TIMEOUT HIT");
                             self.pending_messages = 0;
-                            match self.request.as_mut() {
-                                None => {
-                                    println!("No request. Lets send one");
-                                    let context = self.context.clone();
-                                    let inbox = self.inbox.clone();
-                                    let subject = self.subject.clone();
-
-                                    let batch = self.batch_config;
-                                    self.pending_messages += batch.batch;
-                                    self.request = Some(Box::pin(async move {
-                                        let request =
-                                            serde_json::to_vec(&batch).map(Bytes::from)?;
-
-                                        println!("sending pull request: {:?}", request);
-                                        context
-                                            .client
-                                            .publish_with_reply(subject, inbox, request)
-                                            .await?;
-                                        Ok(())
-                                    }));
-
-                                    if let Some(request) = self.request.as_mut() {
-                                        match request.as_mut().poll(cx) {
-                                            Poll::Ready(result) => {
-                                                println!("request send, checking error");
-                                                self.request = None;
-                                                result?;
-                                                println!("request send succesfully");
-                                            }
-                                            Poll::Pending => {}
-                                        }
-                                    }
-                                }
-
-                                Some(request) => match request.as_mut().poll(cx) {
-                                    Poll::Ready(result) => {
-                                        println!("previous request send");
-                                        self.request = None;
-                                        result?;
-                                        println!("previous request send without error");
-                                    }
-                                    Poll::Pending => {
-                                        println!("pending request");
-                                    }
-                                },
-                            }
-                            self.pending_messages = self.batch_config.batch;
                             println!("processing of loop with fresh request done");
                             continue;
                         }
