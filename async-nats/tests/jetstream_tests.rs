@@ -24,7 +24,6 @@ pub struct AccountInfo {
 
 mod jetstream {
 
-    use std::str::from_utf8;
     use std::time::Duration;
 
     use super::*;
@@ -392,7 +391,6 @@ mod jetstream {
             .unwrap();
         let consumer = stream.get_consumer("pull").await.unwrap();
 
-        let mut p = 0;
         for _ in 0..10_000 {
             context
                 .publish("events".to_string(), "dat".into())
@@ -445,17 +443,11 @@ mod jetstream {
             }
         });
 
-        let mut z = 0;
-        let now = Instant::now();
         let mut iter = consumer.stream().await.unwrap().take(10000);
         while let Some(result) = iter.next().await {
             let msg = result.unwrap();
             msg.ack().await.unwrap();
-            let payload = from_utf8(&msg.payload).unwrap();
-            assert_eq!(payload, format!("i: {}", z));
-            z += 1;
         }
-        println!("now stream: {:?}", now.elapsed());
     }
 
     #[tokio::test]
@@ -486,16 +478,15 @@ mod jetstream {
         let consumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..100 {
+            for i in 0..1000 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                let ack = context
+                let _ack = context
                     .publish(
                         "events".to_string(),
                         format!("timeout test message: {}", i).into(),
                     )
                     .await
                     .unwrap();
-                println!("ack from publish {}: {:?}", i, ack);
             }
             println!("send all 100 messages to jetstream");
         });
@@ -509,7 +500,7 @@ mod jetstream {
             })
             .await
             .unwrap()
-            .take(100);
+            .take(1000);
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
         }
