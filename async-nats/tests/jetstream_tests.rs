@@ -24,6 +24,7 @@ pub struct AccountInfo {
 
 mod jetstream {
 
+    use std::str::from_utf8;
     use std::time::Duration;
 
     use super::*;
@@ -36,6 +37,7 @@ mod jetstream {
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
+    use tokio::time::Instant;
 
     #[tokio::test]
     async fn publish_with_headers() {
@@ -377,19 +379,23 @@ mod jetstream {
             .unwrap();
         let consumer = stream.get_consumer("pull").await.unwrap();
 
-        for _ in 0..1000 {
+        let mut p = 0;
+        for _ in 0..10_000 {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
                 .unwrap();
         }
 
-        let mut iter = consumer.sequence(50).unwrap().take(10);
+        let now = Instant::now();
+        let mut iter = consumer.sequence(100).unwrap().take(100);
         while let Ok(Some(mut batch)) = iter.try_next().await {
             while let Ok(Some(message)) = batch.try_next().await {
                 assert_eq!(message.payload, Bytes::from(b"dat".as_ref()));
+                message.ack().await.unwrap();
             }
         }
+        println!("elapsed sequence: {:?}", now.elapsed());
     }
 
     #[tokio::test]
@@ -418,7 +424,7 @@ mod jetstream {
         let consumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..1000 {
+            for i in 0..10000 {
                 context
                     .publish("events".to_string(), format!("i: {}", i).into())
                     .await
@@ -426,16 +432,22 @@ mod jetstream {
             }
         });
 
-        let mut iter = consumer.stream().await.unwrap().take(1000);
+        let mut z = 0;
+        let now = Instant::now();
+        let mut iter = consumer.stream().await.unwrap().take(10000);
         while let Some(result) = iter.next().await {
-            result.unwrap().ack().await.unwrap();
+            let msg = result.unwrap();
+            msg.ack().await.unwrap();
+            let payload = from_utf8(&msg.payload).unwrap();
+            assert_eq!(payload, format!("i: {}", z));
+            z += 1;
         }
+        println!("now stream: {:?}", now.elapsed());
     }
 
     #[tokio::test]
     // Test ignored until Server issue around sending Pull Request immediately after getting
     // 408 timeout is resolved.
-    #[ignore]
     async fn pull_stream_with_timeout() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -486,7 +498,6 @@ mod jetstream {
             .unwrap()
             .take(100);
         while let Some(result) = iter.next().await {
-            println!("MESSAGE: {:?}", result);
             result.unwrap().ack().await.unwrap();
         }
     }
