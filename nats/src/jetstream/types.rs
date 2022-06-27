@@ -731,7 +731,8 @@ pub struct PeerInfo {
     /// Nanoseconds since this peer was last seen.
     pub active: usize,
     /// Indicates the node is considered offline by the group.
-    pub offline: Option<bool>,
+    #[serde(default)]
+    pub offline: bool,
     //// How many uncommitted operations this peer is behind the leader.
     pub lag: Option<i64>,
 }
