@@ -721,11 +721,14 @@ pub struct ClusterInfo {
     pub replicas: Vec<ClusterReplicas>
 }
 
+/// The replica state of cluster (without leader node), and show the replicate state.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterReplicas {
-    /// The server's name, which is on this cluster (out of the leader)
+    /// The server's name, which is on this cluster (out of the leader).
     pub name: String,
+    /// The replica node on `current state` or not.
     pub current: bool,
+    /// The replica node seen `nano_sec` ago 
     pub active: usize,
 }
 
