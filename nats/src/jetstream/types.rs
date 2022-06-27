@@ -713,23 +713,27 @@ pub struct ConsumerInfo {
 /// Information about the stream's, consumer's associated `JetStream` cluster
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterInfo {
-    /// The name of cluster
+    /// The cluster name.
     pub name: String,
-    /// The leader of the cluster
+    /// The server name of the RAFT leader.
     pub leader: String,
-    /// The replica state of cluster
-    pub replicas: Vec<ClusterReplicas>
+    /// The members of the RAFT cluster.
+    pub replicas: Vec<PeerInfo>
 }
 
-/// The replica state of cluster (without leader node), and show the replicate state.
+/// The members of the RAFT cluster
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct ClusterReplicas {
-    /// The server's name, which is on this cluster (out of the leader).
+pub struct PeerInfo {
+    /// The server name of the peer.
     pub name: String,
-    /// The replica node on `current state` or not.
-    pub current: bool,
-    /// The replica node seen `nano_sec` ago 
+    /// Indicates if the server is up to date and synchronised.
+    pub current: Option<bool>,
+    /// Nanoseconds since this peer was last seen.
     pub active: usize,
+    /// Indicates the node is considered offline by the group.
+    pub offline: Option<bool>,
+    //// How many uncommitted operations this peer is behind the leader.
+    pub lag: i64,
 }
 
 /// Information about a consumer and the stream it is consuming
