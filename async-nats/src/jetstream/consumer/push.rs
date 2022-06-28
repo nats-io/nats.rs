@@ -29,38 +29,9 @@ impl Consumer<Config> {
 /// strong influence on the consumer's overall behavior.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// Setting `deliver_subject` to `Some(...)` will cause this consumer
-    /// to be "push-based". This is analogous in some ways to a normal
-    /// NATS subscription (rather than a queue subscriber) in that the
-    /// consumer will receive all messages published to the stream that
-    /// the consumer is interested in. Acknowledgement policies such as
-    /// `AckPolicy::None` and `AckPolicy::All` may be enabled for such
-    /// push-based consumers, which reduce the amount of effort spent
-    /// tracking delivery. Combining `AckPolicy::All` with
-    /// `Consumer::process_batch` enables particularly nice throughput
-    /// optimizations.
-    ///
-    /// Setting `deliver_subject` to `None` will cause this consumer to
-    /// be "pull-based", and will require explicit acknowledgement of
-    /// each message. This is analogous in some ways to a normal NATS
-    /// queue subscriber, where a message will be delivered to a single
-    /// subscriber. Pull-based consumers are intended to be used for
-    /// workloads where it is desirable to have a single process receive
-    /// a message. The only valid `ack_policy` for pull-based consumers
-    /// is the default of `AckPolicy::Explicit`, which acknowledges each
-    /// processed message individually. Pull-based consumers may be a
-    /// good choice for work queue-like workloads where you want messages
-    /// to be handled by a single consumer process. Note that it is
-    /// possible to deliver a message to multiple consumers if the
-    /// consumer crashes or is slow to acknowledge the delivered message.
-    /// This is a fundamental behavior present in all distributed systems
-    /// that attempt redelivery when a consumer fails to acknowledge a message.
-    /// This is known as "at least once" message processing. To achieve
-    /// "exactly once" semantics, it is necessary to implement idempotent
-    /// semantics in any system that is written to as a result of processing
-    /// a message.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deliver_subject: Option<String>,
+    /// The delivery subject used by the push consumer.
+    #[serde(default)]
+    pub deliver_subject: String,
 
     /// Setting `durable_name` to `Some(...)` will cause this consumer
     /// to be "durable". This may be a good choice for workloads that
@@ -136,7 +107,7 @@ impl FromConsumer for Config {
         }
 
         Ok(Config {
-            deliver_subject: config.deliver_subject,
+            deliver_subject: config.deliver_subject.unwrap(),
             durable_name: config.durable_name,
             description: config.description,
             deliver_group: config.deliver_group,
@@ -160,7 +131,7 @@ impl FromConsumer for Config {
 impl IntoConsumerConfig for Config {
     fn into_consumer_config(self) -> jetstream::consumer::Config {
         jetstream::consumer::Config {
-            deliver_subject: self.deliver_subject,
+            deliver_subject: Some(self.deliver_subject),
             durable_name: self.durable_name,
             description: self.description,
             deliver_group: self.deliver_group,
