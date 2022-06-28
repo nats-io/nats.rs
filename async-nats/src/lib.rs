@@ -1191,10 +1191,6 @@ impl ServerAddr {
     }
 
     /// Return the sockets from resolving the server address.
-    ///
-    /// # Fault injection
-    ///
-    /// If compiled with the `"fault_injection"` feature this method might fail artificially.
     pub fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr>> {
         (self.host(), self.port()).to_socket_addrs()
     }
