@@ -59,6 +59,18 @@ impl Client {
         }
     }
 
+    /// Publishes a message with the given subject and payload.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    ///     let client = async_nats::connect("demo.nats.io").await?;
+    ///     client.publish("messages".into(), "hello world".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
@@ -72,6 +84,22 @@ impl Client {
         Ok(())
     }
 
+    /// Publishes a message with the given subject, headers and payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # use async_nats::{connect, HeaderMap};
+    ///
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    ///     let client = connect("demo.nats.io").await?;
+    ///     let headers = HeaderMap::new();
+    ///     headers.insert("Nats-Expected-Last-Sequence".parse(), "1".parse())?;
+    ///     client.publish_with_headers("messages".into(), headers, "hello world".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish_with_headers(
         &self,
         subject: String,
@@ -90,6 +118,18 @@ impl Client {
         Ok(())
     }
 
+    /// Publishes a message with the given subject, response subject and payload.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    ///     let client = async_nats::connect("demo.nats.io").await?;
+    ///     client.publish_with_reply("messages".into(), "hello world".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish_with_reply(
         &self,
         subject: String,
@@ -108,6 +148,18 @@ impl Client {
         Ok(())
     }
 
+    /// Publishes a message with the given subject, reply subject, headers and payload.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    ///     let client = async_nats::connect("demo.nats.io").await?;
+    ///     client.publish("messages".into(), "hello world".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish_with_reply_and_headers(
         &self,
         subject: String,
