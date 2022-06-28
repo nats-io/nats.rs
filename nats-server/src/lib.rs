@@ -157,6 +157,8 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     if !cfg.is_empty() {
         cmd.arg("-c").arg(cfg);
     }
+    cmd.arg("--debug");
+    cmd.arg("--trace");
 
     let child = cmd.spawn().unwrap();
 

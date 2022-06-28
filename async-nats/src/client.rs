@@ -193,25 +193,26 @@ impl Client {
         format!("_INBOX.{}", nuid::next())
     }
 
+    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
+        let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = mpsc::channel(self.subscription_capacity);
+
+        self.sender
+            .send(Command::Subscribe {
+                sid,
+                subject,
+                queue_group: None,
+                sender,
+            })
+            .await?;
+
+        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+    }
+
     pub async fn queue_subscribe(
         &self,
         subject: String,
         queue_group: String,
-    ) -> Result<Subscriber, Error> {
-        self._subscribe(subject, Some(queue_group)).await
-    }
-
-    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
-        self._subscribe(subject, None).await
-    }
-
-    // TODO: options/questions for nats team:
-    //  - should there just be a single subscribe() function (would be breaking api against 0.11.0)
-    //  - if queue_subscribe is a separate function, how do you want to name the private function here?
-    async fn _subscribe(
-        &self,
-        subject: String,
-        queue_group: Option<String>,
     ) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -220,7 +221,7 @@ impl Client {
             .send(Command::Subscribe {
                 sid,
                 subject,
-                queue_group,
+                queue_group: Some(queue_group),
                 sender,
             })
             .await?;
