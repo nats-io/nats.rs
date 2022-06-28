@@ -38,25 +38,19 @@
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
-//! async fn example() {
-//!     let client = async_nats::connect("demo.nats.io").await.unwrap();
-//!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//! async fn main() -> Result<(), async_nats::Error> {
+//!     let client = async_nats::connect("demo.nats.io").await?;
+//!     let mut subscriber = client.subscribe("messages".into()).await?.take(10);
 //!
 //!     for _ in 0..10 {
-//!         client.publish("foo".into(), "data".into()).await.unwrap();
+//!         client.publish("messages".into(), "data".into()).await?;
 //!     }
 //!
-//!     let mut i = 0;
-//!     while subscriber.next()
-//!         .await
-//!         .is_some()
-//!     {
-//!         i += 1;
-//!         if i >= 10 {
-//!             break;
-//!         }
+//!     while let Some(message) = subscriber.next().await {
+//!       println!("Received message {:?}", message);
 //!     }
-//!     assert_eq!(i, 10);
+//!
+//!     Ok(())
 //! }
 //!
 //! ```
