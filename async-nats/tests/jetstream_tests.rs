@@ -580,6 +580,60 @@ mod jetstream {
             result.unwrap().ack().await.unwrap();
         }
     }
+
+    #[tokio::test]
+    async fn pull_stream_error() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer = stream.get_consumer("pull").await.unwrap();
+
+        tokio::task::spawn(async move {
+            for i in 0..100 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                context
+                    .publish(
+                        "events".to_string(),
+                        format!("hearbeat message: {}", i).into(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let mut iter = consumer
+            .stream_with_config(consumer::pull::BatchConfig {
+                batch: 25,
+                no_wait: false,
+                max_bytes: 0,
+                idle_heartbeat: Duration::from_millis(10),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .take(1);
+        while let Some(result) = iter.next().await {
+            result.expect_err("should be status error");
+        }
+    }
     #[tokio::test]
     async fn pull_fetch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
