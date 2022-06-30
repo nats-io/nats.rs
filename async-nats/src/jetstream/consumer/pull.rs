@@ -347,12 +347,21 @@ impl<'a> futures::Stream for Stream<'a> {
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {}
-                        _ => {
+                        StatusCode::OK => {
                             self.pending_messages -= 1;
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,
                             })));
+                        }
+                        status => {
+                            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!(
+                                    "eror while processing messages from the stream: {}, {:?}",
+                                    status, message.description
+                                ),
+                            )))))
                         }
                     },
                     None => return Poll::Ready(None),
