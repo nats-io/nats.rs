@@ -718,7 +718,7 @@ pub struct ClusterInfo {
     /// The server name of the RAFT leader.
     pub leader: String,
     /// The members of the RAFT cluster.
-    pub replicas: option<Vec<PeerInfo>>,
+    pub replicas: Option<Vec<PeerInfo>>,
 }
 
 /// The members of the RAFT cluster
