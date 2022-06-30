@@ -182,12 +182,21 @@ impl futures::Stream for Batch {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => Poll::Ready(None),
                     StatusCode::IDLE_HEARBEAT => Poll::Pending,
-                    _ => {
+                    StatusCode::OK => {
                         self.pending_messages -= 1;
                         Poll::Ready(Some(Ok(jetstream::Message {
                             context: self.context.clone(),
                             message,
                         })))
+                    }
+                    status => {
+                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!(
+                                "eror while processing messages from the stream: {}, {:?}",
+                                status, message.description
+                            ),
+                        )))))
                     }
                 },
                 None => Poll::Ready(None),
