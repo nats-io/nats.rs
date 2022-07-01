@@ -359,10 +359,7 @@ impl HeaderMap {
     /// map.insert(STATUS, "200".to_string());
     /// assert_eq!(map.get(STATUS).unwrap(), &"200");
     /// ```
-    pub fn get<K: ?Sized>(&self, key: &K) -> Option<&String>
-    where
-        K: ToString,
-    {
+    pub fn get<K: ToString + ?Sized>(&self, key: &K) -> Option<&String> {
         self.inner
             .get(&key.to_string())
             .and_then(|values| values.iter().next())
@@ -394,10 +391,7 @@ impl HeaderMap {
     /// }
     /// ```
     ///
-    pub fn get_all<K: ?Sized>(&self, key: &K) -> GetAll<'_>
-    where
-        K: ToString,
-    {
+    pub fn get_all<K: ToString + ?Sized>(&self, key: &K) -> GetAll<'_> {
         GetAll {
             map: self,
             key: key.to_string(),
