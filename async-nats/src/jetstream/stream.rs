@@ -100,10 +100,10 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn create_consumer<C: IntoConsumerConfig>(
+    pub async fn create_consumer<C: IntoConsumerConfig + FromConsumer>(
         &self,
         config: C,
-    ) -> Result<consumer::Info, Error> {
+    ) -> Result<Consumer<C>, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
             format!(
@@ -129,7 +129,11 @@ impl Stream {
                     error.code, error.status, error.description
                 ),
             ))),
-            Response::Ok(info) => Ok(info),
+            Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
+                FromConsumer::try_from_consumer_config(info.clone().config)?,
+                info,
+                self.context.clone(),
+            )),
         }
     }
 
@@ -227,16 +231,7 @@ impl Stream {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
-            Response::Err { error } if error.status == 404 => self
-                .create_consumer(config.into_consumer_config())
-                .await
-                .map(|info| {
-                    Consumer::new(
-                        T::try_from_consumer_config(info.config.clone()).unwrap(),
-                        info,
-                        self.context.clone(),
-                    )
-                }),
+            Response::Err { error } if error.status == 404 => self.create_consumer(config).await,
             Response::Err { error } => Err(Box::new(io::Error::new(
                 ErrorKind::Other,
                 format!(

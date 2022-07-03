@@ -404,14 +404,13 @@ mod jetstream {
             .unwrap();
 
         let stream = context.get_stream("events").await.unwrap();
-        stream
+        let consumer = stream
             .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".to_string()),
                 ..Default::default()
             })
             .await
             .unwrap();
-        let consumer = stream.get_consumer("pull").await.unwrap();
 
         for _ in 0..1000 {
             context
