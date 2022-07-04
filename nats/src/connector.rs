@@ -20,7 +20,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use url::Url;
+use url::{Host, Url};
 
 use webpki::DNSNameRef;
 
@@ -625,7 +625,15 @@ impl ServerAddress {
 
     /// Returns the host.
     pub fn host(&self) -> &str {
-        self.0.host_str().unwrap()
+        match self.0.host() {
+            Some(Host::Domain(_)) | Some(Host::Ipv4 { .. }) => self.0.host_str().unwrap(),
+            // `host_str()` for Ipv6 includes the []s
+            Some(Host::Ipv6 { .. }) => {
+                let host = self.0.host_str().unwrap();
+                &host[1..host.len() - 1]
+            }
+            None => "",
+        }
     }
 
     /// Returns the port.
@@ -711,6 +719,24 @@ impl IntoServerList for io::Result<Vec<ServerAddress>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_address_ipv6() {
+        let address = ServerAddress::from_str("nats://[::]").unwrap();
+        assert_eq!(address.host(), "::")
+    }
+
+    #[test]
+    fn server_address_ipv4() {
+        let address = ServerAddress::from_str("nats://127.0.0.1").unwrap();
+        assert_eq!(address.host(), "127.0.0.1")
+    }
+
+    #[test]
+    fn server_address_domain() {
+        let address = ServerAddress::from_str("nats://example.com").unwrap();
+        assert_eq!(address.host(), "example.com")
+    }
 
     #[test]
     fn server_address_no_auth() {
