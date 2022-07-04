@@ -26,7 +26,7 @@ use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig
 use jetstream::consumer;
 
 impl Consumer<Config> {
-    /// Returns a stream of message request results
+    /// Returns a stream of messages.
     ///
     /// # Example
     ///
@@ -125,6 +125,47 @@ impl Consumer<Config> {
         Ok(())
     }
 
+    /// Returns a batch of specified number of messages, or if there are less messages on the
+    /// [Stream] than requested, returns all available messages.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    ///
+    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+    ///     durable_name: Some("consumer".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// for _ in 0..100 {
+    ///     jetstream.publish("events".to_string(), "data".into()).await?;
+    /// }
+    ///
+    /// let mut messages = consumer.fetch(200).await?;
+    /// // will finish after 100 messages, as that is the number of messages available on the
+    /// // stream.
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///   println!("got message {:?}", message);
+    ///   message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
     pub async fn fetch(&self, batch: usize) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
@@ -138,6 +179,40 @@ impl Consumer<Config> {
         .await
     }
 
+    /// Returns a batch of specified number of messages unless timeout happens first.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    ///
+    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+    ///     durable_name: Some("consumer".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let mut messages = consumer.batch(100, None).await?;
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///   println!("got message {:?}", message);
+    ///   message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
     pub async fn batch(&self, batch: usize, expires: Option<usize>) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
@@ -152,6 +227,42 @@ impl Consumer<Config> {
         .await
     }
 
+    /// Returns a sequence of [Batches][Batch] allowing for iterating over batches, and then over
+    /// messages in batches.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    ///
+    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
+    ///     durable_name: Some("consumer".to_string()),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let mut iter = consumer.sequence(50).unwrap().take(10);
+    /// while let Ok(Some(mut batch)) = iter.try_next().await {
+    ///     while let Ok(Some(message)) = batch.try_next().await {
+    ///         println!("message received: {:?}", message);
+    ///     }
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
     pub fn sequence(&self, batch: usize) -> Result<Sequence, Error> {
         let context = self.context.clone();
         let subject = format!(
