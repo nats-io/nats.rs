@@ -391,6 +391,7 @@ pub struct StreamInfo {
     /// Various metrics associated with this stream
     pub state: StreamState,
     /// Information about the stream's cluster
+    #[serde(default)]
     pub cluster: ClusterInfo,
 }
 
@@ -704,6 +705,7 @@ pub struct ConsumerInfo {
     /// The number of pending
     pub num_pending: u64,
     /// Information about the consumer's cluster
+    #[serde(default)]
     pub cluster: ClusterInfo,
     /// Indicates if any client is connected and receiving messages from a push consumer
     #[serde(default)]
@@ -714,11 +716,14 @@ pub struct ConsumerInfo {
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterInfo {
     /// The cluster name.
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
     /// The server name of the RAFT leader.
-    pub leader: String,
+    #[serde(default)]
+    pub leader: Option<String>,
     /// The members of the RAFT cluster.
-    pub replicas: Option<Vec<PeerInfo>>,
+    #[serde(default)]
+    pub replicas: Vec<PeerInfo>,
 }
 
 /// The members of the RAFT cluster
