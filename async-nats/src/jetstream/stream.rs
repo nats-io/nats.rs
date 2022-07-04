@@ -36,6 +36,50 @@ pub struct Stream {
 }
 
 impl Stream {
+    /// Get a raw message from the stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    ///
+    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
+    /// println!("Retreived raw message {:?}", raw_message);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, Error> {
+        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let payload = json!({
+            "seq": sequence,
+        });
+
+        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting message: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(value) => Ok(value.message),
+        }
+    }
+
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
@@ -419,6 +463,35 @@ pub struct State {
     pub last_timestamp: time::OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
+}
+
+/// A raw stream message in the representation it is stored.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RawMessage {
+    /// Subject of the message.
+    #[serde(rename = "subject")]
+    pub subject: String,
+
+    /// Sequence of the message.
+    #[serde(rename = "seq")]
+    pub sequence: u64,
+
+    /// Raw payload of the message as a base64 encoded string.
+    #[serde(default, rename = "data")]
+    pub payload: String,
+
+    /// Raw header string, if any.
+    #[serde(default, rename = "hdrs")]
+    pub headers: Option<String>,
+
+    /// The time the message was published.
+    #[serde(rename = "time", with = "rfc3339")]
+    pub time: time::OffsetDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct GetRawMessage {
+    pub message: RawMessage,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
