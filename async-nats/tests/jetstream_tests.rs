@@ -616,13 +616,10 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_with_config(consumer::pull::BatchConfig {
-                batch: 25,
-                no_wait: false,
-                max_bytes: 0,
-                idle_heartbeat: Duration::from_millis(10),
-                ..Default::default()
-            })
+            .stream_builder()
+            .max_messages_per_batch(25)
+            .hearbeat(Duration::from_millis(100))
+            .into_stream()
             .await
             .unwrap()
             .take(1);
