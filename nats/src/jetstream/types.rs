@@ -734,12 +734,13 @@ pub struct PeerInfo {
     /// Indicates if the server is up to date and synchronised.
     pub current: bool,
     /// Nanoseconds since this peer was last seen.
-    pub active: usize,
+    #[serde(with = "serde_nanos")]
+    pub active: Duration,
     /// Indicates the node is considered offline by the group.
     #[serde(default)]
     pub offline: bool,
     /// How many uncommitted operations this peer is behind the leader.
-    pub lag: Option<i64>,
+    pub lag: Option<u64>,
 }
 
 /// Information about a consumer and the stream it is consuming
