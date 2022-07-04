@@ -9,16 +9,18 @@ async fn main() -> Result<(), async_nats::Error> {
     let jetstream = async_nats::jetstream::new(client);
 
     let consumer: PullConsumer = jetstream
-        .create_stream("max")
+        .create_stream("events")
         .await?
         .create_consumer(async_nats::jetstream::consumer::pull::Config {
-            durable_name: Some("max".to_string()),
+            durable_name: Some("consumer".to_string()),
             ..Default::default()
         })
         .await?;
 
     for _ in 0..10 {
-        jetstream.publish("max".to_string(), "max".into()).await?;
+        jetstream
+            .publish("events".to_string(), "data".into())
+            .await?;
     }
 
     let mut messages = consumer.stream().await?.take(10);

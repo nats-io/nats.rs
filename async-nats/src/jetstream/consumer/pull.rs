@@ -228,7 +228,7 @@ impl Consumer<Config> {
     }
 
     /// Returns a sequence of [Batches][Batch] allowing for iterating over batches, and then over
-    /// messages in batches.
+    /// messages in those batches.
     ///
     /// # Example
     ///
