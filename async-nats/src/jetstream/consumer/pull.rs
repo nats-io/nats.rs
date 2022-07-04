@@ -412,7 +412,7 @@ impl<'a> futures::Stream for Stream<'a> {
     }
 }
 
-/// Used for building configuration for a [Stream]. Created by a [stream_builder] on a [Consumer].
+/// Used for building configuration for a [Stream]. Created by a [Consumer::stream_builder] on a [Consumer].
 ///
 /// # Examples
 ///

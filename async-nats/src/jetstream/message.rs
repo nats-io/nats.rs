@@ -41,8 +41,8 @@ impl From<Message> for crate::Message {
 impl Message {
     /// Acknowledges a message delivery by sending `+ACK` to the server.
     ///
-    /// If [consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
-    /// Otherwise redeliveries will occur and [consumer::Consumer] will not be able to advance.
+    /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
+    /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
     ///
     /// Examples
     ///
@@ -123,8 +123,8 @@ impl Message {
     /// and awaits for confirmation for the server that it received the message.
     /// Useful if user wants to ensure `exactly once` semantics.
     ///
-    /// If [consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
-    /// Otherwise redeliveries will occur and [consumer::Consumer] will not be able to advance.
+    /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
+    /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
     ///
     /// Examples
     ///
