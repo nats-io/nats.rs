@@ -13,9 +13,11 @@
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
     jetstream::{self, Context, Error, Message},
+    status::StatusCode,
     Subscriber,
 };
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{self, Poll};
@@ -45,6 +47,19 @@ impl futures::Stream for Stream {
         match self.subscriber.receiver.poll_recv(cx) {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status {
+                    Some(StatusCode::IDLE_HEARBEAT) => {
+                        if let Some(subject) = message.reply.clone() {
+                            let client = self.context.client.clone();
+                            tokio::task::spawn(async move {
+                                client
+                                    .publish(subject, Bytes::from_static(b""))
+                                    .await
+                                    .unwrap();
+                            });
+                        }
+
+                        Poll::Pending
+                    }
                     Some(_) => Poll::Pending,
                     None => Poll::Ready(Some(jetstream::Message {
                         context: self.context.clone(),
