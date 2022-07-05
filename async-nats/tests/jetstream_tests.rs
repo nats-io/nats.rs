@@ -359,7 +359,7 @@ mod jetstream {
 
         // this creates the consumer
         let _consumer: PullConsumer = stream
-            .get_or_create_consumer::<pull::Config>(
+            .get_or_create_consumer::<consumer::pull::Config>(
                 "consumer",
                 consumer::pull::Config {
                     durable_name: Some("consumer".to_string()),
@@ -445,7 +445,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::push::Config {
-                deliver_subject: Some("push".to_string()),
+                deliver_subject: "push".to_string(),
                 durable_name: Some("push".to_string()),
                 ..Default::default()
             })
@@ -485,8 +485,8 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&push::Config {
-                deliver_subject: Some("push".to_string()),
+            .create_consumer(consumer::push::Config {
+                deliver_subject: "push".to_string(),
                 durable_name: Some("push".to_string()),
                 flow_control: true,
                 idle_heartbeat: Duration::from_millis(100),
@@ -530,8 +530,8 @@ mod jetstream {
 
         let stream = context.get_stream("events").await.unwrap();
         stream
-            .create_consumer(&push::Config {
-                deliver_subject: Some("push".to_string()),
+            .create_consumer(consumer::push::Config {
+                deliver_subject: "push".to_string(),
                 durable_name: Some("push".to_string()),
                 idle_heartbeat: Duration::from_millis(100),
                 ..Default::default()

@@ -47,7 +47,7 @@ impl futures::Stream for Stream {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status {
                     Some(StatusCode::IDLE_HEARBEAT) => {
-                        if let Some(subject) = message.reply.clone() {
+                        if let Some(subject) = message.reply {
                             let client = self.context.client.clone();
                             tokio::task::spawn(async move {
                                 client
