@@ -12,9 +12,8 @@
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
-    jetstream::{self, Context, Error, Message},
-    status::StatusCode,
-    Subscriber,
+    jetstream::{self, Context, Message},
+    Error, StatusCode, Subscriber,
 };
 
 use bytes::Bytes;
