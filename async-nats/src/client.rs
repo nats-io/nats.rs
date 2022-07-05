@@ -42,7 +42,7 @@ impl error::Error for PublishError {}
 
 /// Client is a `Clonable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
-/// [connect] and [ConnectOptions::connect]
+/// [crate::connect] and [crate::ConnectOptions::connect]
 #[derive(Clone, Debug)]
 pub struct Client {
     sender: mpsc::Sender<Command>,
