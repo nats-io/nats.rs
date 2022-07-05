@@ -28,7 +28,7 @@ async fn main() -> Result<(), async_nats::Error> {
     while let Some(message) = messages.next().await {
         let message = message?;
         println!("got message: {:?}", message);
-        println!("paylaod: {:?}", from_utf8(&message.payload));
+        println!("payload: {:?}", from_utf8(&message.payload));
     }
 
     Ok(())
