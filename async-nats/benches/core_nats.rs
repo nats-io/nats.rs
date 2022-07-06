@@ -8,8 +8,8 @@ pub fn publish(c: &mut Criterion) {
     throughput_group.warm_up_time(std::time::Duration::from_secs(1));
 
     let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
-    for size in [32, 128, 256, 1024, 4096, 8192].iter() {
-        throughput_group.throughput(criterion::Throughput::Bytes(*size as u64 * 1000));
+    for size in [32, 1024, 8192].iter() {
+        throughput_group.throughput(criterion::Throughput::Bytes(*size as u64 * 100));
         throughput_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
             size,
@@ -21,7 +21,7 @@ pub fn publish(c: &mut Criterion) {
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
-                    async move { publish_1000_messages(nc, msg).await }
+                    async move { publish_messages(nc, msg, 100).await }
                 });
             },
         );
@@ -33,8 +33,8 @@ pub fn publish(c: &mut Criterion) {
     messages_group.warm_up_time(std::time::Duration::from_secs(1));
 
     let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
-    for size in [32, 128, 256, 1024, 4096, 8192].iter() {
-        messages_group.throughput(criterion::Throughput::Elements(1000));
+    for size in [32, 1024, 8192].iter() {
+        messages_group.throughput(criterion::Throughput::Elements(100));
         messages_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
             size,
@@ -50,7 +50,7 @@ pub fn publish(c: &mut Criterion) {
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
-                    async move { publish_1000_messages(nc, msg).await }
+                    async move { publish_messages(nc, msg, 100).await }
                 });
             },
         );
@@ -65,8 +65,8 @@ pub fn subscribe(c: &mut Criterion) {
     subscribe_amount_group.sample_size(10);
     subscribe_amount_group.warm_up_time(std::time::Duration::from_secs(1));
 
-    for size in [32, 128, 256, 1024, 4096, 8192].iter() {
-        subscribe_amount_group.throughput(criterion::Throughput::Elements(1000));
+    for size in [32, 1024, 8192].iter() {
+        subscribe_amount_group.throughput(criterion::Throughput::Elements(100));
         subscribe_amount_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
             size,
@@ -95,16 +95,16 @@ pub fn subscribe(c: &mut Criterion) {
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
-                    async move { subscribe_1000_messages(nc).await }
+                    async move { subscribe_messages(nc, 100).await }
                 });
             },
         );
     }
     subscribe_amount_group.finish();
 }
-async fn publish_1000_messages(nc: async_nats::Client, msg: &'_ [u8]) {
+async fn publish_messages(nc: async_nats::Client, msg: &'_ [u8], amount: usize) {
     let msg = msg.to_vec();
-    for _i in 0..1000 {
+    for _i in 0..amount {
         nc.publish("bench".into(), msg.clone().into())
             .await
             .unwrap();
@@ -112,9 +112,9 @@ async fn publish_1000_messages(nc: async_nats::Client, msg: &'_ [u8]) {
     nc.flush().await.unwrap();
 }
 
-async fn subscribe_1000_messages(nc: async_nats::Client) {
+async fn subscribe_messages(nc: async_nats::Client, amount: usize) {
     let mut sub = nc.subscribe("bench".into()).await.unwrap();
-    for _ in 0..1000 {
+    for _ in 0..amount {
         sub.next().await.unwrap();
     }
 }
