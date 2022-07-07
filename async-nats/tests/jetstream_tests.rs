@@ -551,9 +551,10 @@ mod jetstream {
 
         tokio::task::spawn(async move {
             for i in 0..500 {
-                // if i > 4500 {
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                // }
+                // add some time to allow hearbeats kick in
+                if i > 250 {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
                 context
                     .publish(
                         "events".to_string(),

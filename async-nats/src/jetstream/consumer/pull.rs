@@ -435,10 +435,8 @@ impl<'a> Stream<'a> {
         let (hearbeat_sender, mut hearbeat_receiver) = tokio::sync::mpsc::channel(128);
         let (missing_sender, missing_receiver) = tokio::sync::oneshot::channel();
         if !batch_config.idle_heartbeat.is_zero() {
-            println!("hearbeat is not zero. running check thread");
             tokio::task::spawn(async move {
                 loop {
-                    println!("new hb loop");
                     match tokio::time::timeout(
                         batch_config.idle_heartbeat.mul_f64(4.0),
                         hearbeat_receiver.recv(),
@@ -446,14 +444,12 @@ impl<'a> Stream<'a> {
                     .await
                     {
                         Err(_) => {
-                            println!("reached timeout for hb wait");
                             missing_sender.send(()).unwrap();
                             break;
                         }
                         Ok(recv) => match recv {
                             None => break,
                             Some(_) => {
-                                println!("received hb in loop");
                                 continue;
                             }
                         },
@@ -494,13 +490,9 @@ impl<'a> futures::Stream for Stream<'a> {
             )))));
         }
         loop {
-            if self.hearbeats_counter > 0 {
-                println!("hearbeat counter: {:?}", self.hearbeats_counter);
-            }
             match self.hearbeat.as_mut() {
                 None => {
                     if self.hearbeats_counter > 0 {
-                        println!("hearbet future is none. serting to some");
                         let sender = self.hearbeat_sender.clone();
                         self.hearbeat = Some(Box::pin(async move {
                             sender.send(()).await?;
@@ -513,7 +505,6 @@ impl<'a> futures::Stream for Stream<'a> {
                         self.request = None;
                         result?;
                         self.hearbeat = None;
-                        println!("decremeanting counter: {:?}", self.hearbeats_counter);
                         self.hearbeats_counter -= 1;
                         self.last_activity = Instant::now();
                         if self.hearbeats_counter > 0 {
@@ -573,11 +564,6 @@ impl<'a> futures::Stream for Stream<'a> {
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {
-                            println!(
-                                "increamentinh hb because of idle hb in {:?}",
-                                self.last_activity
-                            );
-                            println!("HB message: {:?}", message);
                             self.hearbeats_counter += 1;
                             continue;
                         }
@@ -588,7 +574,6 @@ impl<'a> futures::Stream for Stream<'a> {
                                 .elapsed()
                                 .gt(&self.batch_config.idle_heartbeat)
                             {
-                                println!("incrementing hb counter in ok message");
                                 self.hearbeats_counter += 1;
                             }
                             return Poll::Ready(Some(Ok(jetstream::Message {
@@ -609,7 +594,6 @@ impl<'a> futures::Stream for Stream<'a> {
                     None => return Poll::Ready(None),
                 },
                 Poll::Pending => {
-                    println!("pending poll for message");
                     return std::task::Poll::Pending;
                 }
             }
