@@ -552,7 +552,7 @@ mod jetstream {
         tokio::task::spawn(async move {
             for i in 0..500 {
                 // add some time to allow hearbeats kick in
-                if i > 250 {
+                if i > 400 {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
                 context

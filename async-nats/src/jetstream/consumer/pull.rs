@@ -490,29 +490,31 @@ impl<'a> futures::Stream for Stream<'a> {
             )))));
         }
         loop {
-            match self.hearbeat.as_mut() {
-                None => {
-                    if self.hearbeats_counter > 0 {
-                        let sender = self.hearbeat_sender.clone();
-                        self.hearbeat = Some(Box::pin(async move {
-                            sender.send(()).await?;
-                            Ok(())
-                        }));
-                    }
-                }
-                Some(hearbeat) => match hearbeat.as_mut().poll(cx) {
-                    Poll::Ready(result) => {
-                        self.request = None;
-                        result?;
-                        self.hearbeat = None;
-                        self.hearbeats_counter -= 1;
-                        self.last_activity = Instant::now();
+            if !self.batch_config.idle_heartbeat.is_zero() {
+                match self.hearbeat.as_mut() {
+                    None => {
                         if self.hearbeats_counter > 0 {
-                            continue;
+                            let sender = self.hearbeat_sender.clone();
+                            self.hearbeat = Some(Box::pin(async move {
+                                sender.send(()).await?;
+                                Ok(())
+                            }));
                         }
                     }
-                    Poll::Pending => {}
-                },
+                    Some(hearbeat) => match hearbeat.as_mut().poll(cx) {
+                        Poll::Ready(result) => {
+                            self.request = None;
+                            result?;
+                            self.hearbeat = None;
+                            self.hearbeats_counter -= 1;
+                            self.last_activity = Instant::now();
+                            if self.hearbeats_counter > 0 {
+                                continue;
+                            }
+                        }
+                        Poll::Pending => {}
+                    },
+                }
             }
             match self.request.as_mut() {
                 None => {
