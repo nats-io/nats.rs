@@ -506,7 +506,7 @@ impl<'a> futures::Stream for Stream<'a> {
                             self.request = None;
                             result?;
                             self.hearbeat = None;
-                            self.hearbeats_counter -= 1;
+                            self.hearbeats_counter = self.hearbeats_counter.saturating_sub(1);
                             self.last_activity = Instant::now();
                             if self.hearbeats_counter > 0 {
                                 continue;
@@ -566,7 +566,7 @@ impl<'a> futures::Stream for Stream<'a> {
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {
-                            self.hearbeats_counter += 1;
+                            self.hearbeats_counter = self.hearbeats_counter.saturating_add(1);
                             continue;
                         }
                         StatusCode::OK => {
@@ -576,7 +576,7 @@ impl<'a> futures::Stream for Stream<'a> {
                                 .elapsed()
                                 .gt(&self.batch_config.idle_heartbeat)
                             {
-                                self.hearbeats_counter += 1;
+                                self.hearbeats_counter = self.hearbeats_counter.saturating_add(1);
                             }
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
