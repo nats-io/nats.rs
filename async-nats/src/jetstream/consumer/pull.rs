@@ -74,7 +74,7 @@ impl Consumer<Config> {
         .await
     }
 
-    /// Enables customization of [Stream] by setting timeouts, hearbeats, maximum number of
+    /// Enables customization of all types of [futures::Stream] by setting timeouts, hearbeats, maximum number of
     /// messages or bytes buffered.
     ///
     /// # Examples
@@ -90,7 +90,7 @@ impl Consumer<Config> {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.stream_builder()
+    /// let mut messages = consumer.iterator_builder()
     ///     .max_messages_per_batch(100)
     ///     .max_bytes_per_batch(1024)
     ///     .into_stream().await?;
@@ -102,8 +102,8 @@ impl Consumer<Config> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn stream_builder(&self) -> StreamBuilder<'_> {
-        StreamBuilder::new(self)
+    pub fn iterator_builder(&self) -> IteratorBuilder<'_> {
+        IteratorBuilder::new(self)
     }
 
     pub(crate) async fn request_batch<I: Into<BatchConfig>>(
@@ -523,7 +523,7 @@ impl<'a> futures::Stream for Stream<'a> {
     }
 }
 
-/// Used for building configuration for a [Stream]. Created by a [Consumer::stream_builder] on a [Consumer].
+/// Used for building configuration for a [Stream]. Created by a [Consumer::iterator_builder] on a [Consumer].
 ///
 /// # Examples
 ///
@@ -538,7 +538,7 @@ impl<'a> futures::Stream for Stream<'a> {
 ///     .get_stream("events").await?
 ///     .get_consumer("pull").await?;
 ///
-/// let mut messages = consumer.stream_builder()
+/// let mut messages = consumer.iterator_builder()
 ///     .max_messages_per_batch(100)
 ///     .max_bytes_per_batch(1024)
 ///     .into_stream().await?;
@@ -550,7 +550,7 @@ impl<'a> futures::Stream for Stream<'a> {
 /// }
 /// # Ok(())
 /// # }
-pub struct StreamBuilder<'a> {
+pub struct IteratorBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     hearbeat: Duration,
@@ -558,9 +558,9 @@ pub struct StreamBuilder<'a> {
     consumer: &'a Consumer<Config>,
 }
 
-impl<'a> StreamBuilder<'a> {
+impl<'a> IteratorBuilder<'a> {
     pub fn new(consumer: &'a Consumer<Config>) -> Self {
-        StreamBuilder {
+        IteratorBuilder {
             consumer,
             batch: 200,
             max_bytes: 0,
@@ -589,7 +589,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.stream_builder()
+    /// let mut messages = consumer.iterator_builder()
     ///     .max_bytes_per_batch(1024)
     ///     .into_stream().await?;
     ///
@@ -625,7 +625,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.stream_builder()
+    /// let mut messages = consumer.iterator_builder()
     ///     .max_messages_per_batch(100)
     ///     .into_stream().await?;
     ///
@@ -657,7 +657,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.stream_builder()
+    /// let mut messages = consumer.iterator_builder()
     ///     .hearbeat(std::time::Duration::from_secs(10))
     ///     .into_stream().await?;
     ///
@@ -690,7 +690,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.stream_builder()
+    /// let mut messages = consumer.iterator_builder()
     ///     .expires(std::time::Duration::from_secs(30))
     ///     .into_stream().await?;
     ///
@@ -706,7 +706,7 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
-    /// Creates actual [Stream] with provided configuration.
+    /// Creates [Stream] iterator with provided configuration.
     ///
     /// # Examples
     ///
@@ -721,7 +721,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.stream_builder()
+    /// let mut messages = consumer.iterator_builder()
     ///     .max_messages_per_batch(100)
     ///     .into_stream().await?;
     ///
@@ -734,6 +734,96 @@ impl<'a> StreamBuilder<'a> {
     /// # }
     pub async fn into_stream(self) -> Result<Stream<'a>, Error> {
         Stream::stream(
+            BatchConfig {
+                batch: self.batch,
+                expires: Some(self.expires),
+                no_wait: false,
+                max_bytes: self.max_bytes,
+                idle_heartbeat: self.hearbeat,
+            },
+            self.consumer,
+        )
+        .await
+    }
+
+    /// Creates [Batch] iterator with provided configuration.
+    ///
+    /// This variant will not wait for more messages if given [Consumer] on the server
+    /// has less messages already available than requested. In such case, iterator will finish.
+    ///
+    /// Setting expires and reaching its limit will result in stopped iterator with `timeout`
+    /// error.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer = jetstream
+    ///     .get_stream("events").await?
+    ///     .get_consumer("pull").await?;
+    ///
+    /// let mut messages = consumer.iterator_builder()
+    ///     .max_messages_per_batch(100)
+    ///     .into_fetch().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    pub async fn into_fetch(self) -> Result<Batch, Error> {
+        Batch::batch(
+            BatchConfig {
+                batch: self.batch,
+                expires: Some(self.expires),
+                no_wait: true,
+                max_bytes: self.max_bytes,
+                idle_heartbeat: self.hearbeat,
+            },
+            self.consumer,
+        )
+        .await
+    }
+
+    /// Creates [Batch] iterator with provided configuration.
+    /// This variants waits until all messages arrive or timeout happens.
+    ///
+    /// Setting expires and reaching its limit will result in stopped iterator with `timeout`
+    /// error.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer = jetstream
+    ///     .get_stream("events").await?
+    ///     .get_consumer("pull").await?;
+    ///
+    /// let mut messages = consumer.iterator_builder()
+    ///     .max_messages_per_batch(100)
+    ///     .into_batch().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    pub async fn into_batch(self) -> Result<Batch, Error> {
+        Batch::batch(
             BatchConfig {
                 batch: self.batch,
                 expires: Some(self.expires),

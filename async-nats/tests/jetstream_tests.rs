@@ -643,7 +643,7 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_builder()
+            .iterator_builder()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(100))
             .into_stream()
@@ -695,7 +695,7 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_builder()
+            .iterator_builder()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(500))
             .hearbeat(Duration::from_millis(10))
@@ -748,7 +748,7 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_builder()
+            .iterator_builder()
             .max_messages_per_batch(25)
             .hearbeat(Duration::from_millis(100))
             .into_stream()
@@ -803,7 +803,26 @@ mod jetstream {
             i += 1;
         }
         assert_eq!(i, 10);
+
+        for _ in 0..10 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let iter = consumer
+            .iterator_builder()
+            .max_messages_per_batch(10)
+            .into_fetch()
+            .await
+            .unwrap()
+            .count()
+            .await;
+
+        assert_eq!(iter, 10);
     }
+
     #[tokio::test]
     async fn pull_batch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -834,22 +853,32 @@ mod jetstream {
             .unwrap();
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
-        for _ in 0..100 {
+        for _ in 0..200 {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
                 .unwrap();
         }
 
-        let mut iter = consumer.batch(100, Some(10000000000)).await.unwrap();
+        let iter = consumer
+            .batch(100, Some(10000000000))
+            .await
+            .unwrap()
+            .count()
+            .await;
 
-        let mut i = 0;
-        while (iter.next().await).is_some() {
-            i += 1;
-            if i >= 100 {
-                return;
-            }
-        }
+        assert_eq!(iter, 100);
+
+        let iter = consumer
+            .iterator_builder()
+            .max_messages_per_batch(100)
+            .into_batch()
+            .await
+            .unwrap()
+            .count()
+            .await;
+
+        assert_eq!(iter, 100);
     }
 
     #[tokio::test]
