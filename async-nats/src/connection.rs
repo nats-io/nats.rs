@@ -244,7 +244,7 @@ impl Connection {
                     }
                 }
             }
-
+            if let Some(status) = maybe_status {}
             let mut headers = HeaderMap::new();
             while let Some(line) = lines.next() {
                 if line.is_empty() {

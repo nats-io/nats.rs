@@ -500,6 +500,7 @@ impl<'a> futures::Stream for Stream<'a> {
             match self.hearbeat.as_mut() {
                 None => {
                     if self.hearbeats_counter > 0 {
+                        println!("hearbet future is none. serting to some");
                         let sender = self.hearbeat_sender.clone();
                         self.hearbeat = Some(Box::pin(async move {
                             sender.send(()).await?;
@@ -515,6 +516,9 @@ impl<'a> futures::Stream for Stream<'a> {
                         println!("decremeanting counter: {:?}", self.hearbeats_counter);
                         self.hearbeats_counter -= 1;
                         self.last_activity = Instant::now();
+                        if self.hearbeats_counter > 0 {
+                            continue;
+                        }
                     }
                     Poll::Pending => {}
                 },
@@ -569,16 +573,16 @@ impl<'a> futures::Stream for Stream<'a> {
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {
-                            println!("increamentinh hb because of idle hb");
+                            println!(
+                                "increamentinh hb because of idle hb in {:?}",
+                                self.last_activity
+                            );
+                            println!("HB message: {:?}", message);
                             self.hearbeats_counter += 1;
+                            continue;
                         }
                         StatusCode::OK => {
                             self.pending_messages -= 1;
-                            println!(
-                                "elapsed from last activity: {:?}",
-                                self.last_activity.elapsed()
-                            );
-                            println!("idle: {:?}", self.batch_config.idle_heartbeat);
                             if self
                                 .last_activity
                                 .elapsed()
@@ -605,6 +609,7 @@ impl<'a> futures::Stream for Stream<'a> {
                     None => return Poll::Ready(None),
                 },
                 Poll::Pending => {
+                    println!("pending poll for message");
                     return std::task::Poll::Pending;
                 }
             }
