@@ -526,8 +526,8 @@ mod jetstream {
 
     #[tokio::test]
     async fn pull_stream_with_hearbeat() {
-        let server = nats_server::run_server("tests/configs/jetstream.conf");
-        let client = async_nats::connect(server.client_url()).await.unwrap();
+        // let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect("localhost:4222").await.unwrap();
         let context = async_nats::jetstream::new(client);
 
         context
@@ -550,8 +550,10 @@ mod jetstream {
         let consumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..100 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+            for i in 0..5000 {
+                if i > 4500 {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
                 context
                     .publish(
                         "events".to_string(),
@@ -565,14 +567,14 @@ mod jetstream {
         let mut iter = consumer
             .stream_builder()
             .max_messages_per_batch(25)
-            .expires(Duration::from_millis(500))
-            .hearbeat(Duration::from_millis(10))
+            .expires(Duration::from_millis(5000))
+            .hearbeat(Duration::from_millis(50))
             .into_stream()
             .await
             .unwrap()
-            .take(100);
+            .take(5000);
         while let Some(result) = iter.next().await {
-            println!("MESSAGE: {:?}", result);
+            // println!("MESSAGE: {:?}", result);
             result.unwrap().ack().await.unwrap();
         }
     }

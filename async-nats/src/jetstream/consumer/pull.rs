@@ -13,7 +13,8 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use std::{task::Poll, time::Duration};
+use std::{ops::MulAssign, task::Poll, time::Duration};
+use tokio::{sync::oneshot::error::TryRecvError, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -412,6 +413,11 @@ pub struct Stream<'a> {
     subject: String,
     batch_config: BatchConfig,
     request: Option<BoxFuture<'a, Result<(), Error>>>,
+    hearbeat: Option<BoxFuture<'a, Result<(), Error>>>,
+    hearbeat_sender: tokio::sync::mpsc::Sender<()>,
+    missing_hearbeat: tokio::sync::oneshot::Receiver<()>,
+    last_activity: Instant,
+    hearbeats_counter: usize,
 }
 
 impl<'a> Stream<'a> {
@@ -426,14 +432,49 @@ impl<'a> Stream<'a> {
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
         );
 
+        let (hearbeat_sender, mut hearbeat_receiver) = tokio::sync::mpsc::channel(128);
+        let (missing_sender, missing_receiver) = tokio::sync::oneshot::channel();
+        if !batch_config.idle_heartbeat.is_zero() {
+            println!("hearbeat is not zero. running check thread");
+            tokio::task::spawn(async move {
+                loop {
+                    println!("new hb loop");
+                    match tokio::time::timeout(
+                        batch_config.idle_heartbeat.mul_f64(4.0),
+                        hearbeat_receiver.recv(),
+                    )
+                    .await
+                    {
+                        Err(_) => {
+                            println!("reached timeout for hb wait");
+                            missing_sender.send(()).unwrap();
+                            break;
+                        }
+                        Ok(recv) => match recv {
+                            None => break,
+                            Some(_) => {
+                                println!("received hb in loop");
+                                continue;
+                            }
+                        },
+                    }
+                }
+            });
+        }
+
         Ok(Stream {
             pending_messages: 0,
             subscriber: subscription,
             context: consumer.context.clone(),
             request: None,
+            hearbeat: None,
             inbox,
             subject,
             batch_config,
+            hearbeat_sender,
+            missing_hearbeat: missing_receiver,
+            last_activity: Instant::now(),
+            hearbeats_counter: 0,
         })
     }
 }
@@ -445,7 +486,39 @@ impl<'a> futures::Stream for Stream<'a> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        // println!("starting poll");
+        if self.missing_hearbeat.try_recv().is_ok() {
+            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "did not receive idle hearbeat",
+            )))));
+        }
         loop {
+            if self.hearbeats_counter > 0 {
+                println!("hearbeat counter: {:?}", self.hearbeats_counter);
+            }
+            match self.hearbeat.as_mut() {
+                None => {
+                    if self.hearbeats_counter > 0 {
+                        let sender = self.hearbeat_sender.clone();
+                        self.hearbeat = Some(Box::pin(async move {
+                            sender.send(()).await?;
+                            Ok(())
+                        }));
+                    }
+                }
+                Some(hearbeat) => match hearbeat.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        self.request = None;
+                        result?;
+                        self.hearbeat = None;
+                        println!("decremeanting counter: {:?}", self.hearbeats_counter);
+                        self.hearbeats_counter -= 1;
+                        self.last_activity = Instant::now();
+                    }
+                    Poll::Pending => {}
+                },
+            }
             match self.request.as_mut() {
                 None => {
                     let context = self.context.clone();
@@ -495,9 +568,25 @@ impl<'a> futures::Stream for Stream<'a> {
                             self.pending_messages = 0;
                             continue;
                         }
-                        StatusCode::IDLE_HEARBEAT => {}
+                        StatusCode::IDLE_HEARBEAT => {
+                            println!("increamentinh hb because of idle hb");
+                            self.hearbeats_counter += 1;
+                        }
                         StatusCode::OK => {
                             self.pending_messages -= 1;
+                            println!(
+                                "elapsed from last activity: {:?}",
+                                self.last_activity.elapsed()
+                            );
+                            println!("idle: {:?}", self.batch_config.idle_heartbeat);
+                            if self
+                                .last_activity
+                                .elapsed()
+                                .gt(&self.batch_config.idle_heartbeat)
+                            {
+                                println!("incrementing hb counter in ok message");
+                                self.hearbeats_counter += 1;
+                            }
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,
