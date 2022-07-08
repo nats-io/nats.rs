@@ -776,7 +776,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         user_jwt: None,
         nkey: None,
         signature: None,
-        echo: true,
+        echo: !options.no_echo,
         headers: true,
         no_responders: true,
     };
