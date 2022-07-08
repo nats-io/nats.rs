@@ -48,6 +48,7 @@ impl futures::Stream for Stream {
                 Some(message) => match message.status {
                     Some(StatusCode::IDLE_HEARBEAT) => {
                         if let Some(subject) = message.reply {
+                            // TODO store pending_publish as a future and return errors from it
                             let client = self.context.client.clone();
                             tokio::task::spawn(async move {
                                 client
