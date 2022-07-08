@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
 use tokio_rustls::rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
-use tokio_rustls::webpki;
+use tokio_rustls::webpki::TrustAnchor;
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
@@ -71,14 +71,21 @@ pub(crate) struct TlsOptions {
 
 pub(crate) async fn config_tls(options: &TlsOptions) -> io::Result<rustls::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
-    // adds Mozilla root certs
-    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
+    for cert in rustls_native_certs::load_native_certs().map_err(|err| {
+        io::Error::new(
+            ErrorKind::Other,
+            format!("could not load platform certs: {}", err),
         )
-    }));
+    })? {
+        root_store
+            .add(&rustls::Certificate(cert.0))
+            .map_err(|err| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    format!("failed to read root certificates: {}", err),
+                )
+            })?;
+    }
 
     // use provided ClientConfig or built it from options.
     let tls_config = {
@@ -90,7 +97,7 @@ pub(crate) async fn config_tls(options: &TlsOptions) -> io::Result<rustls::Clien
                 let mut pem = BufReader::new(File::open(cafile)?);
                 let certs = rustls_pemfile::certs(&mut pem)?;
                 let trust_anchors = certs.iter().map(|cert| {
-                    let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..])
+                    let ta = TrustAnchor::try_from_cert_der(&cert[..])
                         .map_err(|err| {
                             io::Error::new(
                                 ErrorKind::InvalidInput,
