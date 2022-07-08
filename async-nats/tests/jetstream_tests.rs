@@ -497,14 +497,14 @@ mod jetstream {
 
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
 
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
         for _ in 0..1000 {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
                 .unwrap();
         }
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
 
         let mut messages = consumer.stream().await.unwrap().take(1000);
         while let Some(Ok(message)) = messages.next().await {
@@ -540,6 +540,9 @@ mod jetstream {
             .unwrap();
 
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
+        let mut messages = consumer.stream().await.unwrap().take(1000);
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
 
         for _ in 0..1000 {
             context
@@ -547,12 +550,13 @@ mod jetstream {
                 .await
                 .unwrap();
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut seen = 0;
         while let Some(Ok(message)) = messages.next().await {
             assert_eq!(message.payload.as_ref(), b"dat");
+            seen += 1;
         }
+        assert_eq!(seen, 1000);
     }
 
     #[tokio::test]
