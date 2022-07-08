@@ -74,7 +74,7 @@ impl Consumer<Config> {
         .await
     }
 
-    /// Enables customization of all types of [futures::Stream] by setting timeouts, hearbeats, maximum number of
+    /// Enables customization of all types of [Consumer] [Iterators][futures::Stream] by setting timeouts, hearbeats, maximum number of
     /// messages or bytes buffered.
     ///
     /// # Examples
@@ -126,7 +126,7 @@ impl Consumer<Config> {
     }
 
     /// Returns a batch of specified number of messages, or if there are less messages on the
-    /// [Stream] than requested, returns all available messages.
+    /// [Iterator][Stream] than requested, returns all available messages.
     ///
     /// # Example
     ///
@@ -179,7 +179,7 @@ impl Consumer<Config> {
         .await
     }
 
-    /// Returns a batch of specified number of messages unless timeout happens first.
+    /// Returns a [Batch] of specified number of messages unless timeout happens first.
     ///
     /// # Example
     ///
