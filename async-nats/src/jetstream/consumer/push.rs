@@ -40,7 +40,7 @@ pub struct Stream {
 }
 
 impl futures::Stream for Stream {
-    type Item = Message;
+    type Item = Result<Message, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         match self.subscriber.receiver.poll_recv(cx) {
@@ -60,10 +60,10 @@ impl futures::Stream for Stream {
                         Poll::Pending
                     }
                     Some(_) => Poll::Pending,
-                    None => Poll::Ready(Some(jetstream::Message {
+                    None => Poll::Ready(Some(Ok(jetstream::Message {
                         context: self.context.clone(),
                         message,
-                    })),
+                    }))),
                 },
                 None => Poll::Ready(None),
             },
