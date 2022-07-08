@@ -663,9 +663,10 @@ impl Connection {
     ///
     /// # Example
     /// ```
+    /// # use std::time::Duration;
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// nc.flush()?;
+    /// nc.flush_timeout(Duration::from_secs(5))?;
     /// # Ok(())
     /// # }
     /// ```
