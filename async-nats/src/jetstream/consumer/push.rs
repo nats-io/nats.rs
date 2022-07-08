@@ -43,32 +43,38 @@ impl futures::Stream for Stream {
     type Item = Result<Message, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.subscriber.receiver.poll_recv(cx) {
-            Poll::Ready(maybe_message) => match maybe_message {
-                Some(message) => match message.status {
-                    Some(StatusCode::IDLE_HEARBEAT) => {
-                        if let Some(subject) = message.reply {
-                            // TODO store pending_publish as a future and return errors from it
-                            let client = self.context.client.clone();
-                            tokio::task::spawn(async move {
-                                client
-                                    .publish(subject, Bytes::from_static(b""))
-                                    .await
-                                    .unwrap();
-                            });
-                        }
+        loop {
+            match self.subscriber.receiver.poll_recv(cx) {
+                Poll::Ready(maybe_message) => match maybe_message {
+                    Some(message) => match message.status {
+                        Some(StatusCode::IDLE_HEARBEAT) => {
+                            if let Some(subject) = message.reply {
+                                // TODO store pending_publish as a future and return errors from it
+                                let client = self.context.client.clone();
+                                tokio::task::spawn(async move {
+                                    client
+                                        .publish(subject, Bytes::from_static(b""))
+                                        .await
+                                        .unwrap();
+                                });
+                            }
 
-                        Poll::Pending
-                    }
-                    Some(_) => Poll::Pending,
-                    None => Poll::Ready(Some(Ok(jetstream::Message {
-                        context: self.context.clone(),
-                        message,
-                    }))),
+                            continue;
+                        }
+                        Some(_) => {
+                            continue;
+                        }
+                        None => {
+                            return Poll::Ready(Some(Ok(jetstream::Message {
+                                context: self.context.clone(),
+                                message,
+                            })))
+                        }
+                    },
+                    None => return Poll::Ready(None),
                 },
-                None => Poll::Ready(None),
-            },
-            Poll::Pending => Poll::Pending,
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }
