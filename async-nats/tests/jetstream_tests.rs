@@ -542,7 +542,7 @@ mod jetstream {
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
         let mut messages = consumer.stream().await.unwrap().take(1000);
 
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         for _ in 0..1000 {
             context
