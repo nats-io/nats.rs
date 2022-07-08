@@ -10,19 +10,75 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
+use crate::{
+    jetstream::{self, Context, Message},
+    Error, StatusCode, Subscriber,
+};
+
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
+use std::pin::Pin;
+use std::task::{self, Poll};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
-use crate::{jetstream, Error};
-
-use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
-
 impl Consumer<Config> {
-    pub fn push(&self) {
-        println!("push");
+    pub async fn stream(&self) -> Result<Stream, Error> {
+        let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
+        let subscriber = self.context.client.subscribe(deliver_subject).await?;
+
+        Ok(Stream {
+            context: self.context.clone(),
+            subscriber,
+        })
     }
 }
+
+pub struct Stream {
+    context: Context,
+    subscriber: Subscriber,
+}
+
+impl futures::Stream for Stream {
+    type Item = Result<Message, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            match self.subscriber.receiver.poll_recv(cx) {
+                Poll::Ready(maybe_message) => match maybe_message {
+                    Some(message) => match message.status {
+                        Some(StatusCode::IDLE_HEARBEAT) => {
+                            if let Some(subject) = message.reply {
+                                // TODO store pending_publish as a future and return errors from it
+                                let client = self.context.client.clone();
+                                tokio::task::spawn(async move {
+                                    client
+                                        .publish(subject, Bytes::from_static(b""))
+                                        .await
+                                        .unwrap();
+                                });
+                            }
+
+                            continue;
+                        }
+                        Some(_) => {
+                            continue;
+                        }
+                        None => {
+                            return Poll::Ready(Some(Ok(jetstream::Message {
+                                context: self.context.clone(),
+                                message,
+                            })))
+                        }
+                    },
+                    None => return Poll::Ready(None),
+                },
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
 /// Configuration for consumers. From a high level, the
 /// Configuration for consumers. From a high level, the
 /// `durable_name` and `deliver_subject` fields have a particularly
