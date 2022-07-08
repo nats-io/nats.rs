@@ -26,7 +26,7 @@ use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig
 use jetstream::consumer;
 
 impl Consumer<Config> {
-    /// Returns a stream of messages.
+    /// Returns a stream of messages for Pull Consumer.
     ///
     /// # Example
     ///

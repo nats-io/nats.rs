@@ -23,6 +23,42 @@ use std::task::{self, Poll};
 use std::time::Duration;
 
 impl Consumer<Config> {
+    /// Returns a stream of messages for Push Consumer.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    /// use async_nats::jetstream::consumer::PushConsumer;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    ///
+    /// let consumer: PushConsumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::push::Config {
+    ///     durable_name: Some("consumer".to_string()),
+    ///     deliver_subject: "deliver".to_string(),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let mut messages = consumer.stream().await?.take(100);
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///   println!("got message {:?}", message);
+    ///   message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
     pub async fn stream(&self) -> Result<Stream, Error> {
         let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
         let subscriber = self.context.client.subscribe(deliver_subject).await?;
