@@ -817,7 +817,7 @@ mod jetstream {
         }
         client.flush().await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let info = consumer.info().await.unwrap();
         assert_eq!(info.num_ack_pending, 8);
 
