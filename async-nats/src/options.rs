@@ -352,6 +352,22 @@ impl ConnectOptions {
         self
     }
 
+    /// Sets `no_echo` option which disables delivering messages that were published from the same
+    /// connection.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().no_echo().connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn no_echo(mut self) -> ConnectOptions {
+        self.no_echo = true;
+        self
+    }
+
     /// Sets the capacity for `Subscribers`. Exceeding it will trigger `slow consumer` error
     /// callback and drop messages.
     /// Defualt is set to 1024 messages buffer.

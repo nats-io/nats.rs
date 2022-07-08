@@ -476,4 +476,38 @@ mod client {
             .unwrap()
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn no_echo() {
+        // no_echo disabled.
+        let server = nats_server::run_basic_server();
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let mut subscription = client.subscribe("echo".to_string()).await.unwrap();
+        client
+            .publish("echo".to_string(), "data".into())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_millis(50), subscription.next())
+            .await
+            .unwrap();
+
+        // no_echo enabled.
+        let server = nats_server::run_basic_server();
+        let client = ConnectOptions::new()
+            .no_echo()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let mut subscription = client.subscribe("echo".to_string()).await.unwrap();
+        client
+            .publish("echo".to_string(), "data".into())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_millis(50), subscription.next())
+            .await
+            .expect_err("should timeout");
+    }
 }
