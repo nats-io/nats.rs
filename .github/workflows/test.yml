@@ -153,6 +153,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --tests --examples --all-features -- --deny clippy::all
 
+  check_deny:
+    name: check (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Set up rust
+        run:
+          rustup update
+
+      - name: Set up cargo deny
+        run:
+          cargo install cargo-deny
+
+      - name: Run license checks
+        run:
+          cargo deny check licenses
+
   check_msrv:
     name: check (msrv)
     runs-on: ubuntu-latest
