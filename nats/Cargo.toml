@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.21.0"
+version = "0.22.0"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"

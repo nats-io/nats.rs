@@ -1,3 +1,12 @@
+# 0.22.0
+## Overview
+This is a minor release for the `nats` client with one fix and several documentation improvements.
+
+## What's changed
+* Handle connecting to ipv6 addresses correctly by @jszwedko in https://github.com/nats-io/nats.rs/pull/386
+* Use correct flush_timeout operation in doc test by @krady21 in https://github.com/nats-io/nats.rs/pull/556
+* Fix typo in jetstream/pull_subscription.rs by @bbigras in https://github.com/nats-io/nats.rs/pull/521
+
 # 0.21.0
 ## Added
 * Allow tokens in connection strings and add tests by @paulgb in https://github.com/nats-io/nats.rs/pull/506
