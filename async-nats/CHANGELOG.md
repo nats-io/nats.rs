@@ -1,3 +1,38 @@
+# 0.16.0
+
+This release features a lot of improvements and additions to `JetStream` API and adds `Push Consumer`.
+
+## Added
+* Add `query_account` to `jetstream::Context` by @caspervonb in https://github.com/nats-io/nats.rs/pull/528
+* Add streams to push consumers by @caspervonb in https://github.com/nats-io/nats.rs/pull/527
+* Add no_echo option by @Jarema in https://github.com/nats-io/nats.rs/pull/560
+* Add `jetstream::Stream::get_raw_message` by @caspervonb in https://github.com/nats-io/nats.rs/pull/484
+* Add Pull Consumer builder by @Jarema in https://github.com/nats-io/nats.rs/pull/541
+
+## Changed
+* Allow unknown directives to be skipped when parsing by @caspervonb in https://github.com/nats-io/nats.rs/pull/514
+* Narrow error type returned from client publishing by @caspervonb in https://github.com/nats-io/nats.rs/pull/525
+* Change `create_consumer` to return `Consumer` by @Jarema in https://github.com/nats-io/nats.rs/pull/544
+* Switch webpki to rustls-native-certs by @Jarema in https://github.com/nats-io/nats.rs/pull/558
+* Normalize error type used in subscribe methods by @caspervonb in https://github.com/nats-io/nats.rs/pull/524
+* Optimize `jetstream::consumer::pull::Consumer::stream` method. by @Jarema in https://github.com/nats-io/nats.rs/pull/529
+* Make `deliver_subject` required for `push::Config` by @caspervonb in https://github.com/nats-io/nats.rs/pull/531
+
+## Fixed
+* Handle missing error cases in Stream by @Jarema in https://github.com/nats-io/nats.rs/pull/542
+* Handle connecting to ipv6 addresses correctly by @jszwedko in https://github.com/nats-io/nats.rs/pull/386
+
+## Other
+* Move `Client` into its own source file by @caspervonb in https://github.com/nats-io/nats.rs/pull/523
+* Extract `jetstream::Message` into its own module by @caspervonb in https://github.com/nats-io/nats.rs/pull/534
+* Normalize introduction example by @caspervonb in https://github.com/nats-io/nats.rs/pull/540
+* Fix documentation links by @Jarema in https://github.com/nats-io/nats.rs/pull/547
+* Add more documentation to Pull Consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/546
+* Add Push Consumer stream docs by @Jarema in https://github.com/nats-io/nats.rs/pull/559
+* Fix ack test race by @Jarema in https://github.com/nats-io/nats.rs/pull/555
+* Add Message and Headers docs by @Jarema in https://github.com/nats-io/nats.rs/pull/548
+* Remove trace and debug from nats-server wrapper by @Jarema in https://github.com/nats-io/nats.rs/pull/550
+
 # 0.15.0
 
 This release is the first `JetStream` 🍾  feature set for `async-nats`!
