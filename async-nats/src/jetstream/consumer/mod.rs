@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! Push and [Pull][PullConsumer] [Consumer] API.
+//! Push and Pull [Consumer] API.
 
 pub mod pull;
 pub mod push;

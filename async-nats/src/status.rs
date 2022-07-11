@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! NATS status codes.
+
 // Heavily borrowed from the http crate, would re-export since it is already a dependency
 // but we have our own range of constants.
 use std::convert::TryFrom;

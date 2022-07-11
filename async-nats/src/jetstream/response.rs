@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A low level `JetStream` responses.
+
 use serde::Deserialize;
 
 /// An error description returned in a response to a jetstream request.
