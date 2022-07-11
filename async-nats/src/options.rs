@@ -614,8 +614,8 @@ impl<A, T> fmt::Debug for CallbackArg1<A, T> {
     }
 }
 
-/// Error report from signing callback
-// this was needed because std::io::Error isn't Send
+/// Error report from signing callback.
+// This was needed because std::io::Error isn't Send.
 #[derive(Clone)]
 pub struct AuthError(String);
 

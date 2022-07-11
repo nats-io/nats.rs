@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A Core NATS message.
 use crate::header::HeaderMap;
 use crate::status::StatusCode;
 use bytes::Bytes;
