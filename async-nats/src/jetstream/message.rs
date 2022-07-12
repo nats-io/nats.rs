@@ -51,14 +51,15 @@ impl Message {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
+    /// use async_nats::jetstream::consumer::PullConsumer;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let consumer = jetstream
+    /// let consumer: PullConsumer = jetstream
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.fetch(100).await?;
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     message?.ack().await?;
@@ -90,14 +91,15 @@ impl Message {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// use async_nats::jetstream::AckKind;
+    /// use async_nats::jetstream::consumer::PullConsumer;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let consumer = jetstream
+    /// let consumer: PullConsumer = jetstream
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.fetch(100).await?;
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     message?.ack_with(AckKind::Nak).await?;
@@ -140,7 +142,7 @@ impl Message {
     ///     .get_stream("events").await?
     ///     .get_consumer("pull").await?;
     ///
-    /// let mut messages = consumer.fetch(100).await?;
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     message?.double_ack().await?;

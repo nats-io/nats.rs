@@ -23,7 +23,7 @@ async fn main() -> Result<(), async_nats::Error> {
             .await?;
     }
 
-    let mut messages = consumer.stream().await?.take(10);
+    let mut messages = consumer.messages().await?.take(10);
 
     while let Some(message) = messages.next().await {
         let message = message?;

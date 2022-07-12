@@ -41,7 +41,7 @@
 //!     ..Default::default()
 //! }).await?;
 //!
-//! let mut messages = consumer.stream().await?.take(100);
+//! let mut messages = consumer.messages().await?.take(100);
 //! while let Ok(Some(message)) = messages.try_next().await {
 //!   println!("message receiver: {:?}", message);
 //!   message.ack().await?;

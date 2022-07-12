@@ -346,7 +346,7 @@ mod jetstream {
         let _consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
 
         let consumer = stream.get_consumer("pull").await.unwrap();
-        consumer.fetch(10).await.unwrap();
+        consumer.fetch().max_messages(10).messages().await.unwrap();
     }
 
     #[tokio::test]
@@ -593,7 +593,7 @@ mod jetstream {
             }
         });
 
-        let mut iter = consumer.stream().await.unwrap().take(1000);
+        let mut iter = consumer.messages().await.unwrap().take(1000);
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
         }
@@ -625,7 +625,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
             for i in 0..100 {
@@ -643,10 +643,10 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_builder()
+            .stream()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(100))
-            .into_stream()
+            .messages()
             .await
             .unwrap()
             .take(100);
@@ -679,7 +679,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
             for i in 0..100 {
@@ -695,11 +695,11 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_builder()
+            .stream()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(500))
             .hearbeat(Duration::from_millis(10))
-            .into_stream()
+            .messages()
             .await
             .unwrap()
             .take(100);
@@ -732,7 +732,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let consumer = stream.get_consumer("pull").await.unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
             for i in 0..100 {
@@ -748,10 +748,10 @@ mod jetstream {
         });
 
         let mut iter = consumer
-            .stream_builder()
+            .stream()
             .max_messages_per_batch(25)
             .hearbeat(Duration::from_millis(100))
-            .into_stream()
+            .messages()
             .await
             .unwrap()
             .take(1);
@@ -796,7 +796,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut iter = consumer.fetch(100).await.unwrap();
+        let mut iter = consumer.fetch().max_messages(100).messages().await.unwrap();
 
         let mut i = 0;
         while (iter.next().await).is_some() {
@@ -841,7 +841,13 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut iter = consumer.batch(100, Some(10000000000)).await.unwrap();
+        let mut iter = consumer
+            .batch()
+            .max_messages(100)
+            .expires(Duration::from_millis(500))
+            .messages()
+            .await
+            .unwrap();
 
         let mut i = 0;
         while (iter.next().await).is_some() {
@@ -925,7 +931,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut iter = consumer.fetch(100).await.unwrap();
+        let mut iter = consumer.fetch().max_messages(100).messages().await.unwrap();
         client.flush().await.unwrap();
 
         // TODO: when rtt() is available, use it here.
