@@ -804,6 +804,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         .connection
         .write_op(ClientOp::Connect(connect_info))
         .await?;
+    connection_handler
+        .connection
+        .write_op(ClientOp::Ping)
+        .await?;
+    connection_handler.pending_pings += 1;
     connection_handler.connection.flush().await?;
     match connection_handler.connection.read_op().await? {
         Some(ServerOp::Error(err)) => {
