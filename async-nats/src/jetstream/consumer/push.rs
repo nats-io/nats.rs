@@ -52,7 +52,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let mut messages = consumer.stream().await?.take(100);
+    /// let mut messages = consumer.messages().await?.take(100);
     /// while let Some(Ok(message)) = messages.next().await {
     ///   println!("got message {:?}", message);
     ///   message.ack().await?;
