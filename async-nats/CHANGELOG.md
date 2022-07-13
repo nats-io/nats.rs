@@ -1,3 +1,38 @@
+# 0.17.0
+## Overview
+This release focuses on two main things:
+* Refactor of JetStream API
+* Fix of slow connect (thanks @brooksmtownsend for reporting this!)
+
+The changes in JetStream API make usage of builder more intuitive and seamless.
+Before, you had to call
+```rust
+// before changes
+let messages = consumer.stream().await?;
+// or use a shortcut
+let messages = consumer.messages().await?;
+
+// after changes
+let messages = consumer.stream().messages().await?;
+// or with options
+let messages = consumer.stream().max_bytes_per_bytes(1024).messages().await?;
+```
+
+## Changed
+* Rename push consumer `Stream` iterator to `Messages` by @caspervonb in https://github.com/nats-io/nats.rs/pull/566
+* Add pull builder for Fetch and Batch by @Jarema in https://github.com/nats-io/nats.rs/pull/565
+
+## Fixed
+* Fix slow connect in no-auth scenarios by @Jarema in https://github.com/nats-io/nats.rs/pull/568
+
+## Other
+* Fix license headers by @Jarema in https://github.com/nats-io/nats.rs/pull/564
+* Add missing module docs headers by @Jarema in https://github.com/nats-io/nats.rs/pull/563
+* Remove fault injection run from workflow by @caspervonb in https://github.com/nats-io/nats.rs/pull/567
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.16.0...async-nats/v0.17.0
+
 # 0.16.0
 
 This release features a lot of improvements and additions to `JetStream` API and adds `Push Consumer`.
