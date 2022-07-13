@@ -461,7 +461,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(Ok(message)) = messages.next().await {
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
@@ -506,7 +506,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(Ok(message)) = messages.next().await {
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
@@ -540,7 +540,7 @@ mod jetstream {
             .unwrap();
 
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 

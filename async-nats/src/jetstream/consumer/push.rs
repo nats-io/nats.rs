@@ -52,7 +52,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let mut messages = consumer.stream().await?.take(100);
+    /// let mut messages = consumer.messages().await?.take(100);
     /// while let Some(Ok(message)) = messages.next().await {
     ///   println!("got message {:?}", message);
     ///   message.ack().await?;
@@ -60,23 +60,23 @@ impl Consumer<Config> {
     /// Ok(())
     /// # }
     /// ```
-    pub async fn stream(&self) -> Result<Stream, Error> {
+    pub async fn messages(&self) -> Result<Messages, Error> {
         let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
         let subscriber = self.context.client.subscribe(deliver_subject).await?;
 
-        Ok(Stream {
+        Ok(Messages {
             context: self.context.clone(),
             subscriber,
         })
     }
 }
 
-pub struct Stream {
+pub struct Messages {
     context: Context,
     subscriber: Subscriber,
 }
 
-impl futures::Stream for Stream {
+impl futures::Stream for Messages {
     type Item = Result<Message, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
