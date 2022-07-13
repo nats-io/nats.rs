@@ -751,6 +751,7 @@ mod jetstream {
             .stream()
             .max_messages_per_batch(25)
             .hearbeat(Duration::from_millis(100))
+            .expires(Duration::default())
             .messages()
             .await
             .unwrap()
