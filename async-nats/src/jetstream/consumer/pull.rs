@@ -63,7 +63,7 @@ impl Consumer<Config> {
     pub async fn messages(&self) -> Result<Stream<'_>, Error> {
         Stream::stream(
             BatchConfig {
-                batch: 100,
+                batch: 200,
                 expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
                 no_wait: false,
                 max_bytes: 0,
@@ -547,7 +547,7 @@ impl<'a> StreamBuilder<'a> {
             consumer,
             batch: 200,
             max_bytes: 0,
-            expires: 0,
+            expires: Duration::from_secs(30).as_nanos().try_into().unwrap(),
             hearbeat: Duration::default(),
         }
     }
