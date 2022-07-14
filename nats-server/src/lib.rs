@@ -97,17 +97,17 @@ impl Server {
     // Grab client addr from logs.
     fn client_addr(&self) -> String {
         // We may need to wait for log to be present.
-        // Wait up to 2s. (20 * 100ms)
-        for _ in 0..20 {
+        // Wait up to 10s. (100 * 100ms)
+        for _ in 0..100 {
             match fs::read_to_string(self.logfile.as_os_str()) {
                 Ok(l) => {
                     if let Some(cre) = CLIENT_RE.captures(&l) {
                         return cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1");
                     } else {
-                        thread::sleep(Duration::from_millis(250));
+                        thread::sleep(Duration::from_millis(500));
                     }
                 }
-                _ => thread::sleep(Duration::from_millis(250)),
+                _ => thread::sleep(Duration::from_millis(500)),
             }
         }
         panic!("no client addr info");
