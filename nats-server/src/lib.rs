@@ -13,13 +13,14 @@
 
 #![allow(dead_code)]
 use std::io::{BufRead, BufReader};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::{env, fs};
 use std::{thread, time::Duration};
 
 use lazy_static::lazy_static;
+use rand::Rng;
 use regex::Regex;
 
 pub struct Server {
@@ -132,6 +133,63 @@ pub fn run_server(cfg: &str) -> Server {
     run_server_with_port(cfg, None)
 }
 
+pub fn is_port_available(port: usize) -> bool {
+    TcpListener::bind(("127.0.0.1", port.try_into().unwrap())).is_ok()
+}
+
+/// Start a NATS Cluster with optional config for each node.
+pub fn run_cluster(cfg: Vec<&str>, jetstream: bool) -> Cluster {
+    let port = rand::thread_rng().gen_range(3000..50_000);
+    let ports = vec![port, port + 100, port + 200];
+
+    let ports = ports
+        .iter()
+        .map(|port| {
+            let mut new_port = *port;
+            while !is_port_available(new_port) || !is_port_available(new_port + 1) {
+                new_port = rand::thread_rng().gen_range(2000..50_000);
+            }
+            new_port
+        })
+        .collect::<Vec<usize>>();
+    let cluster = vec![port + 1, port + 101, port + 201];
+
+    let s1 = run_cluster_node_with_port(
+        cfg[0],
+        Some(ports[0].to_string().as_str()),
+        vec![cluster[1], cluster[2]],
+        "node1".to_string(),
+        "cluster".to_string(),
+        cluster[0],
+        jetstream,
+    );
+    let s2 = run_cluster_node_with_port(
+        cfg[1],
+        Some(ports[1].to_string().as_str()),
+        vec![cluster[0], cluster[2]],
+        "node2".to_string(),
+        "cluster".to_string(),
+        cluster[1],
+        jetstream,
+    );
+    let s3 = run_cluster_node_with_port(
+        cfg[2],
+        Some(ports[2].to_string().as_str()),
+        vec![cluster[0], cluster[1]],
+        "node3".to_string(),
+        "cluster".to_string(),
+        cluster[2],
+        jetstream,
+    );
+    Cluster {
+        servers: vec![s1, s2, s3],
+    }
+}
+
+pub struct Cluster {
+    servers: Vec<Server>,
+}
+
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     let id = nuid::next();
@@ -167,7 +225,116 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     }
 }
 
+fn run_cluster_node_with_port(
+    cfg: &str,
+    port: Option<&str>,
+    routes: Vec<usize>,
+    name: String,
+    cluster_name: String,
+    cluster: usize,
+    jetstream: bool,
+) -> Server {
+    let id = nuid::next();
+    let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
+    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
+    let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
+
+    // Always use dynamic ports so tests can run in parallel.
+    // Create env for a storage directory for jetstream.
+    let mut cmd = Command::new("nats-server");
+    cmd.arg("--store_dir")
+        .arg(store_dir.as_path().to_str().unwrap())
+        .arg("-p");
+    match port {
+        Some(port) => cmd.arg(port),
+        None => cmd.arg("-1"),
+    };
+    cmd.arg("-l")
+        .arg(logfile.as_os_str())
+        .arg("-P")
+        .arg(pidfile.as_os_str())
+        .arg("--routes")
+        .arg(
+            routes
+                .iter()
+                .map(|r| format!("nats://127.0.0.1:{}", r))
+                .collect::<Vec<String>>()
+                .join(","),
+        )
+        .arg("--cluster")
+        .arg(format!("nats://127.0.0.1:{}", cluster))
+        .arg("--cluster_name")
+        .arg(cluster_name)
+        .arg("-n")
+        .arg(name);
+
+    if jetstream {
+        cmd.arg("--js");
+    }
+    if !cfg.is_empty() {
+        cmd.arg("-c").arg(cfg);
+    }
+
+    let child = cmd.spawn().unwrap();
+
+    Server {
+        child,
+        logfile,
+        pidfile,
+    }
+}
+
 /// Starts a local basic NATS server that gets stopped and cleaned up on drop.
 pub fn run_basic_server() -> Server {
     run_server("")
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::run_cluster;
+
+    #[tokio::test]
+    async fn cluster_with_js() {
+        let cluster = run_cluster(vec!["", "", ""], true);
+
+        let client = async_nats::connect(cluster.servers[0].client_url())
+            .await
+            .unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "replicated".to_string(),
+                num_replicas: 3,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(stream.info.config.num_replicas, 3);
+
+        jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "replicated_too_much".to_string(),
+                num_replicas: 5,
+                ..Default::default()
+            })
+            .await
+            .expect_err("this should error as its only 3 nodes cluster");
+        jetstream.delete_stream("replicated").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cluster_without_js() {
+        use futures::StreamExt;
+        let cluster = run_cluster(vec!["", "", ""], true);
+
+        let client = async_nats::connect(cluster.servers[0].client_url())
+            .await
+            .unwrap();
+        let mut subscribe = client.subscribe("foo".into()).await.unwrap();
+        client.publish("foo".into(), "bar".into()).await.unwrap();
+        subscribe.next().await.unwrap();
+    }
 }
