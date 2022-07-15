@@ -30,7 +30,7 @@ mod jetstream {
     use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream::{self, StorageType};
+    use async_nats::jetstream::stream;
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -163,6 +163,7 @@ mod jetstream {
     #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn create_stream_with_replicas() {
+        use crate::jetstream::stream::StorageType;
         let cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
         tokio::time::sleep(Duration::from_secs(5)).await;
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
