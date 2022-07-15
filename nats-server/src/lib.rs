@@ -137,7 +137,7 @@ pub fn is_port_available(port: usize) -> bool {
     TcpListener::bind(("127.0.0.1", port.try_into().unwrap())).is_ok()
 }
 
-pub struct Config<'a>(Vec<&'a str>);
+pub struct Config<'a>([&'a str; 3]);
 
 pub trait IntoConfig<'a> {
     fn into_config(self) -> Config<'a>;
@@ -145,18 +145,20 @@ pub trait IntoConfig<'a> {
 
 impl<'a> IntoConfig<'a> for &'a str {
     fn into_config(self) -> Config<'a> {
-        Config(vec![self, self, self])
+        Config([self, self, self])
     }
 }
 
-impl<'a> IntoConfig<'a> for Vec<&'a str> {
+impl<'a> IntoConfig<'a> for [&'a str; 3] {
     fn into_config(self) -> Config<'a> {
         Config(self)
     }
 }
 
-/// Start a NATS Cluster with optional config for each node.
-pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C, jetstream: bool) -> Cluster {
+/// Start a NATS Cluster with optional config.
+/// You can pass either one config that will be used for each node, or pass a vector
+/// of configs for each replica
+pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
     let cfg = cfg.into_config();
     let port = rand::thread_rng().gen_range(3000..50_000);
     let ports = vec![port, port + 100, port + 200];
@@ -180,7 +182,6 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C, jetstream: bool) -> Cluster {
         "node1".to_string(),
         "cluster".to_string(),
         cluster[0],
-        jetstream,
     );
     let s2 = run_cluster_node_with_port(
         cfg.0[1],
@@ -189,7 +190,6 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C, jetstream: bool) -> Cluster {
         "node2".to_string(),
         "cluster".to_string(),
         cluster[1],
-        jetstream,
     );
     let s3 = run_cluster_node_with_port(
         cfg.0[2],
@@ -198,7 +198,6 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C, jetstream: bool) -> Cluster {
         "node3".to_string(),
         "cluster".to_string(),
         cluster[2],
-        jetstream,
     );
     Cluster {
         servers: vec![s1, s2, s3],
@@ -257,7 +256,6 @@ fn run_cluster_node_with_port(
     name: String,
     cluster_name: String,
     cluster: usize,
-    jetstream: bool,
 ) -> Server {
     let id = nuid::next();
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
@@ -293,9 +291,6 @@ fn run_cluster_node_with_port(
         .arg("-n")
         .arg(name);
 
-    if jetstream {
-        cmd.arg("--js");
-    }
     if !cfg.is_empty() {
         cmd.arg("-c").arg(cfg);
     }
@@ -321,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn cluster_with_js() {
-        let cluster = run_cluster(vec!["", "", ""], true);
+        let cluster = run_cluster("configs/jetstream.conf");
 
         let client = async_nats::connect(cluster.servers[0].client_url())
             .await
@@ -353,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn cluster_without_js() {
         use futures::StreamExt;
-        let cluster = run_cluster(vec!["", "", ""], true);
+        let cluster = run_cluster("");
 
         let client = async_nats::connect(cluster.servers[0].client_url())
             .await
