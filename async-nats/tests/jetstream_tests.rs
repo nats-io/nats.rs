@@ -160,6 +160,7 @@ mod jetstream {
             .unwrap();
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn create_stream_with_replicas() {
         let cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
