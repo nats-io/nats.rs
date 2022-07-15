@@ -161,6 +161,26 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn create_stream_with_replicas() {
+        let cluster = nats_server::run_cluster(vec!["", "", ""], true);
+        let client = async_nats::connect(cluster.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context.create_stream("events").await.unwrap();
+
+        let stream = context
+            .create_stream(&stream::Config {
+                name: "events2".to_string(),
+                num_replicas: 3,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(stream.info.config.num_replicas, 3);
+    }
+
+    #[tokio::test]
     async fn get_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();

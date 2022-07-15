@@ -187,7 +187,13 @@ pub fn run_cluster(cfg: Vec<&str>, jetstream: bool) -> Cluster {
 }
 
 pub struct Cluster {
-    servers: Vec<Server>,
+    pub servers: Vec<Server>,
+}
+
+impl Cluster {
+    pub fn client_url(&self) -> String {
+        self.servers[0].client_url()
+    }
 }
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
