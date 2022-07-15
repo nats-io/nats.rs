@@ -157,11 +157,35 @@ pub struct Info {
     pub push_bound: bool,
 }
 
-/// Information about the consumer's associated `JetStream` cluster
+/// Information about the stream's, consumer's associated `JetStream` cluster
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterInfo {
-    /// The leader of the cluster
-    pub leader: String,
+    /// The cluster name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The server name of the RAFT leader.
+    #[serde(default)]
+    pub leader: Option<String>,
+    /// The members of the RAFT cluster.
+    #[serde(default)]
+    pub replicas: Vec<PeerInfo>,
+}
+
+/// The members of the RAFT cluster
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct PeerInfo {
+    /// The server name of the peer.
+    pub name: String,
+    /// Indicates if the server is up to date and synchronised.
+    pub current: bool,
+    /// Nanoseconds since this peer was last seen.
+    #[serde(with = "serde_nanos")]
+    pub active: Duration,
+    /// Indicates the node is considered offline by the group.
+    #[serde(default)]
+    pub offline: bool,
+    /// How many uncommitted operations this peer is behind the leader.
+    pub lag: Option<u64>,
 }
 
 /// Information about a consumer and the stream it is consuming
