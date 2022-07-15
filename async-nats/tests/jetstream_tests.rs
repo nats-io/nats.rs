@@ -163,6 +163,7 @@ mod jetstream {
     #[tokio::test]
     async fn create_stream_with_replicas() {
         let cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
+        tokio::time::sleep(Duration::from_secs(5)).await;
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
