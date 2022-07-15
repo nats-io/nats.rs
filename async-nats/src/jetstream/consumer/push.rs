@@ -11,13 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
+use super::{
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, PushConsumer,
+    ReplayPolicy,
+};
 use crate::{
     jetstream::{self, stream::ClusterInfo, Context, Message},
     Error, StatusCode, Subscriber,
 };
 
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{self, Poll};
@@ -68,6 +72,149 @@ impl Consumer<Config> {
             context: self.context.clone(),
             subscriber,
         })
+    }
+
+    async fn recreate_ephemeral_subscriber(&self, sequence: u64) -> Result<Subscriber, Error> {
+        let stream = self
+            .context
+            .get_stream(self.info.stream_name.clone())
+            .await?;
+
+        let consumer = stream
+            .create_consumer(jetstream::consumer::push::Config {
+                durable_name: None,
+                ack_policy: AckPolicy::None,
+                max_deliver: 1,
+                flow_control: true,
+                idle_heartbeat: Duration::from_secs(5),
+                deliver_policy: DeliverPolicy::ByStartSequence {
+                    start_sequence: sequence,
+                },
+                ..Default::default()
+            })
+            .await?;
+        self.context
+            .client
+            .subscribe(consumer.info.config.deliver_subject.unwrap())
+            .await
+    }
+
+    pub async fn ordered(&self) -> Result<Ordered, Error> {
+        let subscriber = self
+            .context
+            .client
+            .subscribe(self.info.config.deliver_subject.clone().unwrap())
+            .await?;
+
+        Ok(Ordered {
+            context: self.context.clone(),
+            deliver_subject: self.info.config.deliver_subject.clone().unwrap(),
+            subscriber: Some(subscriber),
+            subscriber_future: None,
+            consumer_sequence: None,
+        })
+    }
+}
+
+pub struct Ordered<'a> {
+    context: Context,
+    deliver_subject: String,
+    subscriber: Option<Subscriber>,
+    subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
+    consumer_sequence: Option<usize>,
+}
+
+impl<'a> futures::Stream for Ordered<'a> {
+    type Item = Result<Message, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            if self.subscriber.is_none() {
+                match self.subscriber_future.as_mut() {
+                    None => {
+                        let context = self.context.clone();
+                        let deliver_subject = self.deliver_subject.clone();
+                        self.subscriber_future = Some(Box::pin(async move {
+                            context.client.subscribe(deliver_subject).await
+                        }));
+                        match self.subscriber_future.as_mut().unwrap().as_mut().poll(cx) {
+                            Poll::Ready(subscriber) => {
+                                self.subscriber_future = None;
+                                self.subscriber = Some(subscriber?);
+                            }
+                            Poll::Pending => {
+                                return Poll::Pending;
+                            }
+                        }
+                    }
+                    Some(subscriber) => match subscriber.as_mut().poll(cx) {
+                        Poll::Ready(subscriber) => {
+                            self.subscriber_future = None;
+                            self.subscriber = Some(subscriber?);
+                        }
+                        Poll::Pending => {
+                            return Poll::Pending;
+                        }
+                    },
+                }
+            }
+            if let Some(subscriber) = self.subscriber.as_mut() {
+                match subscriber.receiver.poll_recv(cx) {
+                    Poll::Ready(maybe_message) => match maybe_message {
+                        Some(message) => match message.status {
+                            Some(StatusCode::IDLE_HEARBEAT) => {
+                                if let Some(subject) = message.reply {
+                                    // TODO store pending_publish as a future and return errors from it
+                                    let client = self.context.client.clone();
+                                    tokio::task::spawn(async move {
+                                        client
+                                            .publish(subject, Bytes::from_static(b""))
+                                            .await
+                                            .unwrap();
+                                    });
+                                }
+                                continue;
+                            }
+                            Some(_) => {
+                                continue;
+                            }
+                            None => {
+                                if let Some(ref headers) = message.headers {
+                                    let sequence: usize = headers
+                                        .get("Nats-Last-Consumer")
+                                        .unwrap()
+                                        .to_str()
+                                        .unwrap()
+                                        .parse()
+                                        .unwrap();
+                                    if sequence + 1 != self.consumer_sequence.unwrap() {
+                                        println!(
+                                            "sequence mismatch! current {}, previos {}",
+                                            sequence,
+                                            self.consumer_sequence.unwrap()
+                                        );
+                                        self.subscriber = None;
+                                        continue;
+                                    }
+                                    self.consumer_sequence = Some(sequence);
+                                } else {
+                                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                        std::io::ErrorKind::NotFound,
+                                        "did not find sequence header",
+                                    )))));
+                                }
+                                return Poll::Ready(Some(Ok(jetstream::Message {
+                                    context: self.context.clone(),
+                                    message,
+                                })));
+                            }
+                        },
+                        None => return Poll::Ready(None),
+                    },
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+        }
     }
 }
 
