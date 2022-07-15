@@ -28,7 +28,9 @@ mod jetstream {
 
     use super::*;
     use async_nats::header::HeaderMap;
-    use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
+    use async_nats::jetstream::consumer::{
+        self, DeliverPolicy, OrderedPush, PullConsumer, PushConsumer,
+    };
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream;
     use async_nats::ConnectOptions;
@@ -521,16 +523,13 @@ mod jetstream {
             .unwrap();
 
         let stream = context.get_stream("events").await.unwrap();
-        stream
-            .create_consumer(consumer::push::Config {
+        let consumer: OrderedPush = stream
+            .create_consumer(consumer::push::OrderedConfig {
                 deliver_subject: "push".to_string(),
-                durable_name: Some("push".to_string()),
                 ..Default::default()
             })
             .await
             .unwrap();
-
-        let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
 
         for _ in 0..1000 {
             context
@@ -538,9 +537,12 @@ mod jetstream {
                 .await
                 .unwrap();
         }
+        println!("pubbded");
 
         let mut messages = consumer.ordered().await.unwrap().take(1000);
-        while let Some(Ok(message)) = messages.next().await {
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            println!("message: {:?}", message);
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }
