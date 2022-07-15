@@ -137,8 +137,27 @@ pub fn is_port_available(port: usize) -> bool {
     TcpListener::bind(("127.0.0.1", port.try_into().unwrap())).is_ok()
 }
 
+pub struct Config<'a>(Vec<&'a str>);
+
+pub trait IntoConfig<'a> {
+    fn into_config(self) -> Config<'a>;
+}
+
+impl<'a> IntoConfig<'a> for &'a str {
+    fn into_config(self) -> Config<'a> {
+        Config(vec![self, self, self])
+    }
+}
+
+impl<'a> IntoConfig<'a> for Vec<&'a str> {
+    fn into_config(self) -> Config<'a> {
+        Config(self)
+    }
+}
+
 /// Start a NATS Cluster with optional config for each node.
-pub fn run_cluster(cfg: Vec<&str>, jetstream: bool) -> Cluster {
+pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C, jetstream: bool) -> Cluster {
+    let cfg = cfg.into_config();
     let port = rand::thread_rng().gen_range(3000..50_000);
     let ports = vec![port, port + 100, port + 200];
 
@@ -155,7 +174,7 @@ pub fn run_cluster(cfg: Vec<&str>, jetstream: bool) -> Cluster {
     let cluster = vec![port + 1, port + 101, port + 201];
 
     let s1 = run_cluster_node_with_port(
-        cfg[0],
+        cfg.0[0],
         Some(ports[0].to_string().as_str()),
         vec![cluster[1], cluster[2]],
         "node1".to_string(),
@@ -164,7 +183,7 @@ pub fn run_cluster(cfg: Vec<&str>, jetstream: bool) -> Cluster {
         jetstream,
     );
     let s2 = run_cluster_node_with_port(
-        cfg[1],
+        cfg.0[1],
         Some(ports[1].to_string().as_str()),
         vec![cluster[0], cluster[2]],
         "node2".to_string(),
@@ -173,7 +192,7 @@ pub fn run_cluster(cfg: Vec<&str>, jetstream: bool) -> Cluster {
         jetstream,
     );
     let s3 = run_cluster_node_with_port(
-        cfg[2],
+        cfg.0[2],
         Some(ports[2].to_string().as_str()),
         vec![cluster[0], cluster[1]],
         "node3".to_string(),
