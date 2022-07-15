@@ -365,7 +365,8 @@ impl Consumer<OrderedConfig> {
             consumer: self,
             subscriber: Some(subscriber),
             subscriber_future: None,
-            consumer_sequence: None,
+            consumer_sequence: Some(0),
+            mismatched: false,
         })
     }
 }
@@ -376,6 +377,7 @@ pub struct Ordered<'a> {
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
     consumer_sequence: Option<u64>,
+    mismatched: bool,
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
@@ -395,7 +397,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 context,
                                 config,
                                 stream_name,
-                                sequence.unwrap(),
+                                sequence.unwrap_or(0),
                             )
                             .await
                         }));
@@ -441,37 +443,28 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 continue;
                             }
                             None => {
-                                if let Some(ref headers) = message.headers {
-                                    let sequence: u64 = headers
-                                        .get("Nats-Last-Consumer")
-                                        .unwrap()
-                                        .to_str()
-                                        .unwrap()
-                                        .parse()
-                                        .unwrap();
-                                    println!("SEQUENCE: {:>}", sequence);
-                                    if sequence + 1 != self.consumer_sequence.unwrap()
-                                        || sequence == 30
-                                    {
-                                        println!(
-                                            "sequence mismatch! current {}, previos {}",
-                                            sequence,
-                                            self.consumer_sequence.unwrap()
-                                        );
-                                        self.subscriber = None;
-                                        continue;
-                                    }
-                                    self.consumer_sequence = Some(sequence);
-                                } else {
-                                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                                        std::io::ErrorKind::NotFound,
-                                        "did not find sequence header",
-                                    )))));
-                                }
-                                return Poll::Ready(Some(Ok(jetstream::Message {
-                                    context: self.context.clone(),
+                                println!("MESSAGE: {:?}", message);
+                                let jetstrea_message = jetstream::message::Message {
                                     message,
-                                })));
+                                    context: self.context.clone(),
+                                };
+
+                                let info = jetstrea_message.jetstream_message_info()?;
+                                println!("SEQUENCE: {:>}", info.stream_seq);
+                                let sequence = info.stream_seq;
+                                if sequence != self.consumer_sequence.unwrap_or(0) + 1
+                                    || (sequence == 30 && self.mismatched)
+                                {
+                                    println!(
+                                        "sequence mismatch! current {}, previos {:?}",
+                                        sequence, self.consumer_sequence,
+                                    );
+                                    self.subscriber = None;
+                                    self.mismatched = true;
+                                    continue;
+                                }
+                                self.consumer_sequence = Some(sequence);
+                                return Poll::Ready(Some(Ok(jetstrea_message)));
                             }
                         },
                         None => return Poll::Ready(None),

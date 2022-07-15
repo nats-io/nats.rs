@@ -18,6 +18,7 @@ use crate::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
+use time::OffsetDateTime;
 
 #[derive(Debug)]
 pub struct Message {
@@ -172,6 +173,130 @@ impl Message {
             )))
         }
     }
+
+    /// Returns the `JetStream` message ID
+    /// if this is a `JetStream` message.
+    #[allow(clippy::eval_order_dependence)]
+    pub fn jetstream_message_info(&self) -> Result<JetStreamMessageInfo<'_>, Error> {
+        const PREFIX: &str = "$JS.ACK.";
+        const SKIP: usize = PREFIX.len();
+
+        let mut reply: &str = self.reply.as_ref().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "did not found reply subject")
+        })?;
+
+        if !reply.starts_with(PREFIX) {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "did not found proper prefix",
+            )));
+        }
+
+        reply = &reply[SKIP..];
+
+        let mut split = reply.split('.');
+
+        // we should avoid allocating to prevent
+        // large performance degradations in
+        // parsing this.
+        let mut tokens: [Option<&str>; 10] = [None; 10];
+        let mut n_tokens = 0;
+        for each_token in &mut tokens {
+            if let Some(token) = split.next() {
+                *each_token = Some(token);
+                n_tokens += 1;
+            }
+        }
+
+        let mut token_index = 0;
+
+        macro_rules! try_parse {
+            () => {
+                match str::parse(try_parse!(str)) {
+                    Ok(parsed) => parsed,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                }
+            };
+            (str) => {
+                if let Some(next) = tokens[token_index].take() {
+                    #[allow(unused)]
+                    {
+                        // this isn't actually unused, but it's
+                        // difficult for the compiler to infer this.
+                        token_index += 1;
+                    }
+                    next
+                } else {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "too few tokens",
+                    )));
+                }
+            };
+        }
+
+        // now we can try to parse the tokens to
+        // individual types. We use an if-else
+        // chain instead of a match because it
+        // produces more optimal code usually,
+        // and we want to try the 9 (11 - the first 2)
+        // case first because we expect it to
+        // be the most common. We use >= to be
+        // future-proof.
+        if n_tokens >= 9 {
+            Ok(JetStreamMessageInfo {
+                domain: {
+                    let domain: &str = try_parse!(str);
+                    if domain == "_" {
+                        None
+                    } else {
+                        Some(domain)
+                    }
+                },
+                acc_hash: Some(try_parse!(str)),
+                stream: try_parse!(str),
+                consumer: try_parse!(str),
+                delivered: try_parse!(),
+                stream_seq: try_parse!(),
+                consumer_seq: try_parse!(),
+                published: {
+                    let nanos: i128 = try_parse!();
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                },
+                pending: try_parse!(),
+                token: if n_tokens >= 9 {
+                    Some(try_parse!(str))
+                } else {
+                    None
+                },
+            })
+        } else if n_tokens == 7 {
+            // we expect this to be increasingly rare, as older
+            // servers are phased out.
+            Ok(JetStreamMessageInfo {
+                domain: None,
+                acc_hash: None,
+                stream: try_parse!(str),
+                consumer: try_parse!(str),
+                delivered: try_parse!(),
+                stream_seq: try_parse!(),
+                consumer_seq: try_parse!(),
+                published: {
+                    let nanos: i128 = try_parse!();
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                },
+                pending: try_parse!(),
+                token: None,
+            })
+        } else {
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "bad token number",
+            )))
+        }
+    }
 }
 
 /// The kinds of response used for acknowledging a processed message.
@@ -207,4 +332,29 @@ impl From<AckKind> for Bytes {
             Term => Bytes::from_static(b"+TERM"),
         }
     }
+}
+
+/// Information about a received message
+#[derive(Debug, Clone)]
+pub struct JetStreamMessageInfo<'a> {
+    /// Optional domain, present in servers post-ADR-15
+    pub domain: Option<&'a str>,
+    /// Optional account hash, present in servers post-ADR-15
+    pub acc_hash: Option<&'a str>,
+    /// The stream name
+    pub stream: &'a str,
+    /// The consumer name
+    pub consumer: &'a str,
+    /// The stream sequence number associated with this message
+    pub stream_seq: u64,
+    /// The consumer sequence number associated with this message
+    pub consumer_seq: u64,
+    /// the number of messages known by the server to be delivered to this consumer
+    pub delivered: i64,
+    /// the number of messages known by the server to be pending to this consumer
+    pub pending: u64,
+    /// the time that this message was received by the server from its publisher
+    pub published: time::OffsetDateTime,
+    /// Optional token, present in servers post-ADR-15
+    pub token: Option<&'a str>,
 }
