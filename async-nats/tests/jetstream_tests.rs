@@ -30,7 +30,7 @@ mod jetstream {
     use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream;
+    use async_nats::jetstream::stream::{self, StorageType};
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -166,12 +166,12 @@ mod jetstream {
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        context.create_stream("events").await.unwrap();
-
         let stream = context
             .create_stream(&stream::Config {
                 name: "events2".to_string(),
                 num_replicas: 3,
+                max_bytes: 1024,
+                storage: StorageType::Memory,
                 ..Default::default()
             })
             .await
