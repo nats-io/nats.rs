@@ -188,6 +188,9 @@ pub struct Config {
     /// Enable idle heartbeat messages
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
+    /// Number of consumer replucas
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub num_replicas: usize,
 }
 
 impl FromConsumer for Config {
@@ -217,6 +220,7 @@ impl FromConsumer for Config {
             headers_only: config.headers_only,
             flow_control: config.flow_control,
             idle_heartbeat: config.idle_heartbeat,
+            num_replicas: config.num_replicas,
         })
     }
 }
@@ -244,6 +248,7 @@ impl IntoConsumerConfig for Config {
             max_batch: 0,
             max_expires: Duration::default(),
             inactive_threshold: Duration::default(),
+            num_replicas: self.num_replicas,
         }
     }
 }
