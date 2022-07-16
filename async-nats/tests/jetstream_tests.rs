@@ -160,6 +160,30 @@ mod jetstream {
             .unwrap();
     }
 
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn create_stream_with_replicas() {
+        use crate::jetstream::stream::StorageType;
+        let cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let client = async_nats::connect(cluster.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(&stream::Config {
+                name: "events2".to_string(),
+                num_replicas: 3,
+                max_bytes: 1024,
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(stream.info.config.num_replicas, 3);
+        context.delete_stream("events2").await.unwrap();
+    }
+
     #[tokio::test]
     async fn get_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");

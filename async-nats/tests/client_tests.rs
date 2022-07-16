@@ -476,7 +476,6 @@ mod client {
             .unwrap()
             .unwrap();
     }
-
     #[tokio::test]
     async fn no_echo() {
         // no_echo disabled.
