@@ -283,6 +283,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
 
+    /// Information about cluster and replication for the Consumer
     #[serde(default)]
     pub cluster: ClusterInfo,
 }
