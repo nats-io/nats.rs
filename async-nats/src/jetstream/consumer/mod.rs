@@ -282,6 +282,9 @@ pub struct Config {
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+
+    #[serde(default)]
+    pub cluster: ClusterInfo,
 }
 
 impl From<&Config> for Config {
