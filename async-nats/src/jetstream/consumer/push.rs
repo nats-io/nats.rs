@@ -11,10 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, PushConsumer,
-    ReplayPolicy,
-};
+use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
     jetstream::{self, stream::ClusterInfo, Context, Message},
     Error, StatusCode, Subscriber,
@@ -366,7 +363,6 @@ impl Consumer<OrderedConfig> {
             subscriber: Some(subscriber),
             subscriber_future: None,
             consumer_sequence: Some(0),
-            mismatched: false,
         })
     }
 }
@@ -377,7 +373,6 @@ pub struct Ordered<'a> {
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
     consumer_sequence: Option<u64>,
-    mismatched: bool,
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
@@ -452,15 +447,12 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 let info = jetstrea_message.jetstream_message_info()?;
                                 println!("SEQUENCE: {:>}", info.stream_seq);
                                 let sequence = info.stream_seq;
-                                if sequence != self.consumer_sequence.unwrap_or(0) + 1
-                                    || (sequence == 30 && self.mismatched)
-                                {
+                                if sequence != self.consumer_sequence.unwrap_or(0) + 1 {
                                     println!(
                                         "sequence mismatch! current {}, previos {:?}",
                                         sequence, self.consumer_sequence,
                                     );
                                     self.subscriber = None;
-                                    self.mismatched = true;
                                     continue;
                                 }
                                 self.consumer_sequence = Some(sequence);
