@@ -433,19 +433,19 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 continue;
                             }
                             None => {
-                                let jetstrea_message = jetstream::message::Message {
+                                let jetstream_message = jetstream::message::Message {
                                     message,
                                     context: self.context.clone(),
                                 };
 
-                                let info = jetstrea_message.jetstream_message_info()?;
-                                let sequence = info.stream_seq;
-                                if sequence != self.stream_sequence + 1 {
+                                let info = jetstream_message.jetstream_message_info()?;
+                                // let sequence = info.stream_seq;
+                                if info.stream_seq != self.stream_sequence + 1 {
                                     self.subscriber = None;
                                     continue;
                                 }
-                                self.stream_sequence = sequence;
-                                return Poll::Ready(Some(Ok(jetstrea_message)));
+                                self.stream_sequence = info.stream_seq;
+                                return Poll::Ready(Some(Ok(jetstream_message)));
                             }
                         },
                         None => return Poll::Ready(None),
