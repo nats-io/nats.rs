@@ -32,7 +32,7 @@ mod jetstream {
         self, DeliverPolicy, OrderedPush, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream;
+    use async_nats::jetstream::stream::{self, StorageType};
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -517,6 +517,7 @@ mod jetstream {
             .create_stream(stream::Config {
                 name: "events".to_string(),
                 subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
                 ..Default::default()
             })
             .await
@@ -531,7 +532,9 @@ mod jetstream {
             .await
             .unwrap();
 
-        for _ in 0..1000 {
+        for i in 0..1000 {
+            if i % 200 == 0 {
+            }
             context
                 .publish("events".to_string(), "dat".into())
                 .await

@@ -438,20 +438,14 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 continue;
                             }
                             None => {
-                                println!("MESSAGE: {:?}", message);
                                 let jetstrea_message = jetstream::message::Message {
                                     message,
                                     context: self.context.clone(),
                                 };
 
                                 let info = jetstrea_message.jetstream_message_info()?;
-                                println!("SEQUENCE: {:>}", info.stream_seq);
                                 let sequence = info.stream_seq;
                                 if sequence != self.consumer_sequence.unwrap_or(0) + 1 {
-                                    println!(
-                                        "sequence mismatch! current {}, previos {:?}",
-                                        sequence, self.consumer_sequence,
-                                    );
                                     self.subscriber = None;
                                     continue;
                                 }
