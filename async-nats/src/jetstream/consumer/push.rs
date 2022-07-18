@@ -362,7 +362,7 @@ impl Consumer<OrderedConfig> {
             consumer: self,
             subscriber: Some(subscriber),
             subscriber_future: None,
-            consumer_sequence: Some(0),
+            stream_sequence: 0,
         })
     }
 }
@@ -372,7 +372,7 @@ pub struct Ordered<'a> {
     consumer: Consumer<OrderedConfig>,
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
-    consumer_sequence: Option<u64>,
+    stream_sequence: u64,
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
@@ -384,17 +384,12 @@ impl<'a> futures::Stream for Ordered<'a> {
                 match self.subscriber_future.as_mut() {
                     None => {
                         let context = self.context.clone();
-                        let sequence = self.consumer_sequence;
+                        let sequence = self.stream_sequence;
                         let config = self.consumer.config.clone();
                         let stream_name = self.consumer.info.stream_name.clone();
                         self.subscriber_future = Some(Box::pin(async move {
-                            recreate_ephemeral_subscriber(
-                                context,
-                                config,
-                                stream_name,
-                                sequence.unwrap_or(0),
-                            )
-                            .await
+                            recreate_ephemeral_subscriber(context, config, stream_name, sequence)
+                                .await
                         }));
                         match self.subscriber_future.as_mut().unwrap().as_mut().poll(cx) {
                             Poll::Ready(subscriber) => {
@@ -445,11 +440,11 @@ impl<'a> futures::Stream for Ordered<'a> {
 
                                 let info = jetstrea_message.jetstream_message_info()?;
                                 let sequence = info.stream_seq;
-                                if sequence != self.consumer_sequence.unwrap_or(0) + 1 {
+                                if sequence != self.stream_sequence + 1 {
                                     self.subscriber = None;
                                     continue;
                                 }
-                                self.consumer_sequence = Some(sequence);
+                                self.stream_sequence = sequence;
                                 return Poll::Ready(Some(Ok(jetstrea_message)));
                             }
                         },

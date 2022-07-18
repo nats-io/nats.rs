@@ -533,8 +533,7 @@ mod jetstream {
             .unwrap();
 
         for i in 0..1000 {
-            if i % 200 == 0 {
-            }
+            if i % 200 == 0 {}
             context
                 .publish("events".to_string(), "dat".into())
                 .await
