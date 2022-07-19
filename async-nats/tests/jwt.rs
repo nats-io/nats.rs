@@ -52,6 +52,9 @@ mod client {
         .await
         .unwrap();
 
+        // Subscribe to our subject
+        let mut subscriber = client.subscribe("events".into()).await.unwrap();
+
         // publish something
         client
             .publish("events".into(), "one".into())
@@ -64,6 +67,7 @@ mod client {
         // Wait a bit for the server to die completely
         sleep(Duration::from_secs(1)).await;
 
+        // Publish while disconnected
         client
             .publish("events".into(), "two".into())
             .await
@@ -72,8 +76,7 @@ mod client {
         // And start another instance which should trigger reconnect
         let _server = nats_server::run_server("tests/configs/jwt.conf");
 
-        let mut subscriber = client.subscribe("events".into()).await.unwrap();
-
+        // Check that everything arrived in order
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.payload, Bytes::from("one"));
 

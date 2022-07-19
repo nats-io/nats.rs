@@ -793,7 +793,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
                 connect_info.signature = Some(sig);
             }
             Err(e) => {
-                println!(
+                panic!(
                     "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
                     e
                 );
