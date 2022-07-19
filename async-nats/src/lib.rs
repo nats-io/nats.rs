@@ -98,7 +98,6 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tls::TlsOptions;
 
 use std::cmp;
 use std::collections::HashMap;
@@ -281,13 +280,13 @@ pub enum ClientOp {
 pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     servers: HashMap<ServerAddr, usize>,
-    options: TlsOptions,
+    options: ConnectOptions,
 }
 
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
-        options: TlsOptions,
+        options: ConnectOptions,
     ) -> Result<Connector, io::Error> {
         let servers = addrs
             .to_server_addrs()?
@@ -332,8 +331,8 @@ impl Connector {
                     .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
                     .await
                 {
-                    Ok((info, connection)) => {
-                        for url in &info.connect_urls {
+                    Ok((server_info, mut connection)) => {
+                        for url in &server_info.connect_urls {
                             let server_addr = url.parse::<ServerAddr>()?;
                             self.servers.entry(server_addr).or_insert(0);
                         }
@@ -341,7 +340,74 @@ impl Connector {
                         let server_attempts = self.servers.get_mut(&server_addr).unwrap();
                         *server_attempts = 0;
 
-                        return Ok((info, connection));
+                        let tls_required = self.options.tls_required || server_addr.tls_required();
+                        let mut connect_info = ConnectInfo {
+                            tls_required,
+                            // FIXME(tp): have optional name
+                            name: Some("beta-rust-client".to_string()),
+                            pedantic: false,
+                            verbose: false,
+                            lang: LANG.to_string(),
+                            version: VERSION.to_string(),
+                            protocol: Protocol::Dynamic,
+                            user: None,
+                            pass: None,
+                            auth_token: None,
+                            user_jwt: None,
+                            nkey: None,
+                            signature: None,
+                            echo: !self.options.no_echo,
+                            headers: true,
+                            no_responders: true,
+                        };
+
+                        match &self.options.auth {
+                            Authorization::None => {
+                                return Ok((server_info, connection));
+                            }
+                            Authorization::Token(token) => {
+                                connect_info.auth_token = Some(token.clone())
+                            }
+                            Authorization::UserAndPassword(user, pass) => {
+                                connect_info.user = Some(user.clone());
+                                connect_info.pass = Some(pass.clone());
+                            }
+                            Authorization::Jwt(jwt, sign_fn) => {
+                                match sign_fn.call(server_info.nonce.clone()).await {
+                                    Ok(sig) => {
+                                        connect_info.user_jwt = Some(jwt.clone());
+                                        connect_info.signature = Some(sig);
+                                    }
+                                    Err(e) => {
+                                        panic!(
+                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
+                    e
+                );
+                                    }
+                                }
+                            }
+                        }
+
+                        connection.write_op(ClientOp::Connect(connect_info)).await?;
+                        connection.flush().await?;
+
+                        match connection.read_op().await? {
+                            Some(ServerOp::Pong) => {
+                                return Ok((server_info, connection));
+                            }
+                            Some(ServerOp::Error(err)) => {
+                                return Err(io::Error::new(
+                                    ErrorKind::InvalidInput,
+                                    err.to_string(),
+                                ));
+                            }
+                            None => {
+                                return Err(io::Error::new(
+                                    ErrorKind::BrokenPipe,
+                                    "connection aborted",
+                                ))
+                            }
+                        }
                     }
 
                     Err(inner) => error.replace(inner),
@@ -743,15 +809,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let ping_interval = options.ping_interval;
     let flush_interval = options.flush_interval;
 
-    let tls_options = TlsOptions {
-        tls_required: options.tls_required,
-        certificates: options.certificates,
-        client_key: options.client_key,
-        client_cert: options.client_cert,
-        tls_client_config: options.tls_client_config,
-    };
-
-    let mut connector = Connector::new(addrs, tls_options)?;
+    let mut connector = Connector::new(addrs, options)?;
     let (server_info, connection) = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
@@ -761,60 +819,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(sender.clone(), options.subscription_capacity);
-    let mut connect_info = ConnectInfo {
-        tls_required,
-        // FIXME(tp): have optional name
-        name: Some("beta-rust-client".to_string()),
-        pedantic: false,
-        verbose: false,
-        lang: LANG.to_string(),
-        version: VERSION.to_string(),
-        protocol: Protocol::Dynamic,
-        user: None,
-        pass: None,
-        auth_token: None,
-        user_jwt: None,
-        nkey: None,
-        signature: None,
-        echo: !options.no_echo,
-        headers: true,
-        no_responders: true,
-    };
-    match options.auth {
-        Authorization::None => {}
-        Authorization::Token(token) => connect_info.auth_token = Some(token),
-        Authorization::UserAndPassword(user, pass) => {
-            connect_info.user = Some(user);
-            connect_info.pass = Some(pass);
-        }
-        Authorization::Jwt(jwt, sign_fn) => match sign_fn.call(server_info.nonce.clone()).await {
-            Ok(sig) => {
-                connect_info.user_jwt = Some(jwt.clone());
-                connect_info.signature = Some(sig);
-            }
-            Err(e) => {
-                panic!(
-                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
-                    e
-                );
-            }
-        },
-    }
-    connection_handler
-        .connection
-        .write_op(ClientOp::Connect(connect_info))
-        .await?;
-    connection_handler.connection.flush().await?;
-    match connection_handler.connection.read_op().await? {
-        Some(ServerOp::Error(err)) => {
-            return Err(io::Error::new(ErrorKind::InvalidInput, err.to_string()));
-        }
-        Some(op) => {
-            connection_handler.handle_server_op(op).await?;
-        }
-        None => return Err(io::Error::new(ErrorKind::BrokenPipe, "connection aborted")),
-    }
-
     tokio::spawn({
         let sender = sender.clone();
         async move {
