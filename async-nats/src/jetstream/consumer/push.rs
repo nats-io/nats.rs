@@ -13,7 +13,7 @@
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
-    jetstream::{self, stream::ClusterInfo, Context, Message},
+    jetstream::{self, Context, Message},
     Error, StatusCode, Subscriber,
 };
 
@@ -191,8 +191,6 @@ pub struct Config {
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
-    /// Information about cluster and replication for the Consumer
-    pub cluster: ClusterInfo,
 }
 
 impl FromConsumer for Config {
@@ -223,7 +221,6 @@ impl FromConsumer for Config {
             flow_control: config.flow_control,
             idle_heartbeat: config.idle_heartbeat,
             num_replicas: config.num_replicas,
-            cluster: config.cluster,
         })
     }
 }
@@ -252,7 +249,6 @@ impl IntoConsumerConfig for Config {
             max_expires: Duration::default(),
             inactive_threshold: Duration::default(),
             num_replicas: self.num_replicas,
-            cluster: self.cluster,
         }
     }
 }
