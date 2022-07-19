@@ -33,6 +33,7 @@ pub trait IntoConsumerConfig {
 }
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
@@ -125,6 +126,7 @@ pub trait FromConsumer {
 
 pub type PullConsumer = Consumer<self::pull::Config>;
 pub type PushConsumer = Consumer<self::push::Config>;
+pub type OrderedPushConsumer = Consumer<self::push::OrderedConfig>;
 
 /// Information about a consumer
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
