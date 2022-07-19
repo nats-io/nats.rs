@@ -312,11 +312,10 @@ pub fn run_basic_server() -> Server {
 #[cfg(test)]
 mod tests {
 
-    use crate::run_cluster;
-
     #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_with_js() {
+        use crate::run_cluster;
         let cluster = run_cluster("configs/jetstream.conf");
 
         let client = async_nats::connect(cluster.servers[0].client_url())
@@ -349,6 +348,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_without_js() {
+        use crate::run_cluster;
         use futures::StreamExt;
         let cluster = run_cluster("");
 
