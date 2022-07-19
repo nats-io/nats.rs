@@ -12,7 +12,11 @@
 // limitations under the License.
 
 mod client {
+    use bytes::Bytes;
+    use futures::stream::StreamExt;
     use std::path::PathBuf;
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     #[tokio::test]
     async fn jwt_auth() {
@@ -32,5 +36,48 @@ mod client {
         nc.publish("hello".into(), "world".into())
             .await
             .expect("published");
+    }
+
+    #[tokio::test]
+    async fn jwt_reconnect() {
+        let server = nats_server::run_server("tests/configs/jwt.conf");
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let client = async_nats::ConnectOptions::with_credentials_file(
+            path.join("tests/configs/TestUser.creds"),
+        )
+        .await
+        .expect("loaded user creds file")
+        .connect(server.client_url())
+        .await
+        .unwrap();
+
+        // publish something
+        client
+            .publish("events".into(), "one".into())
+            .await
+            .expect("published");
+
+        // Drop the server
+        drop(server);
+
+        // Wait a bit for the server to die completely
+        sleep(Duration::from_secs(1)).await;
+
+        client
+            .publish("events".into(), "two".into())
+            .await
+            .expect("published");
+
+        // And start another instance which should trigger reconnect
+        let _server = nats_server::run_server("tests/configs/jwt.conf");
+
+        let mut subscriber = client.subscribe("events".into()).await.unwrap();
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.payload, Bytes::from("one"));
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.payload, Bytes::from("two"));
     }
 }
