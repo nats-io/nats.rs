@@ -314,6 +314,7 @@ mod tests {
 
     use crate::run_cluster;
 
+    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_with_js() {
         let cluster = run_cluster("configs/jetstream.conf");
@@ -345,6 +346,7 @@ mod tests {
         jetstream.delete_stream("replicated").await.unwrap();
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_without_js() {
         use futures::StreamExt;
