@@ -421,29 +421,29 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 match message.status {
                                     Some(StatusCode::IDLE_HEARBEAT) => {
                                         if let Some(headers) = message.headers.as_ref() {
-                                            let sequence: u64 = headers
-                                            .get(crate::header::NATS_LAST_STREAM)
-                                            .ok_or_else(|| {
-                                                std::io::Error::new(
-                                                    std::io::ErrorKind::NotFound,
-                                                    "did not found sequence header",
-                                                )
-                                            })
-                                            .and_then(|header| {
-                                                header.to_str().map_err(|err| {
-                                                    std::io::Error::new(
-                                                        std::io::ErrorKind::Other,
-                                                        format!("could not parse header: {}", err),
-                                                    )
-                                                })
-                                            })
-                                            .and_then(|header| header.parse()
-                                                      .map_err(|err| std::io::Error::new(
+                                            if let Some(sequence) =
+                                                headers.get(crate::header::NATS_LAST_STREAM)
+                                            {
+                                                let sequence: u64 = sequence
+                                                    .to_str()
+                                                    .map_err(|err| {
+                                                        Box::new(std::io::Error::new(
                                                             std::io::ErrorKind::Other,
-                                                            format!("could not parse header into u64: {}", err)))
-                                                      )?;
-                                            if sequence != self.stream_sequence {
-                                                self.subscriber = None;
+                                                            format!(
+                                                                "could not parse header: {}",
+                                                                err
+                                                            ),
+                                                        ))
+                                                    })?
+                                                    .parse().map_err(|err|
+                                                           Box::new(std::io::Error::new(
+                                                                   std::io::ErrorKind::Other, 
+                                                                   format!("could not parse header into u64: {}", err))
+                                                               ))?;
+
+                                                if sequence != self.stream_sequence {
+                                                    self.subscriber = None;
+                                                }
                                             }
                                         }
                                         if let Some(subject) = message.reply {
