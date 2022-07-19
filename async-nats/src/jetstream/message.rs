@@ -259,8 +259,8 @@ impl Message {
                 stream: try_parse!(str),
                 consumer: try_parse!(str),
                 delivered: try_parse!(),
-                stream_seq: try_parse!(),
-                consumer_seq: try_parse!(),
+                stream_sequence: try_parse!(),
+                consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
                     OffsetDateTime::from_unix_timestamp_nanos(nanos)?
@@ -281,8 +281,8 @@ impl Message {
                 stream: try_parse!(str),
                 consumer: try_parse!(str),
                 delivered: try_parse!(),
-                stream_seq: try_parse!(),
-                consumer_seq: try_parse!(),
+                stream_sequence: try_parse!(),
+                consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
                     OffsetDateTime::from_unix_timestamp_nanos(nanos)?
@@ -346,9 +346,9 @@ pub struct Info<'a> {
     /// The consumer name
     pub consumer: &'a str,
     /// The stream sequence number associated with this message
-    pub stream_seq: u64,
+    pub stream_sequence: u64,
     /// The consumer sequence number associated with this message
-    pub consumer_seq: u64,
+    pub consumer_sequence: u64,
     /// the number of messages known by the server to be delivered to this consumer
     pub delivered: i64,
     /// the number of messages known by the server to be pending to this consumer

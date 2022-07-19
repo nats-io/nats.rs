@@ -388,8 +388,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                         let config = self.consumer.config.clone();
                         let stream_name = self.consumer.info.stream_name.clone();
                         self.subscriber_future = Some(Box::pin(async move {
-                            recreate_ephemeral_subscriber(context, config, stream_name, sequence)
-                                .await
+                            self.recreate_ephemeral_subscriber(sequence).await
                         }));
                         match self.subscriber_future.as_mut().unwrap().as_mut().poll(cx) {
                             Poll::Ready(subscriber) => {
@@ -440,11 +439,11 @@ impl<'a> futures::Stream for Ordered<'a> {
 
                                 let info = jetstream_message.info()?;
                                 // let sequence = info.stream_seq;
-                                if info.stream_seq != self.stream_sequence + 1 {
+                                if info.stream_sequence != self.stream_sequence + 1 {
                                     self.subscriber = None;
                                     continue;
                                 }
-                                self.stream_sequence = info.stream_seq;
+                                self.stream_sequence = info.stream_sequence;
                                 return Poll::Ready(Some(Ok(jetstream_message)));
                             }
                         },
@@ -457,25 +456,26 @@ impl<'a> futures::Stream for Ordered<'a> {
     }
 }
 
-async fn recreate_ephemeral_subscriber(
-    context: Context,
-    config: OrderedConfig,
-    stream_name: String,
-    sequence: u64,
-) -> Result<Subscriber, Error> {
-    let stream = context.get_stream(stream_name.clone()).await?;
+impl<'a> Ordered<'a> {
+    async fn recreate_ephemeral_subscriber(&self, sequence: u64) -> Result<Subscriber, Error> {
+        let stream = self
+            .context
+            .get_stream(self.consumer.info.stream_name.clone())
+            .await?;
 
-    let subscriber = context
-        .client
-        .subscribe(config.deliver_subject.clone())
-        .await?;
-    stream
-        .create_consumer(jetstream::consumer::push::OrderedConfig {
-            deliver_policy: DeliverPolicy::ByStartSequence {
-                start_sequence: sequence,
-            },
-            ..config
-        })
-        .await?;
-    Ok(subscriber)
+        let subscriber = self
+            .context
+            .client
+            .subscribe(self.consumer.config.deliver_subject.clone())
+            .await?;
+        stream
+            .create_consumer(jetstream::consumer::push::OrderedConfig {
+                deliver_policy: DeliverPolicy::ByStartSequence {
+                    start_sequence: sequence,
+                },
+                ..self.consumer.config.clone()
+            })
+            .await?;
+        Ok(subscriber)
+    }
 }
