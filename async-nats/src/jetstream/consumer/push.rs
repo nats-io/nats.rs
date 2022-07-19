@@ -437,7 +437,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                     })?
                                                     .parse().map_err(|err|
                                                            Box::new(std::io::Error::new(
-                                                                   std::io::ErrorKind::Other, 
+                                                                   std::io::ErrorKind::Other,
                                                                    format!("could not parse header into u64: {}", err))
                                                                ))?;
 
