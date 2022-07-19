@@ -13,7 +13,7 @@
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
-    jetstream::{self, stream::ClusterInfo, Context, Message},
+    jetstream::{self, Context, Message},
     Error, StatusCode, Subscriber,
 };
 
@@ -191,8 +191,6 @@ pub struct Config {
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
-    /// Information about cluster and replication for the Consumer
-    pub cluster: ClusterInfo,
 }
 
 impl FromConsumer for Config {
@@ -223,7 +221,6 @@ impl FromConsumer for Config {
             flow_control: config.flow_control,
             idle_heartbeat: config.idle_heartbeat,
             num_replicas: config.num_replicas,
-            cluster: config.cluster,
         })
     }
 }
@@ -252,7 +249,6 @@ impl IntoConsumerConfig for Config {
             max_expires: Duration::default(),
             inactive_threshold: Duration::default(),
             num_replicas: self.num_replicas,
-            cluster: self.cluster,
         }
     }
 }
@@ -295,6 +291,9 @@ pub struct OrderedConfig {
     /// The maximum number of waiting consumers.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_waiting: i64,
+    /// Number of consumer replucas
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub num_replicas: usize,
 }
 
 impl FromConsumer for OrderedConfig {
@@ -318,6 +317,7 @@ impl FromConsumer for OrderedConfig {
             headers_only: config.headers_only,
             deliver_policy: config.deliver_policy,
             max_waiting: config.max_waiting,
+            num_replicas: config.num_replicas,
         })
     }
 }
@@ -345,6 +345,7 @@ impl IntoConsumerConfig for OrderedConfig {
             max_batch: 0,
             max_expires: Duration::default(),
             inactive_threshold: Duration::from_secs(30),
+            num_replicas: self.num_replicas,
         }
     }
 }
@@ -414,42 +415,72 @@ impl<'a> futures::Stream for Ordered<'a> {
             }
             if let Some(subscriber) = self.subscriber.as_mut() {
                 match subscriber.receiver.poll_recv(cx) {
-                    Poll::Ready(maybe_message) => match maybe_message {
-                        Some(message) => match message.status {
-                            Some(StatusCode::IDLE_HEARBEAT) => {
-                                if let Some(subject) = message.reply {
-                                    // TODO store pending_publish as a future and return errors from it
-                                    let client = self.context.client.clone();
-                                    tokio::task::spawn(async move {
-                                        client
-                                            .publish(subject, Bytes::from_static(b""))
-                                            .await
-                                            .unwrap();
-                                    });
-                                }
-                                continue;
-                            }
-                            Some(_) => {
-                                continue;
-                            }
-                            None => {
-                                let jetstream_message = jetstream::message::Message {
-                                    message,
-                                    context: self.context.clone(),
-                                };
+                    Poll::Ready(maybe_message) => {
+                        match maybe_message {
+                            Some(message) => {
+                                match message.status {
+                                    Some(StatusCode::IDLE_HEARBEAT) => {
+                                        if let Some(headers) = message.headers.as_ref() {
+                                            let sequence: u64 = headers
+                                            .get("nats-last-stream")
+                                            .ok_or_else(|| {
+                                                std::io::Error::new(
+                                                    std::io::ErrorKind::NotFound,
+                                                    "did not found sequence header",
+                                                )
+                                            })
+                                            .and_then(|header| {
+                                                header.to_str().map_err(|err| {
+                                                    std::io::Error::new(
+                                                        std::io::ErrorKind::Other,
+                                                        format!("could not parse header: {}", err),
+                                                    )
+                                                })
+                                            })
+                                            .and_then(|header| header.parse()
+                                                      .map_err(|err| std::io::Error::new(
+                                                            std::io::ErrorKind::Other,
+                                                            format!("could not parse header into u64: {}", err)))
+                                                      )?;
+                                            if sequence != self.stream_sequence {
+                                                self.subscriber = None;
+                                            } else {
+                                            }
+                                        }
+                                        if let Some(subject) = message.reply {
+                                            // TODO store pending_publish as a future and return errors from it
+                                            let client = self.context.client.clone();
+                                            tokio::task::spawn(async move {
+                                                client
+                                                    .publish(subject, Bytes::from_static(b""))
+                                                    .await
+                                                    .unwrap();
+                                            });
+                                        }
+                                        continue;
+                                    }
+                                    Some(_) => {
+                                        continue;
+                                    }
+                                    None => {
+                                        let jetstream_message = jetstream::message::Message {
+                                            message,
+                                            context: self.context.clone(),
+                                        };
 
-                                let info = jetstream_message.info()?;
-                                // let sequence = info.stream_seq;
-                                if info.stream_sequence != self.stream_sequence + 1 {
-                                    self.subscriber = None;
-                                    continue;
+                                        let info = jetstream_message.info()?;
+                                        if info.stream_sequence != self.stream_sequence + 1 {
+                                            self.subscriber = None;
+                                            continue;
+                                        }
+                                        self.stream_sequence = info.stream_sequence;
+                                        return Poll::Ready(Some(Ok(jetstream_message)));
+                                    }
                                 }
-                                self.stream_sequence = info.stream_sequence;
-                                return Poll::Ready(Some(Ok(jetstream_message)));
                             }
-                        },
-                        None => return Poll::Ready(None),
-                    },
+                            None => return Poll::Ready(None),
+                        }
+                    }
                     Poll::Pending => return Poll::Pending,
                 }
             }
@@ -469,11 +500,18 @@ async fn recreate_ephemeral_subscriber(
         .client
         .subscribe(config.deliver_subject.clone())
         .await?;
+    let deliver_policy = {
+        if sequence == 0 {
+            DeliverPolicy::All
+        } else {
+            DeliverPolicy::ByStartSequence {
+                start_sequence: sequence,
+            }
+        }
+    };
     stream
         .create_consumer(jetstream::consumer::push::OrderedConfig {
-            deliver_policy: DeliverPolicy::ByStartSequence {
-                start_sequence: sequence,
-            },
+            deliver_policy,
             ..config
         })
         .await?;

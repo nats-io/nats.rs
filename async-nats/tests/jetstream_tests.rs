@@ -532,19 +532,25 @@ mod jetstream {
             .await
             .unwrap();
 
-        for i in 0..1000 {
-            if i % 200 == 0 {}
-            context
-                .publish("events".to_string(), "dat".into())
-                .await
-                .unwrap();
-        }
-        println!("pubbded");
+        tokio::task::spawn({
+            let context = context.clone();
+            async move {
+                for i in 0..1000 {
+                    if i % 500 == 0 {
+                        tokio::time::sleep(Duration::from_secs(6)).await
+                    }
+                    context
+                        .publish("events".to_string(), "dat".into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
 
         let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
             let message = message.unwrap();
-            println!("message: {:?}", message);
+            // println!("message: {:?}", message);
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }
