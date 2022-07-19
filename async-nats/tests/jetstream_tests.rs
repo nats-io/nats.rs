@@ -550,7 +550,6 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
             let message = message.unwrap();
-            // println!("message: {:?}", message);
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }

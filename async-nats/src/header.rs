@@ -13,3 +13,5 @@
 
 //! NATS [Message][crate::Message] headers, leveraging [http::header] crate.
 pub use http::header::{HeaderMap, HeaderName, HeaderValue};
+
+pub const NATS_LAST_STREAM: &str = "nats-last-stream";

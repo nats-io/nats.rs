@@ -422,7 +422,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                     Some(StatusCode::IDLE_HEARBEAT) => {
                                         if let Some(headers) = message.headers.as_ref() {
                                             let sequence: u64 = headers
-                                            .get("nats-last-stream")
+                                            .get(crate::header::NATS_LAST_STREAM)
                                             .ok_or_else(|| {
                                                 std::io::Error::new(
                                                     std::io::ErrorKind::NotFound,
@@ -444,7 +444,6 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                       )?;
                                             if sequence != self.stream_sequence {
                                                 self.subscriber = None;
-                                            } else {
                                             }
                                         }
                                         if let Some(subject) = message.reply {
