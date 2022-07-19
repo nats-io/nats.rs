@@ -18,7 +18,7 @@ use std::{task::Poll, time::Duration};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    jetstream::{self, Context},
+    jetstream::{self, stream::ClusterInfo, Context},
     Error, StatusCode, Subscriber,
 };
 
@@ -1288,6 +1288,12 @@ pub struct Config {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+    /// Number of consumer replucas
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub num_replicas: usize,
+    /// Information about cluster and replication for the Consumer
+    #[serde(default)]
+    pub cluster: ClusterInfo,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -1319,6 +1325,8 @@ impl IntoConsumerConfig for Config {
             max_batch: self.max_batch,
             max_expires: self.max_expires,
             inactive_threshold: self.inactive_threshold,
+            num_replicas: self.num_replicas,
+            cluster: self.cluster,
         }
     }
 }
@@ -1347,6 +1355,8 @@ impl FromConsumer for Config {
             max_batch: config.max_batch,
             max_expires: config.max_expires,
             inactive_threshold: config.inactive_threshold,
+            num_replicas: config.num_replicas,
+            cluster: config.cluster,
         })
     }
 }

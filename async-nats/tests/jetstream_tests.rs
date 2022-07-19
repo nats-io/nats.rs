@@ -181,6 +181,19 @@ mod jetstream {
             .unwrap();
 
         assert_eq!(stream.info.config.num_replicas, 3);
+        assert!(stream.info.cluster.is_some());
+        assert_eq!(stream.info.cluster.as_ref().unwrap().replicas.len(), 2);
+
+        let consumer = stream
+            .create_consumer(jetstream::consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(consumer.cached_info().cluster.replicas.len(), 2);
+
         context.delete_stream("events2").await.unwrap();
     }
 

@@ -23,6 +23,7 @@ use serde_json::json;
 use time::serde::rfc3339;
 
 use super::response::Response;
+use super::stream::ClusterInfo;
 use super::Context;
 use crate::jetstream::consumer;
 use crate::Error;
@@ -157,13 +158,6 @@ pub struct Info {
     pub push_bound: bool,
 }
 
-/// Information about the consumer's associated `JetStream` cluster
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct ClusterInfo {
-    /// The leader of the cluster
-    pub leader: String,
-}
-
 /// Information about a consumer and the stream it is consuming
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SequencePair {
@@ -284,6 +278,14 @@ pub struct Config {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+
+    /// Number of consumer replucas
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub num_replicas: usize,
+
+    /// Information about cluster and replication for the Consumer
+    #[serde(default)]
+    pub cluster: ClusterInfo,
 }
 
 impl From<&Config> for Config {
