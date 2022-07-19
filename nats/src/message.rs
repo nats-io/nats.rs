@@ -350,7 +350,7 @@ impl Message {
                 consumer: try_parse!(str),
                 delivered: try_parse!(),
                 stream_seq: try_parse!(),
-                consumer_seq: try_parse!(),
+                consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
                     OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()?
@@ -372,7 +372,7 @@ impl Message {
                 consumer: try_parse!(str),
                 delivered: try_parse!(),
                 stream_seq: try_parse!(),
-                consumer_seq: try_parse!(),
+                consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
                     OffsetDateTime::from_unix_timestamp_nanos(nanos).ok()?

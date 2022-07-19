@@ -29,7 +29,7 @@ mod jetstream {
     use super::*;
     use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::{
-        self, DeliverPolicy, OrderedPush, PullConsumer, PushConsumer,
+        self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, StorageType};
@@ -524,7 +524,7 @@ mod jetstream {
             .unwrap();
 
         let stream = context.get_stream("events").await.unwrap();
-        let consumer: OrderedPush = stream
+        let consumer: OrderedPushConsumer = stream
             .create_consumer(consumer::push::OrderedConfig {
                 deliver_subject: "push".to_string(),
                 ..Default::default()
@@ -541,7 +541,7 @@ mod jetstream {
         }
         println!("pubbded");
 
-        let mut messages = consumer.ordered().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
             let message = message.unwrap();
             println!("message: {:?}", message);

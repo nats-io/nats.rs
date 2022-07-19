@@ -177,7 +177,7 @@ impl Message {
     /// Returns the `JetStream` message ID
     /// if this is a `JetStream` message.
     #[allow(clippy::eval_order_dependence)]
-    pub fn jetstream_message_info(&self) -> Result<JetStreamMessageInfo<'_>, Error> {
+    pub fn info(&self) -> Result<Info<'_>, Error> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
 
@@ -246,7 +246,7 @@ impl Message {
         // be the most common. We use >= to be
         // future-proof.
         if n_tokens >= 9 {
-            Ok(JetStreamMessageInfo {
+            Ok(Info {
                 domain: {
                     let domain: &str = try_parse!(str);
                     if domain == "_" {
@@ -275,7 +275,7 @@ impl Message {
         } else if n_tokens == 7 {
             // we expect this to be increasingly rare, as older
             // servers are phased out.
-            Ok(JetStreamMessageInfo {
+            Ok(Info {
                 domain: None,
                 acc_hash: None,
                 stream: try_parse!(str),
@@ -336,7 +336,7 @@ impl From<AckKind> for Bytes {
 
 /// Information about a received message
 #[derive(Debug, Clone)]
-pub struct JetStreamMessageInfo<'a> {
+pub struct Info<'a> {
     /// Optional domain, present in servers post-ADR-15
     pub domain: Option<&'a str>,
     /// Optional account hash, present in servers post-ADR-15

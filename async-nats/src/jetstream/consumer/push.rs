@@ -350,7 +350,7 @@ impl IntoConsumerConfig for OrderedConfig {
 }
 
 impl Consumer<OrderedConfig> {
-    pub async fn ordered<'a>(self) -> Result<Ordered<'a>, Error> {
+    pub async fn messages<'a>(self) -> Result<Ordered<'a>, Error> {
         let subscriber = self
             .context
             .client
@@ -438,7 +438,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                     context: self.context.clone(),
                                 };
 
-                                let info = jetstream_message.jetstream_message_info()?;
+                                let info = jetstream_message.info()?;
                                 // let sequence = info.stream_seq;
                                 if info.stream_seq != self.stream_sequence + 1 {
                                     self.subscriber = None;

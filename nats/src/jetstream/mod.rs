@@ -1357,12 +1357,12 @@ impl JetStream {
                 // Track messages for sequence mismatches.
                 if let Some(message_info) = message.jetstream_message_info() {
                     let mut sequence_info = sequence_pair.lock();
-                    if message_info.consumer_seq != sequence_info.consumer_seq + 1 {
+                    if message_info.consumer_sequence != sequence_info.consumer_seq + 1 {
                         return handle_sequence_mismatch(sid, sequence_info.stream_seq + 1);
                     }
 
                     sequence_info.stream_seq = message_info.stream_seq;
-                    sequence_info.consumer_seq = message_info.consumer_seq;
+                    sequence_info.consumer_seq = message_info.consumer_sequence;
                 }
 
                 false
