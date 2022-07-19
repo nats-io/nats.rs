@@ -409,7 +409,7 @@ pub struct JetStreamMessageInfo<'a> {
     /// The stream sequence number associated with this message
     pub stream_seq: u64,
     /// The consumer sequence number associated with this message
-    pub consumer_sequence: u64,
+    pub consumer_seq: u64,
     /// the number of messages known by the server to be delivered to this consumer
     pub delivered: i64,
     /// the number of messages known by the server to be pending to this consumer
