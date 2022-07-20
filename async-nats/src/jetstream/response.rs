@@ -38,7 +38,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "code: {}, status: {}, description: {}",
+            "JetStream response error code: {}, status: {}, description: {}",
             self.code, self.status, self.description
         )
     }
