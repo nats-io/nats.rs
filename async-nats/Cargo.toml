@@ -34,6 +34,8 @@ nuid = "0.3.2"
 serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6.2"
+lazy_static = "1.4"
+base64 = "0.13"
 
 [dev-dependencies]
 criterion =  { version = "0.3", features = ["async_tokio"]}

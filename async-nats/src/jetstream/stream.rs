@@ -81,6 +81,29 @@ impl Stream {
         }
     }
 
+    pub(crate) async fn get_last_message<S: AsRef<str>>(
+        &self,
+        subject: S,
+    ) -> Result<RawMessage, Error> {
+        let request_subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let payload = json!({
+            "last_by_subj": subject.as_ref(),
+        });
+
+        let response: Response<GetRawMessage> =
+            self.context.request(request_subject, &payload).await?;
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting message: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(value) => Ok(value.message),
+        }
+    }
+
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
