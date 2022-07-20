@@ -15,10 +15,12 @@
 
 use std::{
     io::{self, ErrorKind},
+    str::from_utf8,
     time::Duration,
 };
 
-use crate::Error;
+use crate::{Error, Message};
+use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -510,6 +512,34 @@ pub struct RawMessage {
     /// The time the message was published.
     #[serde(rename = "time", with = "rfc3339")]
     pub time: time::OffsetDateTime,
+}
+
+impl TryFrom<RawMessage> for Message {
+    type Error = Error;
+
+    fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
+        let decoded_paylaod = base64::decode(value.payload)
+            .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
+        let decoded_headers = {
+            if let Some(headers) = value.headers {
+                let decoded = base64::decode(headers)?;
+                println!("HEADERS: {:?}", from_utf8(&decoded)?);
+                // let byted = HeaderMap::try_from(decoded.to_vec())?;
+                Some(())
+            } else {
+                None
+            }
+        };
+        Ok(Message {
+            subject: value.subject,
+            reply: None,
+            payload: decoded_paylaod.into(),
+            // TODO: parse actual headers.
+            headers: None,
+            status: None,
+            description: None,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
