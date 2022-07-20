@@ -95,13 +95,7 @@ impl Stream {
         let response: Response<GetRawMessage> =
             self.context.request(request_subject, &payload).await?;
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting message: {}, {}",
-                    error.code, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(ErrorKind::Other, error))),
             Response::Ok(value) => Ok(value.message),
         }
     }
