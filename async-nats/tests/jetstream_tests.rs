@@ -1218,6 +1218,48 @@ mod jetstream {
         assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
 
         kv.purge("key").await.unwrap();
-        // TODO: cant test without history.
+        let mut history = kv.history("key").await.unwrap();
+        while let Some(entry) = history.next().await {
+            println!("ENTRY: {:?}", entry);
+        }
+    }
+
+    #[tokio::test]
+    async fn kv_history() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".to_string(),
+                description: "test_description".to_string(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        println!("{:?}", kv.status().await.unwrap());
+        kv.put("key", "0".into()).await.unwrap();
+        kv.put("key", "1".into()).await.unwrap();
+        kv.put("key", "2".into()).await.unwrap();
+
+        let mut history = kv.history("key").await.unwrap().enumerate();
+
+        while let Some((i, entry)) = history.next().await {
+            let entry = entry.unwrap();
+            assert_eq!(
+                i,
+                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            );
+            assert_eq!(i + 1, entry.revision as usize);
+        }
     }
 }
