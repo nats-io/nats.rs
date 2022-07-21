@@ -1183,9 +1183,41 @@ mod jetstream {
         let value = kv.get("key").await.unwrap();
         assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
         kv.delete("key").await.unwrap();
-        // TODO: this fails because we dont downcast properly
         let ss = kv.get("kv").await.unwrap();
-        println!("checks: {:?}", ss);
+        assert!(ss.is_none());
         // TODO: add history chekcs
+    }
+
+    #[tokio::test]
+    async fn kv_purge() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".to_string(),
+                description: "test_description".to_string(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        println!("{:?}", kv.status().await.unwrap());
+        let payload: Bytes = "data".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+
+        kv.purge("key").await.unwrap();
+        // TODO: cant test without history.
     }
 }
