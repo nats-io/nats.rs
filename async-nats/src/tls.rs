@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::tls;
+use crate::ConnectOptions;
 use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
@@ -69,7 +70,7 @@ pub(crate) struct TlsOptions {
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
 }
 
-pub(crate) async fn config_tls(options: &TlsOptions) -> io::Result<rustls::ClientConfig> {
+pub(crate) async fn config_tls(options: &ConnectOptions) -> io::Result<rustls::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
     for cert in rustls_native_certs::load_native_certs().map_err(|err| {
         io::Error::new(

@@ -809,7 +809,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let ping_interval = options.ping_interval;
     let flush_interval = options.flush_interval;
 
-    let mut connector = Connector::new(addrs, options)?;
+    let mut connector = Connector::new(addrs, options.clone())?;
     let (server_info, connection) = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
