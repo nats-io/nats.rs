@@ -1185,6 +1185,11 @@ mod jetstream {
         kv.delete("key").await.unwrap();
         let ss = kv.get("kv").await.unwrap();
         assert!(ss.is_none());
+
+        let mut entries = kv.history("key").await.unwrap();
+        while let Some(entry) = entries.next().await {
+            println!("entry: {:?}", entry.unwrap());
+        }
         // TODO: add history chekcs
     }
 
@@ -1212,15 +1217,29 @@ mod jetstream {
             .unwrap();
         println!("{:?}", kv.status().await.unwrap());
         let payload: Bytes = "data".into();
-        kv.put("key", payload.clone()).await.unwrap();
-        kv.put("key", payload.clone()).await.unwrap();
-        let value = kv.get("key").await.unwrap();
-        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+        kv.put("dz", "0".into()).await.unwrap();
+        kv.put("dz", "1".into()).await.unwrap();
+        kv.put("dz", "2".into()).await.unwrap();
+        kv.put("dz", "3".into()).await.unwrap();
+        kv.put("dz", "4".into()).await.unwrap();
+        kv.put("dz", "5".into()).await.unwrap();
 
-        kv.purge("key").await.unwrap();
-        let mut history = kv.history("key").await.unwrap();
+        kv.put("baz", "0".into()).await.unwrap();
+        kv.put("baz", "1".into()).await.unwrap();
+        kv.put("baz", "2".into()).await.unwrap();
+
+        println!("PRE:::::::::::::::::::::::::::::");
+        let mut history = kv.history("dz").await.unwrap();
         while let Some(entry) = history.next().await {
             println!("ENTRY: {:?}", entry);
+            println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
+        }
+        kv.purge("dz").await.unwrap();
+        println!("POST:::::::::::::::::::::::::::::");
+        let mut history = kv.history("dz").await.unwrap();
+        while let Some(entry) = history.next().await {
+            println!("ENTRY: {:?}", entry);
+            println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
         }
     }
 

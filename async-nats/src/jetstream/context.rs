@@ -433,6 +433,7 @@ impl Context {
                 storage: config.storage,
                 allow_rollup: true,
                 deny_delete: true,
+                deny_purge: false,
                 num_replicas,
                 discard: stream::DiscardPolicy::New,
                 ..Default::default()
