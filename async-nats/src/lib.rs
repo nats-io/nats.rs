@@ -150,6 +150,7 @@ pub mod header;
 pub mod jetstream;
 pub mod message;
 pub mod status;
+pub mod subject;
 mod tls;
 
 pub use message::Message;
