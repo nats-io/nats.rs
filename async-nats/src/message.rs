@@ -12,18 +12,17 @@
 // limitations under the License.
 
 //! A Core NATS message.
-use crate::header::HeaderMap;
-use crate::status::StatusCode;
+use crate::{SubjectBuf, header::HeaderMap, status::StatusCode};
 use bytes::Bytes;
 
 /// A Core NATS message.
 #[derive(Debug)]
 pub struct Message {
     /// Subject to which message is published to.
-    pub subject: String,
+    pub subject: SubjectBuf,
     /// Optional reply subject to which response can be published by [crate::Subscriber].
     /// Used for request-response pattern with [crate::Client::request].
-    pub reply: Option<String>,
+    pub reply: Option<SubjectBuf>,
     /// Payload of the message. Can be any arbitrary data format.
     pub payload: Bytes,
     /// Optional headers. Rust client uses [http::header].

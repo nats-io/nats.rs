@@ -22,7 +22,7 @@ use tokio::io;
 
 use crate::header::{HeaderMap, HeaderName, HeaderValue};
 use crate::status::StatusCode;
-use crate::{ClientOp, ServerError, ServerOp};
+use crate::{ClientOp, ServerError, ServerOp, SubjectBuf};
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
 pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
@@ -115,8 +115,9 @@ impl Connection {
                 return Ok(None);
             }
 
-            let subject = subject.to_owned();
-            let reply_to = reply_to.map(String::from);
+            // SAFETY: Subjects from the server are always valid.
+            let subject = SubjectBuf::new_unchecked(subject.to_owned());
+            let reply_to = reply_to.map(|reply_sub| SubjectBuf::new_unchecked(reply_sub.to_owned()));
 
             self.buffer.advance(len + 2);
             let payload = self.buffer.split_to(payload_len).freeze();
@@ -155,8 +156,9 @@ impl Connection {
                 }
             };
 
-            // Convert the slice into an owned string.
-            let subject = subject.to_string();
+            // SAFETY: Subjects from the server are always valid.
+            let subject = SubjectBuf::new_unchecked(subject.to_owned());
+            let reply_to = reply_to.map(|reply_sub| SubjectBuf::new_unchecked(reply_sub.to_owned()));
 
             // Parse the subject ID.
             let sid = u64::from_str(sid).map_err(|_| {
@@ -165,9 +167,6 @@ impl Connection {
                     "cannot parse sid argument after HMSG",
                 )
             })?;
-
-            // Convert the slice into an owned string.
-            let reply_to = reply_to.map(ToString::to_string);
 
             // Parse the number of payload bytes.
             let num_header_bytes = usize::from_str(num_header_bytes).map_err(|_| {
@@ -421,8 +420,21 @@ impl Connection {
 }
 
 #[cfg(test)]
+pub(crate) mod test_util {
+    use crate::SubjectBuf;
+
+    pub fn foo_bar_sub() -> SubjectBuf {
+        SubjectBuf::new_unchecked("FOO.BAR".to_string())
+    }
+
+    pub fn inbox_sub(counter: u32) -> Option<SubjectBuf> {
+        Some(SubjectBuf::new_unchecked(format!("INBOX.{counter}")))
+    }
+}
+#[cfg(test)]
 mod read_op {
     use super::Connection;
+    use super::test_util::*;
     use crate::{HeaderMap, ServerError, ServerInfo, ServerOp, StatusCode};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncWriteExt};
@@ -545,7 +557,7 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 9,
-                subject: "FOO.BAR".into(),
+                subject: foo_bar_sub(),
                 reply: None,
                 headers: None,
                 payload: "Hello World".into(),
@@ -564,8 +576,8 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 9,
-                subject: "FOO.BAR".into(),
-                reply: Some("INBOX.34".into()),
+                subject: foo_bar_sub(),
+                reply: inbox_sub(34),
                 headers: None,
                 payload: "Hello World".into(),
                 status: None,
@@ -587,8 +599,8 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 10,
-                subject: "FOO.BAR".into(),
-                reply: Some("INBOX.35".into()),
+                subject: foo_bar_sub(),
+                reply: inbox_sub(35),
                 headers: Some(HeaderMap::from_iter([(
                     "Header".parse().unwrap(),
                     "X".parse().unwrap()
@@ -613,8 +625,8 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 10,
-                subject: "FOO.BAR".into(),
-                reply: Some("INBOX.35".into()),
+                subject: foo_bar_sub(),
+                reply: inbox_sub(35),
                 headers: Some(HeaderMap::from_iter([(
                     "Header".parse().unwrap(),
                     "Y".parse().unwrap()
@@ -641,8 +653,8 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 10,
-                subject: "FOO.BAR".into(),
-                reply: Some("INBOX.35".into()),
+                subject: foo_bar_sub(),
+                reply: inbox_sub(35),
                 headers: Some(HeaderMap::default()),
                 payload: "".into(),
                 status: Some(StatusCode::NOT_FOUND),
@@ -660,7 +672,7 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 9,
-                subject: "FOO.BAR".into(),
+                subject: foo_bar_sub(),
                 reply: None,
                 headers: None,
                 payload: "Hello Again".into(),
@@ -706,8 +718,8 @@ mod read_op {
             result,
             Some(ServerOp::Message {
                 sid: 10,
-                subject: "FOO.BAR".into(),
-                reply: Some("INBOX.35".into()),
+                subject: foo_bar_sub(),
+                reply: inbox_sub(35),
                 headers: Some(HeaderMap::default()),
                 payload: "".into(),
                 status: Some(StatusCode::NOT_FOUND),
@@ -726,6 +738,8 @@ mod read_op {
 #[cfg(test)]
 mod write_op {
     use super::Connection;
+    use super::test_util::*;
+    use crate::SubjectBuf;
     use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -740,7 +754,7 @@ mod write_op {
 
         connection
             .write_op(ClientOp::Publish {
-                subject: "FOO.BAR".into(),
+                subject: foo_bar_sub(),
                 payload: "Hello World".into(),
                 respond: None,
                 headers: None,
@@ -757,9 +771,9 @@ mod write_op {
 
         connection
             .write_op(ClientOp::Publish {
-                subject: "FOO.BAR".into(),
+                subject: foo_bar_sub(),
                 payload: "Hello World".into(),
-                respond: Some("INBOX.67".into()),
+                respond: inbox_sub(67),
                 headers: None,
             })
             .await
@@ -773,9 +787,9 @@ mod write_op {
 
         connection
             .write_op(ClientOp::Publish {
-                subject: "FOO.BAR".into(),
+                subject: foo_bar_sub(),
                 payload: "Hello World".into(),
-                respond: Some("INBOX.67".into()),
+                respond: inbox_sub(67),
                 headers: Some(HeaderMap::from_iter([(
                     "Header".parse().unwrap(),
                     "X".parse().unwrap(),
@@ -807,7 +821,7 @@ mod write_op {
         connection
             .write_op(ClientOp::Subscribe {
                 sid: 11,
-                subject: "FOO.BAR".into(),
+                subject: foo_bar_sub(),
                 queue_group: None,
             })
             .await
@@ -822,8 +836,8 @@ mod write_op {
         connection
             .write_op(ClientOp::Subscribe {
                 sid: 11,
-                subject: "FOO.BAR".into(),
-                queue_group: Some("QUEUE.GROUP".into()),
+                subject: foo_bar_sub(),
+                queue_group: Some(SubjectBuf::new_unchecked("QUEUE.GROUP".into())),
             })
             .await
             .unwrap();

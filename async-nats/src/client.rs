@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::SubjectBuf;
+
 use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
@@ -59,7 +61,7 @@ impl Client {
         }
     }
 
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
+    pub async fn publish(&self, subject: SubjectBuf, payload: Bytes) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -74,7 +76,7 @@ impl Client {
 
     pub async fn publish_with_headers(
         &self,
-        subject: String,
+        subject: SubjectBuf,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), Error> {
@@ -92,8 +94,8 @@ impl Client {
 
     pub async fn publish_with_reply(
         &self,
-        subject: String,
-        reply: String,
+        subject: SubjectBuf,
+        reply: SubjectBuf,
         payload: Bytes,
     ) -> Result<(), Error> {
         self.sender
@@ -110,8 +112,8 @@ impl Client {
 
     pub async fn publish_with_reply_and_headers(
         &self,
-        subject: String,
-        reply: String,
+        subject: SubjectBuf,
+        reply: SubjectBuf,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
@@ -127,7 +129,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
+    pub async fn request(&self, subject: SubjectBuf, payload: Bytes) -> Result<Message, Error> {
         let inbox = self.new_inbox();
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply(subject, inbox, payload).await?;
@@ -151,7 +153,7 @@ impl Client {
 
     pub async fn request_with_headers(
         &self,
-        subject: String,
+        subject: SubjectBuf,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, Error> {
@@ -189,11 +191,12 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}", nuid::next())
+    pub fn new_inbox(&self) -> SubjectBuf {
+        // SAFETY: NUIDs are always valid tokens
+        SubjectBuf::new_unchecked(format!("_INBOX.{}", nuid::next()))
     }
 
-    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
+    pub async fn subscribe(&self, subject: SubjectBuf) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -211,8 +214,8 @@ impl Client {
 
     pub async fn queue_subscribe(
         &self,
-        subject: String,
-        queue_group: String,
+        subject: SubjectBuf,
+        queue_group: SubjectBuf,
     ) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
