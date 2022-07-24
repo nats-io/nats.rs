@@ -16,7 +16,7 @@
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{Client, Error};
+use crate::{Client, Error, SubjectBuf};
 use bytes::Bytes;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
@@ -30,29 +30,29 @@ use super::stream::{Config, DeleteStatus, Info, Stream};
 #[derive(Debug, Clone)]
 pub struct Context {
     pub(crate) client: Client,
-    pub(crate) prefix: String,
+    pub(crate) prefix: SubjectBuf,
 }
 
 impl Context {
     pub(crate) fn new(client: Client) -> Context {
         Context {
             client,
-            prefix: "$JS.API".to_string(),
+            prefix: "$JS.API".parse().expect("is a valid subject"),
         }
     }
 
-    pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
+    pub(crate) fn with_prefix(client: Client, prefix: SubjectBuf) -> Context {
         Context {
             client,
-            prefix: prefix.to_string(),
+            prefix: prefix,
         }
     }
 
-    pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
-        Context {
+    pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Result<Context, Error> {
+        Ok(Context {
             client,
-            prefix: format!("$JS.{}.API", domain.as_ref()),
-        }
+            prefix: SubjectBuf::new(format!("$JS.{}.API", domain.as_ref()))?,
+        })
     }
 
     /// Publish a message to a given subject associated with a stream and returns an acknowledgment from
@@ -72,7 +72,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
+    pub async fn publish(&self, subject: SubjectBuf, payload: Bytes) -> Result<PublishAck, Error> {
         let message = self.client.request(subject, payload).await?;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
@@ -110,7 +110,7 @@ impl Context {
     /// ```
     pub async fn publish_with_headers(
         &self,
-        subject: String,
+        subject: SubjectBuf,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAck, Error> {
@@ -135,7 +135,7 @@ impl Context {
 
     /// Query the server for account information
     pub async fn query_account(&self) -> Result<Account, Error> {
-        let response: Response<Account> = self.request("INFO".into(), b"").await?;
+        let response: Response<Account> = self.request("INFO".parse()?, b"").await?;
 
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -182,7 +182,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.CREATE.{}", config.name);
+        let subject = SubjectBuf::new(format!("STREAM.CREATE.{}", config.name))?;
         let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
@@ -224,7 +224,7 @@ impl Context {
             )));
         }
 
-        let subject = format!("STREAM.INFO.{}", stream);
+        let subject = SubjectBuf::new(format!("STREAM.INFO.{stream}"))?;
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -267,7 +267,7 @@ impl Context {
         S: Into<Config>,
     {
         let config: Config = stream_config.into();
-        let subject = format!("STREAM.INFO.{}", config.name);
+        let subject = SubjectBuf::new(format!("STREAM.INFO.{}", config.name))?;
 
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
@@ -309,7 +309,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.DELETE.{}", stream);
+        let subject = SubjectBuf::new(format!("STREAM.DELETE.{}", stream))?;
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -349,7 +349,7 @@ impl Context {
         S: Borrow<Config>,
     {
         let config = config.borrow();
-        let subject = format!("STREAM.UPDATE.{}", config.name);
+        let subject = SubjectBuf::new(format!("STREAM.UPDATE.{}", config.name))?;
         match self.request(subject, config).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -382,7 +382,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<Response<V>, Error>
+    pub async fn request<T, V>(&self, subject: SubjectBuf, payload: &T) -> Result<Response<V>, Error>
     where
         T: ?Sized + Serialize,
         V: DeserializeOwned,
@@ -391,7 +391,7 @@ impl Context {
 
         let message = self
             .client
-            .request(format!("{}.{}", self.prefix, subject), request)
+            .request(self.prefix.clone().join_all(&subject)?, request)
             .await?;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 

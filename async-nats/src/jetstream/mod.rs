@@ -83,7 +83,7 @@
 //! # }
 //! ```
 
-use crate::Client;
+use crate::{Client, SubjectBuf, Error};
 
 pub mod account;
 pub mod consumer;
@@ -131,7 +131,7 @@ pub fn new(client: Client) -> Context {
 /// # Ok(())
 /// # }
 /// ```
-pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
+pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Result<Context, Error> {
     context::Context::with_domain(client, domain)
 }
 
@@ -150,6 +150,6 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
 /// # Ok(())
 /// # }
 /// ```
-pub fn with_prefix(client: Client, prefix: &str) -> Context {
+pub fn with_prefix(client: Client, prefix: SubjectBuf) -> Context {
     context::Context::with_prefix(client, prefix)
 }

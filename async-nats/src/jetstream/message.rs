@@ -72,7 +72,7 @@ impl Message {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string(), "".into())
+                .publish(reply.clone(), "".into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -112,7 +112,7 @@ impl Message {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string(), kind.into())
+                .publish(reply.clone(), kind.into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -157,7 +157,7 @@ impl Message {
             let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
             self.context
                 .client
-                .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
+                .publish_with_reply(reply.clone(), inbox, AckKind::Ack.into())
                 .await?;
             match subscription.next().await {
                 Some(_) => Ok(()),

@@ -14,7 +14,7 @@
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
     jetstream::{self, Context, Message},
-    Error, StatusCode, Subscriber,
+    Error, StatusCode, Subscriber, SubjectBuf,
 };
 
 use bytes::Bytes;
@@ -203,7 +203,7 @@ impl FromConsumer for Config {
         }
 
         Ok(Config {
-            deliver_subject: config.deliver_subject.unwrap(),
+            deliver_subject: config.deliver_subject.unwrap().into_inner(),
             durable_name: config.durable_name,
             description: config.description,
             deliver_group: config.deliver_group,
@@ -228,7 +228,7 @@ impl FromConsumer for Config {
 impl IntoConsumerConfig for Config {
     fn into_consumer_config(self) -> jetstream::consumer::Config {
         jetstream::consumer::Config {
-            deliver_subject: Some(self.deliver_subject),
+            deliver_subject: Some(SubjectBuf::new_unchecked(self.deliver_subject)),
             durable_name: self.durable_name,
             description: self.description,
             deliver_group: self.deliver_group,
@@ -308,7 +308,7 @@ impl FromConsumer for OrderedConfig {
             )));
         }
         Ok(OrderedConfig {
-            deliver_subject: config.deliver_subject.unwrap(),
+            deliver_subject: config.deliver_subject.unwrap().into_inner(),
             description: config.description,
             filter_subject: config.filter_subject,
             replay_policy: config.replay_policy,
@@ -325,7 +325,7 @@ impl FromConsumer for OrderedConfig {
 impl IntoConsumerConfig for OrderedConfig {
     fn into_consumer_config(self) -> super::Config {
         jetstream::consumer::Config {
-            deliver_subject: Some(self.deliver_subject),
+            deliver_subject: Some(SubjectBuf::new_unchecked(self.deliver_subject)),
             durable_name: None,
             description: self.description,
             deliver_group: None,
@@ -497,7 +497,7 @@ async fn recreate_ephemeral_subscriber(
 
     let subscriber = context
         .client
-        .subscribe(config.deliver_subject.clone())
+        .subscribe(SubjectBuf::new(config.deliver_subject.clone())?)
         .await?;
     let deliver_policy = {
         if sequence == 0 {

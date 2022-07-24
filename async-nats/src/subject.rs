@@ -229,6 +229,17 @@ impl SubjectBuf {
             Ok(self)
         }
     }
+    /// Append all tokens of the provided [`Subject`] to the buffer.
+    pub fn join_all(mut self, subject: &Subject) -> Result<Self, Error> {
+        if self.0.ends_with(MULTI_WILDCARD_CHAR) {
+            Err(Error::CanNotJoin)
+        } else {
+            self.0.reserve(subject.len() + 1);
+            self.0.push(TOKEN_SEPARATOR);
+            self.0.push_str(subject);
+            Ok(self)
+        }
+    }
 }
 
 impl FromStr for SubjectBuf {

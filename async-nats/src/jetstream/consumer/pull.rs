@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     jetstream::{self, Context},
-    Error, StatusCode, Subscriber,
+    Error, StatusCode, Subscriber, SubjectBuf,
 };
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
@@ -110,12 +110,12 @@ impl Consumer<Config> {
     pub(crate) async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
-        inbox: String,
+        inbox: SubjectBuf,
     ) -> Result<(), Error> {
-        let subject = format!(
+        let subject = SubjectBuf::new(format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             self.context.prefix, self.info.stream_name, self.info.name
-        );
+        ))?;
 
         let payload = serde_json::to_vec(&batch.into())?;
 
@@ -247,10 +247,10 @@ impl Consumer<Config> {
     /// ```
     pub fn sequence(&self, batch: usize) -> Result<Sequence, Error> {
         let context = self.context.clone();
-        let subject = format!(
+        let subject = SubjectBuf::new(format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             self.context.prefix, self.info.stream_name, self.info.name
-        );
+        ))?;
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
@@ -330,7 +330,7 @@ impl futures::Stream for Batch {
 
 pub struct Sequence<'a> {
     context: Context,
-    subject: String,
+    subject: SubjectBuf,
     request: Bytes,
     pending_messages: usize,
     next: Option<BoxFuture<'a, Result<Batch, Error>>>,
@@ -390,8 +390,8 @@ pub struct Stream<'a> {
     pending_messages: usize,
     subscriber: Subscriber,
     context: Context,
-    inbox: String,
-    subject: String,
+    inbox: SubjectBuf,
+    subject: SubjectBuf,
     batch_config: BatchConfig,
     request: Option<BoxFuture<'a, Result<(), Error>>>,
 }
@@ -403,10 +403,10 @@ impl<'a> Stream<'a> {
     ) -> Result<Stream<'a>, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
-        let subject = format!(
+        let subject = SubjectBuf::new(format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
-        );
+        ))?;
 
         Ok(Stream {
             pending_messages: 0,
