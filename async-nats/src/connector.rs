@@ -121,6 +121,8 @@ impl Connector {
 
                         match &self.options.auth {
                             Authorization::None => {
+                                connection.write_op(ClientOp::Connect(connect_info)).await?;
+
                                 return Ok((server_info, connection));
                             }
                             Authorization::Token(token) => {
@@ -147,6 +149,7 @@ impl Connector {
                         }
 
                         connection.write_op(ClientOp::Connect(connect_info)).await?;
+                        connection.write_op(ClientOp::Ping).await?;
                         connection.flush().await?;
 
                         match connection.read_op().await? {

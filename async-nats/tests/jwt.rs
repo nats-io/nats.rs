@@ -48,6 +48,12 @@ mod client {
         )
         .await
         .expect("loaded user creds file")
+        .disconnect_callback(move || async move {
+            println!("disconnect");
+        })
+        .reconnect_callback(move || async move {
+            println!("reconnection");
+        })
         .connect(server.client_url())
         .await
         .unwrap();
@@ -72,7 +78,7 @@ mod client {
         drop(server);
 
         // Wait a bit for the server to die completely
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(10)).await;
 
         // Publish while disconnected
         for _ in 0..10 {
