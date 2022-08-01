@@ -425,51 +425,8 @@ impl<'a> futures::Stream for Ordered<'a> {
                     Poll::Ready(maybe_message) => {
                         match maybe_message {
                             Some(message) => {
-                                println!("GOT MESSAGE OF SOME KIND {:?}", message);
                                 match message.status {
                                     Some(StatusCode::IDLE_HEARBEAT) => {
-                                        // if let Some(headers) = message.headers.as_ref() {
-                                        //     let consumer_sequence: u64 = headers
-                                        //         .get(NATS_LAST_CONSUMER)
-                                        //         .ok_or_else(|| {
-                                        //             std::io::Error::new(
-                                        //                 std::io::ErrorKind::Other,
-                                        //                 "did not found consumer sequence",
-                                        //             )
-                                        //         })
-                                        //         .and_then(|h| {
-                                        //             h.to_str().map_err(|err| {
-                                        //                 std::io::Error::new(
-                                        //                     std::io::ErrorKind::Other,
-                                        //                     err,
-                                        //                 )
-                                        //             })
-                                        //         })?
-                                        //         .parse()?;
-                                        //     let stream_sequence: u64 = headers
-                                        //         .get(NATS_LAST_STREAM)
-                                        //         .ok_or_else(|| {
-                                        //             std::io::Error::new(
-                                        //                 std::io::ErrorKind::Other,
-                                        //                 "did not found consumer sequence",
-                                        //             )
-                                        //         })
-                                        //         .and_then(|h| {
-                                        //             h.to_str().map_err(|err| {
-                                        //                 std::io::Error::new(
-                                        //                     std::io::ErrorKind::Other,
-                                        //                     err,
-                                        //                 )
-                                        //             })
-                                        //         })?
-                                        //         .parse()?;
-                                        //     if stream_sequence != consumer_sequence {
-                                        //         println!("HEARBEAT  SELF STREAM {} CONS {}, STREAM SEQ {} CON SEQ {}", stream_sequence, consumer_sequence, self.stream_sequence, self.consumer_sequence);
-                                        //         self.subscriber = None;
-                                        //         return Poll::Ready(None);
-                                        //     }
-                                        // }
-                                        println!("GOT HEARBEAT");
                                         if let Some(subject) = message.reply {
                                             // TODO store pending_publish as a future and return errors from it
                                             let client = self.context.client.clone();
