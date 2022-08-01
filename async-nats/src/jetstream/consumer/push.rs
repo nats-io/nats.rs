@@ -364,6 +364,7 @@ impl Consumer<OrderedConfig> {
             subscriber: Some(subscriber),
             subscriber_future: None,
             stream_sequence: 0,
+            consumer_sequence: 0,
         })
     }
 }
@@ -374,6 +375,7 @@ pub struct Ordered<'a> {
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
     stream_sequence: u64,
+    consumer_sequence: u64,
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
@@ -468,11 +470,14 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         };
 
                                         let info = jetstream_message.info()?;
-                                        if info.stream_sequence != self.stream_sequence + 1 {
+                                        if info.consumer_sequence != self.consumer_sequence + 1
+                                            && info.stream_sequence != self.stream_sequence + 1
+                                        {
                                             self.subscriber = None;
                                             continue;
                                         }
                                         self.stream_sequence = info.stream_sequence;
+                                        self.consumer_sequence = info.consumer_sequence;
                                         return Poll::Ready(Some(Ok(jetstream_message)));
                                     }
                                 }

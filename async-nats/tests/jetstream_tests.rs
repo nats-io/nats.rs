@@ -32,7 +32,7 @@ mod jetstream {
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream::{self, StorageType};
+    use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -606,6 +606,48 @@ mod jetstream {
         });
 
         let mut messages = consumer.messages().await.unwrap().take(1000);
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    #[tokio::test]
+    async fn push_ordered_capped() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                discard: DiscardPolicy::Old,
+                max_messages: 500,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..1000 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let mut messages = consumer.messages().await.unwrap().take(500);
         while let Some(message) = messages.next().await {
             let message = message.unwrap();
             assert_eq!(message.status, None);
