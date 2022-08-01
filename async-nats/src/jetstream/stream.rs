@@ -517,6 +517,7 @@ impl TryFrom<RawMessage> for Message {
         let decoded_headers = {
             if let Some(headers) = value.headers {
                 let decoded = base64::decode(headers)?;
+                // TODO: Remove the println
                 println!("HEADERS: {:?}", from_utf8(&decoded)?);
                 // let byted = HeaderMap::try_from(decoded.to_vec())?;
                 Some(decoded)
@@ -622,7 +623,7 @@ fn parse_headers(
     if headers.is_empty() {
         Ok((None, maybe_status, maybe_description))
     } else {
-        Ok(Some((headers), maybe_status, maybe_description))
+        Ok((Some(headers), maybe_status, maybe_description))
     }
 }
 

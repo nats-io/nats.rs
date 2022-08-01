@@ -15,6 +15,7 @@
 pub use http::header::{HeaderMap, HeaderName, HeaderValue};
 
 pub const NATS_LAST_STREAM: &str = "nats-last-stream";
+pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
 
 /// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";

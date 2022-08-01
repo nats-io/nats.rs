@@ -33,7 +33,7 @@ mod jetstream {
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream::{self, StorageType};
+    use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -511,6 +511,7 @@ mod jetstream {
     #[tokio::test]
     async fn push_ordered() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
+        // let client = async_nats::connect("localhost:4222").await.unwrap();
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
@@ -550,6 +551,53 @@ mod jetstream {
 
         let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn push_ordered_capped() {
+        // let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect("localhost:4222").await.unwrap();
+        // let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "ordered_capped".to_string(),
+                subjects: vec!["capped".to_string()],
+                storage: StorageType::File,
+                max_messages: 5000,
+                max_messages_per_subject: 300,
+                discard: DiscardPolicy::New,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("ordered_capped").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let context = context.clone();
+        for _ in 0..505 {
+            context
+                .publish("capped".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        let mut messages = consumer.messages().await.unwrap().take(300).enumerate();
+        while let Some((i, message)) = messages.next().await {
+            println!("message receinved {}", i);
             let message = message.unwrap();
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
@@ -1199,6 +1247,7 @@ mod jetstream {
         let client = ConnectOptions::new()
             .error_callback(|err| async move { println!("error: {:?}", err) })
             .connect(server.client_url())
+            // .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -1234,6 +1283,7 @@ mod jetstream {
             println!("ENTRY: {:?}", entry);
             println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
         }
+        println!("PURGE");
         kv.purge("dz").await.unwrap();
         println!("POST:::::::::::::::::::::::::::::");
         let mut history = kv.history("dz").await.unwrap();
@@ -1249,6 +1299,7 @@ mod jetstream {
         let client = ConnectOptions::new()
             .error_callback(|err| async move { println!("error: {:?}", err) })
             .connect(server.client_url())
+            // .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -1256,9 +1307,9 @@ mod jetstream {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
+                bucket: "history".to_string(),
                 description: "test_description".to_string(),
-                history: 10,
+                history: 15,
                 storage: StorageType::File,
                 num_replicas: 1,
                 ..Default::default()
@@ -1266,19 +1317,22 @@ mod jetstream {
             .await
             .unwrap();
         println!("{:?}", kv.status().await.unwrap());
-        kv.put("key", "0".into()).await.unwrap();
-        kv.put("key", "1".into()).await.unwrap();
-        kv.put("key", "2".into()).await.unwrap();
+        for i in 0..20 {
+            kv.put("key", format!("{}", i).into()).await.unwrap();
+        }
 
         let mut history = kv.history("key").await.unwrap().enumerate();
 
         while let Some((i, entry)) = history.next().await {
             let entry = entry.unwrap();
-            assert_eq!(
-                i,
-                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
-            );
-            assert_eq!(i + 1, entry.revision as usize);
+            println!("ENTRY: {:?}", entry);
+            // assert_eq!(
+            // i,
+            // from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            // );
+            // assert_eq!(i + 1, entry.revision as usize);
         }
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }

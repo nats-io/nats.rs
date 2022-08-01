@@ -13,6 +13,7 @@
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
+    header::{NATS_LAST_CONSUMER, NATS_LAST_STREAM},
     jetstream::{self, Context, Message},
     Error, StatusCode, Subscriber,
 };
@@ -364,6 +365,7 @@ impl Consumer<OrderedConfig> {
             subscriber: Some(subscriber),
             subscriber_future: None,
             stream_sequence: 0,
+            consumer_sequence: 0,
         })
     }
 }
@@ -374,14 +376,17 @@ pub struct Ordered<'a> {
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
     stream_sequence: u64,
+    consumer_sequence: u64,
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
     type Item = Result<Message, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        println!("POLLED ORDERED SEQ {}", self.stream_sequence);
         loop {
             if self.subscriber.is_none() {
+                println!("SUB IS NONE");
                 match self.subscriber_future.as_mut() {
                     None => {
                         let context = self.context.clone();
@@ -406,6 +411,8 @@ impl<'a> futures::Stream for Ordered<'a> {
                         Poll::Ready(subscriber) => {
                             self.subscriber_future = None;
                             self.subscriber = Some(subscriber?);
+                            self.consumer_sequence = 0;
+                            self.stream_sequence = 0;
                         }
                         Poll::Pending => {
                             return Poll::Pending;
@@ -418,34 +425,51 @@ impl<'a> futures::Stream for Ordered<'a> {
                     Poll::Ready(maybe_message) => {
                         match maybe_message {
                             Some(message) => {
+                                println!("GOT MESSAGE OF SOME KIND {:?}", message);
                                 match message.status {
                                     Some(StatusCode::IDLE_HEARBEAT) => {
-                                        if let Some(headers) = message.headers.as_ref() {
-                                            if let Some(sequence) =
-                                                headers.get(crate::header::NATS_LAST_STREAM)
-                                            {
-                                                let sequence: u64 = sequence
-                                                    .to_str()
-                                                    .map_err(|err| {
-                                                        Box::new(std::io::Error::new(
-                                                            std::io::ErrorKind::Other,
-                                                            format!(
-                                                                "could not parse header: {}",
-                                                                err
-                                                            ),
-                                                        ))
-                                                    })?
-                                                    .parse().map_err(|err|
-                                                           Box::new(std::io::Error::new(
-                                                                   std::io::ErrorKind::Other,
-                                                                   format!("could not parse header into u64: {}", err))
-                                                               ))?;
-
-                                                if sequence != self.stream_sequence {
-                                                    self.subscriber = None;
-                                                }
-                                            }
-                                        }
+                                        // if let Some(headers) = message.headers.as_ref() {
+                                        //     let consumer_sequence: u64 = headers
+                                        //         .get(NATS_LAST_CONSUMER)
+                                        //         .ok_or_else(|| {
+                                        //             std::io::Error::new(
+                                        //                 std::io::ErrorKind::Other,
+                                        //                 "did not found consumer sequence",
+                                        //             )
+                                        //         })
+                                        //         .and_then(|h| {
+                                        //             h.to_str().map_err(|err| {
+                                        //                 std::io::Error::new(
+                                        //                     std::io::ErrorKind::Other,
+                                        //                     err,
+                                        //                 )
+                                        //             })
+                                        //         })?
+                                        //         .parse()?;
+                                        //     let stream_sequence: u64 = headers
+                                        //         .get(NATS_LAST_STREAM)
+                                        //         .ok_or_else(|| {
+                                        //             std::io::Error::new(
+                                        //                 std::io::ErrorKind::Other,
+                                        //                 "did not found consumer sequence",
+                                        //             )
+                                        //         })
+                                        //         .and_then(|h| {
+                                        //             h.to_str().map_err(|err| {
+                                        //                 std::io::Error::new(
+                                        //                     std::io::ErrorKind::Other,
+                                        //                     err,
+                                        //                 )
+                                        //             })
+                                        //         })?
+                                        //         .parse()?;
+                                        //     if stream_sequence != consumer_sequence {
+                                        //         println!("HEARBEAT  SELF STREAM {} CONS {}, STREAM SEQ {} CON SEQ {}", stream_sequence, consumer_sequence, self.stream_sequence, self.consumer_sequence);
+                                        //         self.subscriber = None;
+                                        //         return Poll::Ready(None);
+                                        //     }
+                                        // }
+                                        println!("GOT HEARBEAT");
                                         if let Some(subject) = message.reply {
                                             // TODO store pending_publish as a future and return errors from it
                                             let client = self.context.client.clone();
@@ -468,11 +492,24 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         };
 
                                         let info = jetstream_message.info()?;
-                                        if info.stream_sequence != self.stream_sequence + 1 {
-                                            self.subscriber = None;
-                                            continue;
+                                        println!(
+                                            "CONS SEQUENCE: {}, SRR SEQUENCE {},  SELF CONS {}, SELF STREAM {}",
+                                            info.consumer_sequence,
+                                            info.stream_sequence,
+                                            self.stream_sequence,
+                                            self.consumer_sequence,
+                                        );
+                                        if self.consumer_sequence + 1 != info.consumer_sequence
+                                            && self.stream_sequence + 1 != info.stream_sequence
+                                        {
+                                            println!("MISMATCH");
+                                            return Poll::Ready(None);
+                                            // self.subscriber = None;
+                                            // continue;
                                         }
                                         self.stream_sequence = info.stream_sequence;
+                                        self.consumer_sequence = info.consumer_sequence;
+                                        println!("no mismatch. ret message");
                                         return Poll::Ready(Some(Ok(jetstream_message)));
                                     }
                                 }
