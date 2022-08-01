@@ -1,21 +1,24 @@
 use crate::connection::Connection;
+use crate::tls;
 use crate::Authorization;
 use crate::ClientOp;
+use crate::ConnectInfo;
 use crate::Protocol;
 use crate::ServerAddr;
 use crate::ServerInfo;
+use crate::ServerOp;
 use crate::SocketAddr;
 use crate::ToServerAddrs;
+use crate::LANG;
 use crate::VERSION;
 use bytes::BytesMut;
 use std::cmp;
 use std::collections::HashMap;
 use std::io;
-use std::io::BufWriter;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWrite;
+use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
@@ -147,14 +150,14 @@ impl Connector {
                         connection.flush().await?;
 
                         match connection.read_op().await? {
-                            Some(ServerOp::Pong) => {
-                                return Ok((server_info, connection));
-                            }
                             Some(ServerOp::Error(err)) => {
                                 return Err(io::Error::new(
                                     ErrorKind::InvalidInput,
                                     err.to_string(),
                                 ));
+                            }
+                            Some(_) => {
+                                return Ok((server_info, connection));
                             }
                             None => {
                                 return Err(io::Error::new(
