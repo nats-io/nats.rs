@@ -55,12 +55,19 @@ mod client {
         // Subscribe to our subject
         let mut subscriber = client.subscribe("events".into()).await.unwrap();
 
+        println!("publish");
         // publish something
         client
             .publish("events".into(), "one".into())
             .await
             .expect("published");
 
+        client.flush().await.expect("flushed");
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.payload, Bytes::from("one"));
+
+        println!("dropping server");
         // Drop the server
         drop(server);
 
@@ -68,19 +75,24 @@ mod client {
         sleep(Duration::from_secs(1)).await;
 
         // Publish while disconnected
-        client
-            .publish("events".into(), "two".into())
-            .await
-            .expect("published");
+        for _ in 0..10 {
+            println!("publish");
+            client
+                .publish("events".into(), "after".into())
+                .await
+                .expect("published");
+        }
+
+        println!("flush");
+        client.flush().await.expect("flushed");
 
         // And start another instance which should trigger reconnect
         let _server = nats_server::run_server("tests/configs/jwt.conf");
 
-        // Check that everything arrived in order
-        let message = subscriber.next().await.unwrap();
-        assert_eq!(message.payload, Bytes::from("one"));
-
-        let message = subscriber.next().await.unwrap();
-        assert_eq!(message.payload, Bytes::from("two"));
+        for _ in 0..10 {
+            println!("Waiting for message");
+            let message = subscriber.next().await.unwrap();
+            assert_eq!(message.payload, Bytes::from("after"));
+        }
     }
 }
