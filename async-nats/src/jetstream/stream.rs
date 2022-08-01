@@ -517,9 +517,6 @@ impl TryFrom<RawMessage> for Message {
         let decoded_headers = {
             if let Some(headers) = value.headers {
                 let decoded = base64::decode(headers)?;
-                // TODO: Remove the println
-                println!("HEADERS: {:?}", from_utf8(&decoded)?);
-                // let byted = HeaderMap::try_from(decoded.to_vec())?;
                 Some(decoded)
             } else {
                 None

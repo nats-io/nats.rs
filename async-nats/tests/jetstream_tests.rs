@@ -32,6 +32,7 @@ mod jetstream {
     use async_nats::jetstream::consumer::{
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
+    use async_nats::jetstream::kv::Operation;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::ConnectOptions;
@@ -1177,8 +1178,8 @@ mod jetstream {
             })
             .await
             .unwrap();
-        // TODO: have better tests
         assert_eq!("KV_test", kv.stream_name);
+        assert_eq!(kv.stream.info.config.discard, DiscardPolicy::New);
     }
 
     #[tokio::test]
@@ -1269,7 +1270,6 @@ mod jetstream {
             })
             .await
             .unwrap();
-        println!("{:?}", kv.status().await.unwrap());
         let payload: Bytes = "data".into();
         let rev = kv.put("key", payload.clone()).await.unwrap();
         let value = kv.get("key").await.unwrap();
@@ -1279,10 +1279,12 @@ mod jetstream {
         assert!(ss.is_none());
 
         let mut entries = kv.history("key").await.unwrap();
-        while let Some(entry) = entries.next().await {
-            println!("entry: {:?}", entry.unwrap());
-        }
-        // TODO: add history chekcs
+
+        let first_op = entries.next().await;
+        assert_eq!(first_op.unwrap().unwrap().operation, Operation::Put);
+
+        let first_op = entries.next().await;
+        assert_eq!(first_op.unwrap().unwrap().operation, Operation::Delete);
     }
 
     #[tokio::test]
