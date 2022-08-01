@@ -557,12 +557,57 @@ mod jetstream {
         }
     }
 
+    // test added just to be sure, that if messages have arrived to the stream already, we won't
+    // miss them in AckPolicy::None setup.
+    #[tokio::test]
+    async fn push_ordered_delayed() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        // let client = async_nats::connect("localhost:4222").await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..1000 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let mut messages = consumer.messages().await.unwrap().take(1000);
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
     #[tokio::test]
     #[ignore]
     async fn push_ordered_capped() {
-        // let server = nats_server::run_server("tests/configs/jetstream.conf");
-        let client = async_nats::connect("localhost:4222").await.unwrap();
-        // let client = async_nats::connect(server.client_url()).await.unwrap();
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        // let client = async_nats::connect("localhost:4222").await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
         context
@@ -570,7 +615,6 @@ mod jetstream {
                 name: "ordered_capped".to_string(),
                 subjects: vec!["capped".to_string()],
                 storage: StorageType::File,
-                max_messages: 5000,
                 max_messages_per_subject: 300,
                 discard: DiscardPolicy::New,
                 ..Default::default()
@@ -1326,13 +1370,12 @@ mod jetstream {
         while let Some((i, entry)) = history.next().await {
             let entry = entry.unwrap();
             println!("ENTRY: {:?}", entry);
-            // assert_eq!(
-            // i,
-            // from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
-            // );
-            // assert_eq!(i + 1, entry.revision as usize);
+            println!("ENTRY PAYLOAD: {}", from_utf8(&entry.value).unwrap());
+            assert_eq!(
+                i + 5,
+                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            );
+            assert_eq!(i + 6, entry.revision as usize);
         }
-
-        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }
