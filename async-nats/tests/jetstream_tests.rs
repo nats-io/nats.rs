@@ -642,16 +642,16 @@ mod jetstream {
 
         for i in 0..1000 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".to_string(), format!("{}", i).into())
                 .await
                 .unwrap();
         }
 
-        let mut messages = consumer.messages().await.unwrap().take(500);
-        while let Some(message) = messages.next().await {
+        let mut messages = consumer.messages().await.unwrap().take(500).enumerate();
+        while let Some((i, message)) = messages.next().await {
             let message = message.unwrap();
             assert_eq!(message.status, None);
-            assert_eq!(message.payload.as_ref(), b"dat");
+            assert_eq!(message.payload, bytes::Bytes::from(format!("{}", i + 500)));
         }
     }
 
