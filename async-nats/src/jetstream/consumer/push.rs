@@ -407,6 +407,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                     Some(subscriber) => match subscriber.as_mut().poll(cx) {
                         Poll::Ready(subscriber) => {
                             self.subscriber_future = None;
+                            self.consumer_sequence = 0;
                             self.subscriber = Some(subscriber?);
                         }
                         Poll::Pending => {
