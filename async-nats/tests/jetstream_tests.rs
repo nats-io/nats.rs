@@ -1161,7 +1161,8 @@ mod jetstream {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .error_callback(|err| async move { println!("error: {:?}", err) })
-            .connect(server.client_url())
+            // .connect(server.client_url())
+            .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -1253,7 +1254,8 @@ mod jetstream {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .error_callback(|err| async move { println!("error: {:?}", err) })
-            .connect(server.client_url())
+            // .connect(server.client_url())
+            .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -1261,7 +1263,7 @@ mod jetstream {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
+                bucket: "delete".to_string(),
                 description: "test_description".to_string(),
                 history: 10,
                 storage: StorageType::File,
@@ -1292,8 +1294,8 @@ mod jetstream {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .error_callback(|err| async move { println!("error: {:?}", err) })
-            .connect(server.client_url())
-            // .connect("localhost:4222")
+            // .connect(server.client_url())
+            .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -1301,7 +1303,7 @@ mod jetstream {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
+                bucket: "purge".to_string(),
                 description: "test_description".to_string(),
                 history: 10,
                 storage: StorageType::File,
@@ -1311,32 +1313,34 @@ mod jetstream {
             .await
             .unwrap();
         println!("{:?}", kv.status().await.unwrap());
-        let payload: Bytes = "data".into();
-        kv.put("dz", "0".into()).await.unwrap();
-        kv.put("dz", "1".into()).await.unwrap();
-        kv.put("dz", "2".into()).await.unwrap();
-        kv.put("dz", "3".into()).await.unwrap();
-        kv.put("dz", "4".into()).await.unwrap();
-        kv.put("dz", "5".into()).await.unwrap();
+        // let payload: Bytes = "data".into();
+        // kv.put("dz", "0".into()).await.unwrap();
+        // kv.put("dz", "1".into()).await.unwrap();
+        // kv.put("dz", "2".into()).await.unwrap();
+        // kv.put("dz", "3".into()).await.unwrap();
+        // kv.put("dz", "4".into()).await.unwrap();
+        // kv.put("dz", "5".into()).await.unwrap();
 
-        kv.put("baz", "0".into()).await.unwrap();
-        kv.put("baz", "1".into()).await.unwrap();
-        kv.put("baz", "2".into()).await.unwrap();
+        // kv.put("baz", "0".into()).await.unwrap();
+        // kv.put("baz", "1".into()).await.unwrap();
+        // kv.put("baz", "2".into()).await.unwrap();
 
-        println!("PRE:::::::::::::::::::::::::::::");
-        let mut history = kv.history("dz").await.unwrap();
-        while let Some(entry) = history.next().await {
-            println!("ENTRY: {:?}", entry);
-            println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
-        }
+        // println!("PRE:::::::::::::::::::::::::::::");
+        // let mut history = kv.history("dz").await.unwrap();
+        // while let Some(entry) = history.next().await {
+        //     println!("ENTRY: {:?}", entry);
+        //     println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
+        // }
         println!("PURGE");
         kv.purge("dz").await.unwrap();
         println!("POST:::::::::::::::::::::::::::::");
-        let mut history = kv.history("dz").await.unwrap();
-        while let Some(entry) = history.next().await {
-            println!("ENTRY: {:?}", entry);
-            println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
-        }
+        // let mut history = kv.history("dz").await.unwrap();
+        // while let Some(entry) = history.next().await {
+        //     println!("ENTRY: {:?}", entry);
+        //     println!("VALUE ENTRY: {:?}", from_utf8(&entry.unwrap().value));
+        // }
+        // let history = kv.history("dz").await.unwrap().count().await;
+        // println!("history count: {:?}", history);
     }
 
     #[tokio::test]
