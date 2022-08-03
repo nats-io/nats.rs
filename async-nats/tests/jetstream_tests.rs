@@ -525,6 +525,54 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn pull_stream_by_one() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("push".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer: PullConsumer = stream.get_consumer("push").await.unwrap();
+
+        for _ in 0..100 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        println!("pubbed");
+        let mut messages = consumer
+            .stream()
+            .max_messages_per_batch(1)
+            .messages()
+            .await
+            .unwrap()
+            .take(100);
+
+        while let Some(Ok(message)) = messages.next().await {
+            println!("message");
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    #[tokio::test]
     async fn push_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
