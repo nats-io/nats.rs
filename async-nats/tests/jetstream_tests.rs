@@ -647,11 +647,24 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut messages = consumer.messages().await.unwrap().take(500).enumerate();
-        while let Some((i, message)) = messages.next().await {
+        // distrupt stream sequence continuity.
+        stream.delete_message(510).await.unwrap();
+        stream.delete_message(600).await.unwrap();
+        stream.delete_message(800).await.unwrap();
+
+        // take 3 messages less, as we discarded 3 from remaining 500.
+        let mut messages = consumer.messages().await.unwrap().take(497);
+        // expect sequence to start at 500, after server discarded other 500 of messages.
+        let mut i = 500;
+        while let Some(message) = messages.next().await {
+            // account for deleted messages.
+            if i == 509 || i == 599 || i == 799 {
+                i += 1;
+            }
             let message = message.unwrap();
             assert_eq!(message.status, None);
-            assert_eq!(message.payload, bytes::Bytes::from(format!("{}", i + 500)));
+            assert_eq!(message.payload, bytes::Bytes::from(format!("{}", i)));
+            i += 1;
         }
     }
 
