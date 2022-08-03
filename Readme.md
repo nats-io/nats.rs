@@ -49,7 +49,7 @@ New bleeding edge experimental async Tokio-based NATS client.
 Currently supports:
 
 * Core NATS
-* JetStream Pull Consumers API
+* JetStream API
 * JetStream Management API
 
 And should soon catch up with in terms of feature parity with synchronous client.

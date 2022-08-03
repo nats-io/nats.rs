@@ -28,9 +28,11 @@ mod jetstream {
 
     use super::*;
     use async_nats::header::HeaderMap;
-    use async_nats::jetstream::consumer::{self, DeliverPolicy, PullConsumer, PushConsumer};
+    use async_nats::jetstream::consumer::{
+        self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
+    };
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream;
+    use async_nats::jetstream::stream::{self, StorageType};
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -158,6 +160,43 @@ mod jetstream {
             })
             .await
             .unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn create_stream_with_replicas() {
+        use crate::jetstream::stream::StorageType;
+        let cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let client = async_nats::connect(cluster.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(&stream::Config {
+                name: "events2".to_string(),
+                num_replicas: 3,
+                max_bytes: 1024,
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(stream.info.config.num_replicas, 3);
+        assert!(stream.info.cluster.is_some());
+        assert_eq!(stream.info.cluster.as_ref().unwrap().replicas.len(), 2);
+
+        let consumer = stream
+            .create_consumer(jetstream::consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(consumer.cached_info().cluster.replicas.len(), 2);
+
+        context.delete_stream("events2").await.unwrap();
     }
 
     #[tokio::test]
@@ -461,8 +500,56 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(Ok(message)) = messages.next().await {
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    #[tokio::test]
+    async fn push_ordered() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        tokio::task::spawn({
+            let context = context.clone();
+            async move {
+                for i in 0..1000 {
+                    if i % 500 == 0 {
+                        tokio::time::sleep(Duration::from_secs(6)).await
+                    }
+                    context
+                        .publish("events".to_string(), "dat".into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        let mut messages = consumer.messages().await.unwrap().take(1000);
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }
@@ -506,7 +593,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(Ok(message)) = messages.next().await {
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
@@ -540,7 +627,7 @@ mod jetstream {
             .unwrap();
 
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
-        let mut messages = consumer.stream().await.unwrap().take(1000);
+        let mut messages = consumer.messages().await.unwrap().take(1000);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -751,6 +838,7 @@ mod jetstream {
             .stream()
             .max_messages_per_batch(25)
             .hearbeat(Duration::from_millis(100))
+            .expires(Duration::default())
             .messages()
             .await
             .unwrap()

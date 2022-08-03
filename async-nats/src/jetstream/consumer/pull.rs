@@ -63,7 +63,7 @@ impl Consumer<Config> {
     pub async fn messages(&self) -> Result<Stream<'_>, Error> {
         Stream::stream(
             BatchConfig {
-                batch: 100,
+                batch: 200,
                 expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
                 no_wait: false,
                 max_bytes: 0,
@@ -547,7 +547,7 @@ impl<'a> StreamBuilder<'a> {
             consumer,
             batch: 200,
             max_bytes: 0,
-            expires: 0,
+            expires: Duration::from_secs(30).as_nanos().try_into().unwrap(),
             hearbeat: Duration::default(),
         }
     }
@@ -1288,6 +1288,9 @@ pub struct Config {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+    /// Number of consumer replucas
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub num_replicas: usize,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -1319,6 +1322,7 @@ impl IntoConsumerConfig for Config {
             max_batch: self.max_batch,
             max_expires: self.max_expires,
             inactive_threshold: self.inactive_threshold,
+            num_replicas: self.num_replicas,
         }
     }
 }
@@ -1347,6 +1351,7 @@ impl FromConsumer for Config {
             max_batch: config.max_batch,
             max_expires: config.max_expires,
             inactive_threshold: config.inactive_threshold,
+            num_replicas: config.num_replicas,
         })
     }
 }

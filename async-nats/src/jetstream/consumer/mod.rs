@@ -23,6 +23,7 @@ use serde_json::json;
 use time::serde::rfc3339;
 
 use super::response::Response;
+use super::stream::ClusterInfo;
 use super::Context;
 use crate::jetstream::consumer;
 use crate::Error;
@@ -32,6 +33,7 @@ pub trait IntoConsumerConfig {
 }
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
@@ -124,6 +126,7 @@ pub trait FromConsumer {
 
 pub type PullConsumer = Consumer<self::pull::Config>;
 pub type PushConsumer = Consumer<self::push::Config>;
+pub type OrderedPushConsumer = Consumer<self::push::OrderedConfig>;
 
 /// Information about a consumer
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -155,13 +158,6 @@ pub struct Info {
     /// Indicates if any client is connected and receiving messages from a push consumer
     #[serde(default)]
     pub push_bound: bool,
-}
-
-/// Information about the consumer's associated `JetStream` cluster
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct ClusterInfo {
-    /// The leader of the cluster
-    pub leader: String,
 }
 
 /// Information about a consumer and the stream it is consuming
@@ -284,6 +280,10 @@ pub struct Config {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+
+    /// Number of consumer replucas
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub num_replicas: usize,
 }
 
 impl From<&Config> for Config {
