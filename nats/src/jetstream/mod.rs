@@ -513,7 +513,7 @@ where
     type Item = io::Result<T>;
 
     fn next(&mut self) -> Option<io::Result<T>> {
-        if self.done {
+        if self.done && self.items.is_empty() {
             return None;
         }
         if !self.items.is_empty() {
@@ -537,6 +537,10 @@ where
         if page.items.is_none() {
             self.done = true;
             return None;
+        }
+
+        if page.total <= page.limit + page.offset {
+            self.done = true;
         }
 
         let items = page.items.take().unwrap();
