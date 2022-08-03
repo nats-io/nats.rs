@@ -12,11 +12,8 @@
 // limitations under the License.
 
 mod client {
-    use bytes::Bytes;
     use futures::stream::StreamExt;
     use std::path::PathBuf;
-    use std::time::Duration;
-    use tokio::time::sleep;
 
     #[tokio::test]
     async fn jwt_auth() {
@@ -37,68 +34,46 @@ mod client {
             .await
             .expect("published");
     }
-
     #[tokio::test]
     async fn jwt_reconnect() {
-        let server = nats_server::run_server("tests/configs/jwt.conf");
-
+        use async_nats::ServerAddr;
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let mut servers = vec![
+            nats_server::run_server("tests/configs/jwt.conf"),
+            nats_server::run_server("tests/configs/jwt.conf"),
+            nats_server::run_server("tests/configs/jwt.conf"),
+        ];
+
         let client = async_nats::ConnectOptions::with_credentials_file(
             path.join("tests/configs/TestUser.creds"),
         )
         .await
-        .expect("loaded user creds file")
+        .unwrap()
         .disconnect_callback(move || async move {
             println!("disconnect");
         })
         .reconnect_callback(move || async move {
             println!("reconnection");
         })
-        .connect(server.client_url())
+        .connect(
+            servers
+                .iter()
+                .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                .collect::<Vec<ServerAddr>>()
+                .as_slice(),
+        )
         .await
         .unwrap();
 
-        // Subscribe to our subject
-        let mut subscriber = client.subscribe("events".into()).await.unwrap();
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        while !servers.is_empty() {
+            client.publish("test".into(), "data".into()).await.unwrap();
+            client.flush().await.unwrap();
+            assert!(subscriber.next().await.is_some());
 
-        println!("publish");
-        // publish something
-        client
-            .publish("events".into(), "one".into())
-            .await
-            .expect("published");
-
-        client.flush().await.expect("flushed");
-
-        let message = subscriber.next().await.unwrap();
-        assert_eq!(message.payload, Bytes::from("one"));
-
-        println!("dropping server");
-        // Drop the server
-        drop(server);
-
-        // Wait a bit for the server to die completely
-        sleep(Duration::from_secs(10)).await;
-
-        // Publish while disconnected
-        for _ in 0..10 {
-            println!("publish");
-            client
-                .publish("events".into(), "after".into())
-                .await
-                .expect("published");
-        }
-
-        println!("flush");
-        client.flush().await.expect("flushed");
-
-        // And start another instance which should trigger reconnect
-        let _server = nats_server::run_server("tests/configs/jwt.conf");
-
-        for _ in 0..10 {
-            println!("Waiting for message");
-            let message = subscriber.next().await.unwrap();
-            assert_eq!(message.payload, Bytes::from("after"));
+            drop(servers.remove(0));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     }
 }
