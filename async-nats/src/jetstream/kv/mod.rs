@@ -262,10 +262,8 @@ impl Store {
         subject.push_str(key.as_ref());
 
         let mut headers = http::HeaderMap::default();
-        println!("INSERTING HEADERS");
         headers.insert(KV_OPERATION, KV_OPERATION_PURGE.try_into()?);
         headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.try_into()?);
-        println!("AFTER INSERTION");
 
         self.stream
             .context
