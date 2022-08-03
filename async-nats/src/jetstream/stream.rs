@@ -535,11 +535,6 @@ struct GetRawMessage {
     pub message: RawMessage,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct DeleteMessage {
-    pub success: bool,
-}
-
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
