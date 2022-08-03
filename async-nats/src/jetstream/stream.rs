@@ -81,6 +81,47 @@ impl Stream {
         }
     }
 
+    /// Delete a message from the stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    ///
+    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// stream.delete_message(publish_ack.sequence).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_message(&self, sequence: u64) -> Result<bool, Error> {
+        let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
+        let payload = json!({
+            "seq": sequence,
+        });
+
+        let response: Response<DeleteStatus> = self.context.request(subject, &payload).await?;
+
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while deleting message: {}, {}",
+                    error.code, error.status
+                ),
+            ))),
+            Response::Ok(value) => Ok(value.success),
+        }
+    }
+
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
@@ -492,6 +533,11 @@ pub struct RawMessage {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct GetRawMessage {
     pub message: RawMessage,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct DeleteMessage {
+    pub success: bool,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {

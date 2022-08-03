@@ -294,6 +294,64 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn delete_message() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("events").await.unwrap();
+        let payload = b"payload";
+        context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .get_or_create_consumer(
+                "consumer",
+                consumer::pull::Config {
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        stream.delete_message(publish_ack.sequence).await.unwrap();
+
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .info()
+                .unwrap()
+                .stream_sequence,
+            1
+        );
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .info()
+                .unwrap()
+                .stream_sequence,
+            3
+        );
+    }
+
+    #[tokio::test]
     async fn create_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
