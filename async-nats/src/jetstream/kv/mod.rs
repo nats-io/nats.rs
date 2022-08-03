@@ -317,7 +317,6 @@ impl<'a> futures::Stream for History<'a> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        println!("started history loop with done {}", self.done);
         if self.done {
             return Poll::Ready(None);
         }
@@ -327,12 +326,10 @@ impl<'a> futures::Stream for History<'a> {
                 Some(message) => {
                     let message = message?;
                     let info = message.info()?;
-                    println!("PENDINGS: {:?}", info);
                     if info.pending == 0 {
                         self.done = true;
                     }
 
-                    println!("HEADERS: {:?}", message.headers);
                     let operation = match message
                         .headers
                         .as_ref()
@@ -362,10 +359,7 @@ impl<'a> futures::Stream for History<'a> {
                     })))
                 }
             },
-            std::task::Poll::Pending => {
-                println!("PENDINGS");
-                Poll::Pending
-            }
+            std::task::Poll::Pending => Poll::Pending,
         }
     }
 
