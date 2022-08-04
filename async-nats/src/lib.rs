@@ -606,7 +606,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         },
     )?;
 
-    let (_, connection) = connector.try_connect().await?;
+    let connection = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);

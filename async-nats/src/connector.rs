@@ -55,17 +55,17 @@ impl Connector {
         Ok(Connector { servers, options })
     }
 
-    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
-        for _ in 0..128 {
+    pub(crate) async fn connect(&mut self) -> Result<Connection, io::Error> {
+        loop {
+            println!("try_connect");
             if let Ok(inner) = self.try_connect().await {
+                println!("try_connect OK");
                 return Ok(inner);
             }
         }
-
-        Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
     }
 
-    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn try_connect(&mut self) -> Result<Connection, io::Error> {
         let mut error = None;
 
         let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
@@ -123,7 +123,7 @@ impl Connector {
                             Authorization::None => {
                                 connection.write_op(ClientOp::Connect(connect_info)).await?;
 
-                                return Ok((server_info, connection));
+                                return Ok(connection);
                             }
                             Authorization::Token(token) => {
                                 connect_info.auth_token = Some(token.clone())
@@ -160,7 +160,7 @@ impl Connector {
                                 ));
                             }
                             Some(_) => {
-                                return Ok((server_info, connection));
+                                return Ok(connection);
                             }
                             None => {
                                 return Err(io::Error::new(
