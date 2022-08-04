@@ -81,6 +81,53 @@ impl Stream {
         }
     }
 
+    /// Get the last raw message from the stream by subject.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    ///
+    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let raw_message = stream.get_last_raw_message_by_subject("events".into()).await?;
+    /// println!("Retreived raw message {:?}", raw_message);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_last_raw_message_by_subject(
+        &self,
+        stream_subject: &str,
+    ) -> Result<RawMessage, Error> {
+        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let payload = json!({
+            "last_by_subj":  stream_subject,
+        });
+
+        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting message: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(value) => Ok(value.message),
+        }
+    }
+
     /// Delete a message from the stream.
     ///
     /// # Examples

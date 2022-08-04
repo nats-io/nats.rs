@@ -294,6 +294,42 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn get_last_raw_message_by_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .get_or_create_stream(stream::Config {
+                subjects: vec!["events".to_string(), "entries".to_string()],
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"payload";
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        context
+            .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let raw_message = stream
+            .get_last_raw_message_by_subject("events")
+            .await
+            .unwrap();
+
+        assert_eq!(raw_message.sequence, publish_ack.sequence);
+    }
+
+    #[tokio::test]
     async fn delete_message() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
