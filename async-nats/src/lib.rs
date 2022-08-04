@@ -590,7 +590,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let tls_required = options.tls_required;
     let ping_interval = options.ping_interval;
     let flush_interval = options.flush_interval;
 
@@ -607,7 +606,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         },
     )?;
 
-    let (server_info, connection) = connector.try_connect().await?;
+    let (_, connection) = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
