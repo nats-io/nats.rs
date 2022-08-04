@@ -551,7 +551,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_reconnect(&mut self) -> Result<(), io::Error> {
-        let (_, connection) = self.connector.connect().await?;
+        let connection = self.connector.connect().await?;
         self.connection = connection;
 
         self.subscriptions
@@ -568,6 +568,7 @@ impl ConnectionHandler {
                 .unwrap();
         }
         self.events.try_send(ServerEvent::Reconnect).ok();
+
         Ok(())
     }
 }

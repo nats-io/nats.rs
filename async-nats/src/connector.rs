@@ -57,9 +57,7 @@ impl Connector {
 
     pub(crate) async fn connect(&mut self) -> Result<Connection, io::Error> {
         loop {
-            println!("try_connect");
             if let Ok(inner) = self.try_connect().await {
-                println!("try_connect OK");
                 return Ok(inner);
             }
         }
