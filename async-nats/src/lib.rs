@@ -1057,6 +1057,9 @@ pub(crate) enum Authorization {
     /// Authenticate using a username and password.
     UserAndPassword(String, String),
 
+    /// Authenticate using nkey seed
+    NKey(String),
+
     /// Authenticate using a jwt and signing function.
     Jwt(
         String,
