@@ -130,6 +130,32 @@ impl Connector {
                                 connect_info.user = Some(user.clone());
                                 connect_info.pass = Some(pass.clone());
                             }
+                            Authorization::NKey(ref seed) => {
+                                match nkeys::KeyPair::from_seed(seed.as_str()) {
+                                    Ok(key_pair) => {
+                                        let nonce = server_info.nonce.clone();
+                                        match key_pair.sign(nonce.as_bytes()) {
+                                            Ok(signed) => {
+                                                connect_info.nkey = Some(key_pair.public_key());
+                                                connect_info.signature =
+                                                    Some(base64_url::encode(&signed));
+                                            }
+                                            Err(e) => {
+                                                println!(
+                                                    "Nkey auth is disabled. sign error: {}",
+                                                    e
+                                                );
+                                            }
+                                        };
+                                    }
+                                    Err(e) => {
+                                        println!(
+                                            "Nkey auth is disabled. sign error: {} (possibly invalid key or corrupt creds?)",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
                             Authorization::Jwt(jwt, sign_fn) => {
                                 match sign_fn.call(server_info.nonce.clone()).await {
                                     Ok(sig) => {
