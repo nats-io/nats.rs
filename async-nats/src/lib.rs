@@ -286,7 +286,7 @@ pub(crate) struct ConnectionHandler {
     connection: Connection,
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
-    events: mpsc::Sender<ServerEvent>,
+    events: mpsc::Sender<Event>,
     pending_pings: usize,
     max_pings: usize,
 }
@@ -295,7 +295,7 @@ impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
         connector: Connector,
-        events: mpsc::Sender<ServerEvent>,
+        events: mpsc::Sender<Event>,
     ) -> ConnectionHandler {
         ConnectionHandler {
             connection,
@@ -360,7 +360,7 @@ impl ConnectionHandler {
                 self.pending_pings -= 1;
             }
             ServerOp::Error(error) => {
-                self.events.try_send(ServerEvent::Error(error)).ok();
+                self.events.try_send(Event::ServerError(error)).ok();
             }
             ServerOp::Message {
                 sid,
@@ -396,7 +396,7 @@ impl ConnectionHandler {
                             }
                         }
                         Err(mpsc::error::TrySendError::Full(_)) => {
-                            self.events.send(ServerEvent::SlowConsumer(sid)).await.ok();
+                            self.events.send(Event::SlowConsumer(sid)).await.ok();
                         }
                         Err(mpsc::error::TrySendError::Closed(_)) => {
                             self.subscriptions.remove(&sid);
@@ -411,7 +411,7 @@ impl ConnectionHandler {
             // TODO: we should probably update advertised server list here too.
             ServerOp::Info(info) => {
                 if info.lame_duck_mode {
-                    self.events.send(ServerEvent::LameDuckMode).await.ok();
+                    self.events.send(Event::LameDuckMode).await.ok();
                 }
             }
 
@@ -544,7 +544,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
-        self.events.try_send(ServerEvent::Disconnect).ok();
+        self.events.try_send(Event::Disconnect).ok();
         self.handle_reconnect().await?;
 
         Ok(())
@@ -567,7 +567,7 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.events.try_send(ServerEvent::Reconnect).ok();
+        self.events.try_send(Event::Reconnect).ok();
 
         Ok(())
     }
@@ -594,6 +594,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let ping_interval = options.ping_interval;
     let flush_interval = options.flush_interval;
 
+    let (events_tx, mut events_rx) = mpsc::channel(128);
+
     let mut connector = Connector::new(
         addrs,
         ConnectorOptions {
@@ -605,10 +607,10 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth: options.auth,
             no_echo: options.no_echo,
         },
+        events_tx.clone(),
     )?;
 
     let connection = connector.try_connect().await?;
-    let (events_tx, mut events_rx) = mpsc::channel(128);
 
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
 
@@ -642,14 +644,15 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     task::spawn(async move {
         while let Some(event) = events_rx.recv().await {
             match event {
-                ServerEvent::Reconnect => options.reconnect_callback.call().await,
-                ServerEvent::Disconnect => options.disconnect_callback.call().await,
-                ServerEvent::Error(error) => options.error_callback.call(error).await,
-                ServerEvent::LameDuckMode => options.lame_duck_callback.call().await,
-                ServerEvent::SlowConsumer(sid) => {
+                Event::Reconnect => options.reconnect_callback.call().await,
+                Event::Disconnect => options.disconnect_callback.call().await,
+                Event::ServerError(error) => options.error_callback.call(error.into()).await,
+                Event::ClientError(error) => options.error_callback.call(error.into()).await,
+                Event::LameDuckMode => options.lame_duck_callback.call().await,
+                Event::SlowConsumer(sid) => {
                     options
                         .error_callback
-                        .call(ServerError::SlowConsumer(sid))
+                        .call(ServerError::SlowConsumer(sid).into())
                         .await
                 }
             }
@@ -661,12 +664,13 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     Ok(client)
 }
 
-pub(crate) enum ServerEvent {
+pub(crate) enum Event {
     Reconnect,
     Disconnect,
     LameDuckMode,
     SlowConsumer(u64),
-    Error(ServerError),
+    ServerError(ServerError),
+    ClientError(ClientError),
 }
 
 /// Connects to NATS with default config.
@@ -807,10 +811,48 @@ impl Stream for Subscriber {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CallbackError {
+    Client(ClientError),
+    Server(ServerError),
+}
+impl std::fmt::Display for CallbackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Client(error) => write!(f, "{}", error),
+            Self::Server(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+impl From<ServerError> for CallbackError {
+    fn from(server_error: ServerError) -> Self {
+        CallbackError::Server(server_error)
+    }
+}
+
+impl From<ClientError> for CallbackError {
+    fn from(client_error: ClientError) -> Self {
+        CallbackError::Client(client_error)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerError {
     AuthorizationViolation,
     SlowConsumer(u64),
     Other(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClientError {
+    Other(String),
+}
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Other(error) => write!(f, "nats: {}", error),
+        }
+    }
 }
 
 impl ServerError {

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Authorization, Client, ServerError, ToServerAddrs};
+use crate::{Authorization, CallbackError, Client, ToServerAddrs};
 use futures::Future;
 use std::fmt::Formatter;
 use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
@@ -51,7 +51,7 @@ pub struct ConnectOptions {
     pub(crate) reconnect_callback: CallbackArg0<()>,
     pub(crate) disconnect_callback: CallbackArg0<()>,
     pub(crate) lame_duck_callback: CallbackArg0<()>,
-    pub(crate) error_callback: CallbackArg1<ServerError, ()>,
+    pub(crate) error_callback: CallbackArg1<CallbackError, ()>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -95,7 +95,7 @@ impl Default for ConnectOptions {
             reconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
             disconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
             lame_duck_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
-            error_callback: CallbackArg1::<ServerError, ()>(Box::new(move |error| {
+            error_callback: CallbackArg1::<CallbackError, ()>(Box::new(move |error| {
                 Box::pin(async move {
                     println!("error : {}", error);
                 })
@@ -440,11 +440,11 @@ impl ConnectOptions {
     /// ```
     pub fn error_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
     where
-        F: Fn(ServerError) -> Fut + Send + Sync + 'static,
+        F: Fn(CallbackError) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
         self.error_callback =
-            CallbackArg1::<ServerError, ()>(Box::new(move |error| Box::pin(cb(error))));
+            CallbackArg1::<CallbackError, ()>(Box::new(move |error| Box::pin(cb(error))));
         self
     }
 
