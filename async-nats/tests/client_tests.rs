@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::{ConnectOptions, ServerError};
+    use async_nats::{CallbackError, ConnectOptions, ServerError};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -440,7 +440,7 @@ mod client {
             .error_callback(move |err| {
                 let tx = tx.clone();
                 async move {
-                    if let ServerError::SlowConsumer(_) = err {
+                    if let CallbackError::Server(ServerError::SlowConsumer(_)) = err {
                         tx.send(()).await.unwrap()
                     }
                 }
@@ -508,5 +508,26 @@ mod client {
         tokio::time::timeout(Duration::from_millis(50), subscription.next())
             .await
             .expect_err("should timeout");
+    }
+
+    #[tokio::test]
+    async fn reconnect_failures() {
+        let server = nats_server::run_basic_server();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let _client = ConnectOptions::new()
+            .error_callback(move |err| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(err.to_string()).unwrap();
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        drop(server);
+        rx.recv().await;
+        rx.recv().await;
+        rx.recv().await;
+        rx.recv().await;
     }
 }

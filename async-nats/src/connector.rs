@@ -1,8 +1,10 @@
 use crate::connection::Connection;
 use crate::tls;
 use crate::Authorization;
+use crate::ClientError;
 use crate::ClientOp;
 use crate::ConnectInfo;
+use crate::Event;
 use crate::Protocol;
 use crate::ServerAddr;
 use crate::ServerInfo;
@@ -39,12 +41,14 @@ pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     servers: HashMap<ServerAddr, usize>,
     options: ConnectorOptions,
+    events_tx: tokio::sync::mpsc::Sender<Event>,
 }
 
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
         options: ConnectorOptions,
+        events_tx: tokio::sync::mpsc::Sender<Event>,
     ) -> Result<Connector, io::Error> {
         let servers = addrs
             .to_server_addrs()?
@@ -52,13 +56,23 @@ impl Connector {
             .map(|addr| (addr, 0))
             .collect();
 
-        Ok(Connector { servers, options })
+        Ok(Connector {
+            servers,
+            options,
+            events_tx,
+        })
     }
 
     pub(crate) async fn connect(&mut self) -> Result<Connection, io::Error> {
         loop {
-            if let Ok(inner) = self.try_connect().await {
-                return Ok(inner);
+            match self.try_connect().await {
+                Ok(inner) => return Ok(inner),
+                Err(error) => {
+                    self.events_tx
+                        .send(Event::ClientError(ClientError::Other(error.to_string())))
+                        .await
+                        .ok();
+                }
             }
         }
     }
@@ -141,18 +155,21 @@ impl Connector {
                                                     Some(base64_url::encode(&signed));
                                             }
                                             Err(e) => {
-                                                println!(
-                                                    "Nkey auth is disabled. sign error: {}",
-                                                    e
-                                                );
+                                                return Err(std::io::Error::new(
+                                                    ErrorKind::Other,
+                                                    format!(
+                                                        "NKey auth: failed signing the nonce: {}",
+                                                        e
+                                                    ),
+                                                ));
                                             }
                                         };
                                     }
                                     Err(e) => {
-                                        println!(
-                                            "Nkey auth is disabled. sign error: {} (possibly invalid key or corrupt creds?)",
-                                            e
-                                        );
+                                        return Err(std::io::Error::new(
+                                            ErrorKind::Other,
+                                            format!("NKey auth: failed signing the nonce: {}", e),
+                                        ));
                                     }
                                 }
                             }
@@ -163,10 +180,10 @@ impl Connector {
                                         connect_info.signature = Some(sig);
                                     }
                                     Err(e) => {
-                                        panic!(
-                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
-                    e
-                );
+                                        return Err(std::io::Error::new(
+                                            ErrorKind::Other,
+                                            format!("JWT auth: failed signing the nonce: {}", e),
+                                        ));
                                     }
                                 }
                             }
