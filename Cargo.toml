@@ -3,5 +3,6 @@
 members = [
   "nats",
   "async-nats",
-  "nats-server"
+  "nats-server",
+  "nats-subject-derive"
 ]

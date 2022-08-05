@@ -26,7 +26,7 @@ use super::response::Response;
 use super::stream::ClusterInfo;
 use super::Context;
 use crate::jetstream::consumer;
-use crate::{subject, Error, SubjectBuf};
+use crate::{subj, Error, SubjectBuf};
 
 pub trait IntoConsumerConfig {
     fn into_consumer_config(self) -> Config;
@@ -71,7 +71,7 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// # }
     /// ```
     pub async fn info(&mut self) -> Result<&consumer::Info, Error> {
-        let subject = subject!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name)?;
+        let subject = subj!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name)?;
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok::<Info>(info) => {

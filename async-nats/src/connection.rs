@@ -423,14 +423,14 @@ impl Connection {
 
 #[cfg(test)]
 pub(crate) mod test_util {
-    use crate::{subject, SubjectBuf};
+    use crate::{subj, SubjectBuf};
 
     pub fn foo_bar_sub() -> SubjectBuf {
-        subject!("FOO.BAR").unwrap()
+        subj!("FOO.BAR").unwrap()
     }
 
     pub fn inbox_sub(counter: u32) -> Option<SubjectBuf> {
-        Some(subject!("INBOX.{counter}").unwrap())
+        Some(subj!("INBOX.{counter}").unwrap())
     }
 }
 #[cfg(test)]
@@ -741,7 +741,7 @@ mod read_op {
 mod write_op {
     use super::test_util::*;
     use super::Connection;
-    use crate::subject;
+    use crate::subj;
     use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -839,7 +839,7 @@ mod write_op {
             .write_op(ClientOp::Subscribe {
                 sid: 11,
                 subject: foo_bar_sub(),
-                queue_group: Some(subject!("QUEUE.GROUP").unwrap()),
+                queue_group: Some(subj!("QUEUE.GROUP").unwrap()),
             })
             .await
             .unwrap();

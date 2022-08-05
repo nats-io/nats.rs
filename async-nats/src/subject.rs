@@ -27,7 +27,7 @@ pub const MULTI_WILDCARD_CHAR: char = '>';
 pub const TOKEN_SEPARATOR: char = '.';
 
 #[macro_export]
-macro_rules! subject {
+macro_rules! subj {
     ($($arg:tt)*) => {
         $crate::subject::SubjectBuf::new(format!($($arg)*))
     };
@@ -471,17 +471,17 @@ mod test {
     #[test]
     fn macro_test() -> Result<(), Error> {
         let s1 = SubjectBuf::new("test".to_string())?;
-        let s1_macro = subject!("test")?;
+        let s1_macro = subj!("test")?;
         assert_eq!(s1, s1_macro);
 
         let ipsum = "ipsum".to_string();
         let truth = 42;
         let s2 = SubjectBuf::new(format!("test.{}.{}", ipsum, truth))?;
-        let s2_macro = subject!("test.{}.{}", ipsum, truth)?;
+        let s2_macro = subj!("test.{}.{}", ipsum, truth)?;
         assert_eq!(s2, s2_macro);
 
         let s2 = SubjectBuf::new(format!("test.{ipsum}.{truth}"))?;
-        let s2_macro = subject!("test.{ipsum}.{truth}")?;
+        let s2_macro = subj!("test.{ipsum}.{truth}")?;
         assert_eq!(s2, s2_macro);
 
         Ok(())

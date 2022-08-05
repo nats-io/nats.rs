@@ -16,7 +16,7 @@
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{subject, Client, Error, SubjectBuf};
+use crate::{subj, Client, Error, SubjectBuf};
 use bytes::Bytes;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
@@ -51,7 +51,7 @@ impl Context {
     pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Result<Context, Error> {
         Ok(Context {
             client,
-            prefix: subject!("$JS.{}.API", domain.as_ref())?,
+            prefix: subj!("$JS.{}.API", domain.as_ref())?,
         })
     }
 
@@ -182,7 +182,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = subject!("STREAM.CREATE.{}", config.name)?;
+        let subject = subj!("STREAM.CREATE.{}", config.name)?;
         let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
@@ -224,7 +224,7 @@ impl Context {
             )));
         }
 
-        let subject = subject!("STREAM.INFO.{stream}")?;
+        let subject = subj!("STREAM.INFO.{stream}")?;
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -267,7 +267,7 @@ impl Context {
         S: Into<Config>,
     {
         let config: Config = stream_config.into();
-        let subject = subject!("STREAM.INFO.{}", config.name)?;
+        let subject = subj!("STREAM.INFO.{}", config.name)?;
 
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
@@ -309,7 +309,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = subject!("STREAM.DELETE.{}", stream)?;
+        let subject = subj!("STREAM.DELETE.{}", stream)?;
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -396,7 +396,7 @@ impl Context {
 
         let message = self
             .client
-            .request(subject!("{}.{}", self.prefix, subject)?, request)
+            .request(subj!("{}.{}", self.prefix, subject)?, request)
             .await?;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 

@@ -128,6 +128,9 @@ const LANG: &str = "rust";
 /// must be provided using `Options::tls_client_config`.
 pub use tokio_rustls::rustls;
 
+pub use nats_subject_derive::*;
+pub use subject::{SubjectBuf, ToSubject};
+
 use connection::Connection;
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderValue};
@@ -151,7 +154,6 @@ mod tls;
 
 pub use message::Message;
 pub use status::StatusCode;
-pub use subject::SubjectBuf;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.

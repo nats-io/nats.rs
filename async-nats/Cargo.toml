@@ -35,6 +35,7 @@ serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6.2"
 thiserror = "1.0.31"
+nats-subject-derive = { path = "../nats-subject-derive" }
 
 [dev-dependencies]
 criterion =  { version = "0.3", features = ["async_tokio"]}
