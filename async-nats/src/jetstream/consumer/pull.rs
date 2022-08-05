@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     jetstream::{self, Context},
-    Error, StatusCode, Subscriber, SubjectBuf,
+    subject, Error, StatusCode, SubjectBuf, Subscriber,
 };
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
@@ -112,10 +112,12 @@ impl Consumer<Config> {
         batch: I,
         inbox: SubjectBuf,
     ) -> Result<(), Error> {
-        let subject = SubjectBuf::new(format!(
+        let subject = subject!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
-            self.context.prefix, self.info.stream_name, self.info.name
-        ))?;
+            self.context.prefix,
+            self.info.stream_name,
+            self.info.name
+        )?;
 
         let payload = serde_json::to_vec(&batch.into())?;
 
@@ -247,10 +249,12 @@ impl Consumer<Config> {
     /// ```
     pub fn sequence(&self, batch: usize) -> Result<Sequence, Error> {
         let context = self.context.clone();
-        let subject = SubjectBuf::new(format!(
+        let subject = subject!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
-            self.context.prefix, self.info.stream_name, self.info.name
-        ))?;
+            self.context.prefix,
+            self.info.stream_name,
+            self.info.name
+        )?;
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
@@ -403,10 +407,12 @@ impl<'a> Stream<'a> {
     ) -> Result<Stream<'a>, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
-        let subject = SubjectBuf::new(format!(
+        let subject = subject!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
-            consumer.context.prefix, consumer.info.stream_name, consumer.info.name
-        ))?;
+            consumer.context.prefix,
+            consumer.info.stream_name,
+            consumer.info.name
+        )?;
 
         Ok(Stream {
             pending_messages: 0,

@@ -26,6 +26,13 @@ pub const MULTI_WILDCARD_CHAR: char = '>';
 /// Separator of [`Token`]s.
 pub const TOKEN_SEPARATOR: char = '.';
 
+#[macro_export]
+macro_rules! subject {
+    ($($arg:tt)*) => {
+        $crate::subject::SubjectBuf::new(format!($($arg)*))
+    };
+}
+
 /// Errors validating a NATS subject.
 #[derive(Debug, Copy, Clone, thiserror::Error)]
 pub enum Error {
@@ -48,6 +55,10 @@ impl From<Error> for io::Error {
     fn from(err: Error) -> Self {
         io::Error::new(io::ErrorKind::InvalidInput, err)
     }
+}
+
+pub trait ToSubject {
+    fn to_subject(&self) -> Result<SubjectBuf, Error>;
 }
 
 /// A valid NATS subject.
@@ -343,6 +354,30 @@ fn token_match(lt: &str, rt: &str) -> bool {
         || rt == MULTI_WILDCARD
 }
 
+impl ToSubject for SubjectBuf {
+    fn to_subject(&self) -> Result<SubjectBuf, Error> {
+        Ok(self.clone())
+    }
+}
+
+impl ToSubject for Subject {
+    fn to_subject(&self) -> Result<SubjectBuf, Error> {
+        Ok(self.to_owned())
+    }
+}
+
+impl ToSubject for String {
+    fn to_subject(&self) -> Result<SubjectBuf, Error> {
+        SubjectBuf::new(self.clone())
+    }
+}
+
+impl ToSubject for str {
+    fn to_subject(&self) -> Result<SubjectBuf, Error> {
+        Subject::new(self)?.to_subject()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -430,6 +465,25 @@ mod test {
         let mut map = std::collections::HashSet::new();
         map.insert(buf);
         assert!(map.get(sub).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn macro_test() -> Result<(), Error> {
+        let s1 = SubjectBuf::new("test".to_string())?;
+        let s1_macro = subject!("test")?;
+        assert_eq!(s1, s1_macro);
+
+        let ipsum = "ipsum".to_string();
+        let truth = 42;
+        let s2 = SubjectBuf::new(format!("test.{}.{}", ipsum, truth))?;
+        let s2_macro = subject!("test.{}.{}", ipsum, truth)?;
+        assert_eq!(s2, s2_macro);
+
+        let s2 = SubjectBuf::new(format!("test.{ipsum}.{truth}"))?;
+        let s2_macro = subject!("test.{ipsum}.{truth}")?;
+        assert_eq!(s2, s2_macro);
+
         Ok(())
     }
 }

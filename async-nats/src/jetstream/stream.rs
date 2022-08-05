@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{Error, SubjectBuf};
+use crate::{subject, Error, SubjectBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -63,7 +63,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, Error> {
-        let subject = SubjectBuf::new(format!("STREAM.MSG.GET.{}", &self.info.config.name))?;
+        let subject = subject!("STREAM.MSG.GET.{}", self.info.config.name)?;
         let payload = json!({
             "seq": sequence,
         });
@@ -80,7 +80,6 @@ impl Stream {
             Response::Ok(value) => Ok(value.message),
         }
     }
-
 
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
@@ -108,14 +107,14 @@ impl Stream {
     ) -> Result<Consumer<C>, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
-            format!(
+            subject!(
                 "CONSUMER.DURABLE.CREATE.{}.{}",
-                self.info.config.name, durable_name
+                self.info.config.name,
+                durable_name
             )
         } else {
-            format!("CONSUMER.CREATE.{}", self.info.config.name)
-        };
-        let subject = SubjectBuf::new(subject)?;
+            subject!("CONSUMER.CREATE.{}", self.info.config.name)
+        }?;
 
         match self
             .context
@@ -231,7 +230,7 @@ impl Stream {
         name: &str,
         config: T,
     ) -> Result<Consumer<T>, Error> {
-        let subject = SubjectBuf::new(format!("CONSUMER.INFO.{}.{}", self.info.config.name, name))?;
+        let subject = subject!("CONSUMER.INFO.{}.{}", self.info.config.name, name)?;
 
         match self.context.request(subject, &json!({})).await? {
             Response::Err { error } if error.status == 404 => self.create_consumer(config).await,
@@ -268,7 +267,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
-        let subject = SubjectBuf::new(format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name))?;
+        let subject = subject!("CONSUMER.DELETE.{}.{}", self.info.config.name, name)?;
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),

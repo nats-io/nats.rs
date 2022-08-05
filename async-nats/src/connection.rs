@@ -117,7 +117,8 @@ impl Connection {
 
             // SAFETY: Subjects from the server are always valid.
             let subject = SubjectBuf::new_unchecked(subject.to_owned());
-            let reply_to = reply_to.map(|reply_sub| SubjectBuf::new_unchecked(reply_sub.to_owned()));
+            let reply_to =
+                reply_to.map(|reply_sub| SubjectBuf::new_unchecked(reply_sub.to_owned()));
 
             self.buffer.advance(len + 2);
             let payload = self.buffer.split_to(payload_len).freeze();
@@ -158,7 +159,8 @@ impl Connection {
 
             // SAFETY: Subjects from the server are always valid.
             let subject = SubjectBuf::new_unchecked(subject.to_owned());
-            let reply_to = reply_to.map(|reply_sub| SubjectBuf::new_unchecked(reply_sub.to_owned()));
+            let reply_to =
+                reply_to.map(|reply_sub| SubjectBuf::new_unchecked(reply_sub.to_owned()));
 
             // Parse the subject ID.
             let sid = u64::from_str(sid).map_err(|_| {
@@ -421,20 +423,20 @@ impl Connection {
 
 #[cfg(test)]
 pub(crate) mod test_util {
-    use crate::SubjectBuf;
+    use crate::{subject, SubjectBuf};
 
     pub fn foo_bar_sub() -> SubjectBuf {
-        SubjectBuf::new_unchecked("FOO.BAR".to_string())
+        subject!("FOO.BAR").unwrap()
     }
 
     pub fn inbox_sub(counter: u32) -> Option<SubjectBuf> {
-        Some(SubjectBuf::new_unchecked(format!("INBOX.{counter}")))
+        Some(subject!("INBOX.{counter}").unwrap())
     }
 }
 #[cfg(test)]
 mod read_op {
-    use super::Connection;
     use super::test_util::*;
+    use super::Connection;
     use crate::{HeaderMap, ServerError, ServerInfo, ServerOp, StatusCode};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncWriteExt};
@@ -737,9 +739,9 @@ mod read_op {
 
 #[cfg(test)]
 mod write_op {
-    use super::Connection;
     use super::test_util::*;
-    use crate::SubjectBuf;
+    use super::Connection;
+    use crate::subject;
     use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol};
     use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -837,7 +839,7 @@ mod write_op {
             .write_op(ClientOp::Subscribe {
                 sid: 11,
                 subject: foo_bar_sub(),
-                queue_group: Some(SubjectBuf::new_unchecked("QUEUE.GROUP".into())),
+                queue_group: Some(subject!("QUEUE.GROUP").unwrap()),
             })
             .await
             .unwrap();

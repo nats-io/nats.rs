@@ -14,7 +14,8 @@
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
     jetstream::{self, Context, Message},
-    Error, StatusCode, Subscriber, SubjectBuf,
+    subject::ToSubject,
+    Error, StatusCode, SubjectBuf, Subscriber,
 };
 
 use bytes::Bytes;
@@ -497,7 +498,7 @@ async fn recreate_ephemeral_subscriber(
 
     let subscriber = context
         .client
-        .subscribe(SubjectBuf::new(config.deliver_subject.clone())?)
+        .subscribe(config.deliver_subject.to_subject()?)
         .await?;
     let deliver_policy = {
         if sequence == 0 {
