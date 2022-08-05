@@ -12,21 +12,22 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::{ConnectOptions, ServerError};
+    use async_nats::subject::ToSubject;
+    use async_nats::{ConnectOptions, Error, ServerError};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
     use std::time::Duration;
 
     #[tokio::test]
-    async fn basic_pub_sub() {
+    async fn basic_pub_sub() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+        let mut subscriber = client.subscribe("foo".parse()?).await.unwrap();
 
         for _ in 0..10 {
-            client.publish("foo".into(), "data".into()).await.unwrap();
+            client.publish("foo".parse()?, "data".into()).await.unwrap();
         }
 
         client.flush().await.unwrap();
@@ -43,10 +44,11 @@ mod client {
             }
         }
         assert_eq!(i, 10);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn queue_sub() {
+    async fn queue_sub() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         const NUM_SUBSCRIBERS: usize = 3;
         const NUM_ITEMS: usize = 20;
@@ -56,14 +58,17 @@ mod client {
         for _i in 0..NUM_SUBSCRIBERS {
             subscribers.push(
                 client
-                    .queue_subscribe("qfoo".into(), "group".into())
+                    .queue_subscribe("qfoo".parse()?, "group".parse()?)
                     .await
                     .unwrap(),
             );
         }
 
         for _ in 0..NUM_ITEMS {
-            client.publish("qfoo".into(), "data".into()).await.unwrap();
+            client
+                .publish("qfoo".parse()?, "data".into())
+                .await
+                .unwrap();
         }
         client.flush().await.unwrap();
         let mut results = Vec::new();
@@ -90,18 +95,19 @@ mod client {
         assert_eq!(total, NUM_ITEMS as u32, "all items received");
         let num_receivers = counts.into_iter().filter(|n| *n > 0u32).count();
         assert!(num_receivers > 1, "should not all go to single subscriber");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn cloned_client() {
+    async fn cloned_client() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
-        let mut subscriber = client.clone().subscribe("foo".into()).await.unwrap();
+        let mut subscriber = client.clone().subscribe("foo".parse()?).await.unwrap();
 
         let cloned_client = client.clone();
         for _ in 0..10 {
             cloned_client
-                .publish("foo".into(), "data".into())
+                .publish("foo".to_subject()?, "data".into())
                 .await
                 .unwrap();
         }
@@ -118,20 +124,21 @@ mod client {
             }
         }
         assert_eq!(i, 10);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn publish_with_headers() {
+    async fn publish_with_headers() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        let mut subscriber = client.subscribe("test".parse()?).await.unwrap();
 
         let mut headers = async_nats::HeaderMap::new();
         headers.append("X-Test", b"Test".as_ref().try_into().unwrap());
 
         client
-            .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
+            .publish_with_headers("test".to_subject()?, headers.clone(), b"".as_ref().into())
             .await
             .unwrap();
 
@@ -139,14 +146,15 @@ mod client {
 
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.headers.unwrap(), headers);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn publish_request() {
+    async fn publish_request() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
 
         tokio::spawn({
             let client = client.clone();
@@ -161,18 +169,19 @@ mod client {
         let inbox = client.new_inbox();
         let mut insub = client.subscribe(inbox.clone()).await.unwrap();
         client
-            .publish_with_reply("test".into(), inbox, "data".into())
+            .publish_with_reply("test".parse()?, inbox, "data".into())
             .await
             .unwrap();
         assert!(insub.next().await.is_some());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn request() {
+    async fn request() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
 
         tokio::spawn({
             let client = client.clone();
@@ -187,80 +196,103 @@ mod client {
 
         let resp = tokio::time::timeout(
             tokio::time::Duration::from_millis(500),
-            client.request("test".into(), "request".into()),
+            client.request("test".parse()?, "request".into()),
         )
         .await
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
+        Ok(())
     }
     #[tokio::test]
-    async fn request_no_responders() {
+    async fn request_no_responders() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
         tokio::time::timeout(
             tokio::time::Duration::from_millis(300),
-            client.request("test".into(), "request".into()),
+            client.request("test".parse()?, "request".into()),
         )
         .await
         .unwrap()
         .unwrap_err();
+        Ok(())
     }
 
     #[tokio::test]
-    async fn unsubscribe() {
+    async fn unsubscribe() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
 
-        client.publish("test".into(), "data".into()).await.unwrap();
+        client
+            .publish("test".parse()?, "data".into())
+            .await
+            .unwrap();
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
         sub.unsubscribe().await.unwrap();
         // check if we can still send messages after unsubscribe.
-        let mut sub2 = client.subscribe("test2".into()).await.unwrap();
-        client.publish("test2".into(), "data".into()).await.unwrap();
+        let mut sub2 = client.subscribe("test2".parse()?).await.unwrap();
+        client
+            .publish("test2".parse()?, "data".into())
+            .await
+            .unwrap();
         client.flush().await.unwrap();
         assert!(sub2.next().await.is_some());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn unsubscribe_after() {
+    async fn unsubscribe_after() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
 
         for _ in 0..2 {
-            client.publish("test".into(), "data".into()).await.unwrap();
+            client
+                .publish("test".parse()?, "data".into())
+                .await
+                .unwrap();
         }
 
         sub.unsubscribe_after(3).await.unwrap();
-        client.publish("test".into(), "data".into()).await.unwrap();
+        client
+            .publish("test".parse()?, "data".into())
+            .await
+            .unwrap();
         client.flush().await.unwrap();
 
         for _ in 0..3 {
             assert!(sub.next().await.is_some());
         }
         assert!(sub.next().await.is_none());
+        Ok(())
     }
     #[tokio::test]
-    async fn unsubscribe_after_immediate() {
+    async fn unsubscribe_after_immediate() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
 
-        client.publish("test".into(), "data".into()).await.unwrap();
-        client.publish("test".into(), "data".into()).await.unwrap();
+        client
+            .publish("test".parse()?, "data".into())
+            .await
+            .unwrap();
+        client
+            .publish("test".parse()?, "data".into())
+            .await
+            .unwrap();
 
         sub.unsubscribe_after(1).await.unwrap();
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
         assert!(sub.next().await.is_none());
+        Ok(())
     }
 
     #[tokio::test]
@@ -284,7 +316,7 @@ mod client {
     }
 
     #[tokio::test]
-    async fn reconnect_fallback() {
+    async fn reconnect_fallback() -> Result<(), Error> {
         use async_nats::ServerAddr;
 
         let mut servers = vec![
@@ -304,33 +336,41 @@ mod client {
             .await
             .unwrap();
 
-        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        let mut subscriber = client.subscribe("test".parse()?).await.unwrap();
         while !servers.is_empty() {
-            client.publish("test".into(), "data".into()).await.unwrap();
+            client
+                .publish("test".parse()?, "data".into())
+                .await
+                .unwrap();
             client.flush().await.unwrap();
             assert!(subscriber.next().await.is_some());
 
             drop(servers.remove(0));
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn token_auth() {
+    async fn token_auth() -> Result<(), Error> {
         let server = nats_server::run_server("tests/configs/token.conf");
         let client = async_nats::ConnectOptions::with_token("s3cr3t".into())
             .connect(server.client_url())
             .await
             .unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
-        client.publish("test".into(), "test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
+        client
+            .publish("test".parse()?, "test".into())
+            .await
+            .unwrap();
         client.flush().await.unwrap();
         assert!(sub.next().await.is_some());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn user_pass_auth() {
+    async fn user_pass_auth() -> Result<(), Error> {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
         let client =
             async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t".into())
@@ -338,10 +378,14 @@ mod client {
                 .await
                 .unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
-        client.publish("test".into(), "test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".parse()?).await.unwrap();
+        client
+            .publish("test".parse()?, "test".into())
+            .await
+            .unwrap();
         client.flush().await.unwrap();
         assert!(sub.next().await.is_some());
+        Ok(())
     }
 
     #[tokio::test]
@@ -354,7 +398,7 @@ mod client {
     }
 
     #[tokio::test]
-    async fn connection_callbacks() {
+    async fn connection_callbacks() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
         let port = server.client_port().to_string();
 
@@ -379,7 +423,7 @@ mod client {
             .await
             .unwrap();
         println!("conncted");
-        client.subscribe("test".to_string()).await.unwrap();
+        client.subscribe("test".parse()?).await.unwrap();
         client.flush().await.unwrap();
 
         println!("dropped server {:?}", server.client_url());
@@ -397,11 +441,12 @@ mod client {
             .await
             .unwrap()
             .unwrap();
+        Ok(())
     }
 
     #[tokio::test]
     #[cfg_attr(target_os = "windows", ignore)]
-    async fn lame_duck_callback() {
+    async fn lame_duck_callback() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
@@ -416,9 +461,9 @@ mod client {
             .await
             .unwrap();
 
-        let mut sub = client.subscribe("data".to_string()).await.unwrap();
+        let mut sub = client.subscribe("data".parse()?).await.unwrap();
         client
-            .publish("data".to_string(), "data".into())
+            .publish("data".parse()?, "data".into())
             .await
             .unwrap();
         sub.next().await.unwrap();
@@ -428,10 +473,11 @@ mod client {
             .await
             .unwrap()
             .unwrap();
+        Ok(())
     }
 
     #[tokio::test]
-    async fn slow_consumers() {
+    async fn slow_consumers() -> Result<(), Error> {
         let server = nats_server::run_basic_server();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
@@ -449,18 +495,18 @@ mod client {
             .await
             .unwrap();
 
-        let _sub = client.subscribe("data".to_string()).await.unwrap();
+        let _sub = client.subscribe("data".parse()?).await.unwrap();
         client
-            .publish("data".to_string(), "data".into())
+            .publish("data".parse()?, "data".into())
             .await
             .unwrap();
         client
-            .publish("data".to_string(), "data".into())
+            .publish("data".parse()?, "data".into())
             .await
             .unwrap();
         client.flush().await.unwrap();
         client
-            .publish("data".to_string(), "data".into())
+            .publish("data".parse()?, "data".into())
             .await
             .unwrap();
         client.flush().await.unwrap();
@@ -475,18 +521,19 @@ mod client {
             .await
             .unwrap()
             .unwrap();
+        Ok(())
     }
     #[tokio::test]
-    async fn no_echo() {
+    async fn no_echo() -> Result<(), Error> {
         // no_echo disabled.
         let server = nats_server::run_basic_server();
         let client = ConnectOptions::new()
             .connect(server.client_url())
             .await
             .unwrap();
-        let mut subscription = client.subscribe("echo".to_string()).await.unwrap();
+        let mut subscription = client.subscribe("echo".parse()?).await.unwrap();
         client
-            .publish("echo".to_string(), "data".into())
+            .publish("echo".parse()?, "data".into())
             .await
             .unwrap();
         tokio::time::timeout(Duration::from_millis(50), subscription.next())
@@ -500,13 +547,14 @@ mod client {
             .connect(server.client_url())
             .await
             .unwrap();
-        let mut subscription = client.subscribe("echo".to_string()).await.unwrap();
+        let mut subscription = client.subscribe("echo".parse()?).await.unwrap();
         client
-            .publish("echo".to_string(), "data".into())
+            .publish("echo".parse()?, "data".into())
             .await
             .unwrap();
         tokio::time::timeout(Duration::from_millis(50), subscription.next())
             .await
             .expect_err("should timeout");
+        Ok(())
     }
 }
