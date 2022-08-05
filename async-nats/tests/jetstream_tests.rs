@@ -1048,7 +1048,7 @@ mod jetstream {
     async fn pull_fetch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {:?}", err) })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1093,7 +1093,7 @@ mod jetstream {
     async fn pull_batch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {:?}", err) })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1147,7 +1147,7 @@ mod jetstream {
     async fn consumer_info() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {:?}", err) })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1183,7 +1183,7 @@ mod jetstream {
     async fn ack() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .error_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {:?}", err) })
             .connect(server.client_url())
             .await
             .unwrap();

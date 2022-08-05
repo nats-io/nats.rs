@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::{CallbackError, ConnectOptions, ServerError};
+    use async_nats::{ConnectOptions, Event};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -361,18 +361,18 @@ mod client {
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
         let client = async_nats::ConnectOptions::new()
-            .reconnect_callback(move || {
+            .event_callback(move |event| {
                 let tx = tx.clone();
-                async move {
-                    println!("reconnection callback fired");
-                    tx.send(()).await.unwrap();
-                }
-            })
-            .disconnect_callback(move || {
                 let dc_tx = dc_tx.clone();
                 async move {
-                    println!("disconnect callback fired");
-                    dc_tx.send(()).await.unwrap();
+                    if let Event::Reconnect = event {
+                        println!("reconnection callback fired");
+                        tx.send(()).await.unwrap();
+                    }
+                    if let Event::Disconnect = event {
+                        println!("disconnect callback fired");
+                        dc_tx.send(()).await.unwrap();
+                    }
                 }
             })
             .connect(server.client_url())
@@ -406,10 +406,12 @@ mod client {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let client = ConnectOptions::new()
-            .lame_duck_callback(move || {
+            .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
-                    tx.send(()).await.unwrap();
+                    if let Event::LameDuckMode = event {
+                        tx.send(()).await.unwrap();
+                    }
                 }
             })
             .connect(server.client_url())
@@ -437,10 +439,10 @@ mod client {
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let client = ConnectOptions::new()
             .subscription_capacity(1)
-            .error_callback(move |err| {
+            .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
-                    if let CallbackError::Server(ServerError::SlowConsumer(_)) = err {
+                    if let Event::SlowConsumer(_) = event {
                         tx.send(()).await.unwrap()
                     }
                 }
@@ -515,7 +517,7 @@ mod client {
         let server = nats_server::run_basic_server();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let _client = ConnectOptions::new()
-            .error_callback(move |err| {
+            .event_callback(move |err| {
                 let tx = tx.clone();
                 async move {
                     tx.send(err.to_string()).unwrap();
