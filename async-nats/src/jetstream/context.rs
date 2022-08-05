@@ -16,7 +16,7 @@
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{Client, Error};
+use crate::{subject, Client, Error, SubjectBuf};
 use bytes::Bytes;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
@@ -30,29 +30,29 @@ use super::stream::{Config, DeleteStatus, Info, Stream};
 #[derive(Debug, Clone)]
 pub struct Context {
     pub(crate) client: Client,
-    pub(crate) prefix: String,
+    pub(crate) prefix: SubjectBuf,
 }
 
 impl Context {
     pub(crate) fn new(client: Client) -> Context {
         Context {
             client,
-            prefix: "$JS.API".to_string(),
+            prefix: "$JS.API".parse().expect("is a valid subject"),
         }
     }
 
-    pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
+    pub(crate) fn with_prefix(client: Client, prefix: SubjectBuf) -> Context {
         Context {
             client,
-            prefix: prefix.to_string(),
+            prefix: prefix,
         }
     }
 
-    pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
-        Context {
+    pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Result<Context, Error> {
+        Ok(Context {
             client,
-            prefix: format!("$JS.{}.API", domain.as_ref()),
-        }
+            prefix: subject!("$JS.{}.API", domain.as_ref())?,
+        })
     }
 
     /// Publish a message to a given subject associated with a stream and returns an acknowledgment from
@@ -68,11 +68,11 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let ack = jetstream.publish("events".parse()?, "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
+    pub async fn publish(&self, subject: SubjectBuf, payload: Bytes) -> Result<PublishAck, Error> {
         let message = self.client.request(subject, payload).await?;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
@@ -104,13 +104,13 @@ impl Context {
     ///
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", b"Value".as_ref().try_into()?);
-    /// let ack = jetstream.publish_with_headers("events".to_string(), headers, "data".into()).await?;
+    /// let ack = jetstream.publish_with_headers("events".parse()?, headers, "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn publish_with_headers(
         &self,
-        subject: String,
+        subject: SubjectBuf,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAck, Error> {
@@ -135,7 +135,7 @@ impl Context {
 
     /// Query the server for account information
     pub async fn query_account(&self) -> Result<Account, Error> {
-        let response: Response<Account> = self.request("INFO".into(), b"").await?;
+        let response: Response<Account> = self.request("INFO".parse()?, b"").await?;
 
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -182,7 +182,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.CREATE.{}", config.name);
+        let subject = subject!("STREAM.CREATE.{}", config.name)?;
         let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
@@ -224,7 +224,7 @@ impl Context {
             )));
         }
 
-        let subject = format!("STREAM.INFO.{}", stream);
+        let subject = subject!("STREAM.INFO.{stream}")?;
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -267,7 +267,7 @@ impl Context {
         S: Into<Config>,
     {
         let config: Config = stream_config.into();
-        let subject = format!("STREAM.INFO.{}", config.name);
+        let subject = subject!("STREAM.INFO.{}", config.name)?;
 
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
@@ -309,7 +309,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.DELETE.{}", stream);
+        let subject = subject!("STREAM.DELETE.{}", stream)?;
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -349,7 +349,7 @@ impl Context {
         S: Borrow<Config>,
     {
         let config = config.borrow();
-        let subject = format!("STREAM.UPDATE.{}", config.name);
+        let subject = SubjectBuf::new(format!("STREAM.UPDATE.{}", config.name))?;
         match self.request(subject, config).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -372,17 +372,22 @@ impl Context {
     /// ```no_run
     /// # use async_nats::jetstream::stream::Info;
     /// # use async_nats::jetstream::response::Response;
+    /// # use async_nats::subject;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let response: Response<Info> = jetstream
-    /// .request("STREAM.INFO.events".to_string(), &()).await?;
+    /// .request(subject!("STREAM.INFO.events")?, &()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<Response<V>, Error>
+    pub async fn request<T, V>(
+        &self,
+        subject: SubjectBuf,
+        payload: &T,
+    ) -> Result<Response<V>, Error>
     where
         T: ?Sized + Serialize,
         V: DeserializeOwned,
@@ -391,7 +396,7 @@ impl Context {
 
         let message = self
             .client
-            .request(format!("{}.{}", self.prefix, subject), request)
+            .request(subject!("{}.{}", self.prefix, subject)?, request)
             .await?;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 

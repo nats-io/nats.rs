@@ -1,6 +1,9 @@
 use std::{env, str::from_utf8};
 
-use async_nats::jetstream::{self, consumer::PullConsumer};
+use async_nats::{
+    jetstream::{self, consumer::PullConsumer},
+    subject,
+};
 use futures::StreamExt;
 
 #[tokio::main]
@@ -36,7 +39,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish a few messages for the example.
     for i in 0..10 {
         jetstream
-            .publish(format!("events.{}", i), "data".into())
+            .publish(subject!("events.{}", i)?, "data".into())
             .await?;
     }
 

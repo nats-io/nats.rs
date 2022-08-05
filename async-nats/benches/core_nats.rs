@@ -42,7 +42,9 @@ pub fn publish(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
                     let nc = async_nats::connect(server.client_url()).await.unwrap();
-                    nc.publish("data".to_string(), "data".into()).await.unwrap();
+                    nc.publish("data".parse().unwrap(), "data".into())
+                        .await
+                        .unwrap();
                     nc.flush().await.unwrap();
                     nc
                 });
@@ -82,13 +84,15 @@ pub fn subscribe(c: &mut Criterion) {
                             let msg = &bmsg[0..*size].to_vec();
 
                             loop {
-                                nc.publish("bench".to_string(), msg.clone().into())
+                                nc.publish("bench".parse().unwrap(), msg.clone().into())
                                     .await
                                     .unwrap();
                             }
                         }
                     });
-                    nc.publish("data".to_string(), "data".into()).await.unwrap();
+                    nc.publish("data".parse().unwrap(), "data".into())
+                        .await
+                        .unwrap();
                     nc.flush().await.unwrap();
                     nc
                 });
@@ -105,7 +109,7 @@ pub fn subscribe(c: &mut Criterion) {
 async fn publish_messages(nc: async_nats::Client, msg: &'_ [u8], amount: usize) {
     let msg = msg.to_vec();
     for _i in 0..amount {
-        nc.publish("bench".into(), msg.clone().into())
+        nc.publish("bench".parse().unwrap(), msg.clone().into())
             .await
             .unwrap();
     }
@@ -113,7 +117,7 @@ async fn publish_messages(nc: async_nats::Client, msg: &'_ [u8], amount: usize) 
 }
 
 async fn subscribe_messages(nc: async_nats::Client, amount: usize) {
-    let mut sub = nc.subscribe("bench".into()).await.unwrap();
+    let mut sub = nc.subscribe("bench".parse().unwrap()).await.unwrap();
     for _ in 0..amount {
         sub.next().await.unwrap();
     }

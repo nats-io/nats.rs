@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use crate::Error;
+use crate::{subject, Error, SubjectBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -56,14 +56,14 @@ impl Stream {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".parse()?, "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
     /// println!("Retreived raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
     pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, Error> {
-        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let subject = subject!("STREAM.MSG.GET.{}", self.info.config.name)?;
         let payload = json!({
             "seq": sequence,
         });
@@ -100,7 +100,7 @@ impl Stream {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".parse()?, "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events".into()).await?;
     /// println!("Retreived raw message {:?}", raw_message);
     /// # Ok(())
@@ -110,7 +110,7 @@ impl Stream {
         &self,
         stream_subject: &str,
     ) -> Result<RawMessage, Error> {
-        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let subject = subject!("STREAM.MSG.GET.{}", &self.info.config.name)?;
         let payload = json!({
             "last_by_subj":  stream_subject,
         });
@@ -144,13 +144,13 @@ impl Stream {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".parse()?, "data".into()).await?;
     /// stream.delete_message(publish_ack.sequence).await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn delete_message(&self, sequence: u64) -> Result<bool, Error> {
-        let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
+        let subject = subject!("STREAM.MSG.DELETE.{}", &self.info.config.name)?;
         let payload = json!({
             "seq": sequence,
         });
@@ -195,13 +195,14 @@ impl Stream {
     ) -> Result<Consumer<C>, Error> {
         let config = config.into_consumer_config();
         let subject = if let Some(ref durable_name) = config.durable_name {
-            format!(
+            subject!(
                 "CONSUMER.DURABLE.CREATE.{}.{}",
-                self.info.config.name, durable_name
+                self.info.config.name,
+                durable_name
             )
         } else {
-            format!("CONSUMER.CREATE.{}", self.info.config.name)
-        };
+            subject!("CONSUMER.CREATE.{}", self.info.config.name)
+        }?;
 
         match self
             .context
@@ -245,7 +246,7 @@ impl Stream {
     pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<consumer::Info, Error> {
         let name = name.as_ref();
 
-        let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
+        let subject = SubjectBuf::new(format!("CONSUMER.INFO.{}.{}", self.info.config.name, name))?;
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(info) => Ok(info),
@@ -317,7 +318,7 @@ impl Stream {
         name: &str,
         config: T,
     ) -> Result<Consumer<T>, Error> {
-        let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
+        let subject = subject!("CONSUMER.INFO.{}.{}", self.info.config.name, name)?;
 
         match self.context.request(subject, &json!({})).await? {
             Response::Err { error } if error.status == 404 => self.create_consumer(config).await,
@@ -354,7 +355,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
-        let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
+        let subject = subject!("CONSUMER.DELETE.{}.{}", self.info.config.name, name)?;
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),

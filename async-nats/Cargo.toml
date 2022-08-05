@@ -34,11 +34,13 @@ nuid = "0.3.2"
 serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6.2"
+thiserror = "1.0.31"
 
 [dev-dependencies]
 criterion =  { version = "0.3", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
+test-case = "2.2.1"
 
 
 [[bench]]

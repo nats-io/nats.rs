@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_nats::subject;
 use bytes::Bytes;
 use std::time::Instant;
 
@@ -19,7 +20,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("nats://localhost:4222").await?;
 
     let now = Instant::now();
-    let subject = String::from("foo");
+    let subject = subject!("foo")?;
     let dat = Bytes::from("bar");
     client.flush().await?;
     for _ in 0..10_000_000 {
