@@ -68,7 +68,7 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let ack = jetstream.publish("events".parse()?, "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -104,7 +104,7 @@ impl Context {
     ///
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", b"Value".as_ref().try_into()?);
-    /// let ack = jetstream.publish_with_headers("events".to_string(), headers, "data".into()).await?;
+    /// let ack = jetstream.publish_with_headers("events".parse()?, headers, "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -372,13 +372,14 @@ impl Context {
     /// ```no_run
     /// # use async_nats::jetstream::stream::Info;
     /// # use async_nats::jetstream::response::Response;
+    /// # use async_nats::subject;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let response: Response<Info> = jetstream
-    /// .request("STREAM.INFO.events".to_string(), &()).await?;
+    /// .request(subject!("STREAM.INFO.events")?, &()).await?;
     /// # Ok(())
     /// # }
     /// ```

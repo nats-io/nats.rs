@@ -56,7 +56,7 @@ impl Stream {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".parse()?, "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
     /// println!("Retreived raw message {:?}", raw_message);
     /// # Ok(())
@@ -100,7 +100,7 @@ impl Stream {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".parse()?, "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events".into()).await?;
     /// println!("Retreived raw message {:?}", raw_message);
     /// # Ok(())
@@ -110,7 +110,7 @@ impl Stream {
         &self,
         stream_subject: &str,
     ) -> Result<RawMessage, Error> {
-        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let subject = subject!("STREAM.MSG.GET.{}", &self.info.config.name)?;
         let payload = json!({
             "last_by_subj":  stream_subject,
         });
@@ -144,13 +144,13 @@ impl Stream {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".parse()?, "data".into()).await?;
     /// stream.delete_message(publish_ack.sequence).await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn delete_message(&self, sequence: u64) -> Result<bool, Error> {
-        let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
+        let subject = subject!("STREAM.MSG.DELETE.{}", &self.info.config.name)?;
         let payload = json!({
             "seq": sequence,
         });

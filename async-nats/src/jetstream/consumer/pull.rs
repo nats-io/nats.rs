@@ -45,7 +45,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream.publish("events".parse()?, "data".into()).await?;
     ///
     /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
     ///     durable_name: Some("consumer".to_string()),
@@ -148,7 +148,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream.publish("events".parse()?, "data".into()).await?;
     ///
     /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
     ///     durable_name: Some("consumer".to_string()),
@@ -156,7 +156,7 @@ impl Consumer<Config> {
     /// }).await?;
     ///
     /// for _ in 0..100 {
-    ///     jetstream.publish("events".to_string(), "data".into()).await?;
+    ///     jetstream.publish("events".parse()?, "data".into()).await?;
     /// }
     ///
     /// let mut messages = consumer.fetch().max_messages(200).messages().await?;
@@ -192,7 +192,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream.publish("events".parse()?, "data".into()).await?;
     ///
     /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
     ///     durable_name: Some("consumer".to_string()),
@@ -231,7 +231,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream.publish("events".parse()?, "data".into()).await?;
     ///
     /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
     ///     durable_name: Some("consumer".to_string()),
@@ -319,7 +319,7 @@ impl futures::Stream for Batch {
                         return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                             std::io::ErrorKind::Other,
                             format!(
-                                "eror while processing messages from the stream: {}, {:?}",
+                                "error while processing messages from the stream: {}, {:?}",
                                 status, message.description
                             ),
                         )))))

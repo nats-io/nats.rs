@@ -34,7 +34,7 @@
 //!     ..Default::default()
 //! }).await?;
 //!
-//! jetstream.publish("events".to_string(), "data".into()).await?;
+//! jetstream.publish("events".parse()?, "data".into()).await?;
 //!
 //! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
 //!     durable_name: Some("consumer".to_string()),
@@ -65,7 +65,7 @@
 //!     ..Default::default()
 //! }).await?;
 //!
-//! jetstream.publish("events".to_string(), "data".into()).await?;
+//! jetstream.publish("events".parse()?, "data".into()).await?;
 //!
 //! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
 //!     durable_name: Some("consumer".to_string()),
@@ -83,7 +83,7 @@
 //! # }
 //! ```
 
-use crate::{Client, SubjectBuf, Error};
+use crate::{Client, Error, SubjectBuf};
 
 pub mod account;
 pub mod consumer;
@@ -108,7 +108,7 @@ pub use message::{AckKind, Message};
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream.publish("subject".parse()?, "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -125,9 +125,9 @@ pub fn new(client: Client) -> Context {
 /// # async fn main() -> Result<(), async_nats::Error> {
 ///
 /// let client = async_nats::connect("localhost:4222").await?;
-/// let jetstream = async_nats::jetstream::with_domain(client, "hub");
+/// let jetstream = async_nats::jetstream::with_domain(client, "hub")?;
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream.publish("subject".parse()?, "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -140,13 +140,14 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Result<Context, 
 /// # Examples
 ///
 /// ```no_run
+/// # use async_nats::subject;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
 ///
 /// let client = async_nats::connect("localhost:4222").await?;
-/// let jetstream = async_nats::jetstream::with_prefix(client, "JS.acc@hub.API");
+/// let jetstream = async_nats::jetstream::with_prefix(client, subject!("JS.acc@hub.API")?);
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream.publish("subject".parse()?, "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```

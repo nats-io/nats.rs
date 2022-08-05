@@ -46,7 +46,7 @@ impl Consumer<Config> {
     ///     ..Default::default()
     /// }).await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream.publish("events".parse()?, "data".into()).await?;
     ///
     /// let consumer: PushConsumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::push::Config {
     ///     durable_name: Some("consumer".to_string()),

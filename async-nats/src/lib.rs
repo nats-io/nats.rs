@@ -40,10 +40,10 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), async_nats::Error> {
 //!     let client = async_nats::connect("demo.nats.io").await?;
-//!     let mut subscriber = client.subscribe("messages".into()).await?.take(10);
+//!     let mut subscriber = client.subscribe("messages".parse()?).await?.take(10);
 //!
 //!     for _ in 0..10 {
-//!         client.publish("messages".into(), "data".into()).await?;
+//!         client.publish("messages".parse()?, "data".into()).await?;
 //!     }
 //!
 //!     while let Some(message) = subscriber.next().await {
@@ -61,15 +61,16 @@
 //! # use bytes::Bytes;
 //! # use std::error::Error;
 //! # use std::time::Instant;
+//! # use async_nats::subject;
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
-//! let subject = String::from("foo");
+//! let subject = subject!("foo")?;
 //! let data = Bytes::from("bar");
 //! for _ in 0..10 {
-//!     client.publish("subject".into(), "data".into()).await?;
+//!     client.publish(subject.clone(), "data".into()).await?;
 //! }
 //! #    Ok(())
 //! # }
@@ -87,7 +88,7 @@
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
-//! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//! let mut subscriber = client.subscribe("foo".parse()?).await.unwrap();
 //!
 //! while let Some(message) = subscriber.next().await {
 //!     println!("Received message {:?}", message);
@@ -585,7 +586,7 @@ impl ConnectionHandler {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
-/// nc.publish("test".into(), "data".into()).await?;
+/// nc.publish("test".parse()?, "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -682,7 +683,7 @@ pub(crate) enum ServerEvent {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// nc.publish("test".into(), "data".into()).await?;
+/// nc.publish("test".parse()?, "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -699,7 +700,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// # nc.publish("test".into(), "data".into()).await?;
+/// # nc.publish("test".parse()?, "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -730,7 +731,7 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut subscriber = client.subscribe("foo".into()).await?;
+    /// let mut subscriber = client.subscribe("foo".parse()?).await?;
     ///
     ///  subscriber.unsubscribe().await?;
     /// # Ok(())
@@ -758,12 +759,12 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut sub = client.subscribe("test".into()).await?;
+    /// let mut sub = client.subscribe("test".parse()?).await?;
     /// sub.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
     /// for _ in 0..3 {
-    ///     client.publish("test".into(), "data".into()).await?;
+    ///     client.publish("test".parse()?, "data".into()).await?;
     /// }
     ///
     /// while let Some(message) = sub.next().await {
