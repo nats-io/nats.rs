@@ -99,6 +99,7 @@ use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
 
+use core::fmt;
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -643,19 +644,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     task::spawn(async move {
         while let Some(event) = events_rx.recv().await {
-            match event {
-                Event::Reconnect => options.reconnect_callback.call().await,
-                Event::Disconnect => options.disconnect_callback.call().await,
-                Event::ServerError(error) => options.error_callback.call(error.into()).await,
-                Event::ClientError(error) => options.error_callback.call(error.into()).await,
-                Event::LameDuckMode => options.lame_duck_callback.call().await,
-                Event::SlowConsumer(sid) => {
-                    options
-                        .error_callback
-                        .call(ServerError::SlowConsumer(sid).into())
-                        .await
-                }
-            }
+            options.event_callback.call(event).await
         }
     });
 
@@ -664,13 +653,27 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     Ok(client)
 }
 
-pub(crate) enum Event {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Event {
     Reconnect,
     Disconnect,
     LameDuckMode,
     SlowConsumer(u64),
     ServerError(ServerError),
     ClientError(ClientError),
+}
+
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Event::Reconnect => write!(f, "reconnected"),
+            Event::Disconnect => write!(f, "disconnected"),
+            Event::LameDuckMode => write!(f, "lame duck mode detected"),
+            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
+            Event::ServerError(err) => write!(f, "server error: {}", err),
+            Event::ClientError(err) => write!(f, "client error: {}", err),
+        }
+    }
 }
 
 /// Connects to NATS with default config.

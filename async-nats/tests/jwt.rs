@@ -50,12 +50,6 @@ mod client {
         )
         .await
         .unwrap()
-        .disconnect_callback(move || async move {
-            println!("disconnect");
-        })
-        .reconnect_callback(move || async move {
-            println!("reconnection");
-        })
         .connect(
             servers
                 .iter()

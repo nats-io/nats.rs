@@ -42,12 +42,6 @@ mod client {
         ];
 
         let client = async_nats::ConnectOptions::with_nkey(SECRET_SEED.into())
-            .disconnect_callback(move || async move {
-                println!("disconnect");
-            })
-            .reconnect_callback(move || async move {
-                println!("reconnection");
-            })
             .connect(
                 servers
                     .iter()
