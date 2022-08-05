@@ -32,7 +32,7 @@ mod jetstream {
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream::{self, StorageType};
+    use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -294,6 +294,100 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn get_last_raw_message_by_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .get_or_create_stream(stream::Config {
+                subjects: vec!["events".to_string(), "entries".to_string()],
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"payload";
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        context
+            .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let raw_message = stream
+            .get_last_raw_message_by_subject("events")
+            .await
+            .unwrap();
+
+        assert_eq!(raw_message.sequence, publish_ack.sequence);
+    }
+
+    #[tokio::test]
+    async fn delete_message() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("events").await.unwrap();
+        let payload = b"payload";
+        context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .get_or_create_consumer(
+                "consumer",
+                consumer::pull::Config {
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        stream.delete_message(publish_ack.sequence).await.unwrap();
+
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .info()
+                .unwrap()
+                .stream_sequence,
+            1
+        );
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .info()
+                .unwrap()
+                .stream_sequence,
+            3
+        );
+    }
+
+    #[tokio::test]
     async fn create_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -467,6 +561,54 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn pull_stream_by_one() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("push".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer: PullConsumer = stream.get_consumer("push").await.unwrap();
+
+        for _ in 0..100 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        println!("pubbed");
+        let mut messages = consumer
+            .stream()
+            .max_messages_per_batch(1)
+            .messages()
+            .await
+            .unwrap()
+            .take(100);
+
+        while let Some(Ok(message)) = messages.next().await {
+            println!("message");
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    #[tokio::test]
     async fn push_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -552,6 +694,61 @@ mod jetstream {
             let message = message.unwrap();
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    #[tokio::test]
+    async fn push_ordered_capped() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                discard: DiscardPolicy::Old,
+                max_messages: 500,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..1000 {
+            context
+                .publish("events".to_string(), format!("{}", i).into())
+                .await
+                .unwrap();
+        }
+
+        // distrupt stream sequence continuity.
+        stream.delete_message(510).await.unwrap();
+        stream.delete_message(600).await.unwrap();
+        stream.delete_message(800).await.unwrap();
+
+        // take 3 messages less, as we discarded 3 from remaining 500.
+        let mut messages = consumer.messages().await.unwrap().take(497);
+        // expect sequence to start at 500, after server discarded other 500 of messages.
+        let mut i = 500;
+        while let Some(message) = messages.next().await {
+            // account for deleted messages.
+            if i == 509 || i == 599 || i == 799 {
+                i += 1;
+            }
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload, bytes::Bytes::from(format!("{}", i)));
+            i += 1;
         }
     }
 

@@ -98,9 +98,7 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tls::TlsOptions;
 
-use std::cmp;
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -108,19 +106,14 @@ use std::option;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
-use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 use tokio::io::ErrorKind;
-use tokio::time::sleep;
 use url::{Host, Url};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
-use tokio::io::BufWriter;
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
@@ -135,11 +128,13 @@ const LANG: &str = "rust";
 pub use tokio_rustls::rustls;
 
 use connection::Connection;
+use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderValue};
 
 pub(crate) mod auth_utils;
 mod client;
 mod connection;
+mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
@@ -277,150 +272,6 @@ pub enum ClientOp {
     Ping,
     Pong,
     Connect(ConnectInfo),
-}
-
-/// Maintains a list of servers and establishes connections.
-pub(crate) struct Connector {
-    /// A map of servers and number of connect attempts.
-    servers: HashMap<ServerAddr, usize>,
-    options: TlsOptions,
-}
-
-impl Connector {
-    pub(crate) fn new<A: ToServerAddrs>(
-        addrs: A,
-        options: TlsOptions,
-    ) -> Result<Connector, io::Error> {
-        let servers = addrs
-            .to_server_addrs()?
-            .into_iter()
-            .map(|addr| (addr, 0))
-            .collect();
-
-        Ok(Connector { servers, options })
-    }
-
-    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
-        for _ in 0..128 {
-            if let Ok(inner) = self.try_connect().await {
-                return Ok(inner);
-            }
-        }
-
-        Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
-    }
-
-    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
-        let mut error = None;
-
-        let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
-        for server_addr in server_addrs {
-            let server_attempts = self.servers.get_mut(&server_addr).unwrap();
-            let duration = if *server_attempts == 0 {
-                Duration::from_millis(0)
-            } else {
-                let exp: u32 = (*server_attempts - 1).try_into().unwrap_or(std::u32::MAX);
-                let max = Duration::from_secs(4);
-
-                cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
-            };
-
-            *server_attempts += 1;
-            sleep(duration).await;
-
-            let socket_addrs = server_addr.socket_addrs()?;
-            for socket_addr in socket_addrs {
-                match self
-                    .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
-                    .await
-                {
-                    Ok((info, connection)) => {
-                        for url in &info.connect_urls {
-                            let server_addr = url.parse::<ServerAddr>()?;
-                            self.servers.entry(server_addr).or_insert(0);
-                        }
-
-                        let server_attempts = self.servers.get_mut(&server_addr).unwrap();
-                        *server_attempts = 0;
-
-                        return Ok((info, connection));
-                    }
-
-                    Err(inner) => error.replace(inner),
-                };
-            }
-        }
-
-        Err(error.unwrap())
-    }
-
-    pub(crate) async fn try_connect_to(
-        &self,
-        socket_addr: &SocketAddr,
-        tls_required: bool,
-        tls_host: &str,
-    ) -> Result<(ServerInfo, Connection), io::Error> {
-        let tls_config = tls::config_tls(&self.options).await?;
-
-        let tcp_stream = TcpStream::connect(socket_addr).await?;
-        tcp_stream.set_nodelay(true)?;
-
-        let mut connection = Connection {
-            stream: Box::new(BufWriter::new(tcp_stream)),
-            buffer: BytesMut::new(),
-        };
-
-        let op = connection.read_op().await?;
-        let info = match op {
-            Some(ServerOp::Info(info)) => info,
-            Some(op) => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    format!("expected INFO, got {:?}", op),
-                ))
-            }
-            None => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    "expected INFO, got nothing",
-                ))
-            }
-        };
-
-        if self.options.tls_required || info.tls_required || tls_required {
-            let tls_config = Arc::new(tls_config);
-            let tls_connector =
-                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
-                    io::Error::new(
-                        ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {}", err),
-                    )
-                })?;
-
-            // Use the server-advertised hostname to validate if given as a hostname, not an IP address
-            let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
-                rustls::ServerName::try_from(info.host.as_str())
-            {
-                server_hostname
-            } else if let Ok(tls_hostname @ rustls::ServerName::DnsName(_)) =
-                rustls::ServerName::try_from(tls_host)
-            {
-                tls_hostname
-            } else {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "cannot determine hostname for TLS connection",
-                ));
-            };
-
-            connection = Connection {
-                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
-                buffer: BytesMut::new(),
-            };
-        };
-
-        Ok((*info, connection))
-    }
 }
 
 #[derive(Debug)]
@@ -702,7 +553,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_reconnect(&mut self) -> Result<(), io::Error> {
-        let (_, connection) = self.connector.connect().await?;
+        let connection = self.connector.connect().await?;
         self.connection = connection;
 
         self.subscriptions
@@ -719,6 +570,7 @@ impl ConnectionHandler {
                 .unwrap();
         }
         self.events.try_send(ServerEvent::Reconnect).ok();
+
         Ok(())
     }
 }
@@ -741,20 +593,23 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let tls_required = options.tls_required;
     let ping_interval = options.ping_interval;
     let flush_interval = options.flush_interval;
 
-    let tls_options = TlsOptions {
-        tls_required: options.tls_required,
-        certificates: options.certificates,
-        client_key: options.client_key,
-        client_cert: options.client_cert,
-        tls_client_config: options.tls_client_config,
-    };
+    let mut connector = Connector::new(
+        addrs,
+        ConnectorOptions {
+            tls_required: options.tls_required,
+            certificates: options.certificates,
+            client_key: options.client_key,
+            client_cert: options.client_cert,
+            tls_client_config: options.tls_client_config,
+            auth: options.auth,
+            no_echo: options.no_echo,
+        },
+    )?;
 
-    let mut connector = Connector::new(addrs, tls_options)?;
-    let (server_info, connection) = connector.try_connect().await?;
+    let connection = connector.try_connect().await?;
     let (events_tx, mut events_rx) = mpsc::channel(128);
 
     let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
@@ -763,65 +618,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(sender.clone(), options.subscription_capacity);
-    let mut connect_info = ConnectInfo {
-        tls_required,
-        // FIXME(tp): have optional name
-        name: Some("beta-rust-client".to_string()),
-        pedantic: false,
-        verbose: false,
-        lang: LANG.to_string(),
-        version: VERSION.to_string(),
-        protocol: Protocol::Dynamic,
-        user: None,
-        pass: None,
-        auth_token: None,
-        user_jwt: None,
-        nkey: None,
-        signature: None,
-        echo: !options.no_echo,
-        headers: true,
-        no_responders: true,
-    };
-    match options.auth {
-        Authorization::None => {}
-        Authorization::Token(token) => connect_info.auth_token = Some(token),
-        Authorization::UserAndPassword(user, pass) => {
-            connect_info.user = Some(user);
-            connect_info.pass = Some(pass);
-        }
-        Authorization::Jwt(jwt, sign_fn) => match sign_fn.call(server_info.nonce.clone()).await {
-            Ok(sig) => {
-                connect_info.user_jwt = Some(jwt.clone());
-                connect_info.signature = Some(sig);
-            }
-            Err(e) => {
-                println!(
-                    "JWT auth is disabled. sign error: {} (possibly invalid key or corrupt cred file?)",
-                    e
-                );
-            }
-        },
-    }
-    connection_handler
-        .connection
-        .write_op(ClientOp::Connect(connect_info))
-        .await?;
-    connection_handler
-        .connection
-        .write_op(ClientOp::Ping)
-        .await?;
-    connection_handler.pending_pings += 1;
-    connection_handler.connection.flush().await?;
-    match connection_handler.connection.read_op().await? {
-        Some(ServerOp::Error(err)) => {
-            return Err(io::Error::new(ErrorKind::InvalidInput, err.to_string()));
-        }
-        Some(op) => {
-            connection_handler.handle_server_op(op).await?;
-        }
-        None => return Err(io::Error::new(ErrorKind::BrokenPipe, "connection aborted")),
-    }
-
     tokio::spawn({
         let sender = sender.clone();
         async move {
@@ -1262,6 +1058,9 @@ pub(crate) enum Authorization {
 
     /// Authenticate using a username and password.
     UserAndPassword(String, String),
+
+    /// Authenticate using nkey seed
+    NKey(String),
 
     /// Authenticate using a jwt and signing function.
     Jwt(

@@ -441,7 +441,7 @@ impl<'a> futures::Stream for Stream<'a> {
                     let subject = self.subject.clone();
 
                     let next_request_threshold =
-                        self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100);
+                        self.pending_messages <= std::cmp::min(self.batch_config.batch / 2, 100);
 
                     if next_request_threshold {
                         let batch = self.batch_config;
