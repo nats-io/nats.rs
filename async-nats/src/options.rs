@@ -423,11 +423,11 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
-    /// match event {
-    /// async_nats::Event::Disconnect => println!("disconnected"),
-    ///     async_nats::Event::Reconnect => println!("reconnected"),
-    ///     async_nats::Event::ClientError(err) => println!("client error occured: {}", err),
-    ///     other => println!("other event happened: {}", other),
+    ///     match event {
+    ///     async_nats::Event::Disconnect => println!("disconnected"),
+    ///         async_nats::Event::Reconnect => println!("reconnected"),
+    ///         async_nats::Event::ClientError(err) => println!("client error occured: {}", err),
+    ///         other => println!("other event happened: {}", other),
     /// }
     /// }).connect("demo.nats.io").await?;
     /// # Ok(())
