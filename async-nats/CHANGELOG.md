@@ -2,12 +2,16 @@
 ## Overview
 This release focuses on fixes and improvements, with addition of ordered Push Consumer.
 
+## Breaking Changes
+* Refactor callbacks by @Jarema in https://github.com/nats-io/nats.rs/pull/595
+
 ## Added
 * Add `get_last_raw_message_by_subject` to `Stream` by @caspervonb in https://github.com/nats-io/nats.rs/pull/584
 * Add `ClusterInfo` and `PeerInfo` by @Jarema in https://github.com/nats-io/nats.rs/pull/572
 * Add ordered  push consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/574
 * Add concurrent example by @Jarema in https://github.com/nats-io/nats.rs/pull/580
 * Add delete message from stream by @Jarema in https://github.com/nats-io/nats.rs/pull/588
+* Add Nkey authorization support by @neogenie  https://github.com/nats-io/nats.rs/pull/593
 
 ## Fixed
 * Fix ordered consumer after discard policy hit by @Jarema in https://github.com/nats-io/nats.rs/pull/585

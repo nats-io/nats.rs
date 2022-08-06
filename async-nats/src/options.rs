@@ -406,11 +406,29 @@ impl ConnectOptions {
     ///
     /// ## Basic
     /// If you don't need to move anything into the closure, simple signature can be used:
+    ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
-    /// println!("event occured: {}", event);
+    ///         println!("event occured: {}", event);
+    /// }).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    ///
+    /// ```
+    ///
+    /// ## Listening to specific event kind
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().event_callback(|event| async move {
+    ///     match event {
+    ///     async_nats::Event::Disconnect => println!("disconnected"),
+    ///         async_nats::Event::Reconnect => println!("reconnected"),
+    ///         async_nats::Event::ClientError(err) => println!("client error occured: {}", err),
+    ///         other => println!("other event happened: {}", other),
+    /// }
     /// }).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -419,7 +437,7 @@ impl ConnectOptions {
     /// ## Advanced
     /// If you need to move something into the closure, here's an example how to do that
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
