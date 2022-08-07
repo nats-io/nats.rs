@@ -8,10 +8,10 @@ use std::{cmp, fmt, mem, str};
 
 use crate::header::name::HeaderName;
 
-/// Represents an HTTP header field value.
+/// Represents an NATS header field value.
 ///
-/// In practice, HTTP header field values are usually valid ASCII. However, the
-/// HTTP spec allows for a header value to contain opaque bytes as well. In this
+/// In practice, NATS header field values are usually valid ASCII. However, the
+/// NATS spec allows for a header value to contain opaque bytes as well. In this
 /// case, the header field value is not able to be represented as a string.
 ///
 /// To handle this, the `HeaderValue` is useable as a type and can be compared
@@ -203,7 +203,6 @@ impl HeaderValue {
                 }
             }
         } else {
-
             if_downcast_into!(T, Bytes, src, {
                 return HeaderValue {
                     inner: src,
@@ -223,7 +222,10 @@ impl HeaderValue {
         HeaderValue::try_from_generic(src, std::convert::identity)
     }
 
-    fn try_from_generic<T: AsRef<[u8]>, F: FnOnce(T) -> Bytes>(src: T, into: F) -> Result<HeaderValue, InvalidHeaderValue> {
+    fn try_from_generic<T: AsRef<[u8]>, F: FnOnce(T) -> Bytes>(
+        src: T,
+        into: F,
+    ) -> Result<HeaderValue, InvalidHeaderValue> {
         for &b in src.as_ref() {
             if !is_valid(b) {
                 return Err(InvalidHeaderValue { _priv: () });
@@ -332,7 +334,7 @@ impl HeaderValue {
     /// be stored on disk or in memory. By marking header values as sensitive,
     /// components using this crate can be instructed to treat them with special
     /// care for security reasons. For example, caches can avoid storing
-    /// sensitive values, and HPACK encoders used by HTTP/2.0 implementations
+    /// sensitive values, and HPACK encoders used by NATS/2.0 implementations
     /// can choose not to compress them.
     ///
     /// Additionally, sensitive values will be masked by the `Debug`
