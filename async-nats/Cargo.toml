@@ -13,6 +13,7 @@ keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
+fnv = "1.0.7"
 subslice = "0.2.3"
 base64-url = "1.4.13"
 bytes = "1.1.0"
@@ -23,7 +24,6 @@ regex = "1.5.5"
 serde = { version = "1.0.136", features = ["derive"] } 
 serde_json = "1.0.79"
 serde_repr = "0.1.7"
-http = "0.2.7"
 tokio = { version = "1.16.1", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
 itoa = "1"
