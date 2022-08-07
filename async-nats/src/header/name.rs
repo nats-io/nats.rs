@@ -2,18 +2,18 @@ use crate::byte_str::ByteStr;
 use bytes::{Bytes, BytesMut};
 
 use std::borrow::Borrow;
+use std::convert::TryFrom;
 use std::error::Error;
-use std::convert::{TryFrom};
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::mem::MaybeUninit;
 use std::str::FromStr;
-use std::fmt;
 
-/// Represents an HTTP header field name
+/// Represents an NATS header field name
 ///
 /// Header field names identify the header. Header sets may include multiple
-/// headers with the same name. The HTTP specification defines a number of
-/// standard headers, but HTTP messages may include non-standard header names as
+/// headers with the same name. The NATS specification defines a number of
+/// standard headers, but NATS messages may include non-standard header names as
 /// well as long as they adhere to the specification.
 ///
 /// `HeaderName` is used as the [`HeaderMap`] key. Constants are available for
@@ -147,7 +147,7 @@ macro_rules! standard_headers {
     }
 }
 
-// Generate constants for all standard HTTP headers. This includes a static hash
+// Generate constants for all standard NATS headers. This includes a static hash
 // code for the "fast hash" path. The hash code for static headers *do not* have
 // to match the text representation of those headers. This is because header
 // strings are always converted to the static values (when they match) before
@@ -156,7 +156,7 @@ macro_rules! standard_headers {
 standard_headers! {
     /// Advertises which content types the client is able to understand.
     ///
-    /// The Accept request HTTP header advertises which content types, expressed
+    /// The Accept request NATS header advertises which content types, expressed
     /// as MIME types, the client is able to understand. Using content
     /// negotiation, the server then selects one of the proposals, uses it and
     /// informs the client of its choice with the Content-Type response header.
@@ -168,7 +168,7 @@ standard_headers! {
 
     /// Advertises which character set the client is able to understand.
     ///
-    /// The Accept-Charset request HTTP header advertises which character set
+    /// The Accept-Charset request NATS header advertises which character set
     /// the client is able to understand. Using content negotiation, the server
     /// then selects one of the proposals, uses it and informs the client of its
     /// choice within the Content-Type response header. Browsers usually don't
@@ -183,7 +183,7 @@ standard_headers! {
 
     /// Advertises which content encoding the client is able to understand.
     ///
-    /// The Accept-Encoding request HTTP header advertises which content
+    /// The Accept-Encoding request NATS header advertises which content
     /// encoding, usually a compression algorithm, the client is able to
     /// understand. Using content negotiation, the server selects one of the
     /// proposals, uses it and informs the client of its choice with the
@@ -211,7 +211,7 @@ standard_headers! {
 
     /// Advertises which languages the client is able to understand.
     ///
-    /// The Accept-Language request HTTP header advertises which languages the
+    /// The Accept-Language request NATS header advertises which languages the
     /// client is able to understand, and which locale variant is preferred.
     /// Using content negotiation, the server then selects one of the proposals,
     /// uses it and informs the client of its choice with the Content-Language
@@ -236,7 +236,7 @@ standard_headers! {
 
     /// Marker used by the server to advertise partial request support.
     ///
-    /// The Accept-Ranges response HTTP header is a marker used by the server to
+    /// The Accept-Ranges response NATS header is a marker used by the server to
     /// advertise its support of partial requests. The value of this field
     /// indicates the unit that can be used to define a range.
     ///
@@ -269,10 +269,10 @@ standard_headers! {
     /// to succeed.
     (AccessControlAllowCredentials, ACCESS_CONTROL_ALLOW_CREDENTIALS, b"access-control-allow-credentials");
 
-    /// Preflight response indicating permitted HTTP headers.
+    /// Preflight response indicating permitted NATS headers.
     ///
     /// The Access-Control-Allow-Headers response header is used in response to
-    /// a preflight request to indicate which HTTP headers will be available via
+    /// a preflight request to indicate which NATS headers will be available via
     /// Access-Control-Expose-Headers when making the actual request.
     ///
     /// The simple headers, Accept, Accept-Language, Content-Language,
@@ -303,11 +303,11 @@ standard_headers! {
     /// Indicates how long the results of a preflight request can be cached.
     (AccessControlMaxAge, ACCESS_CONTROL_MAX_AGE, b"access-control-max-age");
 
-    /// Informs the server which HTTP headers will be used when an actual
+    /// Informs the server which NATS headers will be used when an actual
     /// request is made.
     (AccessControlRequestHeaders, ACCESS_CONTROL_REQUEST_HEADERS, b"access-control-request-headers");
 
-    /// Informs the server know which HTTP method will be used when the actual
+    /// Informs the server know which NATS method will be used when the actual
     /// request is made.
     (AccessControlRequestMethod, ACCESS_CONTROL_REQUEST_METHOD, b"access-control-request-method");
 
@@ -316,7 +316,7 @@ standard_headers! {
     /// The Age header is usually close to zero. If it is Age: 0, it was
     /// probably just fetched from the origin server; otherwise It is usually
     /// calculated as a difference between the proxy's current date and the Date
-    /// general header included in the HTTP response.
+    /// general header included in the NATS response.
     (Age, AGE, b"age");
 
     /// Lists the set of methods support by a resource.
@@ -362,12 +362,12 @@ standard_headers! {
 
     /// Indicates if the content is expected to be displayed inline.
     ///
-    /// In a regular HTTP response, the Content-Disposition response header is a
+    /// In a regular NATS response, the Content-Disposition response header is a
     /// header indicating if the content is expected to be displayed inline in
     /// the browser, that is, as a Web page or as part of a Web page, or as an
     /// attachment, that is downloaded and saved locally.
     ///
-    /// In a multipart/form-data body, the HTTP Content-Disposition general
+    /// In a multipart/form-data body, the NATS Content-Disposition general
     /// header is a header that can be used on the subpart of a multipart body
     /// to give information about the field it applies to. The subpart is
     /// delimited by the boundary defined in the Content-Type header. Used on
@@ -375,8 +375,8 @@ standard_headers! {
     ///
     /// The Content-Disposition header is defined in the larger context of MIME
     /// messages for e-mail, but only a subset of the possible parameters apply
-    /// to HTTP forms and POST requests. Only the value form-data, as well as
-    /// the optional directive name and filename, can be used in the HTTP
+    /// to NATS forms and POST requests. Only the value form-data, as well as
+    /// the optional directive name and filename, can be used in the NATS
     /// context.
     (ContentDisposition, CONTENT_DISPOSITION, b"content-disposition");
 
@@ -439,10 +439,10 @@ standard_headers! {
 
     /// Allows experimenting with policies by monitoring their effects.
     ///
-    /// The HTTP Content-Security-Policy-Report-Only response header allows web
+    /// The NATS Content-Security-Policy-Report-Only response header allows web
     /// developers to experiment with policies by monitoring (but not enforcing)
     /// their effects. These violation reports consist of JSON documents sent
-    /// via an HTTP POST request to the specified URI.
+    /// via an NATS POST request to the specified URI.
     (ContentSecurityPolicyReportOnly, CONTENT_SECURITY_POLICY_REPORT_ONLY, b"content-security-policy-report-only");
 
     /// Used to indicate the media type of the resource.
@@ -457,7 +457,7 @@ standard_headers! {
     /// type of data is actually sent.
     (ContentType, CONTENT_TYPE, b"content-type");
 
-    /// Contains stored HTTP cookies previously sent by the server with the
+    /// Contains stored NATS cookies previously sent by the server with the
     /// Set-Cookie header.
     ///
     /// The Cookie header might be omitted entirely, if the privacy setting of
@@ -542,10 +542,10 @@ standard_headers! {
     /// number on which the server is listening.
     ///
     /// If no port is given, the default port for the service requested (e.g.,
-    /// "80" for an HTTP URL) is implied.
+    /// "80" for an NATS URL) is implied.
     ///
-    /// A Host header field must be sent in all HTTP/1.1 request messages. A 400
-    /// (Bad Request) status code will be sent to any HTTP/1.1 request message
+    /// A Host header field must be sent in all NATS/1.1 request messages. A 400
+    /// (Bad Request) status code will be sent to any NATS/1.1 request message
     /// that lacks a Host header field or contains more than one.
     (Host, HOST, b"host");
 
@@ -576,7 +576,7 @@ standard_headers! {
 
     /// Makes a request conditional based on the modification date.
     ///
-    /// The If-Modified-Since request HTTP header makes the request conditional:
+    /// The If-Modified-Since request NATS header makes the request conditional:
     /// the server will send back the requested resource, with a 200 status,
     /// only if it has been last modified after the given date. If the request
     /// has not been modified since, the response will be a 304 without any
@@ -593,7 +593,7 @@ standard_headers! {
 
     /// Makes a request conditional based on the E-Tag.
     ///
-    /// The If-None-Match HTTP request header makes the request conditional. For
+    /// The If-None-Match NATS request header makes the request conditional. For
     /// GET and HEAD methods, the server will send back the requested resource,
     /// with a 200 status, only if it doesn't have an ETag matching the given
     /// ones. For other methods, the request will be processed only if the
@@ -601,7 +601,7 @@ standard_headers! {
     /// listed.
     ///
     /// When the condition fails for GET and HEAD methods, then the server must
-    /// return HTTP status code 304 (Not Modified). For methods that apply
+    /// return NATS status code 304 (Not Modified). For methods that apply
     /// server-side changes, the status code 412 (Precondition Failed) is used.
     /// Note that the server generating a 304 response MUST generate any of the
     /// following header fields that would have been sent in a 200 (OK) response
@@ -629,7 +629,7 @@ standard_headers! {
 
     /// Makes a request conditional based on range.
     ///
-    /// The If-Range HTTP request header makes a range request conditional: if
+    /// The If-Range NATS request header makes a range request conditional: if
     /// the condition is fulfilled, the range request will be issued and the
     /// server sends back a 206 Partial Content answer with the appropriate
     /// body. If the condition is not fulfilled, the full resource is sent back,
@@ -645,7 +645,7 @@ standard_headers! {
 
     /// Makes the request conditional based on the last modification date.
     ///
-    /// The If-Unmodified-Since request HTTP header makes the request
+    /// The If-Unmodified-Since request NATS header makes the request
     /// conditional: the server will send back the requested resource, or accept
     /// it in the case of a POST or another non-safe method, only if it has not
     /// been last modified after the given date. If the request has been
@@ -676,7 +676,7 @@ standard_headers! {
     /// The Location response header indicates the URL to redirect a page to. It
     /// only provides a meaning when served with a 3xx status response.
     ///
-    /// The HTTP method used to make the new request to fetch the page pointed
+    /// The NATS method used to make the new request to fetch the page pointed
     /// to by Location depends of the original method and of the kind of
     /// redirection:
     ///
@@ -714,12 +714,12 @@ standard_headers! {
     /// whole path.
     (Origin, ORIGIN, b"origin");
 
-    /// HTTP/1.0 header usually used for backwards compatibility.
+    /// NATS/1.0 header usually used for backwards compatibility.
     ///
-    /// The Pragma HTTP/1.0 general header is an implementation-specific header
+    /// The Pragma NATS/1.0 general header is an implementation-specific header
     /// that may have various effects along the request-response chain. It is
-    /// used for backwards compatibility with HTTP/1.0 caches where the
-    /// Cache-Control HTTP/1.1 header is not yet present.
+    /// used for backwards compatibility with NATS/1.0 caches where the
+    /// Cache-Control NATS/1.1 header is not yet present.
     (Pragma, PRAGMA, b"pragma");
 
     /// Defines the authentication method that should be used to gain access to
@@ -788,7 +788,7 @@ standard_headers! {
     /// refreshed.
     (Refresh, REFRESH, b"refresh");
 
-    /// The Retry-After response HTTP header indicates how long the user agent
+    /// The Retry-After response NATS header indicates how long the user agent
     /// should wait before making a follow-up request. There are two main cases
     /// this header is used:
     ///
@@ -817,7 +817,7 @@ standard_headers! {
     /// handshake. It is sent from the client to the server to provide part
     /// of the information used by the server to prove that it received a
     /// valid WebSocket opening handshake. This helps ensure that the server
-    /// does not accept connections from non-WebSocket clients (e.g., HTTP
+    /// does not accept connections from non-WebSocket clients (e.g., NATS
     /// clients) that are being abused to send data to unsuspecting WebSocket
     /// servers.
     (SecWebSocketKey, SEC_WEBSOCKET_KEY, b"sec-websocket-key");
@@ -849,14 +849,14 @@ standard_headers! {
     /// Used to send cookies from the server to the user agent.
     (SetCookie, SET_COOKIE, b"set-cookie");
 
-    /// Tells the client to communicate with HTTPS instead of using HTTP.
+    /// Tells the client to communicate with NATSS instead of using NATS.
     (StrictTransportSecurity, STRICT_TRANSPORT_SECURITY, b"strict-transport-security");
 
     /// Informs the server of transfer encodings willing to be accepted as part
     /// of the response.
     ///
     /// See also the Transfer-Encoding response header for more details on
-    /// transfer encodings. Note that chunked is always acceptable for HTTP/1.1
+    /// transfer encodings. Note that chunked is always acceptable for NATS/1.1
     /// recipients and you that don't have to specify "chunked" using the TE
     /// header. However, it is useful for setting if the client is accepting
     /// trailer fields in a chunked transfer coding using the "trailers" value.
@@ -893,7 +893,7 @@ standard_headers! {
 
     /// Determines how to match future requests with cached responses.
     ///
-    /// The `vary` HTTP response header determines how to match future request
+    /// The `vary` NATS response header determines how to match future request
     /// headers to decide whether a cached response can be used rather than
     /// requesting a fresh one from the origin server. It is used by the server
     /// to indicate which headers it used when selecting a representation of a
@@ -912,7 +912,7 @@ standard_headers! {
     /// request/response chain.
     (Via, VIA, b"via");
 
-    /// General HTTP header contains information about possible problems with
+    /// General NATS header contains information about possible problems with
     /// the status of the message.
     ///
     /// More than one `warning` header may appear in a response. Warning header
@@ -941,7 +941,7 @@ standard_headers! {
 
     /// Controls DNS prefetching.
     ///
-    /// The `x-dns-prefetch-control` HTTP response header controls DNS
+    /// The `x-dns-prefetch-control` NATS response header controls DNS
     /// prefetching, a feature by which browsers proactively perform domain name
     /// resolution on both links that the user may choose to follow as well as
     /// URLs for items referenced by the document, including images, CSS,
@@ -964,7 +964,7 @@ standard_headers! {
 
     /// Stop pages from loading when an XSS attack is detected.
     ///
-    /// The HTTP X-XSS-Protection response header is a feature of Internet
+    /// The NATS X-XSS-Protection response header is a feature of Internet
     /// Explorer, Chrome and Safari that stops pages from loading when they
     /// detect reflected cross-site scripting (XSS) attacks. Although these
     /// protections are largely unnecessary in modern browsers when sites
@@ -992,65 +992,65 @@ standard_headers! {
 // mapped by HEADER_CHARS, maps to a valid single-byte UTF-8 codepoint.
 const HEADER_CHARS: [u8; 256] = [
     //  0      1      2      3      4      5      6      7      8      9
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //   x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  1x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  2x
-        0,     0,     0,  b'!',  b'"',  b'#',  b'$',  b'%',  b'&', b'\'', //  3x
-        0,     0,  b'*',  b'+',     0,  b'-',  b'.',     0,  b'0',  b'1', //  4x
-     b'2',  b'3',  b'4',  b'5',  b'6',  b'7',  b'8',  b'9',     0,     0, //  5x
-        0,     0,     0,     0,     0,  b'a',  b'b',  b'c',  b'd',  b'e', //  6x
-     b'f',  b'g',  b'h',  b'i',  b'j',  b'k',  b'l',  b'm',  b'n',  b'o', //  7x
-     b'p',  b'q',  b'r',  b's',  b't',  b'u',  b'v',  b'w',  b'x',  b'y', //  8x
-     b'z',     0,     0,     0,  b'^',  b'_',  b'`',  b'a',  b'b',  b'c', //  9x
-     b'd',  b'e',  b'f',  b'g',  b'h',  b'i',  b'j',  b'k',  b'l',  b'm', // 10x
-     b'n',  b'o',  b'p',  b'q',  b'r',  b's',  b't',  b'u',  b'v',  b'w', // 11x
-     b'x',  b'y',  b'z',     0,  b'|',     0,  b'~',     0,     0,     0, // 12x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 13x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 14x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 15x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 16x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 17x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 18x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 19x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 20x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 21x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 22x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 23x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 24x
-        0,     0,     0,     0,     0,     0                              // 25x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //   x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  1x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  2x
+    0, 0, 0, b'!', b'"', b'#', b'$', b'%', b'&', b'\'', //  3x
+    0, 0, b'*', b'+', 0, b'-', b'.', 0, b'0', b'1', //  4x
+    b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', 0, 0, //  5x
+    0, 0, 0, 0, 0, b'a', b'b', b'c', b'd', b'e', //  6x
+    b'f', b'g', b'h', b'i', b'j', b'k', b'l', b'm', b'n', b'o', //  7x
+    b'p', b'q', b'r', b's', b't', b'u', b'v', b'w', b'x', b'y', //  8x
+    b'z', 0, 0, 0, b'^', b'_', b'`', b'a', b'b', b'c', //  9x
+    b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', b'l', b'm', // 10x
+    b'n', b'o', b'p', b'q', b'r', b's', b't', b'u', b'v', b'w', // 11x
+    b'x', b'y', b'z', 0, b'|', 0, b'~', 0, 0, 0, // 12x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 13x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 14x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 15x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 16x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 17x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 18x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 19x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 20x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 21x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 22x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 23x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 24x
+    0, 0, 0, 0, 0, 0, // 25x
 ];
 
-/// Valid header name characters for HTTP/2.0 and HTTP/3.0
+/// Valid header name characters for NATS/2.0 and NATS/3.0
 // HEADER_CHARS_H2 maps every byte that is 128 or larger to 0 so everything that is
 // mapped by HEADER_CHARS_H2, maps to a valid single-byte UTF-8 codepoint.
 const HEADER_CHARS_H2: [u8; 256] = [
     //  0      1      2      3      4      5      6      7      8      9
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //   x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  1x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  2x
-        0,     0,     0,  b'!',  b'"',  b'#',  b'$',  b'%',  b'&', b'\'', //  3x
-        0,     0,  b'*',  b'+',     0,  b'-',  b'.',     0,  b'0',  b'1', //  4x
-     b'2',  b'3',  b'4',  b'5',  b'6',  b'7',  b'8',  b'9',     0,     0, //  5x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  6x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  7x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, //  8x
-        0,     0,     0,     0,  b'^',  b'_',  b'`',  b'a',  b'b',  b'c', //  9x
-     b'd',  b'e',  b'f',  b'g',  b'h',  b'i',  b'j',  b'k',  b'l',  b'm', // 10x
-     b'n',  b'o',  b'p',  b'q',  b'r',  b's',  b't',  b'u',  b'v',  b'w', // 11x
-     b'x',  b'y',  b'z',     0,  b'|',     0,  b'~',     0,     0,     0, // 12x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 13x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 14x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 15x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 16x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 17x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 18x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 19x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 20x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 21x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 22x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 23x
-        0,     0,     0,     0,     0,     0,     0,     0,     0,     0, // 24x
-        0,     0,     0,     0,     0,     0                              // 25x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //   x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  1x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  2x
+    0, 0, 0, b'!', b'"', b'#', b'$', b'%', b'&', b'\'', //  3x
+    0, 0, b'*', b'+', 0, b'-', b'.', 0, b'0', b'1', //  4x
+    b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', 0, 0, //  5x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  6x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  7x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //  8x
+    0, 0, 0, 0, b'^', b'_', b'`', b'a', b'b', b'c', //  9x
+    b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', b'l', b'm', // 10x
+    b'n', b'o', b'p', b'q', b'r', b's', b't', b'u', b'v', b'w', // 11x
+    b'x', b'y', b'z', 0, b'|', 0, b'~', 0, 0, 0, // 12x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 13x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 14x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 15x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 16x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 17x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 18x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 19x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 20x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 21x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 22x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 23x
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 24x
+    0, 0, 0, 0, 0, 0, // 25x
 ];
 
 fn parse_hdr<'a>(
@@ -1083,16 +1083,16 @@ fn parse_hdr<'a>(
     }
 }
 
-
-
 impl<'a> From<StandardHeader> for HdrName<'a> {
     fn from(hdr: StandardHeader) -> HdrName<'a> {
-        HdrName { inner: Repr::Standard(hdr) }
+        HdrName {
+            inner: Repr::Standard(hdr),
+        }
     }
 }
 
 impl HeaderName {
-    /// Converts a slice of bytes to an HTTP header name.
+    /// Converts a slice of bytes to an NATS header name.
     ///
     /// This function normalizes the input.
     pub fn from_bytes(src: &[u8]) -> Result<HeaderName, InvalidHeaderName> {
@@ -1107,7 +1107,7 @@ impl HeaderName {
                 Ok(Custom(val).into())
             }
             Repr::Custom(MaybeLower { buf, lower: false }) => {
-                use bytes::{BufMut};
+                use bytes::BufMut;
                 let mut dst = BytesMut::with_capacity(buf.len());
 
                 for b in buf.iter() {
@@ -1131,10 +1131,10 @@ impl HeaderName {
         }
     }
 
-    /// Converts a slice of bytes to an HTTP header name.
+    /// Converts a slice of bytes to an NATS header name.
     ///
     /// This function expects the input to only contain lowercase characters.
-    /// This is useful when decoding HTTP/2.0 or HTTP/3.0 headers. Both
+    /// This is useful when decoding NATS/2.0 or NATS/3.0 headers. Both
     /// require that all headers be represented in lower case.
     ///
     /// # Examples
@@ -1178,10 +1178,10 @@ impl HeaderName {
         }
     }
 
-    /// Converts a static string to a HTTP header name.
+    /// Converts a static string to a NATS header name.
     ///
     /// This function requires the static string to only contain lowercase
-    /// characters, numerals and symbols, as per the HTTP/2.0 specification
+    /// characters, numerals and symbols, as per the NATS/2.0 specification
     /// and header names internal representation within this library.
     ///
     /// # Panics
@@ -1239,7 +1239,7 @@ impl HeaderName {
     pub const fn from_static(src: &'static str) -> HeaderName {
         let name_bytes = src.as_bytes();
         if let Some(standard) = StandardHeader::from_bytes(name_bytes) {
-            return HeaderName{
+            return HeaderName {
                 inner: Repr::Standard(standard),
             };
         }
@@ -1259,7 +1259,7 @@ impl HeaderName {
         }
 
         HeaderName {
-            inner: Repr::Custom(Custom(ByteStr::from_static(src)))
+            inner: Repr::Custom(Custom(ByteStr::from_static(src))),
         }
     }
 
@@ -1489,7 +1489,7 @@ impl fmt::Debug for InvalidHeaderName {
 
 impl fmt::Display for InvalidHeaderName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("invalid HTTP header name")
+        f.write_str("invalid NATS header name")
     }
 }
 
@@ -1510,7 +1510,8 @@ impl<'a> HdrName<'a> {
     }
 
     pub fn from_bytes<F, U>(hdr: &[u8], f: F) -> Result<U, InvalidHeaderName>
-        where F: FnOnce(HdrName<'_>) -> U,
+    where
+        F: FnOnce(HdrName<'_>) -> U,
     {
         let mut buf = uninit_u8_array();
         // Precondition: HEADER_CHARS is a valid table for parse_hdr().
@@ -1624,9 +1625,10 @@ fn eq_ignore_ascii_case(lower: &[u8], s: &[u8]) -> bool {
         return false;
     }
 
-    lower.iter().zip(s).all(|(a, b)| {
-        *a == HEADER_CHARS[*b as usize]
-    })
+    lower
+        .iter()
+        .zip(s)
+        .all(|(a, b)| *a == HEADER_CHARS[*b as usize])
 }
 
 // Utility functions for MaybeUninit<>. These are drawn from unstable API's on
@@ -1651,8 +1653,8 @@ unsafe fn slice_assume_init<T>(slice: &[MaybeUninit<T>]) -> &[T] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use self::StandardHeader::Vary;
+    use super::*;
 
     #[test]
     fn test_bounds() {
@@ -1664,11 +1666,15 @@ mod tests {
     fn test_parse_invalid_headers() {
         for i in 0..128 {
             let hdr = vec![1u8; i];
-            assert!(HeaderName::from_bytes(&hdr).is_err(), "{} invalid header chars did not fail", i);
+            assert!(
+                HeaderName::from_bytes(&hdr).is_err(),
+                "{} invalid header chars did not fail",
+                i
+            );
         }
     }
 
-    const ONE_TOO_LONG: &[u8] = &[b'a'; super::super::MAX_HEADER_NAME_LEN+1];
+    const ONE_TOO_LONG: &[u8] = &[b'a'; super::super::MAX_HEADER_NAME_LEN + 1];
 
     #[test]
     fn test_invalid_name_lengths() {
@@ -1716,7 +1722,10 @@ mod tests {
             }),
         });
 
-        assert_eq!(name.inner, Repr::Custom(Custom(ByteStr::from_static("hello-world"))));
+        assert_eq!(
+            name.inner,
+            Repr::Custom(Custom(ByteStr::from_static("hello-world")))
+        );
 
         let name = HeaderName::from(HdrName {
             inner: Repr::Custom(MaybeLower {
@@ -1725,49 +1734,68 @@ mod tests {
             }),
         });
 
-        assert_eq!(name.inner, Repr::Custom(Custom(ByteStr::from_static("hello-world"))));
+        assert_eq!(
+            name.inner,
+            Repr::Custom(Custom(ByteStr::from_static("hello-world")))
+        );
     }
 
     #[test]
     fn test_eq_hdr_name() {
         use self::StandardHeader::Vary;
 
-        let a = HeaderName { inner: Repr::Standard(Vary) };
-        let b = HdrName { inner: Repr::Standard(Vary) };
+        let a = HeaderName {
+            inner: Repr::Standard(Vary),
+        };
+        let b = HdrName {
+            inner: Repr::Standard(Vary),
+        };
 
         assert_eq!(a, b);
 
-        let a = HeaderName { inner: Repr::Custom(Custom(ByteStr::from_static("vaary"))) };
+        let a = HeaderName {
+            inner: Repr::Custom(Custom(ByteStr::from_static("vaary"))),
+        };
         assert_ne!(a, b);
 
-        let b = HdrName { inner: Repr::Custom(MaybeLower {
-            buf: b"vaary",
-            lower: true,
-        })};
+        let b = HdrName {
+            inner: Repr::Custom(MaybeLower {
+                buf: b"vaary",
+                lower: true,
+            }),
+        };
 
         assert_eq!(a, b);
 
-        let b = HdrName { inner: Repr::Custom(MaybeLower {
-            buf: b"vaary",
-            lower: false,
-        })};
+        let b = HdrName {
+            inner: Repr::Custom(MaybeLower {
+                buf: b"vaary",
+                lower: false,
+            }),
+        };
 
         assert_eq!(a, b);
 
-        let b = HdrName { inner: Repr::Custom(MaybeLower {
-            buf: b"VAARY",
-            lower: false,
-        })};
+        let b = HdrName {
+            inner: Repr::Custom(MaybeLower {
+                buf: b"VAARY",
+                lower: false,
+            }),
+        };
 
         assert_eq!(a, b);
 
-        let a = HeaderName { inner: Repr::Standard(Vary) };
+        let a = HeaderName {
+            inner: Repr::Standard(Vary),
+        };
         assert_ne!(a, b);
     }
 
     #[test]
     fn test_from_static_std() {
-        let a = HeaderName { inner: Repr::Standard(Vary) };
+        let a = HeaderName {
+            inner: Repr::Standard(Vary),
+        };
 
         let b = HeaderName::from_static("vary");
         assert_eq!(a, b);
@@ -1791,7 +1819,9 @@ mod tests {
     // MaybeLower { lower: true }
     #[test]
     fn test_from_static_custom_short() {
-        let a = HeaderName { inner: Repr::Custom(Custom(ByteStr::from_static("customheader"))) };
+        let a = HeaderName {
+            inner: Repr::Custom(Custom(ByteStr::from_static("customheader"))),
+        };
         let b = HeaderName::from_static("customheader");
         assert_eq!(a, b);
     }
@@ -1811,11 +1841,13 @@ mod tests {
     // MaybeLower { lower: false }
     #[test]
     fn test_from_static_custom_long() {
-        let a = HeaderName { inner: Repr::Custom(Custom(ByteStr::from_static(
-            "longer-than-63--thisheaderislongerthansixtythreecharactersandthushandleddifferent"
-        ))) };
+        let a = HeaderName {
+            inner: Repr::Custom(Custom(ByteStr::from_static(
+                "longer-than-63--thisheaderislongerthansixtythreecharactersandthushandleddifferent",
+            ))),
+        };
         let b = HeaderName::from_static(
-            "longer-than-63--thisheaderislongerthansixtythreecharactersandthushandleddifferent"
+            "longer-than-63--thisheaderislongerthansixtythreecharactersandthushandleddifferent",
         );
         assert_eq!(a, b);
     }
@@ -1824,7 +1856,7 @@ mod tests {
     #[should_panic]
     fn test_from_static_custom_long_uppercase() {
         HeaderName::from_static(
-            "Longer-Than-63--ThisHeaderIsLongerThanSixtyThreeCharactersAndThusHandledDifferent"
+            "Longer-Than-63--ThisHeaderIsLongerThanSixtyThreeCharactersAndThusHandledDifferent",
         );
     }
 
@@ -1838,7 +1870,9 @@ mod tests {
 
     #[test]
     fn test_from_static_custom_single_char() {
-        let a = HeaderName { inner: Repr::Custom(Custom(ByteStr::from_static("a"))) };
+        let a = HeaderName {
+            inner: Repr::Custom(Custom(ByteStr::from_static("a"))),
+        };
         let b = HeaderName::from_static("a");
         assert_eq!(a, b);
     }
