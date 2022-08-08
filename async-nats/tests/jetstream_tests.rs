@@ -171,7 +171,7 @@ mod jetstream {
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let stream = context
+        let mut stream = context
             .create_stream(&stream::Config {
                 name: "events2".to_string(),
                 num_replicas: 3,
@@ -182,9 +182,20 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(stream.info.config.num_replicas, 3);
-        assert!(stream.info.cluster.is_some());
-        assert_eq!(stream.info.cluster.as_ref().unwrap().replicas.len(), 2);
+        assert_eq!(stream.cached_info().config.num_replicas, 3);
+        assert!(stream.cached_info().cluster.is_some());
+        assert_eq!(
+            stream
+                .info()
+                .await
+                .unwrap()
+                .cluster
+                .as_ref()
+                .unwrap()
+                .replicas
+                .len(),
+            2
+        );
 
         let consumer = stream
             .create_consumer(jetstream::consumer::pull::Config {
@@ -207,7 +218,15 @@ mod jetstream {
 
         context.create_stream("events").await.unwrap();
         assert_eq!(
-            context.get_stream("events").await.unwrap().info.config.name,
+            context
+                .get_stream("events")
+                .await
+                .unwrap()
+                .info()
+                .await
+                .unwrap()
+                .config
+                .name,
             "events".to_string()
         );
     }
@@ -224,7 +243,7 @@ mod jetstream {
                 .get_or_create_stream("events")
                 .await
                 .unwrap()
-                .info
+                .cached_info()
                 .config
                 .name,
             "events".to_string()
@@ -238,7 +257,7 @@ mod jetstream {
                 })
                 .await
                 .unwrap()
-                .info
+                .cached_info()
                 .config
                 .name,
             "events2".to_string()
