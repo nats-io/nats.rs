@@ -32,11 +32,69 @@ use super::{
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug)]
 pub struct Stream {
-    pub info: Info,
+    pub(crate) info: Info,
     pub(crate) context: Context,
 }
 
 impl Stream {
+    /// Retrieves `info` about [Stream] from the server, updates the cached `info` inside
+    /// [Stream] and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut stream = jetstream
+    ///     .get_stream("events").await?;
+    ///
+    /// let info = stream.info().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn info(&mut self) -> Result<&Info, Error> {
+        let subject = format!("STREAM.INFO.{}", self.info.config.name);
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok::<Info>(info) => {
+                self.info = info;
+                Ok(&self.info)
+            }
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting stream info: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+        }
+    }
+
+    /// Returns cached [Info] for the [Stream].
+    /// Cache is either from initial creation/retrival of the [Stream] or last call to
+    /// [Stream::info].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream
+    ///     .get_stream("events").await?;
+    ///
+    /// let info = stream.cached_info();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn cached_info(&self) -> &Info {
+        &self.info
+    }
     /// Get a raw message from the stream.
     ///
     /// # Examples
