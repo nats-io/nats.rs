@@ -11,6 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
+use lazy_static::lazy_static;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+use super::stream::StorageType;
+
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
 const ROLLUP_SUBJECT: &str = "sub";
@@ -20,11 +28,11 @@ lazy_static! {
     static ref OBJECT_NAME_RE: Regex = Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap();
 }
 
-fn is_valid_bucket_name(bucket_name: &str) -> bool {
+pub(crate) fn is_valid_bucket_name(bucket_name: &str) -> bool {
     BUCKET_NAME_RE.is_match(bucket_name)
 }
 
-fn is_valid_object_name(object_name: &str) -> bool {
+pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
     if object_name.is_empty() || object_name.starts_with('.') || object_name.ends_with('.') {
         return false;
     }
@@ -32,7 +40,7 @@ fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-fn sanitize_object_name(object_name: &str) -> String {
+pub(crate) fn sanitize_object_name(object_name: &str) -> String {
     object_name.replace('.', "_").replace(' ', "_")
 }
 
@@ -49,4 +57,10 @@ pub struct Config {
     pub storage: StorageType,
     /// How many replicas to keep for each value in a cluster, maximum 5.
     pub num_replicas: usize,
+}
+
+/// A blob store capable of storing large objects efficiently in streams.
+pub struct ObjectStore {
+    pub(crate) name: String,
+    pub(crate) context: crate::jetstream::Context,
 }

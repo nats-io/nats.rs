@@ -25,7 +25,8 @@ use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
 
-use super::stream::{Config, DeleteStatus, Info, Stream};
+use super::object_store::{is_valid_bucket_name, ObjectStore};
+use super::stream::{Config, DeleteStatus, DiscardPolicy, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -409,5 +410,56 @@ impl Context {
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
+    }
+
+    pub async fn create_object_store(
+        &self,
+        config: super::object_store::Config,
+    ) -> Result<super::object_store::ObjectStore, Error> {
+        if !super::object_store::is_valid_bucket_name(&config.bucket) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "invalid bucket name",
+            )));
+        }
+
+        let bucket_name = config.bucket.clone();
+        let stream_name = format!("OBJ_{}", bucket_name);
+        let chunk_subject = format!("$O.{}.C.>", bucket_name);
+        let meta_subject = format!("$O.{}.M.>", bucket_name);
+
+        self.create_stream(super::stream::Config {
+            name: stream_name,
+            description: config.description.clone(),
+            subjects: vec![chunk_subject, meta_subject],
+            max_age: config.max_age,
+            storage: config.storage,
+            num_replicas: config.num_replicas,
+            discard: DiscardPolicy::New,
+            allow_rollup: true,
+            ..Default::default()
+        })
+        .await?;
+
+        Ok(ObjectStore {
+            name: bucket_name,
+            context: self.clone(),
+        })
+    }
+
+    pub async fn get_object_store<T: AsRef<ObjectStore>>(
+        &self,
+        bucket_name: T,
+    ) -> Result<ObjectStore, Error> {
+        if !is_valid_bucket_name(bucket_name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid bucket name",
+            ));
+        }
+        let stream_name = format!("OBJ_{}", bucket_name);
+        self.stream_info(stream_name).await?;
+
+        Ok(ObjectStore::new(bucket_name.to_string(), self.clone()))
     }
 }
