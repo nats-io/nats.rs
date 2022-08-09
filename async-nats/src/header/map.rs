@@ -14,7 +14,7 @@ use super::HeaderValue;
 pub use self::as_header_name::AsHeaderName;
 pub use self::into_header_name::IntoHeaderName;
 
-/// A set of HTTP headers
+/// A set of NATS headers
 ///
 /// `HeaderMap` is an multimap of [`HeaderName`] to values.
 ///
@@ -59,7 +59,7 @@ pub struct HeaderMap<T = HeaderValue> {
 // this is the same hashing algorithm used as part of Rust's `HashMap` in
 // stdlib, many implementation details are different. The two primary reasons
 // for this divergence are that `HeaderMap` is a multimap and the structure has
-// been optimized to take advantage of the characteristics of HTTP headers.
+// been optimized to take advantage of the characteristics of NATS headers.
 //
 // ## Structure Layout
 //
