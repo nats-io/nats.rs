@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ServerInfo;
+
 use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
@@ -45,18 +47,41 @@ impl error::Error for PublishError {}
 /// [crate::connect] and [crate::ConnectOptions::connect]
 #[derive(Clone, Debug)]
 pub struct Client {
+    info: tokio::sync::watch::Receiver<ServerInfo>,
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
 }
 
 impl Client {
-    pub(crate) fn new(sender: mpsc::Sender<Command>, capacity: usize) -> Client {
+    pub(crate) fn new(
+        info: tokio::sync::watch::Receiver<ServerInfo>,
+        sender: mpsc::Sender<Command>,
+        capacity: usize,
+    ) -> Client {
         Client {
+            info,
             sender,
             next_subscription_id: Arc::new(AtomicU64::new(0)),
             subscription_capacity: capacity,
         }
+    }
+
+    /// returns last received info from the server.
+    ///
+    /// Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main () -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("info: {:?}", client.server_info());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn server_info(&self) -> ServerInfo {
+        // We ignore notyfing the watcher, as that requires muatable client reference.
+        self.info.borrow().to_owned()
     }
 
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {

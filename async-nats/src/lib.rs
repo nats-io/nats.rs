@@ -290,6 +290,7 @@ pub(crate) struct ConnectionHandler {
     events: mpsc::Sender<Event>,
     pending_pings: usize,
     max_pings: usize,
+    info_sender: tokio::sync::watch::Sender<ServerInfo>,
 }
 
 impl ConnectionHandler {
@@ -297,6 +298,7 @@ impl ConnectionHandler {
         connection: Connection,
         connector: Connector,
         events: mpsc::Sender<Event>,
+        info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ) -> ConnectionHandler {
         ConnectionHandler {
             connection,
@@ -305,6 +307,7 @@ impl ConnectionHandler {
             events,
             pending_pings: 0,
             max_pings: 2,
+            info_sender,
         }
     }
 
@@ -552,8 +555,14 @@ impl ConnectionHandler {
     }
 
     async fn handle_reconnect(&mut self) -> Result<(), io::Error> {
-        let connection = self.connector.connect().await?;
+        let (info, connection) = self.connector.connect().await?;
         self.connection = connection;
+        self.info_sender.send(info).map_err(|err| {
+            std::io::Error::new(
+                ErrorKind::Other,
+                format!("failed to send info update: {}", err),
+            )
+        })?;
 
         self.subscriptions
             .retain(|_, subscription| !subscription.sender.is_closed());
@@ -611,14 +620,17 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         events_tx.clone(),
     )?;
 
-    let connection = connector.try_connect().await?;
+    let (info, connection) = connector.try_connect().await?;
 
-    let mut connection_handler = ConnectionHandler::new(connection, connector, events_tx);
+    let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
+
+    let mut connection_handler =
+        ConnectionHandler::new(connection, connector, events_tx, info_sender);
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
-    let client = Client::new(sender.clone(), options.subscription_capacity);
+    let client = Client::new(info_watcher, sender.clone(), options.subscription_capacity);
     tokio::spawn({
         let sender = sender.clone();
         async move {
