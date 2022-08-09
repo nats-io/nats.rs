@@ -63,7 +63,7 @@ impl Connector {
         })
     }
 
-    pub(crate) async fn connect(&mut self) -> Result<Connection, io::Error> {
+    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
         loop {
             match self.try_connect().await {
                 Ok(inner) => return Ok(inner),
@@ -77,7 +77,7 @@ impl Connector {
         }
     }
 
-    pub(crate) async fn try_connect(&mut self) -> Result<Connection, io::Error> {
+    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
         let mut error = None;
 
         let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
@@ -135,7 +135,7 @@ impl Connector {
                             Authorization::None => {
                                 connection.write_op(ClientOp::Connect(connect_info)).await?;
 
-                                return Ok(connection);
+                                return Ok((server_info, connection));
                             }
                             Authorization::Token(token) => {
                                 connect_info.auth_token = Some(token.clone())
@@ -201,7 +201,7 @@ impl Connector {
                                 ));
                             }
                             Some(_) => {
-                                return Ok(connection);
+                                return Ok((server_info, connection));
                             }
                             None => {
                                 return Err(io::Error::new(
