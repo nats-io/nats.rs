@@ -136,6 +136,7 @@ mod byte_str;
 mod client;
 mod connection;
 mod connector;
+mod convert;
 mod options;
 
 use crate::options::CallbackArg1;
