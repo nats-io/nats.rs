@@ -17,12 +17,18 @@ use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subs
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
+
+lazy_static! {
+    static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
+}
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
@@ -67,7 +73,7 @@ impl Client {
         }
     }
 
-    /// returns last received info from the server.
+    /// Returns last received info from the server.
     ///
     /// Examples
     ///
@@ -80,8 +86,49 @@ impl Client {
     /// # }
     /// ```
     pub fn server_info(&self) -> ServerInfo {
-        // We ignore notyfing the watcher, as that requires muatable client reference.
+        // We ignore notifying the watcher, as that requires mutable client reference.
         self.info.borrow().to_owned()
+    }
+
+    /// Returns true if the server version is compatible with the version components.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// assert!(client.is_server_compatible(2, 8, 4));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn is_server_compatible(&self, major: i64, minor: i64, patch: i64) -> bool {
+        let info = self.server_info();
+
+        let server_version_captures = VERSION_RE.captures(&info.version).unwrap();
+
+        let server_major = server_version_captures
+            .get(1)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_minor = server_version_captures
+            .get(2)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_patch = server_version_captures
+            .get(3)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        if server_major < major
+            || (server_major == major && server_minor < minor)
+            || (server_major == major && server_minor == minor && server_patch < patch)
+        {
+            return false;
+        }
+        true
     }
 
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
