@@ -537,7 +537,7 @@ mod client {
     async fn inbox_prefix() {
         let server = nats_server::run_basic_server();
         let client = ConnectOptions::new()
-            .inbox_prefix("BOB")
+            .custom_inbox_prefix("BOB")
             .connect(server.client_url())
             .await
             .unwrap();

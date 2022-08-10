@@ -487,11 +487,11 @@ impl ConnectOptions {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// async_nats::ConnectOptions::new().inbox_prefix("CUSTOM").connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().custom_inbox_prefix("CUSTOM").connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn inbox_prefix<T: ToString>(mut self, prefix: T) -> ConnectOptions {
+    pub fn custom_inbox_prefix<T: ToString>(mut self, prefix: T) -> ConnectOptions {
         self.inbox_prefix = prefix.to_string();
         self
     }
