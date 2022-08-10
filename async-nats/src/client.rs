@@ -55,7 +55,7 @@ impl error::Error for PublishError {}
 #[derive(Clone, Debug)]
 pub struct Client {
     info: tokio::sync::watch::Receiver<ServerInfo>,
-    state: tokio::sync::watch::Receiver<State>,
+    pub(crate) state: tokio::sync::watch::Receiver<State>,
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,

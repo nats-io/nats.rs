@@ -39,6 +39,7 @@ mod jetstream {
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
+    use tokio_retry::Retry;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -1278,6 +1279,73 @@ mod jetstream {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let info = consumer.info().await.unwrap();
         assert_eq!(info.num_ack_pending, 8);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(target_os = "windows", ignore)]
+    async fn pull_consumer_with_reconnections() {
+        let mut server =
+            nats_server::run_server_with_port("tests/configs/jetstream.conf", Some("2323"));
+
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(|event| async move {
+                println!("EVENT: {}", event);
+            })
+            // .connect(cluster.servers.get(0).unwrap().client_url())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let jetstream = async_nats::jetstream::new(client.clone());
+        // cluster takes some time to spin up.
+        // we can have a retry mechanism added later.
+        let retry_strategy = tokio_retry::strategy::FibonacciBackoff::from_millis(500).take(5);
+        let stream = Retry::spawn(retry_strategy, || {
+            jetstream.create_stream(async_nats::jetstream::stream::Config {
+                name: "reconnect".to_string(),
+                subjects: vec!["reconnect.>".to_string()],
+                num_replicas: 1,
+                ..Default::default()
+            })
+        })
+        .await
+        .unwrap();
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("durable_reconnect".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        println!("stream and consumer created");
+
+        for i in 0..1000 {
+            jetstream
+                .publish(format!("reconnect.{}", i), i.to_string().into())
+                .await
+                .unwrap();
+        }
+
+        let messages = consumer.messages().await.unwrap();
+
+        println!("starting interation");
+        let mut messages = messages.enumerate();
+        while let Some((i, message)) = messages.next().await {
+            if i % 700 == 0 {
+                server.restart();
+            }
+            let message = message.unwrap();
+            message.ack().await.unwrap();
+            if from_utf8(&message.payload)
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
+                == 999
+            {
+                break;
+            }
+        }
     }
 
     #[tokio::test]
