@@ -40,6 +40,7 @@ lazy_static = "1.4.0"
 criterion =  { version = "0.3", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
+tokio-retry = "0.3.0"
 
 
 [[bench]]

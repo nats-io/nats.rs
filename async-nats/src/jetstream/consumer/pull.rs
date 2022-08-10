@@ -13,11 +13,16 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use std::{task::Poll, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    task::Poll,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    connection::State,
     jetstream::{self, Context},
     Error, StatusCode, Subscriber,
 };
@@ -392,6 +397,7 @@ pub struct Stream<'a> {
     subject: String,
     batch_config: BatchConfig,
     request: Option<BoxFuture<'a, Result<(), Error>>>,
+    since_last_request: Arc<Mutex<Instant>>,
 }
 
 impl<'a> Stream<'a> {
@@ -406,6 +412,52 @@ impl<'a> Stream<'a> {
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
         );
 
+        let since_last_request = Arc::new(Mutex::new(Instant::now()));
+        tokio::task::spawn({
+            let since_last_request = since_last_request.clone();
+            let batch = batch_config;
+            let mut context = consumer.context.clone();
+            let subject = subject.clone();
+            let inbox = inbox.clone();
+            async move {
+                loop {
+                    // Need to check previous state, as `changed` will always fire on first
+                    // call.
+                    let prev_state = context.client.state.borrow().to_owned();
+                    context.client.state.changed().await.ok();
+                    let state = context.client.state.borrow().to_owned();
+
+                    let timeout_threshold = batch.expires.map_or(false, |expires| {
+                        since_last_request
+                            .lock()
+                            .unwrap()
+                            .elapsed()
+                            .gt(&Duration::from_nanos(expires as u64))
+                    });
+
+                    if (state == crate::connection::State::Connected
+                        && prev_state != State::Connected)
+                        || timeout_threshold
+                    {
+                        let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
+
+                        tokio::time::timeout(
+                            context.timeout,
+                            context.client.publish_with_reply(
+                                subject.clone(),
+                                inbox.clone(),
+                                request.clone(),
+                            ),
+                        )
+                        .await
+                        // TODO: add tracing instead of ignoring this.
+                        .ok();
+                        *since_last_request.lock().unwrap() = Instant::now();
+                    }
+                }
+            }
+        });
+
         Ok(Stream {
             pending_messages: 0,
             subscriber: subscription,
@@ -414,6 +466,7 @@ impl<'a> Stream<'a> {
             inbox,
             subject,
             batch_config,
+            since_last_request,
         })
     }
 }
@@ -441,10 +494,15 @@ impl<'a> futures::Stream for Stream<'a> {
                         self.request = Some(Box::pin(async move {
                             let request = serde_json::to_vec(&batch).map(Bytes::from)?;
 
-                            context
-                                .client
-                                .publish_with_reply(subject, inbox, request)
-                                .await?;
+                            tokio::time::timeout(
+                                context.timeout,
+                                context.client.publish_with_reply(
+                                    subject.clone(),
+                                    inbox.clone(),
+                                    request.clone(),
+                                ),
+                            )
+                            .await??;
                             Ok(())
                         }));
                     }
@@ -453,6 +511,7 @@ impl<'a> futures::Stream for Stream<'a> {
                         match request.as_mut().poll(cx) {
                             Poll::Ready(result) => {
                                 self.request = None;
+                                *self.since_last_request.lock().unwrap() = Instant::now();
                                 result?;
                             }
                             Poll::Pending => {}

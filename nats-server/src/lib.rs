@@ -24,6 +24,10 @@ use rand::Rng;
 use regex::Regex;
 
 pub struct Server {
+    cfg: String,
+    id: String,
+    port: Option<String>,
+    cleanup: bool,
     child: Child,
     logfile: PathBuf,
     pidfile: PathBuf,
@@ -38,7 +42,6 @@ impl Drop for Server {
     fn drop(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
-        // Remove log if present.
         if let Ok(log) = fs::read_to_string(self.logfile.as_os_str()) {
             // Check if we had JetStream running and if so cleanup the storage directory.
             if let Some(caps) = SD_RE.captures(&log) {
@@ -52,6 +55,18 @@ impl Drop for Server {
 }
 
 impl Server {
+    pub fn restart(&mut self) {
+        let port = self
+            .port
+            .clone()
+            .expect("can't restart server with dynamic port");
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
+        let (_, _, _, _, child, _, _) =
+            do_run(&self.cfg, Some(&port), self.cleanup, Some(self.id.clone()));
+        self.child = child;
+    }
+
     // Grab client url.
     // Helpful when dynamically allocating ports with -1.
     pub fn client_url(&self) -> String {
@@ -216,10 +231,27 @@ impl Cluster {
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
-    let id = nuid::next();
+    run_server_with_port_and_cleanup(cfg, port, true, None)
+}
+
+fn do_run(
+    cfg: &str,
+    port: Option<&str>,
+    cleanup: bool,
+    id: Option<String>,
+) -> (
+    Option<String>,
+    String,
+    String,
+    bool,
+    Child,
+    PathBuf,
+    PathBuf,
+) {
+    let id = id.unwrap_or_else(nuid::next);
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
     let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
+    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
@@ -241,8 +273,29 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     }
 
     let child = cmd.spawn().unwrap();
+    (
+        port.map(ToString::to_string),
+        cfg.to_string(),
+        id,
+        cleanup,
+        child,
+        logfile,
+        pidfile,
+    )
+}
 
+pub fn run_server_with_port_and_cleanup(
+    cfg: &str,
+    port: Option<&str>,
+    cleanup: bool,
+    id: Option<String>,
+) -> Server {
+    let (port, cfg, id, cleanup, child, logfile, pidfile) = do_run(cfg, port, cleanup, id);
     Server {
+        port,
+        cfg,
+        id,
+        cleanup,
         child,
         logfile,
         pidfile,
@@ -298,6 +351,10 @@ fn run_cluster_node_with_port(
     let child = cmd.spawn().unwrap();
 
     Server {
+        port: port.map(ToString::to_string),
+        cfg: cfg.to_string(),
+        id,
+        cleanup: true,
         child,
         logfile,
         pidfile,
