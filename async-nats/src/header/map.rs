@@ -25,8 +25,8 @@ pub use self::into_header_name::IntoHeaderName;
 /// Basic usage
 ///
 /// ```
-/// # use http::HeaderMap;
-/// # use http::header::{CONTENT_LENGTH, HOST, LOCATION};
+/// # use nats::HeaderMap;
+/// # use nats::header::{CONTENT_LENGTH, HOST, LOCATION};
 /// let mut headers = HeaderMap::new();
 ///
 /// headers.insert(HOST, "example.com".parse().unwrap());
@@ -74,7 +74,7 @@ pub struct HeaderMap<T = HeaderValue> {
 // Extra values associated with a header name are tracked using a linked list.
 // Links are formed with offsets into `extra_values` and not pointers.
 //
-// [1]: https://en.wikipedia.org/wiki/Hash_table#Robin_Hood_hashing
+// [1]: natss://en.wikipedia.org/wiki/Hash_table#Robin_Hood_hashing
 
 /// `HeaderMap` entry iterator.
 ///
@@ -432,7 +432,7 @@ impl HeaderMap {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let map = HeaderMap::new();
     ///
     /// assert!(map.is_empty());
@@ -456,7 +456,7 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let map: HeaderMap<u32> = HeaderMap::with_capacity(10);
     ///
     /// assert!(map.is_empty());
@@ -495,8 +495,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{ACCEPT, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{ACCEPT, HOST};
     /// let mut map = HeaderMap::new();
     ///
     /// assert_eq!(0, map.len());
@@ -522,8 +522,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{ACCEPT, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{ACCEPT, HOST};
     /// let mut map = HeaderMap::new();
     ///
     /// assert_eq!(0, map.keys_len());
@@ -546,8 +546,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     ///
     /// assert!(map.is_empty());
@@ -566,8 +566,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "hello.world".parse().unwrap());
     ///
@@ -593,8 +593,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     ///
     /// assert_eq!(0, map.capacity());
@@ -622,8 +622,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// map.reserve(10);
     /// # map.insert(HOST, "bar".parse().unwrap());
@@ -661,8 +661,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// assert!(map.get("host").is_none());
     ///
@@ -702,8 +702,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::default();
     /// map.insert(HOST, "hello".to_string());
     /// map.get_mut("host").unwrap().push_str("-world");
@@ -734,8 +734,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     ///
     /// map.insert(HOST, "hello".parse().unwrap());
@@ -763,8 +763,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// assert!(!map.contains_key(HOST));
     ///
@@ -787,8 +787,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{CONTENT_LENGTH, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{CONTENT_LENGTH, HOST};
     /// let mut map = HeaderMap::new();
     ///
     /// map.insert(HOST, "hello".parse().unwrap());
@@ -819,8 +819,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{CONTENT_LENGTH, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{CONTENT_LENGTH, HOST};
     /// let mut map = HeaderMap::default();
     ///
     /// map.insert(HOST, "hello".to_string());
@@ -849,8 +849,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{CONTENT_LENGTH, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{CONTENT_LENGTH, HOST};
     /// let mut map = HeaderMap::new();
     ///
     /// map.insert(HOST, "hello".parse().unwrap());
@@ -875,8 +875,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{CONTENT_LENGTH, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{CONTENT_LENGTH, HOST};
     /// let mut map = HeaderMap::new();
     ///
     /// map.insert(HOST, "hello".parse().unwrap());
@@ -899,8 +899,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{CONTENT_LENGTH, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{CONTENT_LENGTH, HOST};
     /// let mut map = HeaderMap::default();
     ///
     /// map.insert(HOST, "hello".to_string());
@@ -928,8 +928,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::{CONTENT_LENGTH, HOST};
+    /// # use nats::HeaderMap;
+    /// # use nats::header::{CONTENT_LENGTH, HOST};
     /// let mut map = HeaderMap::new();
     ///
     /// map.insert(HOST, "hello".parse().unwrap());
@@ -1025,7 +1025,7 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let mut map: HeaderMap<u32> = HeaderMap::default();
     ///
     /// let headers = &[
@@ -1121,8 +1121,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// assert!(map.insert(HOST, "world".parse().unwrap()).is_none());
     /// assert!(!map.is_empty());
@@ -1218,8 +1218,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// assert!(map.insert(HOST, "world".parse().unwrap()).is_none());
     /// assert!(!map.is_empty());
@@ -1340,8 +1340,8 @@ impl<T> HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "hello.world".parse().unwrap());
     ///
@@ -1764,8 +1764,8 @@ impl<T> IntoIterator for HeaderMap<T> {
     /// Basic usage.
     ///
     /// ```
-    /// # use http::header;
-    /// # use http::header::*;
+    /// # use nats::header;
+    /// # use nats::header::*;
     /// let mut map = HeaderMap::new();
     /// map.insert(header::CONTENT_LENGTH, "123".parse().unwrap());
     /// map.insert(header::CONTENT_TYPE, "json".parse().unwrap());
@@ -1779,8 +1779,8 @@ impl<T> IntoIterator for HeaderMap<T> {
     /// Multiple values per key.
     ///
     /// ```
-    /// # use http::header;
-    /// # use http::header::*;
+    /// # use nats::header;
+    /// # use nats::header::*;
     /// let mut map = HeaderMap::new();
     ///
     /// map.append(header::CONTENT_LENGTH, "123".parse().unwrap());
@@ -1827,7 +1827,7 @@ impl<T> FromIterator<(HeaderName, T)> for HeaderMap<T> {
 /// ```
 /// use std::collections::HashMap;
 /// use std::convert::TryInto;
-/// use http::HeaderMap;
+/// use nats::HeaderMap;
 ///
 /// let mut map = HashMap::new();
 /// map.insert("X-Custom-Header".to_string(), "my value".to_string());
@@ -1869,7 +1869,7 @@ impl<T> Extend<(Option<HeaderName>, T)> for HeaderMap<T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::*;
+    /// # use nats::header::*;
     /// let mut map = HeaderMap::new();
     ///
     /// map.insert(ACCEPT, "text/plain".parse().unwrap());
@@ -2263,7 +2263,7 @@ impl<'a, T> Entry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let mut map: HeaderMap<u32> = HeaderMap::default();
     ///
     /// let headers = &[
@@ -2302,7 +2302,7 @@ impl<'a, T> Entry<'a, T> {
     /// Basic usage.
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let mut map = HeaderMap::new();
     ///
     /// let res = map.entry("x-hello")
@@ -2314,8 +2314,8 @@ impl<'a, T> Entry<'a, T> {
     /// The default function is not called if the entry exists in the map.
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     ///
@@ -2339,7 +2339,7 @@ impl<'a, T> Entry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let mut map = HeaderMap::new();
     ///
     /// assert_eq!(map.entry("x-hello").key(), "x-hello");
@@ -2362,7 +2362,7 @@ impl<'a, T> VacantEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
+    /// # use nats::HeaderMap;
     /// let mut map = HeaderMap::new();
     ///
     /// assert_eq!(map.entry("x-hello").key().as_str(), "x-hello");
@@ -2376,7 +2376,7 @@ impl<'a, T> VacantEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry};
+    /// # use nats::header::{HeaderMap, Entry};
     /// let mut map = HeaderMap::new();
     ///
     /// if let Entry::Vacant(v) = map.entry("x-hello") {
@@ -2395,7 +2395,7 @@ impl<'a, T> VacantEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry};
+    /// # use nats::header::{HeaderMap, Entry};
     /// let mut map = HeaderMap::new();
     ///
     /// if let Entry::Vacant(v) = map.entry("x-hello") {
@@ -2421,7 +2421,7 @@ impl<'a, T> VacantEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::*;
+    /// # use nats::header::*;
     /// let mut map = HeaderMap::new();
     ///
     /// if let Entry::Vacant(v) = map.entry("x-hello") {
@@ -2455,8 +2455,8 @@ impl<'a, T: 'a> GetAll<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::HeaderMap;
-    /// # use http::header::HOST;
+    /// # use nats::HeaderMap;
+    /// # use nats::header::HOST;
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "hello.world".parse().unwrap());
     /// map.append(HOST, "hello.earth".parse().unwrap());
@@ -2735,7 +2735,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     ///
@@ -2758,7 +2758,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "hello.world".parse().unwrap());
     ///
@@ -2785,7 +2785,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::default();
     /// map.insert(HOST, "hello.world".to_string());
     ///
@@ -2810,7 +2810,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::default();
     /// map.insert(HOST, "hello.world".to_string());
     /// map.append(HOST, "hello.earth".to_string());
@@ -2833,7 +2833,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "hello.world".parse().unwrap());
     ///
@@ -2856,7 +2856,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     /// map.append(HOST, "world2".parse().unwrap());
@@ -2882,7 +2882,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     ///
@@ -2909,7 +2909,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     ///
@@ -2933,7 +2933,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     ///
@@ -2984,7 +2984,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::new();
     /// map.insert(HOST, "world".parse().unwrap());
     /// map.append(HOST, "earth".parse().unwrap());
@@ -3008,7 +3008,7 @@ impl<'a, T> OccupiedEntry<'a, T> {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderMap, Entry, HOST};
+    /// # use nats::header::{HeaderMap, Entry, HOST};
     /// let mut map = HeaderMap::default();
     /// map.insert(HOST, "world".to_string());
     /// map.append(HOST, "earth".to_string());
