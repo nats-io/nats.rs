@@ -50,19 +50,19 @@ impl HeaderValue {
     /// This function panics if the argument contains invalid header value
     /// characters.
     ///
-    /// Until [Allow panicking in constants](https://github.com/rust-lang/rfcs/pull/2345)
+    /// Until [Allow panicking in constants](natss://github.com/rust-lang/rfcs/pull/2345)
     /// makes its way into stable, the panic message at compile-time is
     /// going to look cryptic, but should at least point at your header value:
     ///
     /// ```text
     /// error: any use of this value will cause an error
-    ///   --> http/src/header/value.rs:67:17
+    ///   --> nats/src/header/value.rs:67:17
     ///    |
     /// 67 |                 ([] as [u8; 0])[0]; // Invalid header value
     ///    |                 ^^^^^^^^^^^^^^^^^^
     ///    |                 |
     ///    |                 index out of bounds: the length is 0 but the index is 0
-    ///    |                 inside `HeaderValue::from_static` at http/src/header/value.rs:67:17
+    ///    |                 inside `HeaderValue::from_static` at nats/src/header/value.rs:67:17
     ///    |                 inside `INVALID_HEADER` at src/main.rs:73:33
     ///    |
     ///   ::: src/main.rs:73:1
@@ -74,7 +74,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_static("hello");
     /// assert_eq!(val, "hello");
     /// ```
@@ -109,7 +109,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_str("hello").unwrap();
     /// assert_eq!(val, "hello");
     /// ```
@@ -117,7 +117,7 @@ impl HeaderValue {
     /// An invalid value
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_str("\n");
     /// assert!(val.is_err());
     /// ```
@@ -133,8 +133,8 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::{HeaderValue, HeaderName};
-    /// # use http::header::ACCEPT;
+    /// # use nats::header::{HeaderValue, HeaderName};
+    /// # use nats::header::ACCEPT;
     /// let val = HeaderValue::from_name(ACCEPT);
     /// assert_eq!(val, HeaderValue::from_bytes(b"accept").unwrap());
     /// ```
@@ -155,7 +155,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_bytes(b"hello\xfa").unwrap();
     /// assert_eq!(val, &b"hello\xfa"[..]);
     /// ```
@@ -163,7 +163,7 @@ impl HeaderValue {
     /// An invalid value
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_bytes(b"\n");
     /// assert!(val.is_err());
     /// ```
@@ -246,7 +246,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_static("hello");
     /// assert_eq!(val.to_str().unwrap(), "hello");
     /// ```
@@ -269,7 +269,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_static("hello");
     /// assert_eq!(val.len(), 5);
     /// ```
@@ -283,7 +283,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_static("");
     /// assert!(val.is_empty());
     ///
@@ -300,7 +300,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let val = HeaderValue::from_static("hello");
     /// assert_eq!(val.as_bytes(), b"hello");
     /// ```
@@ -314,7 +314,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let mut val = HeaderValue::from_static("my secret");
     ///
     /// val.set_sensitive(true);
@@ -345,7 +345,7 @@ impl HeaderValue {
     /// # Examples
     ///
     /// ```
-    /// # use http::header::HeaderValue;
+    /// # use nats::header::HeaderValue;
     /// let mut val = HeaderValue::from_static("my secret");
     ///
     /// val.set_sensitive(true);
