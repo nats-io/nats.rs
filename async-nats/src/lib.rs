@@ -630,7 +630,12 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
-    let client = Client::new(info_watcher, sender.clone(), options.subscription_capacity);
+    let client = Client::new(
+        info_watcher,
+        sender.clone(),
+        options.subscription_capacity,
+        options.inbox_prefix,
+    );
     tokio::spawn({
         let sender = sender.clone();
         async move {

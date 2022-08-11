@@ -49,6 +49,7 @@ pub struct ConnectOptions {
     pub(crate) subscription_capacity: usize,
     pub(crate) sender_capacity: usize,
     pub(crate) event_callback: CallbackArg1<Event, ()>,
+    pub(crate) inbox_prefix: String,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -67,6 +68,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"flush_interval", &self.flush_interval)
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
+            .entry(&"inbox_prefix", &self.inbox_prefix)
             .finish()
     }
 }
@@ -94,6 +96,7 @@ impl Default for ConnectOptions {
                     println!("error : {}", error);
                 })
             })),
+            inbox_prefix: "_INBOX".to_string(),
         }
     }
 }
@@ -474,6 +477,22 @@ impl ConnectOptions {
     ///
     pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
         self.sender_capacity = capacity;
+        self
+    }
+
+    /// Sets custom prefix instead of default `_INBOX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// async_nats::ConnectOptions::new().custom_inbox_prefix("CUSTOM").connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn custom_inbox_prefix<T: ToString>(mut self, prefix: T) -> ConnectOptions {
+        self.inbox_prefix = prefix.to_string();
         self
     }
 }

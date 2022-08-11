@@ -532,4 +532,34 @@ mod client {
         rx.recv().await;
         rx.recv().await;
     }
+
+    #[tokio::test]
+    async fn inbox_prefix() {
+        let server = nats_server::run_basic_server();
+        let client = ConnectOptions::new()
+            .custom_inbox_prefix("BOB")
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut inbox_wildcard_subscription = client.subscribe("BOB.>".to_string()).await.unwrap();
+        let mut subscription = client.subscribe("request".into()).await.unwrap();
+
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                let msg = subscription.next().await.unwrap();
+                client
+                    .publish(msg.reply.unwrap(), "prefix workes".into())
+                    .await
+                    .unwrap();
+            }
+        });
+
+        client
+            .request("request".into(), "data".into())
+            .await
+            .unwrap();
+        inbox_wildcard_subscription.next().await.unwrap();
+    }
 }

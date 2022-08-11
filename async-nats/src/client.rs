@@ -57,6 +57,7 @@ pub struct Client {
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
+    inbox_prefix: String,
 }
 
 impl Client {
@@ -64,12 +65,14 @@ impl Client {
         info: tokio::sync::watch::Receiver<ServerInfo>,
         sender: mpsc::Sender<Command>,
         capacity: usize,
+        inbox_prefix: String,
     ) -> Client {
         Client {
             info,
             sender,
             next_subscription_id: Arc::new(AtomicU64::new(0)),
             subscription_capacity: capacity,
+            inbox_prefix,
         }
     }
 
@@ -262,7 +265,7 @@ impl Client {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}", nuid::next())
+        format!("{}.{}", self.inbox_prefix, nuid::next())
     }
 
     pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
