@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use lazy_static::__Deref;
 use parking_lot::{Mutex, MutexGuard};
 use std::collections::HashMap;
 use std::io::prelude::*;
@@ -416,7 +417,7 @@ impl Read for NatsStream {
 impl Read for &NatsStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &*self.flavor {
-            Flavor::Tcp(tcp) => (&*tcp).read(buf),
+            Flavor::Tcp(tcp) => (tcp.deref()).read(buf),
             Flavor::Tls(tls) => tls_op(tls, |session, eof| match session.read(buf) {
                 Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
                 res => res,
@@ -438,14 +439,14 @@ impl Write for NatsStream {
 impl Write for &NatsStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match &*self.flavor {
-            Flavor::Tcp(tcp) => (&*tcp).write(buf),
+            Flavor::Tcp(tcp) => (tcp.deref()).write(buf),
             Flavor::Tls(tls) => tls_op(tls, |session, _| session.write(buf)),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match &*self.flavor {
-            Flavor::Tcp(tcp) => (&*tcp).flush(),
+            Flavor::Tcp(tcp) => (tcp.deref()).flush(),
             Flavor::Tls(tls) => tls_op(tls, |session, _| session.flush()),
         }
     }

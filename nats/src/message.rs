@@ -261,7 +261,7 @@ impl Message {
     /// Returns `None` if this is not
     /// a `JetStream` message with headers
     /// set.
-    #[allow(clippy::eval_order_dependence)]
+    #[allow(clippy::mixed_read_write_in_expression)]
     pub fn jetstream_message_info(&self) -> Option<crate::jetstream::JetStreamMessageInfo<'_>> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
