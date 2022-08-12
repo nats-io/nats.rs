@@ -41,7 +41,7 @@ pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     servers: HashMap<ServerAddr, usize>,
     options: ConnectorOptions,
-    events_tx: tokio::sync::mpsc::Sender<Event>,
+    pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
 }
 
 impl Connector {

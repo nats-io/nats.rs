@@ -287,7 +287,6 @@ pub(crate) struct ConnectionHandler {
     connection: Connection,
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
-    events: mpsc::Sender<Event>,
     pending_pings: usize,
     max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
@@ -297,14 +296,12 @@ impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
         connector: Connector,
-        events: mpsc::Sender<Event>,
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ) -> ConnectionHandler {
         ConnectionHandler {
             connection,
             connector,
             subscriptions: HashMap::new(),
-            events,
             pending_pings: 0,
             max_pings: 2,
             info_sender,
@@ -364,7 +361,10 @@ impl ConnectionHandler {
                 self.pending_pings -= 1;
             }
             ServerOp::Error(error) => {
-                self.events.try_send(Event::ServerError(error)).ok();
+                self.connector
+                    .events_tx
+                    .try_send(Event::ServerError(error))
+                    .ok();
             }
             ServerOp::Message {
                 sid,
@@ -400,7 +400,11 @@ impl ConnectionHandler {
                             }
                         }
                         Err(mpsc::error::TrySendError::Full(_)) => {
-                            self.events.send(Event::SlowConsumer(sid)).await.ok();
+                            self.connector
+                                .events_tx
+                                .send(Event::SlowConsumer(sid))
+                                .await
+                                .ok();
                         }
                         Err(mpsc::error::TrySendError::Closed(_)) => {
                             self.subscriptions.remove(&sid);
@@ -415,7 +419,11 @@ impl ConnectionHandler {
             // TODO: we should probably update advertised server list here too.
             ServerOp::Info(info) => {
                 if info.lame_duck_mode {
-                    self.events.send(Event::LameDuckMode).await.ok();
+                    self.connector
+                        .events_tx
+                        .send(Event::LameDuckMode)
+                        .await
+                        .ok();
                 }
             }
 
@@ -548,7 +556,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
-        self.events.try_send(Event::Disconnect).ok();
+        self.connector.events_tx.try_send(Event::Disconnect).ok();
         self.handle_reconnect().await?;
 
         Ok(())
@@ -577,7 +585,7 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.events.try_send(Event::Reconnect).ok();
+        self.connector.events_tx.try_send(Event::Reconnect).ok();
 
         Ok(())
     }
@@ -617,15 +625,14 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth: options.auth,
             no_echo: options.no_echo,
         },
-        events_tx.clone(),
+        events_tx,
     )?;
 
     let (info, connection) = connector.try_connect().await?;
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
 
-    let mut connection_handler =
-        ConnectionHandler::new(connection, connector, events_tx, info_sender);
+    let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
