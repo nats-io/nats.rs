@@ -176,7 +176,7 @@ impl Message {
 
     /// Returns the `JetStream` message ID
     /// if this is a `JetStream` message.
-    #[allow(clippy::eval_order_dependence)]
+    #[allow(clippy::mixed_read_write_in_expression)]
     pub fn info(&self) -> Result<Info<'_>, Error> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();

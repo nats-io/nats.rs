@@ -311,15 +311,13 @@ impl futures::Stream for Batch {
                             message,
                         })))
                     }
-                    status => {
-                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "eror while processing messages from the stream: {}, {:?}",
-                                status, message.description
-                            ),
-                        )))))
-                    }
+                    status => Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!(
+                            "eror while processing messages from the stream: {}, {:?}",
+                            status, message.description
+                        ),
+                    ))))),
                 },
                 None => Poll::Ready(None),
             },
