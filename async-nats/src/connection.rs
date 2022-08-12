@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::str::{self, FromStr};
 
 use subslice::SubsliceExt;
@@ -29,6 +30,25 @@ pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
 
 /// Blanked implementation that applies to both TLS and non-TLS `TcpStream`.
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum State {
+    Pending,
+    Connected,
+    Disconnected,
+    Closed,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Pending => write!(f, "pending"),
+            State::Connected => write!(f, "connected"),
+            State::Disconnected => write!(f, "disconnected"),
+            State::Closed => write!(f, "closed"),
+        }
+    }
+}
 
 /// A framed connection
 pub(crate) struct Connection {
