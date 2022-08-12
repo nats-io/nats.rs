@@ -36,7 +36,6 @@ pub enum State {
     Pending,
     Connected,
     Disconnected,
-    Closed,
 }
 
 impl Display for State {
@@ -45,7 +44,6 @@ impl Display for State {
             State::Pending => write!(f, "pending"),
             State::Connected => write!(f, "connected"),
             State::Disconnected => write!(f, "disconnected"),
-            State::Closed => write!(f, "closed"),
         }
     }
 }
