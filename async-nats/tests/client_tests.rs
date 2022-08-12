@@ -534,6 +534,42 @@ mod client {
     }
 
     #[tokio::test]
+    async fn connect_timeout() {
+        // create the notifiers we'll use to synchronize readiness state
+        let startup_listener = std::sync::Arc::new(tokio::sync::Notify::new());
+        let startup_signal = startup_listener.clone();
+        // preregister for a notify_waiters
+        let startup_notified = startup_listener.notified();
+
+        // spawn a listening socket with no connect queue 
+        // so after one connection it hangs - since we are not
+        // calling accept() on the socket
+        tokio::spawn(async move {
+            let socket = tokio::net::TcpSocket::new_v4()?;
+            socket.set_reuseaddr(true)?;
+            socket.set_reuseport(true)?;
+            socket.bind("127.0.0.1:4848".parse().unwrap())?;
+            let _listener = socket.listen(0)?;
+            // notify preregistered
+            startup_signal.notify_waiters();
+
+            // wait for the done signal
+            startup_signal.notified().await;
+            Ok::<(), std::io::Error>(())
+        });
+
+        startup_notified.await;
+        let _hanger = tokio::net::TcpStream::connect("127.0.0.1:4848").await.unwrap();
+        let timeout_result = ConnectOptions::new()
+            .connection_timeout(Some(Duration::from_millis(200)))
+            .connect("nats://127.0.0.1:4848")
+            .await;
+
+        assert_eq!(timeout_result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        startup_listener.notify_one();
+    }
+
+    #[tokio::test]
     async fn inbox_prefix() {
         let server = nats_server::run_basic_server();
         let client = ConnectOptions::new()
