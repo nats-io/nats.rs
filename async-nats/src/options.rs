@@ -38,6 +38,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_failed_connect: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
+    pub(crate) connection_timeout: Option<Duration>,
     pub(crate) auth: Authorization,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
@@ -60,6 +61,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"retry_on_failed_connect", &self.retry_on_failed_connect)
             .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
             .entry(&"max_reconnects", &self.max_reconnects)
+            .entry(&"connection_timeout", &self.connection_timeout)
             .entry(&"tls_required", &self.tls_required)
             .entry(&"certificates", &self.certificates)
             .entry(&"client_cert", &self.client_cert)
@@ -81,6 +83,7 @@ impl Default for ConnectOptions {
             retry_on_failed_connect: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
+            connection_timeout: Some(Duration::from_secs(5)),
             auth: Authorization::None,
             tls_required: false,
             certificates: Vec::new(),
@@ -398,6 +401,38 @@ impl ConnectOptions {
     /// ```
     pub fn subscription_capacity(mut self, capacity: usize) -> ConnectOptions {
         self.subscription_capacity = capacity;
+        self
+    }
+
+    /// Sets a timeout for the underlying TcpStream connection to avoid hangs and deadlocks.
+    /// Setting the value to None results in no timeout being enforced on the underlying
+    /// connection.
+    /// Defualt is set to 5 seconds.
+    ///
+    /// # Examples
+    ///
+    /// # Setting a timeout of 5 seconds
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().connection_timeout(Some(Duration::from_secs(5))).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    ///
+    /// # Setting no timeout (the connection may hang indefinitely)
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().connection_timeout(None).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn connection_timeout(mut self, timeout: Option<Duration>) -> ConnectOptions {
+        self.connection_timeout = timeout;
         self
     }
 
