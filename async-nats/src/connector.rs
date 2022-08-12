@@ -34,6 +34,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
     pub(crate) auth: Authorization,
     pub(crate) no_echo: bool,
+    pub(crate) connection_timeout: Option<Duration>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -228,7 +229,16 @@ impl Connector {
     ) -> Result<(ServerInfo, Connection), io::Error> {
         let tls_config = tls::config_tls(&self.options).await?;
 
-        let tcp_stream = TcpStream::connect(socket_addr).await?;
+        let tcp_stream = match self.options.connection_timeout {
+            Some(connection_timeout) => tokio::time::timeout(connection_timeout, TcpStream::connect(socket_addr))
+                .await
+                .map_err(|_| io::Error::new(
+                        ErrorKind::TimedOut, 
+                        "connection: timeout elapsed with no server response"
+                ))??,
+            None => TcpStream::connect(socket_addr).await?,
+        };
+
         tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection {
