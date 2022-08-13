@@ -562,7 +562,7 @@ mod client {
             .await
             .unwrap();
         let timeout_result = ConnectOptions::new()
-            .connection_timeout(Some(tokio::time::Duration::from_millis(200)))
+            .connection_timeout(tokio::time::Duration::from_millis(200))
             .connect("nats://127.0.0.1:4848")
             .await;
 

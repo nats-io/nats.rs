@@ -38,7 +38,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_failed_connect: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
-    pub(crate) connection_timeout: Option<Duration>,
+    pub(crate) connection_timeout: Duration,
     pub(crate) auth: Authorization,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
@@ -83,7 +83,7 @@ impl Default for ConnectOptions {
             retry_on_failed_connect: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
-            connection_timeout: Some(Duration::from_secs(5)),
+            connection_timeout: Duration::from_secs(5),
             auth: Authorization::None,
             tls_required: false,
             certificates: Vec::new(),
@@ -405,33 +405,17 @@ impl ConnectOptions {
     }
 
     /// Sets a timeout for the underlying TcpStream connection to avoid hangs and deadlocks.
-    /// Setting the value to None results in no timeout being enforced on the underlying
-    /// connection.
     /// Defualt is set to 5 seconds.
     ///
     /// # Examples
-    ///
-    /// # Setting a timeout of 5 seconds
-    ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().connection_timeout(Some(tokio::time::Duration::from_secs(5))).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().connection_timeout(tokio::time::Duration::from_secs(5)).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    ///
-    ///
-    /// # Setting no timeout (the connection may hang indefinitely)
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().connection_timeout(None).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn connection_timeout(mut self, timeout: Option<Duration>) -> ConnectOptions {
+    pub fn connection_timeout(mut self, timeout: Duration) -> ConnectOptions {
         self.connection_timeout = timeout;
         self
     }
