@@ -416,7 +416,7 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().connection_timeout(Some(Duration::from_secs(5))).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().connection_timeout(Some(tokio::time::Duration::from_secs(5))).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```

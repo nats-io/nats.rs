@@ -547,7 +547,6 @@ mod client {
         tokio::spawn(async move {
             let socket = tokio::net::TcpSocket::new_v4()?;
             socket.set_reuseaddr(true)?;
-            socket.set_reuseport(true)?;
             socket.bind("127.0.0.1:4848".parse().unwrap())?;
             let _listener = socket.listen(0)?;
             // notify preregistered
@@ -563,7 +562,7 @@ mod client {
             .await
             .unwrap();
         let timeout_result = ConnectOptions::new()
-            .connection_timeout(Some(Duration::from_millis(200)))
+            .connection_timeout(Some(tokio::time::Duration::from_millis(200)))
             .connect("nats://127.0.0.1:4848")
             .await;
 
