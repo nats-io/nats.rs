@@ -230,12 +230,16 @@ impl Connector {
         let tls_config = tls::config_tls(&self.options).await?;
 
         let tcp_stream = match self.options.connection_timeout {
-            Some(connection_timeout) => tokio::time::timeout(connection_timeout, TcpStream::connect(socket_addr))
-                .await
-                .map_err(|_| io::Error::new(
-                        ErrorKind::TimedOut, 
-                        "connection: timeout elapsed with no server response"
-                ))??,
+            Some(connection_timeout) => {
+                tokio::time::timeout(connection_timeout, TcpStream::connect(socket_addr))
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(
+                            ErrorKind::TimedOut,
+                            "connection: timeout elapsed with no server response",
+                        )
+                    })??
+            }
             None => TcpStream::connect(socket_addr).await?,
         };
 

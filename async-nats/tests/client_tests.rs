@@ -541,7 +541,7 @@ mod client {
         // preregister for a notify_waiters
         let startup_notified = startup_listener.notified();
 
-        // spawn a listening socket with no connect queue 
+        // spawn a listening socket with no connect queue
         // so after one connection it hangs - since we are not
         // calling accept() on the socket
         tokio::spawn(async move {
@@ -559,13 +559,18 @@ mod client {
         });
 
         startup_notified.await;
-        let _hanger = tokio::net::TcpStream::connect("127.0.0.1:4848").await.unwrap();
+        let _hanger = tokio::net::TcpStream::connect("127.0.0.1:4848")
+            .await
+            .unwrap();
         let timeout_result = ConnectOptions::new()
             .connection_timeout(Some(Duration::from_millis(200)))
             .connect("nats://127.0.0.1:4848")
             .await;
 
-        assert_eq!(timeout_result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(
+            timeout_result.unwrap_err().kind(),
+            std::io::ErrorKind::TimedOut
+        );
         startup_listener.notify_one();
     }
 
