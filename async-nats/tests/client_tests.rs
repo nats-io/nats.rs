@@ -12,6 +12,7 @@
 // limitations under the License.
 
 mod client {
+    use async_nats::connection::State;
     use async_nats::{ConnectOptions, Event};
     use bytes::Bytes;
     use futures::future::join_all;
@@ -306,6 +307,7 @@ mod client {
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
+            assert_eq!(State::Connected, client.connection_state());
             client.publish("test".into(), "data".into()).await.unwrap();
             client.flush().await.unwrap();
             assert!(subscriber.next().await.is_some());
@@ -601,5 +603,15 @@ mod client {
             .await
             .unwrap();
         inbox_wildcard_subscription.next().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_state() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        assert_eq!(State::Connected, client.connection_state());
+        drop(server);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(State::Disconnected, client.connection_state());
     }
 }

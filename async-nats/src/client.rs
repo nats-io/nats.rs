@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::connection::State;
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
@@ -54,6 +55,7 @@ impl error::Error for PublishError {}
 #[derive(Clone, Debug)]
 pub struct Client {
     info: tokio::sync::watch::Receiver<ServerInfo>,
+    state: tokio::sync::watch::Receiver<State>,
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
@@ -63,12 +65,14 @@ pub struct Client {
 impl Client {
     pub(crate) fn new(
         info: tokio::sync::watch::Receiver<ServerInfo>,
+        state: tokio::sync::watch::Receiver<State>,
         sender: mpsc::Sender<Command>,
         capacity: usize,
         inbox_prefix: String,
     ) -> Client {
         Client {
             info,
+            state,
             sender,
             next_subscription_id: Arc::new(AtomicU64::new(0)),
             subscription_capacity: capacity,
@@ -310,5 +314,20 @@ impl Client {
         // first question mark is an error from rx itself, second for error from flush.
         rx.await??;
         Ok(())
+    }
+
+    /// Returns the current state of the connection.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("connection state: {}", client.connection_state());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn connection_state(&self) -> State {
+        self.state.borrow().to_owned()
     }
 }
