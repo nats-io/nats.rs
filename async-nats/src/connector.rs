@@ -1,4 +1,5 @@
 use crate::connection::Connection;
+use crate::connection::State;
 use crate::tls;
 use crate::Authorization;
 use crate::ClientError;
@@ -43,6 +44,7 @@ pub(crate) struct Connector {
     servers: HashMap<ServerAddr, usize>,
     options: ConnectorOptions,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
+    pub(crate) state_tx: tokio::sync::watch::Sender<State>,
 }
 
 impl Connector {
@@ -50,6 +52,7 @@ impl Connector {
         addrs: A,
         options: ConnectorOptions,
         events_tx: tokio::sync::mpsc::Sender<Event>,
+        state_tx: tokio::sync::watch::Sender<State>,
     ) -> Result<Connector, io::Error> {
         let servers = addrs
             .to_server_addrs()?
@@ -61,6 +64,7 @@ impl Connector {
             servers,
             options,
             events_tx,
+            state_tx,
         })
     }
 
@@ -136,6 +140,7 @@ impl Connector {
                             Authorization::None => {
                                 connection.write_op(ClientOp::Connect(connect_info)).await?;
 
+                                self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
                             Authorization::Token(token) => {
@@ -202,6 +207,7 @@ impl Connector {
                                 ));
                             }
                             Some(_) => {
+                                self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
                             None => {

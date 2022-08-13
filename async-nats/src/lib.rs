@@ -128,13 +128,13 @@ const LANG: &str = "rust";
 /// must be provided using `Options::tls_client_config`.
 pub use tokio_rustls::rustls;
 
-use connection::Connection;
+use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderValue};
 
 pub(crate) mod auth_utils;
 mod client;
-mod connection;
+pub mod connection;
 mod connector;
 mod options;
 
@@ -557,6 +557,7 @@ impl ConnectionHandler {
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
         self.connector.events_tx.try_send(Event::Disconnect).ok();
+        self.connector.state_tx.send(State::Disconnected).ok();
         self.handle_reconnect().await?;
 
         Ok(())
@@ -613,6 +614,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let flush_interval = options.flush_interval;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
+    let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
 
     let mut connector = Connector::new(
         addrs,
@@ -627,6 +629,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection_timeout: options.connection_timeout,
         },
         events_tx,
+        state_tx,
     )?;
 
     let (info, connection) = connector.try_connect().await?;
@@ -640,6 +643,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     let client = Client::new(
         info_watcher,
+        state_rx,
         sender.clone(),
         options.subscription_capacity,
         options.inbox_prefix,
