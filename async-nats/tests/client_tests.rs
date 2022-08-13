@@ -550,7 +550,11 @@ mod client {
             let socket = tokio::net::TcpSocket::new_v4()?;
             socket.set_reuseaddr(true)?;
             socket.bind("127.0.0.1:4848".parse().unwrap())?;
-            let _listener = socket.listen(0)?;
+            let _listener = if cfg!(target_os = "macos") {
+                socket.listen(1)?
+            } else {
+                socket.listen(0)?
+            };
             // notify preregistered
             startup_signal.notify_waiters();
 
