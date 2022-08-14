@@ -626,6 +626,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             tls_client_config: options.tls_client_config,
             auth: options.auth,
             no_echo: options.no_echo,
+            connection_timeout: options.connection_timeout,
         },
         events_tx,
         state_tx,
