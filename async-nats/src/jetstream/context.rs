@@ -18,11 +18,13 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
+use futures::TryFutureExt;
 use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
+use std::time::Duration;
 
 use super::stream::{Config, DeleteStatus, Info, Stream};
 
@@ -73,7 +75,14 @@ impl Context {
     /// # }
     /// ```
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
-        let message = self.client.request(subject, payload).await?;
+        let message = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.client.request(subject, payload),
+        )
+        .map_err(|_| {
+            std::io::Error::new(ErrorKind::TimedOut, "jetstream publish request timed out")
+        })
+        .await??;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         match response {

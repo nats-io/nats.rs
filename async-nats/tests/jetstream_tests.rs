@@ -24,6 +24,7 @@ pub struct AccountInfo {
 
 mod jetstream {
 
+    use std::io::ErrorKind;
     use std::time::Duration;
 
     use super::*;
@@ -1276,5 +1277,37 @@ mod jetstream {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let info = consumer.info().await.unwrap();
         assert_eq!(info.num_ack_pending, 8);
+    }
+
+    #[tokio::test]
+    async fn reconnect_request() {
+        let mut cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(|event| async move {
+                println!("EVENT: {}", event);
+            })
+            .connect(cluster.servers.get(0).unwrap().client_url())
+            .await
+            .unwrap();
+
+        let jetstream = async_nats::jetstream::new(client.clone());
+        jetstream.create_stream("events").await.unwrap();
+
+        for i in 0..500 {
+            jetstream
+                .publish("events".into(), format!("{}", i).into())
+                .await
+                .unwrap();
+        }
+        drop(cluster.servers.remove(0));
+        let ack = jetstream.publish("events".into(), "fail".into()).await;
+        assert_eq!(
+            ack.unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            ErrorKind::TimedOut
+        )
     }
 }
