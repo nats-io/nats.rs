@@ -33,6 +33,7 @@ use super::stream::{Config, DeleteStatus, Info, Stream};
 pub struct Context {
     pub(crate) client: Client,
     pub(crate) prefix: String,
+    pub(crate) timeout: Duration,
 }
 
 impl Context {
@@ -40,13 +41,19 @@ impl Context {
         Context {
             client,
             prefix: "$JS.API".to_string(),
+            timeout: Duration::from_secs(5),
         }
+    }
+
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout
     }
 
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
         Context {
             client,
             prefix: prefix.to_string(),
+            timeout: Duration::from_secs(5),
         }
     }
 
@@ -54,6 +61,7 @@ impl Context {
         Context {
             client,
             prefix: format!("$JS.{}.API", domain.as_ref()),
+            timeout: Duration::from_secs(5),
         }
     }
 
@@ -75,14 +83,11 @@ impl Context {
     /// # }
     /// ```
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
-        let message = tokio::time::timeout(
-            Duration::from_secs(5),
-            self.client.request(subject, payload),
-        )
-        .map_err(|_| {
-            std::io::Error::new(ErrorKind::TimedOut, "jetstream publish request timed out")
-        })
-        .await??;
+        let message = tokio::time::timeout(self.timeout, self.client.request(subject, payload))
+            .map_err(|_| {
+                std::io::Error::new(ErrorKind::TimedOut, "jetstream publish request timed out")
+            })
+            .await??;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         match response {

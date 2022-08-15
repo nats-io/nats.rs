@@ -1280,18 +1280,19 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn reconnect_request() {
-        let mut cluster = nats_server::run_cluster("tests/configs/jetstream.conf");
+    async fn timeod_out_request() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
         tokio::time::sleep(Duration::from_secs(5)).await;
         let client = async_nats::ConnectOptions::new()
             .event_callback(|event| async move {
                 println!("EVENT: {}", event);
             })
-            .connect(cluster.servers.get(0).unwrap().client_url())
+            .connect(server.client_url())
             .await
             .unwrap();
 
-        let jetstream = async_nats::jetstream::new(client.clone());
+        let mut jetstream = async_nats::jetstream::new(client.clone());
+        jetstream.set_timeout(Duration::from_millis(500));
         jetstream.create_stream("events").await.unwrap();
 
         for i in 0..500 {
@@ -1300,7 +1301,7 @@ mod jetstream {
                 .await
                 .unwrap();
         }
-        drop(cluster.servers.remove(0));
+        drop(server);
         let ack = jetstream.publish("events".into(), "fail".into()).await;
         assert_eq!(
             ack.unwrap_err()
