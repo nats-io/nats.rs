@@ -25,6 +25,7 @@ pub struct AccountInfo {
 mod jetstream {
 
     use std::io::ErrorKind;
+    use std::str::from_utf8;
     use std::time::Duration;
 
     use super::*;
@@ -1310,5 +1311,61 @@ mod jetstream {
                 .kind(),
             ErrorKind::TimedOut
         )
+    }
+
+    #[tokio::test]
+    async fn republish() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let _source_stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "source".to_string(),
+                max_messages: 1000,
+                subjects: vec!["source.>".to_string()],
+                republish: Some(async_nats::jetstream::stream::Republish {
+                    source: ">".to_string(),
+                    destination: "dest.>".to_string(),
+                    headers_only: false,
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let destination_stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "dest".to_string(),
+                max_messages: 2000,
+                subjects: vec!["dest.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = destination_stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("dest".to_string()),
+                deliver_policy: DeliverPolicy::All,
+                ack_policy: consumer::AckPolicy::Explicit,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut messages = consumer.messages().await.unwrap().take(100).enumerate();
+        for i in 0..100 {
+            jetstream
+                .publish(format!("source.{}", i), format!("{}", i).into())
+                .await
+                .unwrap();
+        }
+
+        while let Some((i, message)) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(format!("source.{}", i), message.subject);
+            assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
+            message.ack().await.unwrap();
+        }
     }
 }

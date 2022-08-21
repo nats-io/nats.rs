@@ -491,6 +491,9 @@ pub struct Config {
     /// Indicates if purges will be denied or not.
     #[serde(default, skip_serializing_if = "is_default")]
     pub deny_purge: bool,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub republish: Option<Republish>,
 }
 
 impl From<&Config> for Config {
@@ -506,6 +509,19 @@ impl From<&str> for Config {
             ..Default::default()
         }
     }
+}
+// Republish is for republishing messages once committed to a stream.
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Republish {
+    /// Subject that should be republished.
+    #[serde(rename = "src")]
+    pub source: String,
+    /// Subject where messages will be republished.
+    #[serde(rename = "dest")]
+    pub destination: String,
+    /// If true, only headers should be republished.
+    #[serde(default)]
+    pub headers_only: bool,
 }
 
 /// `DiscardPolicy` determines how we proceed when limits of messages or bytes are hit. The default, `Old` will
