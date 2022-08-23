@@ -313,7 +313,7 @@ mod client {
             assert!(subscriber.next().await.is_some());
 
             drop(servers.remove(0));
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 
