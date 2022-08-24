@@ -24,10 +24,13 @@ use rand::Rng;
 use regex::Regex;
 
 pub struct Server {
+    inner: Inner,
+}
+
+struct Inner {
     cfg: String,
     id: String,
     port: Option<String>,
-    cleanup: bool,
     child: Child,
     logfile: PathBuf,
     pidfile: PathBuf,
@@ -40,16 +43,16 @@ lazy_static! {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        self.child.kill().unwrap();
-        self.child.wait().unwrap();
-        if let Ok(log) = fs::read_to_string(self.logfile.as_os_str()) {
+        self.inner.child.kill().unwrap();
+        self.inner.child.wait().unwrap();
+        if let Ok(log) = fs::read_to_string(self.inner.logfile.as_os_str()) {
             // Check if we had JetStream running and if so cleanup the storage directory.
             if let Some(caps) = SD_RE.captures(&log) {
                 let sd = caps.get(1).map_or("", |m| m.as_str());
                 fs::remove_dir_all(sd).ok();
             }
             // Remove Logfile.
-            fs::remove_file(self.logfile.as_os_str()).ok();
+            fs::remove_file(self.inner.logfile.as_os_str()).ok();
         }
     }
 }
@@ -57,14 +60,14 @@ impl Drop for Server {
 impl Server {
     pub fn restart(&mut self) {
         let port = self
+            .inner
             .port
             .clone()
             .expect("can't restart server with dynamic port");
-        self.child.kill().unwrap();
-        self.child.wait().unwrap();
-        let (_, _, _, _, child, _, _) =
-            do_run(&self.cfg, Some(&port), self.cleanup, Some(self.id.clone()));
-        self.child = child;
+        self.inner.child.kill().unwrap();
+        self.inner.child.wait().unwrap();
+        let inner = do_run(&self.inner.cfg, Some(&port), Some(self.inner.id.clone()));
+        self.inner = inner;
     }
 
     // Grab client url.
@@ -114,7 +117,7 @@ impl Server {
         // We may need to wait for log to be present.
         // Wait up to 10s. (100 * 100ms)
         for _ in 0..100 {
-            match fs::read_to_string(self.logfile.as_os_str()) {
+            match fs::read_to_string(self.inner.logfile.as_os_str()) {
                 Ok(l) => {
                     if let Some(cre) = CLIENT_RE.captures(&l) {
                         return cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1");
@@ -129,7 +132,7 @@ impl Server {
     }
 
     pub fn client_pid(&self) -> usize {
-        String::from_utf8(fs::read(self.pidfile.clone()).unwrap())
+        String::from_utf8(fs::read(self.inner.pidfile.clone()).unwrap())
             .unwrap()
             .parse()
             .unwrap()
@@ -231,23 +234,12 @@ impl Cluster {
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
-    run_server_with_port_and_cleanup(cfg, port, true, None)
+    Server {
+        inner: do_run(cfg, port, None),
+    }
 }
 
-fn do_run(
-    cfg: &str,
-    port: Option<&str>,
-    cleanup: bool,
-    id: Option<String>,
-) -> (
-    Option<String>,
-    String,
-    String,
-    bool,
-    Child,
-    PathBuf,
-    PathBuf,
-) {
+fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
     let id = id.unwrap_or_else(nuid::next);
     let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
     let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
@@ -273,29 +265,10 @@ fn do_run(
     }
 
     let child = cmd.spawn().unwrap();
-    (
-        port.map(ToString::to_string),
-        cfg.to_string(),
+    Inner {
+        port: port.map(ToString::to_string),
+        cfg: cfg.to_string(),
         id,
-        cleanup,
-        child,
-        logfile,
-        pidfile,
-    )
-}
-
-pub fn run_server_with_port_and_cleanup(
-    cfg: &str,
-    port: Option<&str>,
-    cleanup: bool,
-    id: Option<String>,
-) -> Server {
-    let (port, cfg, id, cleanup, child, logfile, pidfile) = do_run(cfg, port, cleanup, id);
-    Server {
-        port,
-        cfg,
-        id,
-        cleanup,
         child,
         logfile,
         pidfile,
@@ -351,13 +324,14 @@ fn run_cluster_node_with_port(
     let child = cmd.spawn().unwrap();
 
     Server {
-        port: port.map(ToString::to_string),
-        cfg: cfg.to_string(),
-        id,
-        cleanup: true,
-        child,
-        logfile,
-        pidfile,
+        inner: Inner {
+            port: port.map(ToString::to_string),
+            cfg: cfg.to_string(),
+            id,
+            child,
+            logfile,
+            pidfile,
+        },
     }
 }
 
