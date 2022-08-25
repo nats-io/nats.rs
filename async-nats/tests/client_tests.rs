@@ -17,6 +17,7 @@ mod client {
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::io::ErrorKind;
     use std::time::Duration;
 
     #[tokio::test]
@@ -194,6 +195,26 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+
+    #[tokio::test]
+    async fn request_timeout() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let _sub = client.subscribe("service".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        let err = client.request("service".into(), "payload".into()).await;
+        println!("ERR: {:?}", err);
+        assert_eq!(
+            err.unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            ErrorKind::TimedOut
+        );
+    }
+
     #[tokio::test]
     async fn request_no_responders() {
         let server = nats_server::run_basic_server();

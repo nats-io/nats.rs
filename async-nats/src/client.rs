@@ -24,6 +24,7 @@ use std::error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
 
@@ -60,6 +61,7 @@ pub struct Client {
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
     inbox_prefix: String,
+    request_timeout: Option<Duration>,
 }
 
 impl Client {
@@ -69,6 +71,7 @@ impl Client {
         sender: mpsc::Sender<Command>,
         capacity: usize,
         inbox_prefix: String,
+        request_timeout: Option<Duration>,
     ) -> Client {
         Client {
             info,
@@ -77,6 +80,7 @@ impl Client {
             next_subscription_id: Arc::new(AtomicU64::new(0)),
             subscription_capacity: capacity,
             inbox_prefix,
+            request_timeout,
         }
     }
 
@@ -211,7 +215,15 @@ impl Client {
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply(subject, inbox, payload).await?;
         self.flush().await?;
-        match sub.next().await {
+        let request = match self.request_timeout {
+            Some(timeout) => {
+                tokio::time::timeout(timeout, sub.next())
+                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
+                    .await?
+            }
+            None => sub.next().await,
+        };
+        match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(Box::new(std::io::Error::new(
@@ -239,7 +251,15 @@ impl Client {
         self.publish_with_reply_and_headers(subject, inbox, headers, payload)
             .await?;
         self.flush().await?;
-        match sub.next().await {
+        let request = match self.request_timeout {
+            Some(timeout) => {
+                tokio::time::timeout(timeout, sub.next())
+                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
+                    .await?
+            }
+            None => sub.next().await,
+        };
+        match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(Box::new(std::io::Error::new(

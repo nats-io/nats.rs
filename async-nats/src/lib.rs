@@ -647,6 +647,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         sender.clone(),
         options.subscription_capacity,
         options.inbox_prefix,
+        options.request_timeout,
     );
     tokio::spawn({
         let sender = sender.clone();
