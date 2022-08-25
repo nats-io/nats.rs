@@ -401,7 +401,7 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
-    /// Sets custom inbox for this reequest. Overrides both customized and default [Client] Inbox.
+    /// Sets custom inbox for this request. Overrides both customized and default [Client] Inbox.
     ///
     /// # Examples
     /// ```no_run
