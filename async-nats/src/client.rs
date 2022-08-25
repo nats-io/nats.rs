@@ -211,7 +211,7 @@ impl Client {
     }
 
     pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
-        self.request_builder().payload(payload).send(subject).await
+        self.build_request().payload(payload).send(subject).await
     }
 
     pub async fn request_with_headers(
@@ -220,7 +220,7 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, Error> {
-        self.request_builder()
+        self.build_request()
             .headers(headers)
             .payload(payload)
             .send(subject)
@@ -234,14 +234,14 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.request_builder()
+    /// client.build_request()
     ///     .timeout(Some(std::time::Duration::from_secs(5)))
     ///     .payload("data".into())
     ///     .send("service".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn request_builder(&self) -> RequestBuilder {
+    pub fn build_request(&self) -> RequestBuilder {
         RequestBuilder::new(self)
     }
 
@@ -348,7 +348,7 @@ impl<'a> RequestBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.request_builder()
+    /// client.build_request()
     ///     .payload("data".into())
     ///     .send("service".into()).await?;
     /// # Ok(())
@@ -368,7 +368,7 @@ impl<'a> RequestBuilder<'a> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-Example", b"value".as_ref().try_into().unwrap());
-    /// client.request_builder()
+    /// client.build_request()
     ///     .headers(headers)
     ///     .payload("data".into())
     ///     .send("service".into()).await?;
@@ -389,7 +389,7 @@ impl<'a> RequestBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.request_builder()
+    /// client.build_request()
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
     ///     .payload("data".into())
     ///     .send("service".into()).await?;
@@ -408,7 +408,7 @@ impl<'a> RequestBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.request_builder()
+    /// client.build_request()
     ///     .inbox("custom_inbox".into())
     ///     .payload("data".into())
     ///     .send("service".into()).await?;
@@ -427,7 +427,7 @@ impl<'a> RequestBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.request_builder()
+    /// client.build_request()
     ///     .payload("data".into())
     ///     .send("service".into()).await?;
     /// # Ok(())

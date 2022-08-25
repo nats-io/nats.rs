@@ -250,7 +250,7 @@ mod client {
         });
 
         client
-            .request_builder()
+            .build_request()
             .inbox(inbox.clone())
             .send("service".into())
             .await
