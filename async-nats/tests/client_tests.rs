@@ -230,6 +230,34 @@ mod client {
     }
 
     #[tokio::test]
+    async fn request_builder() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let inbox = "CUSTOMIZED".to_string();
+        let mut sub = client.subscribe("service".into()).await.unwrap();
+
+        tokio::task::spawn({
+            let client = client.clone();
+            let inbox = inbox.clone();
+            async move {
+                let request = sub.next().await.unwrap();
+                let reply = request.reply.unwrap();
+                assert_eq!(reply, inbox);
+                client.publish(reply, "ok".into()).await.unwrap();
+                client.flush().await.unwrap();
+            }
+        });
+
+        client
+            .request_builder()
+            .inbox(inbox.clone())
+            .send("service".into())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn unsubscribe() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
