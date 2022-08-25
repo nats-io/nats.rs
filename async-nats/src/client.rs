@@ -341,7 +341,7 @@ impl<'a> RequestBuilder<'a> {
         }
     }
 
-    /// Sets the paylaod of the requests. If not used, empty paylaod will be sent.
+    /// Sets the payload of the request. If not used, empty paylaod will be sent.
     ///
     /// # Examples
     /// ```no_run
