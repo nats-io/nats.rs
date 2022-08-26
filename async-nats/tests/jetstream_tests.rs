@@ -40,6 +40,7 @@ mod jetstream {
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tokio_retry::Retry;
+    use tracing::Level;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -1282,8 +1283,12 @@ mod jetstream {
     }
 
     #[tokio::test]
-    #[cfg_attr(target_os = "windows", ignore)]
     async fn pull_consumer_with_reconnections() {
+        let subscriber = tracing_subscriber::FmtSubscriber::builder()
+            .with_max_level(Level::DEBUG)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+
         let mut server =
             nats_server::run_server_with_port("tests/configs/jetstream.conf", Some("2323"));
 

@@ -88,6 +88,21 @@ impl<T: IntoConsumerConfig> Consumer<T> {
         }
     }
 
+    async fn fetch_info(&self) -> Result<consumer::Info, Error> {
+        let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok::<Info>(info) => Ok(info),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting consumer info: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+        }
+    }
+
     /// Returns cached [Info] for the [Consumer].
     /// Cache is either from initial creation/retrival of the [Consumer] or last call to
     /// [Consumer::info].

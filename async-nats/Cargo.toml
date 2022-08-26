@@ -35,12 +35,14 @@ serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6.2"
 lazy_static = "1.4.0"
+tracing = "0.1"
 
 [dev-dependencies]
 criterion =  { version = "0.3", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
 tokio-retry = "0.3.0"
+tracing-subscriber = "0.3"
 
 
 [[bench]]
