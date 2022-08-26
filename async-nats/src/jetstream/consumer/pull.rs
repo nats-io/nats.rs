@@ -13,13 +13,11 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use std::{
-    sync::{Arc, Mutex},
-    task::Poll,
-    time::{Duration, Instant},
-};
+use std::{task::Poll, time::Duration};
+use tokio::task::JoinHandle;
 
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
 
 use crate::{
     connection::State,
@@ -65,7 +63,7 @@ impl Consumer<Config> {
     /// Ok(())
     /// # }
     /// ```
-    pub async fn messages(&self) -> Result<Stream<'_>, Error> {
+    pub async fn messages(&self) -> Result<Stream, Error> {
         Stream::stream(
             BatchConfig {
                 batch: 200,
@@ -389,22 +387,28 @@ impl<'a> futures::Stream for Sequence<'a> {
     }
 }
 
-pub struct Stream<'a> {
+pub struct Stream {
     pending_messages: usize,
+    request_result_rx: tokio::sync::mpsc::Receiver<Result<bool, crate::Error>>,
+    request_tx: tokio::sync::watch::Sender<()>,
     subscriber: Subscriber,
-    context: Context,
-    inbox: String,
-    subject: String,
     batch_config: BatchConfig,
-    request: Option<BoxFuture<'a, Result<(), Error>>>,
-    since_last_request: Arc<Mutex<Instant>>,
+    context: Context,
+    pending_request: bool,
+    task_handle: JoinHandle<()>,
 }
 
-impl<'a> Stream<'a> {
+impl Drop for Stream {
+    fn drop(&mut self) {
+        self.task_handle.abort();
+    }
+}
+
+impl Stream {
     async fn stream(
         batch_config: BatchConfig,
         consumer: &Consumer<Config>,
-    ) -> Result<Stream<'a>, Error> {
+    ) -> Result<Stream, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         let subject = format!(
@@ -412,66 +416,72 @@ impl<'a> Stream<'a> {
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
         );
 
-        let since_last_request = Arc::new(Mutex::new(Instant::now()));
-        tokio::task::spawn({
-            let since_last_request = since_last_request.clone();
+        let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(32);
+        let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
+        let task_handle = tokio::task::spawn({
+            let consumer = consumer.clone();
             let batch = batch_config;
             let mut context = consumer.context.clone();
-            let subject = subject.clone();
+            let subject = subject;
             let inbox = inbox.clone();
             async move {
                 loop {
                     // Need to check previous state, as `changed` will always fire on first
                     // call.
                     let prev_state = context.client.state.borrow().to_owned();
-                    context.client.state.changed().await.ok();
-                    let state = context.client.state.borrow().to_owned();
+                    let mut pending_reset = false;
 
-                    let timeout_threshold = batch.expires.map_or(false, |expires| {
-                        since_last_request
-                            .lock()
-                            .unwrap()
-                            .elapsed()
-                            .gt(&Duration::from_nanos(expires as u64))
-                    });
-
-                    if (state == crate::connection::State::Connected
-                        && prev_state != State::Connected)
-                        || timeout_threshold
-                    {
-                        let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
-
-                        tokio::time::timeout(
-                            context.timeout,
-                            context.client.publish_with_reply(
-                                subject.clone(),
-                                inbox.clone(),
-                                request.clone(),
-                            ),
-                        )
-                        .await
-                        // TODO: add tracing instead of ignoring this.
-                        .ok();
-                        *since_last_request.lock().unwrap() = Instant::now();
+                    tokio::select! {
+                       _  = context.client.state.changed() => {
+                            let state = context.client.state.borrow().to_owned();
+                            if !(state == crate::connection::State::Connected
+                                && prev_state != State::Connected) {
+                                    continue;
+                                }
+                            debug!("detected !Connected -> Connected state change");
+                            match consumer.fetch_info().await {
+                                Ok(info) => {
+                                    if info.num_waiting == 0 {
+                                        pending_reset = true;
+                                    }
+                                }
+                                Err(err) => request_result_tx.send(Err(err)).await.unwrap(),
+                            }
+                        },
+                        _ = request_rx.changed() => debug!("task received request request"),
+                        _ = tokio::time::sleep(Duration::from_nanos(batch.expires.unwrap() as u64)) => debug!("reached expires timer"),
                     }
+
+                    let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
+
+                    let result = context
+                        .client
+                        .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
+                        .await;
+                    // TODO: add tracing instead of ignoring this.
+                    request_result_tx
+                        .send(result.map(|_| pending_reset))
+                        .await
+                        .unwrap();
                 }
+                // }
             }
         });
 
         Ok(Stream {
+            task_handle,
+            request_result_rx,
+            request_tx,
+            batch_config,
             pending_messages: 0,
             subscriber: subscription,
             context: consumer.context.clone(),
-            request: None,
-            inbox,
-            subject,
-            batch_config,
-            since_last_request,
+            pending_request: false,
         })
     }
 }
 
-impl<'a> futures::Stream for Stream<'a> {
+impl futures::Stream for Stream {
     type Item = Result<jetstream::Message, Error>;
 
     fn poll_next(
@@ -479,64 +489,49 @@ impl<'a> futures::Stream for Stream<'a> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
-            match self.request.as_mut() {
-                None => {
-                    let context = self.context.clone();
-                    let inbox = self.inbox.clone();
-                    let subject = self.subject.clone();
-
-                    let next_request_threshold =
-                        self.pending_messages <= std::cmp::min(self.batch_config.batch / 2, 100);
-
-                    if next_request_threshold {
-                        let batch = self.batch_config;
-                        self.pending_messages += batch.batch;
-                        self.request = Some(Box::pin(async move {
-                            let request = serde_json::to_vec(&batch).map(Bytes::from)?;
-
-                            tokio::time::timeout(
-                                context.timeout,
-                                context.client.publish_with_reply(
-                                    subject.clone(),
-                                    inbox.clone(),
-                                    request.clone(),
-                                ),
-                            )
-                            .await??;
-                            Ok(())
-                        }));
-                    }
-
-                    if let Some(request) = self.request.as_mut() {
-                        match request.as_mut().poll(cx) {
-                            Poll::Ready(result) => {
-                                self.request = None;
-                                *self.since_last_request.lock().unwrap() = Instant::now();
-                                result?;
+            trace!("pending messages: {}", self.pending_messages);
+            if self.pending_messages <= std::cmp::min(self.batch_config.batch / 2, 100)
+                && !self.pending_request
+            {
+                debug!("pending messages reached threshold to send new fetch request");
+                self.request_tx.send(()).unwrap();
+                self.pending_request = true;
+            }
+            match self.request_result_rx.poll_recv(cx) {
+                Poll::Ready(resp) => match resp {
+                    Some(resp) => match resp {
+                        Ok(reset) => {
+                            debug!("request successfull, setting pending messages");
+                            if reset {
+                                self.pending_messages = self.batch_config.batch;
+                            } else {
+                                self.pending_messages += self.batch_config.batch;
                             }
-                            Poll::Pending => {}
+                            self.pending_request = false;
                         }
-                    }
-                }
-
-                Some(request) => match request.as_mut().poll(cx) {
-                    Poll::Ready(result) => {
-                        self.request = None;
-                        result?;
-                    }
-                    Poll::Pending => {}
+                        Err(err) => return Poll::Ready(Some(Err(err))),
+                    },
+                    None => return Poll::Ready(None),
                 },
+                Poll::Pending => (),
             }
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
-                            self.pending_messages = 0;
+                            debug!("timeout reached, resetting pending messages");
+                            // We do not want to reset to 0, as more than 1 fetch request might be
+                            // ongoing. This is not perfect, as we don't know how many messages
+                            // were consumed from that specific fetch, but that's best what we can
+                            // do until server can identify fetches.
+                            self.pending_messages = self
+                                .pending_messages
+                                .saturating_sub(self.batch_config.batch);
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {}
                         StatusCode::OK => {
-                            self.pending_messages -= 1;
+                            self.pending_messages = self.pending_messages.saturating_sub(1);
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,
@@ -777,7 +772,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub async fn messages(self) -> Result<Stream<'a>, Error> {
+    pub async fn messages(self) -> Result<Stream, Error> {
         Stream::stream(
             BatchConfig {
                 batch: self.batch,
