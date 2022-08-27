@@ -16,13 +16,13 @@
 
 ## Motivation
 
-Rust may be one the most interesting new languages the NATS ecosystem has seen.
+Rust may be one of the most interesting new languages the NATS ecosystem has seen.
 We believe this client will have a large impact on NATS, distributed systems, and
-embedded and IoT environments. With Rust we wanted to be as idiomatic as we
+embedded and IoT environments. With Rust, we wanted to be as idiomatic as we
 could be and lean into the strengths of the language. We moved many things that
 would have been runtime checks and errors to the compiler, most notably options
-on connections, and having subscriptions generate multiple styles of iterators,
-since iterators are a first class citizen in Rust. We also wanted to be aligned
+on connections, and having subscriptions generate multiple styles of iterators
+since iterators are first-class citizens in Rust. We also wanted to be aligned
 with the NATS philosophy of simple, secure, and fast!
 
 ## Feedback
@@ -160,4 +160,4 @@ The Rust ecosystem has a diverse set of options for async programming. This clie
 
 The async interface provided by this library is implemented as just a thin wrapper around its sync interface. Those two interface styles look very similar, and you're free to choose whichever works best for your application.
 
-<em>*NOTE:* This crate uses thread pool from [blocking crate](https://crates.io/crates/blocking/1.1.0). By default it limits number of threads to 500. It can be ovverided by setting `BLOCKING_MAX_THREADS` environment variable and set between 1 and 10000. Be careful when spinning a lot async operations, as it may drain the thread pool and block foverer until it's reworked</em>
+<em>*NOTE:* This crate uses a thread pool from [blocking crate](https://crates.io/crates/blocking/1.1.0). By default, it limits the number of threads to 500. It can be overridden by setting `BLOCKING_MAX_THREADS` environment variable and set between 1 and 10000. Be careful when spinning a lot of async operations, as it may drain the thread pool and block forever until it's reworked</em>
