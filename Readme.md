@@ -8,13 +8,13 @@
 
 ## Motivation
 
-Rust may be one the most interesting new languages the NATS ecosystem has seen.
+Rust may be one of the most interesting new languages the NATS ecosystem has seen.
 We believe this client will have a large impact on NATS, distributed systems, and
-embedded and IoT environments. With Rust we wanted to be as idiomatic as we
+embedded and IoT environments. With Rust, we wanted to be as idiomatic as we
 could be and lean into the strengths of the language. We moved many things that
 would have been runtime checks and errors to the compiler, most notably options
-on connections, and having subscriptions generate multiple styles of iterators,
-since iterators are a first class citizen in Rust. We also wanted to be aligned
+on connections, and having subscriptions generate multiple styles of iterators
+since iterators are first-class citizens in Rust. We also wanted to be aligned
 with the NATS philosophy of simple, secure, and fast!
 
 ## Clients
