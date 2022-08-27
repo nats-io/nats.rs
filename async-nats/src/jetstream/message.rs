@@ -159,7 +159,14 @@ impl Message {
                 .client
                 .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
                 .await?;
-            match subscription.next().await {
+            match tokio::time::timeout(self.context.timeout, subscription.next())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "double ack response timed out",
+                    )
+                })? {
                 Some(_) => Ok(()),
                 None => Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
