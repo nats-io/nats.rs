@@ -416,7 +416,7 @@ impl Stream {
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
         );
 
-        let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(32);
+        let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let task_handle = tokio::task::spawn({
             let consumer = consumer.clone();
@@ -508,6 +508,7 @@ impl futures::Stream for Stream {
                                 self.pending_messages += self.batch_config.batch;
                             }
                             self.pending_request = false;
+                            continue;
                         }
                         Err(err) => return Poll::Ready(Some(Err(err))),
                     },
