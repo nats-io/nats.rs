@@ -458,11 +458,13 @@ impl Stream {
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
                         .await;
+                    debug!("request published");
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
                         .send(result.map(|_| pending_reset))
                         .await
                         .unwrap();
+                    trace!("result send over tx");
                 }
                 // }
             }
@@ -501,7 +503,7 @@ impl futures::Stream for Stream {
                 Poll::Ready(resp) => match resp {
                     Some(resp) => match resp {
                         Ok(reset) => {
-                            debug!("request successfull, setting pending messages");
+                            debug!("request successful, setting pending messages");
                             if reset {
                                 self.pending_messages = self.batch_config.batch;
                             } else {
@@ -514,8 +516,11 @@ impl futures::Stream for Stream {
                     },
                     None => return Poll::Ready(None),
                 },
-                Poll::Pending => (),
+                Poll::Pending => {
+                    trace!("pending result");
+                }
             }
+            trace!("polling subscriber");
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
@@ -551,6 +556,7 @@ impl futures::Stream for Stream {
                     None => return Poll::Ready(None),
                 },
                 Poll::Pending => {
+                    debug!("subscriber still pending");
                     return std::task::Poll::Pending;
                 }
             }
