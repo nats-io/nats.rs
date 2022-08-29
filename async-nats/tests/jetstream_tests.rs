@@ -236,6 +236,27 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn purge_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context.create_stream("events").await.unwrap();
+
+        for _ in 0..3 {
+            context
+                .publish("events".to_string(), "data".into())
+                .await
+                .unwrap();
+        }
+        let mut stream = context.get_stream("events").await.unwrap();
+        assert_eq!(stream.cached_info().state.messages, 3);
+
+        stream.purge().await.unwrap();
+
+        assert_eq!(stream.info().await.unwrap().state.messages, 0);
+    }
+    #[tokio::test]
     async fn get_or_create_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
