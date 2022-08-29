@@ -11,15 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cmp, task::Poll, time::Duration};
+use std::{
+    cmp,
+    io::{self, ErrorKind},
+    task::Poll,
+    time::Duration,
+};
 
+use bytes::Bytes;
+use http::HeaderMap;
+use tokio::io::AsyncReadExt;
+
+use base64_url::base64;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::Error;
+
 use super::{consumer::push::Ordered, stream::StorageType};
-use time::serde::rfc3339;
+use time::{serde::rfc3339, OffsetDateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
@@ -64,12 +76,112 @@ pub struct Config {
 /// A blob store capable of storing large objects efficiently in streams.
 pub struct ObjectStore {
     pub(crate) name: String,
-    pub(crate) context: crate::jetstream::Context,
+    pub(crate) stream: crate::jetstream::stream::Stream,
 }
 
-
 impl ObjectStore {
+    pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
+        let object_name = object_name.as_ref();
+        let object_name = sanitize_object_name(object_name);
+        if !is_valid_object_name(&object_name) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid object name",
+            )));
+        }
 
+        // Grab last meta value we have.
+        let stream_name = format!("OBJ_{}", &self.name);
+        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+
+        let message = self
+            .stream
+            .get_last_raw_message_by_subject(subject.as_str())
+            .await?;
+        let decoded_paylaod = base64::decode(message.payload)
+            .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
+        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_paylaod)?;
+
+        Ok(object_info)
+    }
+
+    pub async fn put<T>(
+        &self,
+        meta: T,
+        data: &mut (impl tokio::io::AsyncRead + std::marker::Unpin),
+    ) -> Result<ObjectInfo, Error>
+    where
+        ObjectMeta: From<T>,
+    {
+        let object_meta: ObjectMeta = meta.into();
+
+        let object_name = sanitize_object_name(&object_meta.name);
+        if !is_valid_object_name(&object_name) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid object name",
+            )));
+        }
+        // Fetch any existing object info, if ther is any for later use.
+        let maybe_existing_object_info = match self.info(&object_name).await {
+            Ok(object_info) => Some(object_info),
+            Err(_) => None,
+        };
+
+        let object_nuid = nuid::next();
+        let chunk_subject = format!("$O.{}.C.{}", &self.name, &object_nuid);
+
+        let mut object_chunks = 0;
+        let mut object_size = 0;
+
+        let mut buffer = [0; DEFAULT_CHUNK_SIZE];
+
+        loop {
+            let n = data.read(&mut buffer).await?;
+
+            if n == 0 {
+                break;
+            }
+
+            object_size += n;
+            object_chunks += 1;
+
+            // FIXME: this is ugly
+            let paylaod = bytes::Bytes::from(buffer.to_vec());
+
+            self.stream
+                .context
+                .publish(chunk_subject.clone(), paylaod)
+                .await?;
+        }
+        // Create a random subject prefixed with the object stream name.
+        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let object_info = ObjectInfo {
+            name: object_name,
+            description: object_meta.description,
+            link: object_meta.link,
+            bucket: self.name.clone(),
+            nuid: object_nuid,
+            chunks: object_chunks,
+            size: object_size,
+            digest: "".to_string(),
+            modified: OffsetDateTime::now_utc(),
+            deleted: false,
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.parse()?);
+        let data = serde_json::to_vec(&object_info)?;
+
+        self.stream
+            .context
+            .publish_with_headers(subject, headers, data.into())
+            .await?;
+
+        // TODO: purge old chunks
+
+        Ok(object_info)
+    }
 }
 
 /// Represents an object stored in a bucket.
@@ -179,4 +291,24 @@ pub struct ObjectLink {
     pub name: String,
     /// Name of the bucket the object is stored in.
     pub bucket: Option<String>,
+}
+
+/// Meta information about an object.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ObjectMeta {
+    /// Name of the object
+    pub name: String,
+    /// A short human readable description of the object.
+    pub description: Option<String>,
+    /// Link this object points to, if any.
+    pub link: Option<ObjectLink>,
+}
+
+impl From<&str> for ObjectMeta {
+    fn from(s: &str) -> ObjectMeta {
+        ObjectMeta {
+            name: s.to_string(),
+            ..Default::default()
+        }
+    }
 }
