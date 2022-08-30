@@ -522,7 +522,7 @@ type AsyncCallbackArg1<A, T> =
 pub(crate) struct CallbackArg1<A, T>(AsyncCallbackArg1<A, T>);
 
 impl<A, T> CallbackArg1<A, T> {
-    pub async fn call(&self, arg: A) -> T {
+    pub(crate) async fn call(&self, arg: A) -> T {
         (self.0.as_ref())(arg).await
     }
 }
