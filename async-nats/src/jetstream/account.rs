@@ -43,6 +43,7 @@ pub struct Limits {
     /// Indicates if Streams created in this account requires the max_bytes property set
     pub max_bytes_required: bool,
     /// The maximum number of outstanding ACKs any consumer may configure
+    #[serde(skip_serializing_if = "is_default")]
     pub max_ack_pending: i64,
     /// The maximum size any single memory stream may be
     #[serde(deserialize_with = "negative_as_none")]
@@ -96,4 +97,8 @@ pub struct Account {
     /// Tiers associated with this account.
     #[serde(default)]
     pub tiers: HashMap<String, Tier>,
+}
+
+fn is_default<T: Default + Eq>(t: &T) -> bool {
+    t == &T::default()
 }
