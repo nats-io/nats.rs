@@ -95,6 +95,8 @@
 //! #     Ok(())
 //! # }
 
+#![deny(unreachable_pub)]
+
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
@@ -308,7 +310,7 @@ impl ConnectionHandler {
         }
     }
 
-    pub async fn process(
+    pub(crate) async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {

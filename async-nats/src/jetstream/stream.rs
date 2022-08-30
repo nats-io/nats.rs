@@ -723,7 +723,7 @@ pub struct RawMessage {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct GetRawMessage {
-    pub message: RawMessage,
+    pub(crate) message: RawMessage,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
