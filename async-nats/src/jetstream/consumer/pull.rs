@@ -536,6 +536,7 @@ impl futures::Stream for Stream {
                             continue;
                         }
                         StatusCode::IDLE_HEARBEAT => {}
+                            continue;
                         StatusCode::OK => {
                             self.pending_messages = self.pending_messages.saturating_sub(1);
                             return Poll::Ready(Some(Ok(jetstream::Message {
