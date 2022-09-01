@@ -80,6 +80,54 @@ pub struct ObjectStore {
 }
 
 impl ObjectStore {
+    pub async fn get<T: AsRef<str>>(&self, object_name: T) -> Result<Object, Error> {
+        let object_info = self.info(object_name).await?;
+        // if let Some(link) = object_info.link {
+        //     return self.get(link.name).await;
+        // }
+
+        let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
+
+        let subscription = self
+            .stream
+            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                deliver_subject: self.stream.context.client.new_inbox(),
+                ..Default::default()
+            })
+            .await?
+            .messages()
+            .await?;
+
+        Ok(Object::new(subscription, object_info))
+    }
+
+    pub async fn delete<T: AsRef<str>>(&self, object_name: T) -> Result<(), Error> {
+        let object_name = object_name.as_ref();
+        let mut object_info = self.info(object_name).await?;
+        object_info.chunks = 0;
+        object_info.size = 0;
+        object_info.deleted = true;
+
+        let data = serde_json::to_vec(&object_info)?;
+
+        let mut headers = HeaderMap::default();
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.parse()?);
+
+        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+
+        self.stream
+            .context
+            .publish_with_headers(subject, headers, data.into())
+            .await?;
+
+        let stream_name = format!("OBJ_{}", self.name);
+        let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
+
+        self.stream.purge_subject(&chunk_subject).await?;
+
+        Ok(())
+    }
+
     pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
         let object_name = object_name.as_ref();
         let object_name = sanitize_object_name(object_name);
@@ -178,7 +226,13 @@ impl ObjectStore {
             .publish_with_headers(subject, headers, data.into())
             .await?;
 
-        // TODO: purge old chunks
+        // Purge any old chunks.
+        if let Some(existing_object_info) = maybe_existing_object_info {
+            let stream_name = format!("OBJ_{}", self.name);
+            let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
+
+            self.stream.purge_subject(&chunk_subject).await?;
+        }
 
         Ok(object_info)
     }
