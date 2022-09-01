@@ -1046,7 +1046,7 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..50 {
+            for i in 0..25 {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 context
                     .publish(
@@ -1066,7 +1066,7 @@ mod jetstream {
             .messages()
             .await
             .unwrap()
-            .take(100);
+            .take(25);
         while let Some(result) = iter.next().await {
             println!("MESSAGE: {:?}", result);
             result.unwrap().ack().await.unwrap();

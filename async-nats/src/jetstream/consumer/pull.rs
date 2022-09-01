@@ -468,6 +468,9 @@ impl Stream {
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
                         .await;
+                    if let Err(err) = consumer.context.client.flush().await {
+                        debug!("flush failed: {}", err);
+                    }
                     debug!("request published");
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
@@ -545,6 +548,8 @@ impl futures::Stream for Stream {
                         "did not receive idle hearbeat in time",
                     )))))
                 }
+                // ignore this error as that means we haven't got any missing hearbeats that we
+                // haven't read.
                 Err(TryRecvError::Empty) => (),
                 Err(TryRecvError::Closed) => {
                     return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
