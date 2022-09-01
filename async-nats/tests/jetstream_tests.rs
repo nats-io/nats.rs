@@ -39,8 +39,8 @@ mod jetstream {
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
+    use tokio::time::Instant;
     use tokio_retry::Retry;
-    use tracing::Level;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -1046,8 +1046,8 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..100 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+            for i in 0..50 {
+                tokio::time::sleep(Duration::from_millis(200)).await;
                 context
                     .publish(
                         "events".to_string(),
@@ -1062,7 +1062,7 @@ mod jetstream {
             .stream()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(500))
-            .hearbeat(Duration::from_millis(10))
+            .hearbeat(Duration::from_millis(150))
             .messages()
             .await
             .unwrap()
@@ -1222,6 +1222,60 @@ mod jetstream {
             }
         }
     }
+    #[tokio::test]
+    async fn pull_consumer_stream_with_hearbeat() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        context
+            .publish("events".to_string(), "dat".into())
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+
+        messages.next().await.unwrap().unwrap().ack().await.unwrap();
+        let name = &consumer.cached_info().name;
+        stream.delete_consumer(name).await.unwrap();
+        let now = Instant::now();
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        println!("time elapsed {:?}", now.elapsed());
+    }
 
     #[tokio::test]
     async fn consumer_info() {
@@ -1341,11 +1395,6 @@ mod jetstream {
 
     #[tokio::test]
     async fn pull_consumer_with_reconnections() {
-        let subscriber = tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(Level::DEBUG)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber).unwrap();
-
         let mut server =
             nats_server::run_server_with_port("tests/configs/jetstream.conf", Some("2323"));
 

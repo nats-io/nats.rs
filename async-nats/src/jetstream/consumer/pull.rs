@@ -13,8 +13,12 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use std::{task::Poll, time::Duration};
-use tokio::task::JoinHandle;
+use std::{
+    sync::{Arc, Mutex},
+    task::Poll,
+    time::Duration,
+};
+use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle, time::Instant};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -70,7 +74,7 @@ impl Consumer<Config> {
                 expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
                 no_wait: false,
                 max_bytes: 0,
-                idle_heartbeat: Duration::default(),
+                idle_heartbeat: Duration::from_secs(15),
             },
             self,
         )
@@ -396,11 +400,17 @@ pub struct Stream {
     context: Context,
     pending_request: bool,
     task_handle: JoinHandle<()>,
+    hearbeat_handle: Option<JoinHandle<()>>,
+    last_seen: Arc<Mutex<Instant>>,
+    hearbeats_missing: tokio::sync::oneshot::Receiver<()>,
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
         self.task_handle.abort();
+        if let Some(handle) = self.hearbeat_handle.take() {
+            handle.abort()
+        }
     }
 }
 
@@ -469,9 +479,36 @@ impl Stream {
                 // }
             }
         });
+        let last_seen = Arc::new(Mutex::new(Instant::now()));
+        let (missed_heartbeat_tx, missed_hearbeat_rx) = tokio::sync::oneshot::channel();
+        let hearbeat_handle = if !batch_config.idle_heartbeat.is_zero() {
+            debug!("spawning hearbeat checker task");
+            Some(tokio::task::spawn({
+                let last_seen = last_seen.clone();
+                async move {
+                    loop {
+                        tokio::time::sleep(batch_config.idle_heartbeat).await;
+                        debug!("checking for missed hearbeats");
+                        if last_seen
+                            .lock()
+                            .unwrap()
+                            .elapsed()
+                            .ge(&batch_config.idle_heartbeat.saturating_mul(3))
+                        {
+                            debug!("missed hearbeat threshold met");
+                            missed_heartbeat_tx.send(()).unwrap();
+                            break;
+                        }
+                    }
+                }
+            }))
+        } else {
+            None
+        };
 
         Ok(Stream {
             task_handle,
+            hearbeat_handle,
             request_result_rx,
             request_tx,
             batch_config,
@@ -479,6 +516,8 @@ impl Stream {
             subscriber: subscription,
             context: consumer.context.clone(),
             pending_request: false,
+            last_seen,
+            hearbeats_missing: missed_hearbeat_rx,
         })
     }
 }
@@ -498,6 +537,21 @@ impl futures::Stream for Stream {
                 debug!("pending messages reached threshold to send new fetch request");
                 self.request_tx.send(()).unwrap();
                 self.pending_request = true;
+            }
+            match self.hearbeats_missing.try_recv() {
+                Ok(_) => {
+                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "did not receive idle hearbeat in time",
+                    )))))
+                }
+                Err(TryRecvError::Empty) => (),
+                Err(TryRecvError::Closed) => {
+                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "unexpected heartbeat error closure",
+                    )))))
+                }
             }
             match self.request_result_rx.poll_recv(cx) {
                 Poll::Ready(resp) => match resp {
@@ -535,9 +589,17 @@ impl futures::Stream for Stream {
                                 .saturating_sub(self.batch_config.batch);
                             continue;
                         }
-                        StatusCode::IDLE_HEARBEAT => {}
+                        StatusCode::IDLE_HEARBEAT => {
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
                             continue;
+                        }
                         StatusCode::OK => {
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
+                            *self.last_seen.lock().unwrap() = Instant::now();
                             self.pending_messages = self.pending_messages.saturating_sub(1);
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
