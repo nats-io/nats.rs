@@ -27,6 +27,7 @@ use futures::StreamExt;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::Error;
 
@@ -91,6 +92,7 @@ impl ObjectStore {
         let subscription = self
             .stream
             .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                filter_subject: chunk_subject,
                 deliver_subject: self.stream.context.client.new_inbox(),
                 ..Default::default()
             })
@@ -195,7 +197,7 @@ impl ObjectStore {
             object_chunks += 1;
 
             // FIXME: this is ugly
-            let paylaod = bytes::Bytes::from(buffer.to_vec());
+            let paylaod = bytes::Bytes::from(buffer[..n].to_vec());
 
             self.stream
                 .context
@@ -270,7 +272,7 @@ impl tokio::io::AsyncRead for Object<'_> {
     ) -> std::task::Poll<std::io::Result<()>> {
         if !self.remaining_bytes.is_empty() {
             let len = cmp::min(buf.remaining(), self.remaining_bytes.len());
-            buf.put_slice(&self.remaining_bytes[len..]);
+            buf.put_slice(&self.remaining_bytes[..len]);
             self.remaining_bytes = self.remaining_bytes[len..].to_vec();
             return Poll::Ready(Ok(()));
         }
@@ -287,7 +289,8 @@ impl tokio::io::AsyncRead for Object<'_> {
                         })?;
                         let len = cmp::min(buf.remaining(), message.payload.len());
                         buf.put_slice(&message.payload[..len]);
-                        self.remaining_bytes = self.remaining_bytes[len..].to_vec();
+                        self.remaining_bytes
+                            .extend_from_slice(&message.payload[len..]);
 
                         let info = message.info().map_err(|err| {
                             std::io::Error::new(

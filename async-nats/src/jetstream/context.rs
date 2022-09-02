@@ -444,22 +444,23 @@ impl Context {
         let chunk_subject = format!("$O.{}.C.>", bucket_name);
         let meta_subject = format!("$O.{}.M.>", bucket_name);
 
-        self.create_stream(super::stream::Config {
-            name: stream_name,
-            description: config.description.clone(),
-            subjects: vec![chunk_subject, meta_subject],
-            max_age: config.max_age,
-            storage: config.storage,
-            num_replicas: config.num_replicas,
-            discard: DiscardPolicy::New,
-            allow_rollup: true,
-            ..Default::default()
-        })
-        .await?;
+        let stream = self
+            .create_stream(super::stream::Config {
+                name: stream_name,
+                description: config.description.clone(),
+                subjects: vec![chunk_subject, meta_subject],
+                max_age: config.max_age,
+                storage: config.storage,
+                num_replicas: config.num_replicas,
+                discard: DiscardPolicy::New,
+                allow_rollup: true,
+                ..Default::default()
+            })
+            .await?;
 
         Ok(ObjectStore {
             name: bucket_name,
-            context: self.clone(),
+            stream,
         })
     }
 
@@ -494,11 +495,11 @@ impl Context {
             )));
         }
         let stream_name = format!("OBJ_{}", bucket_name);
-        self.get_stream(stream_name).await?;
+        let stream = self.get_stream(stream_name).await?;
 
         Ok(ObjectStore {
             name: bucket_name.to_string(),
-            context: self.clone(),
+            stream,
         })
     }
 
