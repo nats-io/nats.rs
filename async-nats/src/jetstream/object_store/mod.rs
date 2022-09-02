@@ -238,6 +238,12 @@ impl ObjectStore {
 
         Ok(object_info)
     }
+
+    pub async fn watch(&self) -> Result<Watch, Error> {}
+}
+
+pub struct Watch<'a> {
+    subscription: crate::jetstream::consumer::push::Ordered<'a>,
 }
 
 /// Represents an object stored in a bucket.
