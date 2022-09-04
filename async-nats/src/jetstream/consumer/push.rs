@@ -428,17 +428,9 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                 headers.get(crate::header::NATS_LAST_STREAM)
                                             {
                                                 let sequence: u64 = sequence
-                                                    .to_str()
-                                                    .map_err(|err| {
-                                                        Box::new(std::io::Error::new(
-                                                            std::io::ErrorKind::Other,
-                                                            format!(
-                                                                "could not parse header: {}",
-                                                                err
-                                                            ),
-                                                        ))
-                                                    })?
-                                                    .parse().map_err(|err|
+                                                    .iter().next().unwrap()
+                                                    .parse()
+                                                    .map_err(|err|
                                                            Box::new(std::io::Error::new(
                                                                    std::io::ErrorKind::Other,
                                                                    format!("could not parse header into u64: {}", err))

@@ -132,7 +132,7 @@ pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
-pub use header::{HeaderMap, HeaderValue};
+pub use header::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) mod auth_utils;
 mod client;
