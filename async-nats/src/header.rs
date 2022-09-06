@@ -154,7 +154,6 @@ impl HeaderMap {
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
 /// headers.insert("Another", async_nats::HeaderValue::from_str("AnotherValue")?);
-/// headers.insert("Third", "OneMore".parse()?);
 /// # Ok(())
 /// # }
 /// ```
