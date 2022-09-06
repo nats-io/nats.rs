@@ -25,7 +25,7 @@ pub const NATS_LAST_STREAM: &str = "nats-last-stream";
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Default)]
 pub struct HeaderMap {
-    headers: HashMap<HeaderName, HeaderValue>,
+    inner: HashMap<HeaderName, HeaderValue>,
 }
 
 impl FromIterator<(HeaderName, HeaderValue)> for HeaderMap {
@@ -40,7 +40,7 @@ impl FromIterator<(HeaderName, HeaderValue)> for HeaderMap {
 
 impl HeaderMap {
     pub fn iter(&self) -> std::collections::hash_map::Iter<'_, HeaderName, HeaderValue> {
-        self.headers.iter()
+        self.inner.iter()
     }
 }
 
@@ -52,13 +52,13 @@ impl HeaderMap {
 
 impl HeaderMap {
     pub fn insert<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
-        self.headers
+        self.inner
             .insert(name.into_header_name(), value.into_header_value());
     }
 
     pub fn append<K: IntoHeaderName, V: ToString>(&mut self, name: K, value: V) {
         let key = name.into_header_name();
-        let v = self.headers.get_mut(&key);
+        let v = self.inner.get_mut(&key);
         match v {
             Some(v) => {
                 v.value.insert(value.to_string());
@@ -70,13 +70,13 @@ impl HeaderMap {
     }
 
     pub fn get<T: IntoHeaderName>(&self, name: T) -> Option<&HeaderValue> {
-        self.headers.get(&name.into_header_name())
+        self.inner.get(&name.into_header_name())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = vec![];
         buf.extend_from_slice(b"NATS/1.0\r\n");
-        for (k, vs) in &self.headers {
+        for (k, vs) in &self.inner {
             for v in vs.iter() {
                 buf.extend_from_slice(k.value.as_bytes());
                 buf.extend_from_slice(b": ");
