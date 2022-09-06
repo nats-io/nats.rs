@@ -1012,7 +1012,7 @@ impl SubscribeOptions {
         self
     }
 
-    /// Enables hearbeat messages to be sent.
+    /// Enables heartbeat messages to be sent.
     #[allow(clippy::cast_possible_truncation)]
     pub fn idle_heartbeat(mut self, interval: Duration) -> Self {
         self.idle_heartbeat = Some(interval);
