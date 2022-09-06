@@ -1021,7 +1021,7 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn pull_stream_with_hearbeat() {
+    async fn pull_stream_with_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
@@ -1051,7 +1051,7 @@ mod jetstream {
                 context
                     .publish(
                         "events".to_string(),
-                        format!("hearbeat message: {}", i).into(),
+                        format!("heartbeat message: {}", i).into(),
                     )
                     .await
                     .unwrap();
@@ -1062,7 +1062,7 @@ mod jetstream {
             .stream()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(500))
-            .hearbeat(Duration::from_millis(150))
+            .heartbeat(Duration::from_millis(150))
             .messages()
             .await
             .unwrap()
@@ -1104,7 +1104,7 @@ mod jetstream {
                 context
                     .publish(
                         "events".to_string(),
-                        format!("hearbeat message: {}", i).into(),
+                        format!("heartbeat message: {}", i).into(),
                     )
                     .await
                     .unwrap();
@@ -1114,7 +1114,7 @@ mod jetstream {
         let mut iter = consumer
             .stream()
             .max_messages_per_batch(25)
-            .hearbeat(Duration::from_millis(100))
+            .heartbeat(Duration::from_millis(100))
             .expires(Duration::default())
             .messages()
             .await
@@ -1223,7 +1223,7 @@ mod jetstream {
         }
     }
     #[tokio::test]
-    async fn pull_consumer_stream_with_hearbeat() {
+    async fn pull_consumer_stream_with_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {:?}", err) })

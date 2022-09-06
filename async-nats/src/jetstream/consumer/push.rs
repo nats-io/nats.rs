@@ -85,7 +85,7 @@ impl futures::Stream for Messages {
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status {
-                        Some(StatusCode::IDLE_HEARBEAT) => {
+                        Some(StatusCode::IDLE_HEARTBEAT) => {
                             if let Some(subject) = message.reply {
                                 // TODO store pending_publish as a future and return errors from it
                                 let client = self.context.client.clone();
@@ -422,7 +422,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                         match maybe_message {
                             Some(message) => {
                                 match message.status {
-                                    Some(StatusCode::IDLE_HEARBEAT) => {
+                                    Some(StatusCode::IDLE_HEARTBEAT) => {
                                         if let Some(headers) = message.headers.as_ref() {
                                             if let Some(sequence) =
                                                 headers.get(crate::header::NATS_LAST_STREAM)

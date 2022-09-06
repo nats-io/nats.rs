@@ -81,7 +81,7 @@ impl Consumer<Config> {
         .await
     }
 
-    /// Enables customization of [Stream] by setting timeouts, hearbeats, maximum number of
+    /// Enables customization of [Stream] by setting timeouts, heartbeats, maximum number of
     /// messages or bytes buffered.
     ///
     /// # Examples
@@ -310,7 +310,7 @@ impl futures::Stream for Batch {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => Poll::Ready(None),
-                    StatusCode::IDLE_HEARBEAT => Poll::Pending,
+                    StatusCode::IDLE_HEARTBEAT => Poll::Pending,
                     StatusCode::OK => {
                         self.pending_messages -= 1;
                         Poll::Ready(Some(Ok(jetstream::Message {
@@ -400,15 +400,15 @@ pub struct Stream {
     context: Context,
     pending_request: bool,
     task_handle: JoinHandle<()>,
-    hearbeat_handle: Option<JoinHandle<()>>,
+    heartbeat_handle: Option<JoinHandle<()>>,
     last_seen: Arc<Mutex<Instant>>,
-    hearbeats_missing: tokio::sync::oneshot::Receiver<()>,
+    heartbeats_missing: tokio::sync::oneshot::Receiver<()>,
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
         self.task_handle.abort();
-        if let Some(handle) = self.hearbeat_handle.take() {
+        if let Some(handle) = self.heartbeat_handle.take() {
             handle.abort()
         }
     }
@@ -483,22 +483,22 @@ impl Stream {
             }
         });
         let last_seen = Arc::new(Mutex::new(Instant::now()));
-        let (missed_heartbeat_tx, missed_hearbeat_rx) = tokio::sync::oneshot::channel();
-        let hearbeat_handle = if !batch_config.idle_heartbeat.is_zero() {
-            debug!("spawning hearbeat checker task");
+        let (missed_heartbeat_tx, missed_heartbeat_rx) = tokio::sync::oneshot::channel();
+        let heartbeat_handle = if !batch_config.idle_heartbeat.is_zero() {
+            debug!("spawning heartbeat checker task");
             Some(tokio::task::spawn({
                 let last_seen = last_seen.clone();
                 async move {
                     loop {
                         tokio::time::sleep(batch_config.idle_heartbeat).await;
-                        debug!("checking for missed hearbeats");
+                        debug!("checking for missed heartbeats");
                         if last_seen
                             .lock()
                             .unwrap()
                             .elapsed()
                             .ge(&batch_config.idle_heartbeat.saturating_mul(3))
                         {
-                            debug!("missed hearbeat threshold met");
+                            debug!("missed heartbeat threshold met");
                             missed_heartbeat_tx.send(()).unwrap();
                             break;
                         }
@@ -511,7 +511,7 @@ impl Stream {
 
         Ok(Stream {
             task_handle,
-            hearbeat_handle,
+            heartbeat_handle,
             request_result_rx,
             request_tx,
             batch_config,
@@ -520,7 +520,7 @@ impl Stream {
             context: consumer.context.clone(),
             pending_request: false,
             last_seen,
-            hearbeats_missing: missed_hearbeat_rx,
+            heartbeats_missing: missed_heartbeat_rx,
         })
     }
 }
@@ -541,14 +541,14 @@ impl futures::Stream for Stream {
                 self.request_tx.send(()).unwrap();
                 self.pending_request = true;
             }
-            match self.hearbeats_missing.try_recv() {
+            match self.heartbeats_missing.try_recv() {
                 Ok(_) => {
                     return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
-                        "did not receive idle hearbeat in time",
+                        "did not receive idle heartbeat in time",
                     )))))
                 }
-                // ignore this error as that means we haven't got any missing hearbeats that we
+                // ignore this error as that means we haven't got any missing heartbeats that we
                 // haven't read.
                 Err(TryRecvError::Empty) => (),
                 Err(TryRecvError::Closed) => {
@@ -594,7 +594,7 @@ impl futures::Stream for Stream {
                                 .saturating_sub(self.batch_config.batch);
                             continue;
                         }
-                        StatusCode::IDLE_HEARBEAT => {
+                        StatusCode::IDLE_HEARTBEAT => {
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
@@ -663,7 +663,7 @@ impl futures::Stream for Stream {
 pub struct StreamBuilder<'a> {
     batch: usize,
     max_bytes: usize,
-    hearbeat: Duration,
+    heartbeat: Duration,
     expires: usize,
     consumer: &'a Consumer<Config>,
 }
@@ -675,7 +675,7 @@ impl<'a> StreamBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: Duration::from_secs(30).as_nanos().try_into().unwrap(),
-            hearbeat: Duration::default(),
+            heartbeat: Duration::default(),
         }
     }
 
@@ -753,7 +753,7 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
-    /// Sets hearbeat which will be send by the server if there are no messages for a given
+    /// Sets heartbeat which will be send by the server if there are no messages for a given
     /// [Consumer] pending.
     ///
     /// # Examples
@@ -771,7 +771,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_consumer("pull").await?;
     ///
     /// let mut messages = consumer.stream()
-    ///     .hearbeat(std::time::Duration::from_secs(10))
+    ///     .heartbeat(std::time::Duration::from_secs(10))
     ///     .messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
@@ -781,8 +781,8 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn hearbeat(mut self, hearbeat: Duration) -> Self {
-        self.hearbeat = hearbeat;
+    pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.heartbeat = heartbeat;
         self
     }
 
@@ -854,7 +854,7 @@ impl<'a> StreamBuilder<'a> {
                 expires: Some(self.expires),
                 no_wait: false,
                 max_bytes: self.max_bytes,
-                idle_heartbeat: self.hearbeat,
+                idle_heartbeat: self.heartbeat,
             },
             self.consumer,
         )
@@ -893,7 +893,7 @@ impl<'a> StreamBuilder<'a> {
 pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
-    hearbeat: Duration,
+    heartbeat: Duration,
     expires: usize,
     consumer: &'a Consumer<Config>,
 }
@@ -905,7 +905,7 @@ impl<'a> FetchBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: 0,
-            hearbeat: Duration::default(),
+            heartbeat: Duration::default(),
         }
     }
 
@@ -981,7 +981,7 @@ impl<'a> FetchBuilder<'a> {
         self
     }
 
-    /// Sets hearbeat which will be send by the server if there are no messages for a given
+    /// Sets heartbeat which will be send by the server if there are no messages for a given
     /// [Consumer] pending.
     ///
     /// # Examples
@@ -999,7 +999,7 @@ impl<'a> FetchBuilder<'a> {
     ///     .get_consumer("pull").await?;
     ///
     /// let mut messages = consumer.fetch()
-    ///     .hearbeat(std::time::Duration::from_secs(10))
+    ///     .heartbeat(std::time::Duration::from_secs(10))
     ///     .messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
@@ -1009,8 +1009,8 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn hearbeat(mut self, hearbeat: Duration) -> Self {
-        self.hearbeat = hearbeat;
+    pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.heartbeat = heartbeat;
         self
     }
 
@@ -1083,7 +1083,7 @@ impl<'a> FetchBuilder<'a> {
                 expires: Some(self.expires),
                 no_wait: true,
                 max_bytes: self.max_bytes,
-                idle_heartbeat: self.hearbeat,
+                idle_heartbeat: self.heartbeat,
             },
             self.consumer,
         )
@@ -1122,7 +1122,7 @@ impl<'a> FetchBuilder<'a> {
 pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
-    hearbeat: Duration,
+    heartbeat: Duration,
     expires: usize,
     consumer: &'a Consumer<Config>,
 }
@@ -1134,7 +1134,7 @@ impl<'a> BatchBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: 0,
-            hearbeat: Duration::default(),
+            heartbeat: Duration::default(),
         }
     }
 
@@ -1212,7 +1212,7 @@ impl<'a> BatchBuilder<'a> {
         self
     }
 
-    /// Sets hearbeat which will be send by the server if there are no messages for a given
+    /// Sets heartbeat which will be send by the server if there are no messages for a given
     /// [Consumer] pending.
     ///
     /// # Examples
@@ -1230,7 +1230,7 @@ impl<'a> BatchBuilder<'a> {
     ///     .get_consumer("pull").await?;
     ///
     /// let mut messages = consumer.batch()
-    ///     .hearbeat(std::time::Duration::from_secs(10))
+    ///     .heartbeat(std::time::Duration::from_secs(10))
     ///     .messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
@@ -1240,8 +1240,8 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn hearbeat(mut self, hearbeat: Duration) -> Self {
-        self.hearbeat = hearbeat;
+    pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.heartbeat = heartbeat;
         self
     }
 
@@ -1313,7 +1313,7 @@ impl<'a> BatchBuilder<'a> {
                 expires: Some(self.expires),
                 no_wait: false,
                 max_bytes: self.max_bytes,
-                idle_heartbeat: self.hearbeat,
+                idle_heartbeat: self.heartbeat,
             },
             self.consumer,
         )
@@ -1341,7 +1341,7 @@ pub struct BatchConfig {
     /// Whichever value is reached first, batch will complete.
     pub max_bytes: usize,
 
-    /// Setting this other than zero will cause the server to send 100 Idle Hearbeat status to the
+    /// Setting this other than zero will cause the server to send 100 Idle Heartbeat status to the
     /// client
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
