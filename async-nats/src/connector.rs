@@ -114,9 +114,7 @@ impl Connector {
             *server_attempts += 1;
             sleep(duration).await;
 
-            let socket_addrs = server_addr
-                .socket_addrs()
-                .map_err(|err| ConnectError::ResolveHost(err))?;
+            let socket_addrs = server_addr.socket_addrs().map_err(ConnectError::Dns)?;
             for socket_addr in socket_addrs {
                 match self
                     .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
@@ -126,7 +124,7 @@ impl Connector {
                         for url in &server_info.connect_urls {
                             let server_addr = url
                                 .parse::<ServerAddr>()
-                                .map_err(|_| ConnectError::ServerListParse)?;
+                                .map_err(|_| ConnectError::ServerParse)?;
                             self.servers.entry(server_addr).or_insert(0);
                         }
 
@@ -156,10 +154,7 @@ impl Connector {
 
                         match &self.options.auth {
                             Authorization::None => {
-                                connection
-                                    .write_op(ClientOp::Connect(connect_info))
-                                    .await
-                                    .map_err(|err| ConnectError::WriteError(err))?;
+                                connection.write_op(ClientOp::Connect(connect_info)).await?;
 
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
@@ -181,12 +176,10 @@ impl Connector {
                                                 connect_info.signature =
                                                     Some(base64_url::encode(&signed));
                                             }
-                                            Err(e) => {
-                                                return Err(ConnectError::AuthenticationChallenge)
-                                            }
+                                            Err(e) => return Err(ConnectError::Authentication),
                                         };
                                     }
-                                    Err(e) => return Err(ConnectError::AuthenticationChallenge),
+                                    Err(e) => return Err(ConnectError::Authentication),
                                 }
                             }
                             Authorization::Jwt(jwt, sign_fn) => {
@@ -195,31 +188,21 @@ impl Connector {
                                         connect_info.user_jwt = Some(jwt.clone());
                                         connect_info.signature = Some(sig);
                                     }
-                                    Err(e) => return Err(ConnectError::AuthenticationChallenge),
+                                    Err(e) => return Err(ConnectError::Authentication),
                                 }
                             }
                         }
 
-                        connection
-                            .write_op(ClientOp::Connect(connect_info))
-                            .await
-                            .map_err(|err| ConnectError::WriteError(err))?;
-                        connection
-                            .write_op(ClientOp::Ping)
-                            .await
-                            .map_err(|err| ConnectError::WriteError(err))?;
-                        connection
-                            .flush()
-                            .await
-                            .map_err(|err| ConnectError::WriteError(err))?;
+                        connection.write_op(ClientOp::Connect(connect_info)).await?;
+                        connection.write_op(ClientOp::Ping).await?;
+                        connection.flush().await?;
 
-                        match connection
-                            .read_op()
-                            .await
-                            .map_err(|err| ConnectError::WriteError(err))?
-                        {
+                        match connection.read_op().await? {
                             Some(ServerOp::Error(err)) => {
-                                return Err(ConnectError::ReadError(err));
+                                return Err(ConnectError::Io(std::io::Error::new(
+                                    ErrorKind::Other,
+                                    format!("server error: {}", err),
+                                )));
                             }
                             Some(_) => {
                                 self.state_tx.send(State::Connected).ok();
@@ -245,41 +228,36 @@ impl Connector {
     ) -> Result<(ServerInfo, Connection), ConnectError> {
         let tls_config = tls::config_tls(&self.options)
             .await
-            .map_err(|err| ConnectError::TLSError(err))?;
+            .map_err(|err| ConnectError::Tls(err))?;
 
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
         )
         .await
-        .map_err(|_| ConnectError::Timeout)?
-        .map_err(|err| ConnectError::TcpStreamError(err))?;
+        .map_err(|_| ConnectError::Timeout)??;
 
-        tcp_stream
-            .set_nodelay(true)
-            .map_err(|err| ConnectError::TcpStreamError(err))?;
+        tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection {
             stream: Box::new(BufWriter::new(tcp_stream)),
             buffer: BytesMut::new(),
         };
 
-        let op = connection
-            .read_op()
-            .await
-            .map_err(|err| ConnectError::ReadOp(err))?;
+        let op = connection.read_op().await?;
         let info = match op {
             Some(ServerOp::Info(info)) => info,
             Some(op) => {
-                return Err(ConnectError::WrongOp(format!(
-                    "expected info, got {:?}",
-                    op
+                return Err(ConnectError::Io(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("expected info, got {:?}", op),
                 )))
             }
             None => {
-                return Err(ConnectError::WrongOp(
-                    "expected info, got nothing".to_string(),
-                ))
+                return Err(ConnectError::Io(std::io::Error::new(
+                    ErrorKind::Other,
+                    "expected info, got nothing",
+                )))
             }
         };
 
@@ -292,7 +270,7 @@ impl Connector {
                         format!("failed to create TLS connector from TLS config: {}", err),
                     )
                 })
-                .map_err(|err| ConnectError::TLSError(err))?;
+                .map_err(|err| ConnectError::Tls(err))?;
 
             // Use the server-advertised hostname to validate if given as a hostname, not an IP address
             let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
@@ -308,16 +286,11 @@ impl Connector {
                     ErrorKind::InvalidInput,
                     "cannot determine hostname for TLS connection",
                 ))
-                .map_err(|err| ConnectError::TLSError(err));
+                .map_err(|err| ConnectError::Tls(err));
             };
 
             connection = Connection {
-                stream: Box::new(
-                    tls_connector
-                        .connect(domain, connection.stream)
-                        .await
-                        .map_err(|err| ConnectError::TcpStreamError(err))?,
-                ),
+                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
                 buffer: BytesMut::new(),
             };
         };

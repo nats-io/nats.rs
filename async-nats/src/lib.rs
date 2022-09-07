@@ -105,6 +105,7 @@ use futures::stream::Stream;
 
 use core::fmt;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
@@ -635,7 +636,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         events_tx,
         state_tx,
     )
-    .map_err(|_| ConnectError::ServerListParse)?;
+    .map_err(|_| ConnectError::ServerParse)?;
 
     let (info, connection) = connector.try_connect().await?;
 
@@ -732,27 +733,28 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError>
 #[derive(Error, Debug)]
 pub enum ConnectError {
     #[error("failed to parse server or server list")]
-    ServerListParse,
-    #[error("failed to resolve a socket address")]
-    ResolveHost(#[source] io::Error),
+    ServerParse,
+    #[error("DNS error: {0}")]
+    Dns(io::Error),
     #[error("failed signing nonce")]
-    AuthenticationChallenge,
-    #[error("failed to write to socket")]
-    WriteError(#[source] io::Error),
-    #[error("failed to read response")]
-    ReadError(ServerError),
+    Authentication,
     #[error("connection aborted")]
     ConnectionAborted,
-    #[error("TLS error")]
-    TLSError(#[source] io::Error),
+    #[error("TLS error: {0}")]
+    Tls(#[source] io::Error),
     #[error("connection: timeout elapsed with no server response")]
     Timeout,
-    #[error("failed to create TCP Stream")]
-    TcpStreamError(#[source] io::Error),
-    #[error("failed to read server op")]
-    ReadOp(#[source] io::Error),
-    #[error("unexpected op `{0}`")]
-    WrongOp(String),
+    #[error("Io error")]
+    Io(#[from] io::Error),
+}
+
+#[cfg(test)]
+mod error {
+    use crate::{ConnectError, Test};
+    use std::error::Error;
+
+    #[tokio::test]
+    async fn source() {}
 }
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
