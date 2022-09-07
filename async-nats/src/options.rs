@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Authorization, Client, Event, ToServerAddrs};
+use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
 use futures::Future;
 use std::fmt::Formatter;
 use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
@@ -133,7 +133,7 @@ impl ConnectOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect<A: ToServerAddrs>(self, addrs: A) -> io::Result<Client> {
+    pub async fn connect<A: ToServerAddrs>(self, addrs: A) -> Result<Client, ConnectError> {
         crate::connect_with_options(addrs, self).await
     }
 

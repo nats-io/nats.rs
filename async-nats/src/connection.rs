@@ -303,6 +303,7 @@ impl Connection {
         ))
     }
 
+    // TODO: do we want an custom error here?
     pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         loop {
             if let Some(op) = self.try_read_op()? {

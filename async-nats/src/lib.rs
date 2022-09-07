@@ -97,6 +97,8 @@
 
 #![deny(unreachable_pub)]
 
+use thiserror::Error;
+
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
@@ -611,7 +613,7 @@ impl ConnectionHandler {
 pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
-) -> Result<Client, io::Error> {
+) -> Result<Client, ConnectError> {
     let ping_interval = options.ping_interval;
     let flush_interval = options.flush_interval;
 
@@ -632,7 +634,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         },
         events_tx,
         state_tx,
-    )?;
+    )
+    .map_err(|_| ConnectError::ServerListParse)?;
 
     let (info, connection) = connector.try_connect().await?;
 
@@ -722,8 +725,34 @@ impl fmt::Display for Event {
 /// # Ok(())
 /// # }
 /// ```
-pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
+pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
+}
+
+#[derive(Error, Debug)]
+pub enum ConnectError {
+    #[error("failed to parse server or server list")]
+    ServerListParse,
+    #[error("failed to resolve a socket address")]
+    ResolveHost(#[source] io::Error),
+    #[error("failed signing nonce")]
+    AuthenticationChallenge,
+    #[error("failed to write to socket")]
+    WriteError(#[source] io::Error),
+    #[error("failed to read response")]
+    ReadError(ServerError),
+    #[error("connection aborted")]
+    ConnectionAborted,
+    #[error("TLS error")]
+    TLSError(#[source] io::Error),
+    #[error("connection: timeout elapsed with no server response")]
+    Timeout,
+    #[error("failed to create TCP Stream")]
+    TcpStreamError(#[source] io::Error),
+    #[error("failed to read server op")]
+    ReadOp(#[source] io::Error),
+    #[error("unexpected op `{0}`")]
+    WrongOp(String),
 }
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].

@@ -17,6 +17,7 @@ use crate::tls;
 use crate::Authorization;
 use crate::ClientError;
 use crate::ClientOp;
+use crate::ConnectError;
 use crate::ConnectInfo;
 use crate::Event;
 use crate::Protocol;
@@ -95,7 +96,7 @@ impl Connector {
         }
     }
 
-    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         let mut error = None;
 
         let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
@@ -113,7 +114,9 @@ impl Connector {
             *server_attempts += 1;
             sleep(duration).await;
 
-            let socket_addrs = server_addr.socket_addrs()?;
+            let socket_addrs = server_addr
+                .socket_addrs()
+                .map_err(|err| ConnectError::ResolveHost(err))?;
             for socket_addr in socket_addrs {
                 match self
                     .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
@@ -121,7 +124,9 @@ impl Connector {
                 {
                     Ok((server_info, mut connection)) => {
                         for url in &server_info.connect_urls {
-                            let server_addr = url.parse::<ServerAddr>()?;
+                            let server_addr = url
+                                .parse::<ServerAddr>()
+                                .map_err(|_| ConnectError::ServerListParse)?;
                             self.servers.entry(server_addr).or_insert(0);
                         }
 
@@ -151,7 +156,10 @@ impl Connector {
 
                         match &self.options.auth {
                             Authorization::None => {
-                                connection.write_op(ClientOp::Connect(connect_info)).await?;
+                                connection
+                                    .write_op(ClientOp::Connect(connect_info))
+                                    .await
+                                    .map_err(|err| ConnectError::WriteError(err))?;
 
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
@@ -174,22 +182,11 @@ impl Connector {
                                                     Some(base64_url::encode(&signed));
                                             }
                                             Err(e) => {
-                                                return Err(std::io::Error::new(
-                                                    ErrorKind::Other,
-                                                    format!(
-                                                        "NKey auth: failed signing the nonce: {}",
-                                                        e
-                                                    ),
-                                                ));
+                                                return Err(ConnectError::AuthenticationChallenge)
                                             }
                                         };
                                     }
-                                    Err(e) => {
-                                        return Err(std::io::Error::new(
-                                            ErrorKind::Other,
-                                            format!("NKey auth: failed signing the nonce: {}", e),
-                                        ));
-                                    }
+                                    Err(e) => return Err(ConnectError::AuthenticationChallenge),
                                 }
                             }
                             Authorization::Jwt(jwt, sign_fn) => {
@@ -198,37 +195,37 @@ impl Connector {
                                         connect_info.user_jwt = Some(jwt.clone());
                                         connect_info.signature = Some(sig);
                                     }
-                                    Err(e) => {
-                                        return Err(std::io::Error::new(
-                                            ErrorKind::Other,
-                                            format!("JWT auth: failed signing the nonce: {}", e),
-                                        ));
-                                    }
+                                    Err(e) => return Err(ConnectError::AuthenticationChallenge),
                                 }
                             }
                         }
 
-                        connection.write_op(ClientOp::Connect(connect_info)).await?;
-                        connection.write_op(ClientOp::Ping).await?;
-                        connection.flush().await?;
+                        connection
+                            .write_op(ClientOp::Connect(connect_info))
+                            .await
+                            .map_err(|err| ConnectError::WriteError(err))?;
+                        connection
+                            .write_op(ClientOp::Ping)
+                            .await
+                            .map_err(|err| ConnectError::WriteError(err))?;
+                        connection
+                            .flush()
+                            .await
+                            .map_err(|err| ConnectError::WriteError(err))?;
 
-                        match connection.read_op().await? {
+                        match connection
+                            .read_op()
+                            .await
+                            .map_err(|err| ConnectError::WriteError(err))?
+                        {
                             Some(ServerOp::Error(err)) => {
-                                return Err(io::Error::new(
-                                    ErrorKind::InvalidInput,
-                                    err.to_string(),
-                                ));
+                                return Err(ConnectError::ReadError(err));
                             }
                             Some(_) => {
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
-                            None => {
-                                return Err(io::Error::new(
-                                    ErrorKind::BrokenPipe,
-                                    "connection aborted",
-                                ))
-                            }
+                            None => return Err(ConnectError::ConnectionAborted),
                         }
                     }
 
@@ -245,54 +242,57 @@ impl Connector {
         socket_addr: &SocketAddr,
         tls_required: bool,
         tls_host: &str,
-    ) -> Result<(ServerInfo, Connection), io::Error> {
-        let tls_config = tls::config_tls(&self.options).await?;
+    ) -> Result<(ServerInfo, Connection), ConnectError> {
+        let tls_config = tls::config_tls(&self.options)
+            .await
+            .map_err(|err| ConnectError::TLSError(err))?;
 
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
         )
         .await
-        .map_err(|_| {
-            io::Error::new(
-                ErrorKind::TimedOut,
-                "connection: timeout elapsed with no server response",
-            )
-        })??;
+        .map_err(|_| ConnectError::Timeout)?
+        .map_err(|err| ConnectError::TcpStreamError(err))?;
 
-        tcp_stream.set_nodelay(true)?;
+        tcp_stream
+            .set_nodelay(true)
+            .map_err(|err| ConnectError::TcpStreamError(err))?;
 
         let mut connection = Connection {
             stream: Box::new(BufWriter::new(tcp_stream)),
             buffer: BytesMut::new(),
         };
 
-        let op = connection.read_op().await?;
+        let op = connection
+            .read_op()
+            .await
+            .map_err(|err| ConnectError::ReadOp(err))?;
         let info = match op {
             Some(ServerOp::Info(info)) => info,
             Some(op) => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    format!("expected INFO, got {:?}", op),
-                ))
+                return Err(ConnectError::WrongOp(format!(
+                    "expected info, got {:?}",
+                    op
+                )))
             }
             None => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    "expected INFO, got nothing",
+                return Err(ConnectError::WrongOp(
+                    "expected info, got nothing".to_string(),
                 ))
             }
         };
 
         if self.options.tls_required || info.tls_required || tls_required {
             let tls_config = Arc::new(tls_config);
-            let tls_connector =
-                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
+            let tls_connector = tokio_rustls::TlsConnector::try_from(tls_config)
+                .map_err(|err| {
                     io::Error::new(
                         ErrorKind::Other,
                         format!("failed to create TLS connector from TLS config: {}", err),
                     )
-                })?;
+                })
+                .map_err(|err| ConnectError::TLSError(err))?;
 
             // Use the server-advertised hostname to validate if given as a hostname, not an IP address
             let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
@@ -307,11 +307,17 @@ impl Connector {
                 return Err(io::Error::new(
                     ErrorKind::InvalidInput,
                     "cannot determine hostname for TLS connection",
-                ));
+                ))
+                .map_err(|err| ConnectError::TLSError(err));
             };
 
             connection = Connection {
-                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
+                stream: Box::new(
+                    tls_connector
+                        .connect(domain, connection.stream)
+                        .await
+                        .map_err(|err| ConnectError::TcpStreamError(err))?,
+                ),
                 buffer: BytesMut::new(),
             };
         };
