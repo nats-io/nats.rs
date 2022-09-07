@@ -738,12 +738,8 @@ pub enum ConnectError {
     Dns(io::Error),
     #[error("failed signing nonce")]
     Authentication,
-    #[error("connection aborted")]
-    ConnectionAborted,
     #[error("TLS error: {0}")]
     Tls(#[source] io::Error),
-    #[error("connection: timeout elapsed with no server response")]
-    Timeout,
     #[error("Io error")]
     Io(#[from] io::Error),
 }

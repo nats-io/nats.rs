@@ -208,7 +208,12 @@ impl Connector {
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
-                            None => return Err(ConnectError::ConnectionAborted),
+                            None => {
+                                return Err(ConnectError::Io(std::io::Error::new(
+                                    ErrorKind::ConnectionAborted,
+                                    "connection aborted",
+                                )))
+                            }
                         }
                     }
 
@@ -228,14 +233,16 @@ impl Connector {
     ) -> Result<(ServerInfo, Connection), ConnectError> {
         let tls_config = tls::config_tls(&self.options)
             .await
-            .map_err(|err| ConnectError::Tls(err))?;
+            .map_err(ConnectError::Tls)?;
 
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
         )
         .await
-        .map_err(|_| ConnectError::Timeout)??;
+        .map_err(|_| {
+            ConnectError::Io(io::Error::new(ErrorKind::TimedOut, "connection timed out"))
+        })??;
 
         tcp_stream.set_nodelay(true)?;
 
