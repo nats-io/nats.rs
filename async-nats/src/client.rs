@@ -174,7 +174,7 @@ impl Client {
         subject: String,
         reply: String,
         payload: Bytes,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -206,25 +206,21 @@ impl Client {
         Ok(())
     }
 
-    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
+    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, RequestError> {
         let inbox = self.new_inbox();
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply(subject, inbox, payload).await?;
-        self.flush().await?;
+        self.flush()
+            .await
+            .map_err(|_| RequestError::Io(IoErrorKind::FlushError))?;
         match sub.next().await {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
+                    return Err(RequestError::NoResponders);
                 }
                 Ok(message)
             }
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
+            None => Err(RequestError::Io(IoErrorKind::BrokenPipe)),
         }
     }
 
@@ -233,26 +229,22 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, RequestError> {
         let inbox = self.new_inbox();
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply_and_headers(subject, inbox, headers, payload)
             .await?;
-        self.flush().await?;
+        self.flush()
+            .await
+            .map_err(|_| RequestError::Io(IoErrorKind::FlushError))?;
         match sub.next().await {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
+                    return Err(RequestError::NoResponders);
                 }
                 Ok(message)
             }
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
+            None => Err(RequestError::Io(IoErrorKind::BrokenPipe)),
         }
     }
 
@@ -272,7 +264,7 @@ impl Client {
         format!("{}.{}", self.inbox_prefix, nuid::next())
     }
 
-    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
+    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, SubscribeError> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -329,5 +321,42 @@ impl Client {
     /// ```
     pub fn connection_state(&self) -> State {
         self.state.borrow().to_owned()
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("failed to send subscribe")]
+pub struct SubscribeError(#[from] mpsc::error::SendError<Command>);
+
+#[derive(Debug, Error)]
+pub enum RequestError {
+    #[error("request timed out")]
+    TimedOut,
+    #[error("no responders")]
+    NoResponders,
+    #[error("request error: {0:?}")]
+    Io(IoErrorKind),
+}
+
+#[derive(Debug, Error)]
+pub enum IoErrorKind {
+    #[error(transparent)]
+    PublishError(mpsc::error::SendError<Command>),
+    #[error(transparent)]
+    SubscribeError(mpsc::error::SendError<Command>),
+    #[error("failed to flush request")]
+    FlushError,
+    #[error("iterator closed, broken pipe")]
+    BrokenPipe,
+}
+
+impl From<PublishError> for RequestError {
+    fn from(e: PublishError) -> Self {
+        RequestError::Io(IoErrorKind::PublishError(e.0))
+    }
+}
+impl From<SubscribeError> for RequestError {
+    fn from(e: SubscribeError) -> Self {
+        RequestError::Io(IoErrorKind::SubscribeError(e.0))
     }
 }

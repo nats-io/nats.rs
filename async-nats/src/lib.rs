@@ -105,7 +105,6 @@ use futures::stream::Stream;
 
 use core::fmt;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
@@ -742,15 +741,6 @@ pub enum ConnectError {
     Tls(#[source] io::Error),
     #[error("Io error")]
     Io(#[from] io::Error),
-}
-
-#[cfg(test)]
-mod error {
-    use crate::{ConnectError, Test};
-    use std::error::Error;
-
-    #[tokio::test]
-    async fn source() {}
 }
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].

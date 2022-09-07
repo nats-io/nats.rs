@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
+use futures::{future::BoxFuture, TryFutureExt};
 use std::{
     sync::{Arc, Mutex},
     task::Poll,
@@ -467,6 +467,9 @@ impl Stream {
                     let result = context
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
+                        .map_err(|err| {
+                            Box::new(std::io::Error::new(std::io::ErrorKind::Other, err))
+                        })
                         .await;
                     if let Err(err) = consumer.context.client.flush().await {
                         debug!("flush failed: {}", err);

@@ -39,7 +39,7 @@ use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tokio_rustls::rustls::{self};
+use tokio_rustls::rustls;
 
 pub(crate) struct ConnectorOptions {
     pub(crate) tls_required: bool,
@@ -176,10 +176,10 @@ impl Connector {
                                                 connect_info.signature =
                                                     Some(base64_url::encode(&signed));
                                             }
-                                            Err(e) => return Err(ConnectError::Authentication),
+                                            Err(_) => return Err(ConnectError::Authentication),
                                         };
                                     }
-                                    Err(e) => return Err(ConnectError::Authentication),
+                                    Err(_) => return Err(ConnectError::Authentication),
                                 }
                             }
                             Authorization::Jwt(jwt, sign_fn) => {
@@ -188,7 +188,7 @@ impl Connector {
                                         connect_info.user_jwt = Some(jwt.clone());
                                         connect_info.signature = Some(sig);
                                     }
-                                    Err(e) => return Err(ConnectError::Authentication),
+                                    Err(_) => return Err(ConnectError::Authentication),
                                 }
                             }
                         }
@@ -277,7 +277,7 @@ impl Connector {
                         format!("failed to create TLS connector from TLS config: {}", err),
                     )
                 })
-                .map_err(|err| ConnectError::Tls(err))?;
+                .map_err(ConnectError::Tls)?;
 
             // Use the server-advertised hostname to validate if given as a hostname, not an IP address
             let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
@@ -293,7 +293,7 @@ impl Connector {
                     ErrorKind::InvalidInput,
                     "cannot determine hostname for TLS connection",
                 ))
-                .map_err(|err| ConnectError::Tls(err));
+                .map_err(ConnectError::Tls);
             };
 
             connection = Connection {
