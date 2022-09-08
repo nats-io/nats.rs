@@ -24,7 +24,6 @@ use std::error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
 
 lazy_static! {
@@ -300,11 +299,16 @@ impl Client {
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
-    pub async fn flush(&self) -> Result<(), Error> {
+    pub async fn flush(&self) -> Result<(), FlushError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sender.send(Command::Flush { result: tx }).await?;
+        self.sender
+            .send(Command::Flush { result: tx })
+            .await
+            .map_err(FlushError::SendError)?;
         // first question mark is an error from rx itself, second for error from flush.
-        rx.await??;
+        rx.await
+            .map_err(|_| FlushError::FlushError)?
+            .map_err(|_| FlushError::FlushError)?;
         Ok(())
     }
 
@@ -336,6 +340,14 @@ pub enum RequestError {
     NoResponders,
     #[error("request error: {0:?}")]
     Io(IoErrorKind),
+}
+
+#[derive(Debug, Error)]
+pub enum FlushError {
+    #[error("failed to send flush request")]
+    SendError(mpsc::error::SendError<Command>),
+    #[error("flush failed")]
+    FlushError,
 }
 
 #[derive(Debug, Error)]
