@@ -14,12 +14,13 @@
 use std::{
     cmp,
     io::{self, ErrorKind},
+    str::FromStr,
     task::Poll,
     time::Duration,
 };
 
+use crate::{HeaderMap, HeaderValue};
 use bytes::Bytes;
-use http::HeaderMap;
 use tokio::io::AsyncReadExt;
 
 use base64_url::base64;
@@ -113,7 +114,7 @@ impl ObjectStore {
         let data = serde_json::to_vec(&object_info)?;
 
         let mut headers = HeaderMap::default();
-        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.parse()?);
+        headers.insert(NATS_ROLLUP, HeaderValue::from_str(ROLLUP_SUBJECT)?);
 
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
 
@@ -220,7 +221,7 @@ impl ObjectStore {
         };
 
         let mut headers = HeaderMap::new();
-        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.parse()?);
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.parse::<HeaderValue>()?);
         let data = serde_json::to_vec(&object_info)?;
 
         self.stream
@@ -239,7 +240,7 @@ impl ObjectStore {
         Ok(object_info)
     }
 
-    pub async fn watch(&self) -> Result<Watch, Error> {}
+    // pub async fn watch(&self) -> Result<Watch, Error> {}
 }
 
 pub struct Watch<'a> {
