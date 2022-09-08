@@ -142,7 +142,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> async_nats::ConnectError {
     /// let nc =
     /// async_nats::ConnectOptions::with_token("t0k3n!".into()).connect("demo.nats.io").await?;
     /// # Ok(())
@@ -160,7 +160,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> async_nats::ConnectError {
     /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
     ///     .connect("demo.nats.io").await?;
     /// # Ok(())
@@ -178,7 +178,7 @@ impl ConnectOptions {
     /// # Example
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> async_nats::ConnectError {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let nc = async_nats::ConnectOptions::with_nkey(seed.into())
     ///     .connect("localhost").await?;

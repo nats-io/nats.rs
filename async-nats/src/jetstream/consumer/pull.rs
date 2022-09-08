@@ -12,8 +12,9 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, TryFutureExt};
+use futures::future::BoxFuture;
 use std::{
+    io,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,
@@ -463,23 +464,15 @@ impl Stream {
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
-
                     let result = context
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
-                        .map_err(|err| {
-                            Box::new(std::io::Error::new(std::io::ErrorKind::Other, err))
-                        })
-                        .await;
-                    if let Err(err) = consumer.context.client.flush().await {
-                        debug!("flush failed: {}", err);
-                    }
-                    debug!("request published");
-                    // TODO: add tracing instead of ignoring this.
-                    request_result_tx
-                        .send(result.map(|_| pending_reset))
                         .await
-                        .unwrap();
+                        .map(|_| pending_reset)
+                        .map_err(|err| Box::from(io::Error::new(io::ErrorKind::Other, err)));
+
+                    // TODO: add tracing instead of ignoring this.
+                    request_result_tx.send(result).await.unwrap();
                     trace!("result send over tx");
                 }
                 // }

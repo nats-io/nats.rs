@@ -14,7 +14,7 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectOptions, Event};
+    use async_nats::{ConnectError, ConnectOptions, Event};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -586,10 +586,11 @@ mod client {
             .connect("nats://127.0.0.1:4848")
             .await;
 
-        assert_eq!(
-            timeout_result.unwrap_err().kind(),
-            std::io::ErrorKind::TimedOut
-        );
+        if let Err(ConnectError::Io(err)) = timeout_result {
+            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        } else {
+            panic!("wrong error type");
+        }
         startup_listener.notify_one();
     }
 
