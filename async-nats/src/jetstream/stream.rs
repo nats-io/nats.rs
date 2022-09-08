@@ -15,7 +15,7 @@
 
 use std::{
     io::{self, ErrorKind},
-    str::{from_utf8, FromStr},
+    str::FromStr,
     time::Duration,
 };
 
@@ -842,12 +842,8 @@ fn parse_headers(
 
             headers.insert(
                 HeaderName::from_str(k)?,
-                HeaderValue::from_str(&s).map_err(|err| {
-                    Box::from(io::Error::new(
-                        ErrorKind::Other,
-                        "failed to parse header from str",
-                    ))
-                })?,
+                HeaderValue::from_str(&s)
+                    .map_err(|err| Box::new(io::Error::new(ErrorKind::Other, err)))?,
             );
         } else {
             return Err(Box::new(std::io::Error::new(
@@ -857,7 +853,7 @@ fn parse_headers(
         }
     }
 
-    if headers. {
+    if true {
         Ok((None, maybe_status, maybe_description))
     } else {
         Ok((Some(headers), maybe_status, maybe_description))
