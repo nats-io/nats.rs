@@ -271,7 +271,7 @@ impl Store {
         Ok(())
     }
 
-    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History, Error> {
+    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, Error> {
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
