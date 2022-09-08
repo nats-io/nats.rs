@@ -20,7 +20,7 @@ use nats::kv::*;
 #[test]
 fn key_value_entry() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect("localhost:4222").unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -268,8 +268,7 @@ fn key_value_delete() {
 #[test]
 fn key_value_purge() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    // let client = nats::connect(&server.client_url()).unwrap();
-    let client = nats::connect("localhost:4222").unwrap();
+    let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
