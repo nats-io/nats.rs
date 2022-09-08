@@ -44,7 +44,7 @@ Legacy *synchronous* client that supports:
 [![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
 
 
-New bleeding edge experimental async Tokio-based NATS client.
+New async Tokio-based NATS client.
 
 Currently supports:
 
@@ -57,6 +57,8 @@ When it reaches feature parity with `nats` crate, synchronous wrapper over `asyn
 replace current `nats` codebase.
 
 Any feedback related to this client is welcomed.
+
+> **Note:** async client is still <1.0.0 version and will introduce breaking changes.
 
 ### Documentation
 
