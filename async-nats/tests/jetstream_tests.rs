@@ -806,7 +806,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        for i in 0..1000 {
+        for _ in 0..1000 {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
@@ -1756,7 +1756,6 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let payload: Bytes = "data".into();
         kv.put("dz", "0".into()).await.unwrap();
         kv.put("dz", "1".into()).await.unwrap();
         kv.put("dz", "2".into()).await.unwrap();
@@ -1771,7 +1770,6 @@ mod jetstream {
         let history = kv.history("dz").await.unwrap().count().await;
         assert_eq!(history, 6);
         kv.purge("dz").await.unwrap();
-        let history = kv.history("dz").await.unwrap();
         let history = kv.history("dz").await.unwrap().count().await;
         assert_eq!(history, 1);
     }
