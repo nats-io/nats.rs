@@ -19,8 +19,8 @@ use std::{
     time::Duration,
 };
 
+use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, Message, StatusCode};
-use http::{header::HeaderName, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -782,7 +782,7 @@ const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 fn parse_headers(
     buf: &[u8],
 ) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), Error> {
-    let mut headers = http::HeaderMap::new();
+    let mut headers = HeaderMap::new();
     let mut maybe_status: Option<StatusCode> = None;
     let mut maybe_description: Option<String> = None;
     let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
@@ -840,7 +840,15 @@ fn parse_headers(
                 s.push_str(v.trim());
             }
 
-            headers.insert(HeaderName::from_str(k)?, HeaderValue::from_str(&s)?);
+            headers.insert(
+                HeaderName::from_str(k)?,
+                HeaderValue::from_str(&s).map_err(|err| {
+                    Box::from(io::Error::new(
+                        ErrorKind::Other,
+                        "failed to parse header from str",
+                    ))
+                })?,
+            );
         } else {
             return Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -849,7 +857,7 @@ fn parse_headers(
         }
     }
 
-    if headers.is_empty() {
+    if headers. {
         Ok((None, maybe_status, maybe_description))
     } else {
         Ok((Some(headers), maybe_status, maybe_description))

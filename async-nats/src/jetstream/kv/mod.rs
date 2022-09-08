@@ -15,9 +15,9 @@ pub mod bucket;
 
 use std::{io, task::Poll};
 
+use crate::HeaderValue;
 use bytes::Bytes;
 use futures::StreamExt;
-use http::HeaderValue;
 use lazy_static::lazy_static;
 use regex::Regex;
 use time::OffsetDateTime;
@@ -214,10 +214,10 @@ impl Store {
         subject.push_str(&self.prefix);
         subject.push_str(key.as_ref());
 
-        let mut headers = http::HeaderMap::default();
+        let mut headers = crate::HeaderMap::default();
         headers.insert(
             header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
-            revision.try_into()?,
+            HeaderValue::from(revision),
         );
 
         self.stream
@@ -238,9 +238,9 @@ impl Store {
         subject.push_str(&self.prefix);
         subject.push_str(key.as_ref());
 
-        let mut headers = http::HeaderMap::default();
+        let mut headers = crate::HeaderMap::default();
         // TODO: figure out which headers k/v should be where.
-        headers.insert(KV_OPERATION, KV_OPERATION_DELETE.try_into()?);
+        headers.insert(KV_OPERATION, KV_OPERATION_DELETE.parse::<HeaderValue>()?);
 
         self.stream
             .context
@@ -261,9 +261,9 @@ impl Store {
         subject.push_str(&self.prefix);
         subject.push_str(key.as_ref());
 
-        let mut headers = http::HeaderMap::default();
-        headers.insert(KV_OPERATION, KV_OPERATION_PURGE.try_into()?);
-        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.try_into()?);
+        let mut headers = crate::HeaderMap::default();
+        headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
+        headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
 
         self.stream
             .context
@@ -334,8 +334,11 @@ impl<'a> futures::Stream for History<'a> {
                         .headers
                         .as_ref()
                         .and_then(|headers| headers.get(KV_OPERATION))
-                        .unwrap_or(&HeaderValue::from_static(KV_OPERATION_PUT))
-                        .to_str()?
+                        .unwrap_or(&HeaderValue::from(KV_OPERATION_PUT))
+                        .iter()
+                        .nth(0)
+                        .unwrap()
+                        .as_str()
                     {
                         KV_OPERATION_DELETE => Operation::Delete,
                         KV_OPERATION_PURGE => Operation::Purge,

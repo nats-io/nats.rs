@@ -16,6 +16,7 @@
 
 use std::{
     collections::{self, HashMap, HashSet},
+    convert::TryFrom,
     str::FromStr,
 };
 
@@ -173,6 +174,32 @@ impl FromStr for HeaderValue {
         let mut set = HeaderValue::new();
         set.value.insert(s.to_string());
         Ok(set)
+    }
+}
+
+
+// impl TryFrom<&str> for HeaderValue {
+//     type Error = ParseError;
+
+//     fn try_from(value: &str) -> Result<Self, Self::Error> {
+//         let mut set = HeaderValue::new();
+//         set.value.insert(value.to_string());
+//         Ok(set)
+//     }
+// }
+
+impl From<u64> for HeaderValue {
+    fn from(v: u64) -> Self {
+        let mut set = HeaderValue::new();
+        set.value.insert(v.to_string());
+        set
+    }
+}
+impl From<&str> for HeaderValue {
+    fn from(v: &str) -> Self {
+        let mut set = HeaderValue::new();
+        set.value.insert(v.to_string());
+        set
     }
 }
 
