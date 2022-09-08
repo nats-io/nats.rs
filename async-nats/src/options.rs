@@ -22,7 +22,7 @@ use tokio_rustls::rustls;
 /// # Examples
 /// ```
 /// # #[tokio::main]
-/// # async fn options() -> std::io::Result<()> {
+/// # async fn main() -> Result<(), async_nats::ConnectError> {
 /// let mut options =
 /// async_nats::ConnectOptions::new()
 ///     .require_tls(true)
@@ -110,7 +110,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn options() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let mut options =
     /// async_nats::ConnectOptions::new()
     ///     .require_tls(true)
@@ -128,7 +128,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -142,7 +142,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> async_nats::ConnectError {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc =
     /// async_nats::ConnectOptions::with_token("t0k3n!".into()).connect("demo.nats.io").await?;
     /// # Ok(())
@@ -160,7 +160,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> async_nats::ConnectError {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
     ///     .connect("demo.nats.io").await?;
     /// # Ok(())
@@ -178,11 +178,11 @@ impl ConnectOptions {
     /// # Example
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> async_nats::ConnectError {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let nc = async_nats::ConnectOptions::with_nkey(seed.into())
     ///     .connect("localhost").await?;
-    /// # std::io::Result::Ok(())
+    /// # Ok(())
     /// # }
     /// ```
     pub fn with_nkey(seed: String) -> Self {
@@ -198,7 +198,7 @@ impl ConnectOptions {
     /// # Example
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let key_pair = std::sync::Arc::new(nkeys::KeyPair::from_seed(seed).unwrap());
     /// // load jwt from creds file or other secure source
@@ -209,7 +209,7 @@ impl ConnectOptions {
     ///         let key_pair = key_pair.clone();
     ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }})
     ///     .connect("localhost").await?;
-    /// # std::io::Result::Ok(())
+    /// # Ok(())
     /// # }
     /// ```
     pub fn with_jwt<F, Fut>(jwt: String, sign_cb: F) -> Self
@@ -242,7 +242,7 @@ impl ConnectOptions {
     /// # Example
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds".into()).await?
     ///     .connect("connect.ngs.global").await?;
     /// # Ok(())
@@ -258,7 +258,7 @@ impl ConnectOptions {
     /// # Example
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let creds =
     /// "-----BEGIN NATS USER JWT-----
     /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
@@ -293,7 +293,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc =
     /// async_nats::ConnectOptions::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
     /// # Ok(())
@@ -309,7 +309,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc =
     /// async_nats::ConnectOptions::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
     /// # Ok(())
@@ -326,7 +326,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc =
     /// async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
@@ -345,7 +345,7 @@ impl ConnectOptions {
     /// ```no_run
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -361,7 +361,7 @@ impl ConnectOptions {
     /// ```no_run
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -377,7 +377,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().no_echo().connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -394,7 +394,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().subscription_capacity(1024).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -410,7 +410,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().connection_timeout(tokio::time::Duration::from_secs(5)).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -431,7 +431,7 @@ impl ConnectOptions {
     ///
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
     ///         println!("event occured: {}", event);
     /// }).connect("demo.nats.io").await?;
@@ -443,7 +443,7 @@ impl ConnectOptions {
     /// ## Listening to specific event kind
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
     ///     match event {
     ///     async_nats::Event::Disconnect => println!("disconnected"),
