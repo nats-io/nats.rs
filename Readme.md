@@ -8,13 +8,13 @@
 
 ## Motivation
 
-Rust may be one the most interesting new languages the NATS ecosystem has seen.
+Rust may be one of the most interesting new languages the NATS ecosystem has seen.
 We believe this client will have a large impact on NATS, distributed systems, and
-embedded and IoT environments. With Rust we wanted to be as idiomatic as we
+embedded and IoT environments. With Rust, we wanted to be as idiomatic as we
 could be and lean into the strengths of the language. We moved many things that
 would have been runtime checks and errors to the compiler, most notably options
-on connections, and having subscriptions generate multiple styles of iterators,
-since iterators are a first class citizen in Rust. We also wanted to be aligned
+on connections, and having subscriptions generate multiple styles of iterators
+since iterators are first-class citizens in Rust. We also wanted to be aligned
 with the NATS philosophy of simple, secure, and fast!
 
 ## Clients
@@ -44,7 +44,7 @@ Legacy *synchronous* client that supports:
 [![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
 
 
-New bleeding edge experimental async Tokio-based NATS client.
+New async Tokio-based NATS client.
 
 Currently supports:
 
@@ -57,6 +57,8 @@ When it reaches feature parity with `nats` crate, synchronous wrapper over `asyn
 replace current `nats` codebase.
 
 Any feedback related to this client is welcomed.
+
+> **Note:** async client is still <1.0.0 version and will introduce breaking changes.
 
 ### Documentation
 

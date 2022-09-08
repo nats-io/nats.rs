@@ -1,3 +1,56 @@
+## Overview
+
+This release is focused on resilience of the client against network issues.
+
+It also adds some utility methods, Stream Republish and improvements for Pull Consumers.
+
+## Added
+* Add server info by @Jarema in https://github.com/nats-io/nats.rs/pull/600
+* Add server compatibility check function by @Jarema in https://github.com/nats-io/nats.rs/pull/603
+* Add stream info and cached_info by @Jarema in https://github.com/nats-io/nats.rs/pull/599
+* Add custom request prefix option by @Jarema in https://github.com/nats-io/nats.rs/pull/604
+* Add connection timeout by @thed0ct0r in https://github.com/nats-io/nats.rs/pull/607
+* Add stream republish by @Jarema in https://github.com/nats-io/nats.rs/pull/613
+* Add timeout to double_ack by @Jarema in https://github.com/nats-io/nats.rs/pull/617
+* Add internal connection state watcher by @Jarema in https://github.com/nats-io/nats.rs/pull/606
+* Add miss Pull Consumer heartbeats error by @Jarema in https://github.com/nats-io/nats.rs/pull/627
+* Add purge subject by @Jarema in https://github.com/nats-io/nats.rs/pull/620
+
+## Fixed
+* Fix jetstream reconnect by @Jarema in https://github.com/nats-io/nats.rs/pull/610
+* Fix typos in readme's by @insmo in https://github.com/nats-io/nats.rs/pull/618
+* Fix voldemort error by @Jarema in https://github.com/nats-io/nats.rs/pull/626
+* Jarema/fix pull consumer deadlock by @Jarema in https://github.com/nats-io/nats.rs/pull/619
+
+*Thanks to all contributors for helping out, taking part in discussion and detailed issue reports!*
+
+
+## New Contributors
+* @thed0ct0r made their first contribution in https://github.com/nats-io/nats.rs/pull/607
+* @insmo made their first contribution in https://github.com/nats-io/nats.rs/pull/618
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.18.0...async-nats/v0.19.0
+
+# 0.18.0
+## Overview
+This release focuses on fixes and improvements, with addition of ordered Push Consumer.
+
+## Breaking Changes
+* Refactor callbacks by @Jarema in https://github.com/nats-io/nats.rs/pull/595
+
+## Added
+* Add `get_last_raw_message_by_subject` to `Stream` by @caspervonb in https://github.com/nats-io/nats.rs/pull/584
+* Add `ClusterInfo` and `PeerInfo` by @Jarema in https://github.com/nats-io/nats.rs/pull/572
+* Add ordered  push consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/574
+* Add concurrent example by @Jarema in https://github.com/nats-io/nats.rs/pull/580
+* Add delete message from stream by @Jarema in https://github.com/nats-io/nats.rs/pull/588
+* Add Nkey authorization support by @neogenie  https://github.com/nats-io/nats.rs/pull/593
+
+## Fixed
+* Fix ordered consumer after discard policy hit by @Jarema in https://github.com/nats-io/nats.rs/pull/585
+* Fix pull consumer stream method when batch is set to 1 by @Jarema in https://github.com/nats-io/nats.rs/pull/590
+* Fix reconnect auth deadlock by @caspervonb in https://github.com/nats-io/nats.rs/pull/578
+
 # 0.17.0
 ## Overview
 This release focuses on two main things:

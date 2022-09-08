@@ -19,12 +19,12 @@ use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
 use futures::{FutureExt, TryFutureExt};
-use http::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
+use std::time::Duration;
 
 use super::kv::{self, Store, MAX_HISTORY};
 use super::stream::{self, Config, DeleteStatus, Info, Stream};
@@ -34,6 +34,7 @@ use super::stream::{self, Config, DeleteStatus, Info, Stream};
 pub struct Context {
     pub(crate) client: Client,
     pub(crate) prefix: String,
+    pub(crate) timeout: Duration,
 }
 
 impl Context {
@@ -41,13 +42,19 @@ impl Context {
         Context {
             client,
             prefix: "$JS.API".to_string(),
+            timeout: Duration::from_secs(5),
         }
+    }
+
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout
     }
 
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
         Context {
             client,
             prefix: prefix.to_string(),
+            timeout: Duration::from_secs(5),
         }
     }
 
@@ -55,6 +62,7 @@ impl Context {
         Context {
             client,
             prefix: format!("$JS.{}.API", domain.as_ref()),
+            timeout: Duration::from_secs(5),
         }
     }
 
@@ -76,7 +84,11 @@ impl Context {
     /// # }
     /// ```
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
-        let message = self.client.request(subject, payload).await?;
+        let message = tokio::time::timeout(self.timeout, self.client.request(subject, payload))
+            .map_err(|_| {
+                std::io::Error::new(ErrorKind::TimedOut, "jetstream publish request timed out")
+            })
+            .await??;
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         match response {
@@ -106,7 +118,7 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let mut headers = async_nats::HeaderMap::new();
-    /// headers.append("X-key", b"Value".as_ref().try_into()?);
+    /// headers.append("X-key", "Value");
     /// let ack = jetstream.publish_with_headers("events".to_string(), headers, "data".into()).await?;
     /// # Ok(())
     /// # }
@@ -114,7 +126,7 @@ impl Context {
     pub async fn publish_with_headers(
         &self,
         subject: String,
-        headers: HeaderMap,
+        headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAck, Error> {
         let message = self

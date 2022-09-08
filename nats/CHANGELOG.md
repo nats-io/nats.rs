@@ -1,3 +1,10 @@
+# 0.23.0
+## Overview
+This is a minor release with one small addition.
+
+## Added
+* Add cluster to streaminfo/consumerinfo struct by @j13tw in https://github.com/nats-io/nats.rs/pull/537
+
 # 0.22.0
 ## Overview
 This is a minor release for the `nats` client with one fix and several documentation improvements.

@@ -1,8 +1,9 @@
 [package]
 name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
-version = "0.17.0"
+version = "0.19.0"
 edition = "2021"
+rust = "1.59.0"
 description = "A async Rust NATS client"
 license = "Apache-2.0"
 documentation = "https://docs.rs/async-nats"
@@ -34,6 +35,8 @@ nuid = "0.3.2"
 serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6.2"
+tracing = "0.1"
+itertools = "0.10"
 lazy_static = "1.4"
 base64 = "0.13"
 
@@ -41,6 +44,8 @@ base64 = "0.13"
 criterion =  { version = "0.3", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
+tokio-retry = "0.3.0"
+tracing-subscriber = "0.3"
 
 
 [[bench]]

@@ -12,10 +12,13 @@
 // limitations under the License.
 
 mod client {
-    use async_nats::{ConnectOptions, ServerError};
+    use async_nats::connection::State;
+    use async_nats::header::HeaderValue;
+    use async_nats::{ConnectOptions, Event};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::str::FromStr;
     use std::time::Duration;
 
     #[tokio::test]
@@ -128,7 +131,7 @@ mod client {
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
 
         let mut headers = async_nats::HeaderMap::new();
-        headers.append("X-Test", b"Test".as_ref().try_into().unwrap());
+        headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
 
         client
             .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
@@ -136,6 +139,18 @@ mod client {
             .unwrap();
 
         client.flush().await.unwrap();
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.headers.unwrap(), headers);
+
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
+        headers.append("X-Test", "Second");
+
+        client
+            .publish_with_headers("test".into(), headers.clone(), "test".into())
+            .await
+            .unwrap();
 
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.headers.unwrap(), headers);
@@ -306,12 +321,13 @@ mod client {
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
+            assert_eq!(State::Connected, client.connection_state());
             client.publish("test".into(), "data".into()).await.unwrap();
             client.flush().await.unwrap();
             assert!(subscriber.next().await.is_some());
 
             drop(servers.remove(0));
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 
@@ -361,18 +377,18 @@ mod client {
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
         let client = async_nats::ConnectOptions::new()
-            .reconnect_callback(move || {
+            .event_callback(move |event| {
                 let tx = tx.clone();
-                async move {
-                    println!("reconnection callback fired");
-                    tx.send(()).await.unwrap();
-                }
-            })
-            .disconnect_callback(move || {
                 let dc_tx = dc_tx.clone();
                 async move {
-                    println!("disconnect callback fired");
-                    dc_tx.send(()).await.unwrap();
+                    if let Event::Reconnect = event {
+                        println!("reconnection callback fired");
+                        tx.send(()).await.unwrap();
+                    }
+                    if let Event::Disconnect = event {
+                        println!("disconnect callback fired");
+                        dc_tx.send(()).await.unwrap();
+                    }
                 }
             })
             .connect(server.client_url())
@@ -406,10 +422,12 @@ mod client {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let client = ConnectOptions::new()
-            .lame_duck_callback(move || {
+            .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
-                    tx.send(()).await.unwrap();
+                    if let Event::LameDuckMode = event {
+                        tx.send(()).await.unwrap();
+                    }
                 }
             })
             .connect(server.client_url())
@@ -437,10 +455,10 @@ mod client {
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let client = ConnectOptions::new()
             .subscription_capacity(1)
-            .error_callback(move |err| {
+            .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
-                    if let ServerError::SlowConsumer(_) = err {
+                    if let Event::SlowConsumer(_) = event {
                         tx.send(()).await.unwrap()
                     }
                 }
@@ -508,5 +526,118 @@ mod client {
         tokio::time::timeout(Duration::from_millis(50), subscription.next())
             .await
             .expect_err("should timeout");
+    }
+
+    #[tokio::test]
+    async fn reconnect_failures() {
+        let server = nats_server::run_basic_server();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let _client = ConnectOptions::new()
+            .event_callback(move |err| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(err.to_string()).unwrap();
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        drop(server);
+        rx.recv().await;
+        rx.recv().await;
+        rx.recv().await;
+        rx.recv().await;
+    }
+
+    #[tokio::test]
+    async fn connect_timeout() {
+        // create the notifiers we'll use to synchronize readiness state
+        let startup_listener = std::sync::Arc::new(tokio::sync::Notify::new());
+        let startup_signal = startup_listener.clone();
+        // preregister for a notify_waiters
+        let startup_notified = startup_listener.notified();
+
+        // spawn a listening socket with no connect queue
+        // so after one connection it hangs - since we are not
+        // calling accept() on the socket
+        tokio::spawn(async move {
+            let socket = tokio::net::TcpSocket::new_v4()?;
+            socket.set_reuseaddr(true)?;
+            socket.bind("127.0.0.1:4848".parse().unwrap())?;
+            let _listener = if cfg!(target_os = "macos") {
+                socket.listen(1)?
+            } else {
+                socket.listen(0)?
+            };
+            // notify preregistered
+            startup_signal.notify_waiters();
+
+            // wait for the done signal
+            startup_signal.notified().await;
+            Ok::<(), std::io::Error>(())
+        });
+
+        startup_notified.await;
+        let _hanger = tokio::net::TcpStream::connect("127.0.0.1:4848")
+            .await
+            .unwrap();
+        let timeout_result = ConnectOptions::new()
+            .connection_timeout(tokio::time::Duration::from_millis(200))
+            .connect("nats://127.0.0.1:4848")
+            .await;
+
+        assert_eq!(
+            timeout_result.unwrap_err().kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        startup_listener.notify_one();
+    }
+
+    #[tokio::test]
+    async fn inbox_prefix() {
+        let server = nats_server::run_basic_server();
+        let client = ConnectOptions::new()
+            .custom_inbox_prefix("BOB")
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut inbox_wildcard_subscription = client.subscribe("BOB.>".to_string()).await.unwrap();
+        let mut subscription = client.subscribe("request".into()).await.unwrap();
+
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                let msg = subscription.next().await.unwrap();
+                client
+                    .publish(msg.reply.unwrap(), "prefix workes".into())
+                    .await
+                    .unwrap();
+            }
+        });
+
+        client
+            .request("request".into(), "data".into())
+            .await
+            .unwrap();
+        inbox_wildcard_subscription.next().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_state() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        assert_eq!(State::Connected, client.connection_state());
+        drop(server);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(State::Disconnected, client.connection_state());
+    }
+
+    #[tokio::test]
+    async fn publish_error_should_be_nameable() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let _error: Result<(), async_nats::PublishError> =
+            client.publish("foo".into(), "data".into()).await;
     }
 }

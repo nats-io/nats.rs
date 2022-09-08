@@ -680,6 +680,7 @@ pub(crate) enum AuthStyle {
         /// Securely loads the user JWT.
         jwt_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
         /// Securely loads the nkey and signs the nonce passed as an argument.
+        #[allow(clippy::type_complexity)]
         sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
     },
 
@@ -688,6 +689,7 @@ pub(crate) enum AuthStyle {
         /// Securely loads the public nkey.
         nkey_cb: Arc<dyn Fn() -> io::Result<SecureString> + Send + Sync>,
         /// Signs the nonce passed as an argument.
+        #[allow(clippy::type_complexity)]
         sig_cb: Arc<dyn Fn(&[u8]) -> io::Result<SecureString> + Send + Sync>,
     },
 }

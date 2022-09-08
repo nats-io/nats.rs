@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Authorization, Client, ServerError, ToServerAddrs};
+use crate::{Authorization, Client, Event, ToServerAddrs};
 use futures::Future;
 use std::fmt::Formatter;
 use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
@@ -38,6 +38,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_failed_connect: bool,
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
+    pub(crate) connection_timeout: Duration,
     pub(crate) auth: Authorization,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
@@ -48,10 +49,8 @@ pub struct ConnectOptions {
     pub(crate) ping_interval: Duration,
     pub(crate) subscription_capacity: usize,
     pub(crate) sender_capacity: usize,
-    pub(crate) reconnect_callback: CallbackArg0<()>,
-    pub(crate) disconnect_callback: CallbackArg0<()>,
-    pub(crate) lame_duck_callback: CallbackArg0<()>,
-    pub(crate) error_callback: CallbackArg1<ServerError, ()>,
+    pub(crate) event_callback: CallbackArg1<Event, ()>,
+    pub(crate) inbox_prefix: String,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -62,6 +61,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"retry_on_failed_connect", &self.retry_on_failed_connect)
             .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
             .entry(&"max_reconnects", &self.max_reconnects)
+            .entry(&"connection_timeout", &self.connection_timeout)
             .entry(&"tls_required", &self.tls_required)
             .entry(&"certificates", &self.certificates)
             .entry(&"client_cert", &self.client_cert)
@@ -70,6 +70,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"flush_interval", &self.flush_interval)
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
+            .entry(&"inbox_prefix", &self.inbox_prefix)
             .finish()
     }
 }
@@ -82,6 +83,7 @@ impl Default for ConnectOptions {
             retry_on_failed_connect: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
+            connection_timeout: Duration::from_secs(5),
             auth: Authorization::None,
             tls_required: false,
             certificates: Vec::new(),
@@ -92,14 +94,12 @@ impl Default for ConnectOptions {
             ping_interval: Duration::from_secs(60),
             sender_capacity: 128,
             subscription_capacity: 1024,
-            reconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
-            disconnect_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
-            lame_duck_callback: CallbackArg0::<()>(Box::new(|| Box::pin(async {}))),
-            error_callback: CallbackArg1::<ServerError, ()>(Box::new(move |error| {
+            event_callback: CallbackArg1::<Event, ()>(Box::new(move |error| {
                 Box::pin(async move {
                     println!("error : {}", error);
                 })
             })),
+            inbox_prefix: "_INBOX".to_string(),
         }
     }
 }
@@ -169,6 +169,25 @@ impl ConnectOptions {
     pub fn with_user_and_password(user: String, pass: String) -> Self {
         ConnectOptions {
             auth: Authorization::UserAndPassword(user, pass),
+            ..Default::default()
+        }
+    }
+
+    /// Authenticate with a NKey. Requires NKey Seed secret.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let nc = async_nats::ConnectOptions::with_nkey(seed.into())
+    ///     .connect("localhost").await?;
+    /// # std::io::Result::Ok(())
+    /// # }
+    /// ```
+    pub fn with_nkey(seed: String) -> Self {
+        ConnectOptions {
+            auth: Authorization::NKey(seed),
             ..Default::default()
         }
     }
@@ -385,6 +404,22 @@ impl ConnectOptions {
         self
     }
 
+    /// Sets a timeout for the underlying TcpStream connection to avoid hangs and deadlocks.
+    /// Defualt is set to 5 seconds.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().connection_timeout(tokio::time::Duration::from_secs(5)).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn connection_timeout(mut self, timeout: Duration) -> ConnectOptions {
+        self.connection_timeout = timeout;
+        self
+    }
+
     /// Registers asynchronous callback for errors that are receiver over the wire from the server.
     ///
     /// # Examples
@@ -393,57 +428,29 @@ impl ConnectOptions {
     ///
     /// ## Basic
     /// If you don't need to move anything into the closure, simple signature can be used:
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().error_callback(|error| async move {
-    /// println!("error occured: {}", error);
-    /// }).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// ## Advanced
-    /// If you need to move something into the closure, here's an example how to do that
-    ///
-    /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
-    /// async_nats::ConnectOptions::new().error_callback(move |error| {
-    ///     let tx = tx.clone();
-    ///     async move {
-    ///         tx.send(error).await.unwrap();
-    ///         }
-    /// }).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn error_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
-    where
-        F: Fn(ServerError) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + 'static + Send + Sync,
-    {
-        self.error_callback =
-            CallbackArg1::<ServerError, ()>(Box::new(move |error| Box::pin(cb(error))));
-        self
-    }
-
-    /// Registers asynchronous callback for reconnection events.
-    ///
-    /// # Examples
-    /// As asynchronous callbacks are stil not in `stable` channel, here are some examples how to
-    /// work around this
-    ///
-    /// ## Basic
-    ///
-    /// If you don't need to move anything into the closure, simple signature can be used:
     ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().reconnect_callback(|| async {
-    /// println!("reconnected");
+    /// async_nats::ConnectOptions::new().event_callback(|event| async move {
+    ///         println!("event occured: {}", event);
+    /// }).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    ///
+    /// ```
+    ///
+    /// ## Listening to specific event kind
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().event_callback(|event| async move {
+    ///     match event {
+    ///     async_nats::Event::Disconnect => println!("disconnected"),
+    ///         async_nats::Event::Reconnect => println!("reconnected"),
+    ///         async_nats::Event::ClientError(err) => println!("client error occured: {}", err),
+    ///         other => println!("other event happened: {}", other),
+    /// }
     /// }).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -456,108 +463,21 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
-    /// async_nats::ConnectOptions::new().reconnect_callback(move || {
+    /// async_nats::ConnectOptions::new().event_callback(move |event| {
     ///     let tx = tx.clone();
     ///     async move {
-    ///         tx.send("reconnected").await.unwrap();
+    ///         tx.send(event).await.unwrap();
     ///         }
     /// }).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn reconnect_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    pub fn event_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
     where
-        F: Fn() -> Fut + Send + Sync + 'static,
+        F: Fn(Event) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.reconnect_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
-        self
-    }
-
-    /// Registers asynchronous callback for disconection events.
-    ///
-    /// # Examples
-    /// As asynchronous callbacks are stil not in `stable` channel, here are some examples how to
-    /// work around this
-    ///
-    /// ## Basic
-    /// If you don't need to move anything into the closure, simple signature can be used:
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().disconnect_callback(|| async {
-    /// println!("disconnected");
-    /// }).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// ## Advanced
-    /// If you need to move something into the closure, here's an example how to do that
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
-    /// async_nats::ConnectOptions::new().disconnect_callback(move || {
-    ///     let tx = tx.clone();
-    ///     async move {
-    ///         tx.send("disconnected").await.unwrap();
-    ///         }
-    /// }).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn disconnect_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
-    where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + 'static + Send + Sync,
-    {
-        self.disconnect_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
-        self
-    }
-
-    /// Registers asynchronous callback for server entering lame duck mode
-    ///
-    /// # Examples
-    /// As asynchronous callbacks are stil not in `stable` channel, here are some examples how to
-    /// work around this
-    ///
-    /// ## Basic
-    /// If you don't need to move anything into the closure, simple signature can be used:
-    /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().lame_duck_callback(|| async {
-    /// println!("server entered lame duck mode");
-    /// }).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// ## Advanced
-    /// If you need to move something into the closure, here's an example how to do that
-    ///
-    /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
-    /// async_nats::ConnectOptions::new().reconnect_callback(move || {
-    ///     let tx = tx.clone();
-    ///     async move {
-    ///         tx.send("server entered lame duck mode").await.unwrap();
-    ///         }
-    /// }).connect("demo.nats.io").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn lame_duck_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
-    where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + 'static + Send + Sync,
-    {
-        self.lame_duck_callback = CallbackArg0::<()>(Box::new(move || Box::pin(cb())));
+        self.event_callback = CallbackArg1::<Event, ()>(Box::new(move |event| Box::pin(cb(event))));
         self
     }
 
@@ -578,32 +498,31 @@ impl ConnectOptions {
         self.sender_capacity = capacity;
         self
     }
-}
 
-type AsyncCallbackArg0<T> =
-    Box<dyn Fn() -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
+    /// Sets custom prefix instead of default `_INBOX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// async_nats::ConnectOptions::new().custom_inbox_prefix("CUSTOM").connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn custom_inbox_prefix<T: ToString>(mut self, prefix: T) -> ConnectOptions {
+        self.inbox_prefix = prefix.to_string();
+        self
+    }
+}
 
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 
-pub(crate) struct CallbackArg0<T>(AsyncCallbackArg0<T>);
-
-impl<T> CallbackArg0<T> {
-    pub async fn call(&self) -> T {
-        (self.0.as_ref())().await
-    }
-}
-
-impl<T> fmt::Debug for CallbackArg0<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.write_str("callback")
-    }
-}
-
 pub(crate) struct CallbackArg1<A, T>(AsyncCallbackArg1<A, T>);
 
 impl<A, T> CallbackArg1<A, T> {
-    pub async fn call(&self, arg: A) -> T {
+    pub(crate) async fn call(&self, arg: A) -> T {
         (self.0.as_ref())(arg).await
     }
 }

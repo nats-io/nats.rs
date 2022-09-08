@@ -13,11 +13,18 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use std::{task::Poll, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    task::Poll,
+    time::Duration,
+};
+use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle, time::Instant};
 
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
 
 use crate::{
+    connection::State,
     jetstream::{self, Context},
     Error, StatusCode, Subscriber,
 };
@@ -60,21 +67,21 @@ impl Consumer<Config> {
     /// Ok(())
     /// # }
     /// ```
-    pub async fn messages(&self) -> Result<Stream<'_>, Error> {
+    pub async fn messages(&self) -> Result<Stream, Error> {
         Stream::stream(
             BatchConfig {
                 batch: 200,
                 expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
                 no_wait: false,
                 max_bytes: 0,
-                idle_heartbeat: Duration::default(),
+                idle_heartbeat: Duration::from_secs(15),
             },
             self,
         )
         .await
     }
 
-    /// Enables customization of [Stream] by setting timeouts, hearbeats, maximum number of
+    /// Enables customization of [Stream] by setting timeouts, heartbeats, maximum number of
     /// messages or bytes buffered.
     ///
     /// # Examples
@@ -303,7 +310,7 @@ impl futures::Stream for Batch {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => Poll::Ready(None),
-                    StatusCode::IDLE_HEARBEAT => Poll::Pending,
+                    StatusCode::IDLE_HEARTBEAT => Poll::Pending,
                     StatusCode::OK => {
                         self.pending_messages -= 1;
                         Poll::Ready(Some(Ok(jetstream::Message {
@@ -311,15 +318,13 @@ impl futures::Stream for Batch {
                             message,
                         })))
                     }
-                    status => {
-                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "eror while processing messages from the stream: {}, {:?}",
-                                status, message.description
-                            ),
-                        )))))
-                    }
+                    status => Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!(
+                            "eror while processing messages from the stream: {}, {:?}",
+                            status, message.description
+                        ),
+                    ))))),
                 },
                 None => Poll::Ready(None),
             },
@@ -386,21 +391,34 @@ impl<'a> futures::Stream for Sequence<'a> {
     }
 }
 
-pub struct Stream<'a> {
+pub struct Stream {
     pending_messages: usize,
+    request_result_rx: tokio::sync::mpsc::Receiver<Result<bool, crate::Error>>,
+    request_tx: tokio::sync::watch::Sender<()>,
     subscriber: Subscriber,
-    context: Context,
-    inbox: String,
-    subject: String,
     batch_config: BatchConfig,
-    request: Option<BoxFuture<'a, Result<(), Error>>>,
+    context: Context,
+    pending_request: bool,
+    task_handle: JoinHandle<()>,
+    heartbeat_handle: Option<JoinHandle<()>>,
+    last_seen: Arc<Mutex<Instant>>,
+    heartbeats_missing: tokio::sync::oneshot::Receiver<()>,
 }
 
-impl<'a> Stream<'a> {
+impl Drop for Stream {
+    fn drop(&mut self) {
+        self.task_handle.abort();
+        if let Some(handle) = self.heartbeat_handle.take() {
+            handle.abort()
+        }
+    }
+}
+
+impl Stream {
     async fn stream(
         batch_config: BatchConfig,
         consumer: &Consumer<Config>,
-    ) -> Result<Stream<'a>, Error> {
+    ) -> Result<Stream, Error> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         let subject = format!(
@@ -408,19 +426,106 @@ impl<'a> Stream<'a> {
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
         );
 
+        let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
+        let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
+        let task_handle = tokio::task::spawn({
+            let consumer = consumer.clone();
+            let batch = batch_config;
+            let mut context = consumer.context.clone();
+            let subject = subject;
+            let inbox = inbox.clone();
+            async move {
+                loop {
+                    // Need to check previous state, as `changed` will always fire on first
+                    // call.
+                    let prev_state = context.client.state.borrow().to_owned();
+                    let mut pending_reset = false;
+
+                    tokio::select! {
+                       _  = context.client.state.changed() => {
+                            let state = context.client.state.borrow().to_owned();
+                            if !(state == crate::connection::State::Connected
+                                && prev_state != State::Connected) {
+                                    continue;
+                                }
+                            debug!("detected !Connected -> Connected state change");
+                            match consumer.fetch_info().await {
+                                Ok(info) => {
+                                    if info.num_waiting == 0 {
+                                        pending_reset = true;
+                                    }
+                                }
+                                Err(err) => request_result_tx.send(Err(err)).await.unwrap(),
+                            }
+                        },
+                        _ = request_rx.changed() => debug!("task received request request"),
+                        _ = tokio::time::sleep(Duration::from_nanos(batch.expires.unwrap() as u64)) => debug!("reached expires timer"),
+                    }
+
+                    let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
+
+                    let result = context
+                        .client
+                        .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
+                        .await;
+                    if let Err(err) = consumer.context.client.flush().await {
+                        debug!("flush failed: {}", err);
+                    }
+                    debug!("request published");
+                    // TODO: add tracing instead of ignoring this.
+                    request_result_tx
+                        .send(result.map(|_| pending_reset))
+                        .await
+                        .unwrap();
+                    trace!("result send over tx");
+                }
+                // }
+            }
+        });
+        let last_seen = Arc::new(Mutex::new(Instant::now()));
+        let (missed_heartbeat_tx, missed_heartbeat_rx) = tokio::sync::oneshot::channel();
+        let heartbeat_handle = if !batch_config.idle_heartbeat.is_zero() {
+            debug!("spawning heartbeat checker task");
+            Some(tokio::task::spawn({
+                let last_seen = last_seen.clone();
+                async move {
+                    loop {
+                        tokio::time::sleep(batch_config.idle_heartbeat).await;
+                        debug!("checking for missed heartbeats");
+                        if last_seen
+                            .lock()
+                            .unwrap()
+                            .elapsed()
+                            .ge(&batch_config.idle_heartbeat.saturating_mul(3))
+                        {
+                            debug!("missed heartbeat threshold met");
+                            missed_heartbeat_tx.send(()).unwrap();
+                            break;
+                        }
+                    }
+                }
+            }))
+        } else {
+            None
+        };
+
         Ok(Stream {
+            task_handle,
+            heartbeat_handle,
+            request_result_rx,
+            request_tx,
+            batch_config,
             pending_messages: 0,
             subscriber: subscription,
             context: consumer.context.clone(),
-            request: None,
-            inbox,
-            subject,
-            batch_config,
+            pending_request: false,
+            last_seen,
+            heartbeats_missing: missed_heartbeat_rx,
         })
     }
 }
 
-impl<'a> futures::Stream for Stream<'a> {
+impl futures::Stream for Stream {
     type Item = Result<jetstream::Message, Error>;
 
     fn poll_next(
@@ -428,58 +533,79 @@ impl<'a> futures::Stream for Stream<'a> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
-            match self.request.as_mut() {
-                None => {
-                    let context = self.context.clone();
-                    let inbox = self.inbox.clone();
-                    let subject = self.subject.clone();
-
-                    let next_request_threshold =
-                        self.pending_messages < std::cmp::min(self.batch_config.batch / 2, 100);
-
-                    if next_request_threshold {
-                        let batch = self.batch_config;
-                        self.pending_messages += batch.batch;
-                        self.request = Some(Box::pin(async move {
-                            let request = serde_json::to_vec(&batch).map(Bytes::from)?;
-
-                            context
-                                .client
-                                .publish_with_reply(subject, inbox, request)
-                                .await?;
-                            Ok(())
-                        }));
-                    }
-
-                    if let Some(request) = self.request.as_mut() {
-                        match request.as_mut().poll(cx) {
-                            Poll::Ready(result) => {
-                                self.request = None;
-                                result?;
-                            }
-                            Poll::Pending => {}
-                        }
-                    }
-                }
-
-                Some(request) => match request.as_mut().poll(cx) {
-                    Poll::Ready(result) => {
-                        self.request = None;
-                        result?;
-                    }
-                    Poll::Pending => {}
-                },
+            trace!("pending messages: {}", self.pending_messages);
+            if self.pending_messages <= std::cmp::min(self.batch_config.batch / 2, 100)
+                && !self.pending_request
+            {
+                debug!("pending messages reached threshold to send new fetch request");
+                self.request_tx.send(()).unwrap();
+                self.pending_request = true;
             }
+            match self.heartbeats_missing.try_recv() {
+                Ok(_) => {
+                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "did not receive idle heartbeat in time",
+                    )))))
+                }
+                // ignore this error as that means we haven't got any missing heartbeats that we
+                // haven't read.
+                Err(TryRecvError::Empty) => (),
+                Err(TryRecvError::Closed) => {
+                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "unexpected heartbeat error closure",
+                    )))))
+                }
+            }
+            match self.request_result_rx.poll_recv(cx) {
+                Poll::Ready(resp) => match resp {
+                    Some(resp) => match resp {
+                        Ok(reset) => {
+                            debug!("request successful, setting pending messages");
+                            if reset {
+                                self.pending_messages = self.batch_config.batch;
+                            } else {
+                                self.pending_messages += self.batch_config.batch;
+                            }
+                            self.pending_request = false;
+                            continue;
+                        }
+                        Err(err) => return Poll::Ready(Some(Err(err))),
+                    },
+                    None => return Poll::Ready(None),
+                },
+                Poll::Pending => {
+                    trace!("pending result");
+                }
+            }
+            trace!("polling subscriber");
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
-                            self.pending_messages = 0;
+                            debug!("timeout reached, resetting pending messages");
+                            // We do not want to reset to 0, as more than 1 fetch request might be
+                            // ongoing. This is not perfect, as we don't know how many messages
+                            // were consumed from that specific fetch, but that's best what we can
+                            // do until server can identify fetches.
+                            self.pending_messages = self
+                                .pending_messages
+                                .saturating_sub(self.batch_config.batch);
                             continue;
                         }
-                        StatusCode::IDLE_HEARBEAT => {}
+                        StatusCode::IDLE_HEARTBEAT => {
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
+                            continue;
+                        }
                         StatusCode::OK => {
-                            self.pending_messages -= 1;
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
+                            *self.last_seen.lock().unwrap() = Instant::now();
+                            self.pending_messages = self.pending_messages.saturating_sub(1);
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,
@@ -498,6 +624,7 @@ impl<'a> futures::Stream for Stream<'a> {
                     None => return Poll::Ready(None),
                 },
                 Poll::Pending => {
+                    debug!("subscriber still pending");
                     return std::task::Poll::Pending;
                 }
             }
@@ -536,7 +663,7 @@ impl<'a> futures::Stream for Stream<'a> {
 pub struct StreamBuilder<'a> {
     batch: usize,
     max_bytes: usize,
-    hearbeat: Duration,
+    heartbeat: Duration,
     expires: usize,
     consumer: &'a Consumer<Config>,
 }
@@ -548,7 +675,7 @@ impl<'a> StreamBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: Duration::from_secs(30).as_nanos().try_into().unwrap(),
-            hearbeat: Duration::default(),
+            heartbeat: Duration::default(),
         }
     }
 
@@ -626,7 +753,7 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
-    /// Sets hearbeat which will be send by the server if there are no messages for a given
+    /// Sets heartbeat which will be send by the server if there are no messages for a given
     /// [Consumer] pending.
     ///
     /// # Examples
@@ -644,7 +771,7 @@ impl<'a> StreamBuilder<'a> {
     ///     .get_consumer("pull").await?;
     ///
     /// let mut messages = consumer.stream()
-    ///     .hearbeat(std::time::Duration::from_secs(10))
+    ///     .heartbeat(std::time::Duration::from_secs(10))
     ///     .messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
@@ -654,8 +781,8 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn hearbeat(mut self, hearbeat: Duration) -> Self {
-        self.hearbeat = hearbeat;
+    pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.heartbeat = heartbeat;
         self
     }
 
@@ -720,14 +847,14 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub async fn messages(self) -> Result<Stream<'a>, Error> {
+    pub async fn messages(self) -> Result<Stream, Error> {
         Stream::stream(
             BatchConfig {
                 batch: self.batch,
                 expires: Some(self.expires),
                 no_wait: false,
                 max_bytes: self.max_bytes,
-                idle_heartbeat: self.hearbeat,
+                idle_heartbeat: self.heartbeat,
             },
             self.consumer,
         )
@@ -766,7 +893,7 @@ impl<'a> StreamBuilder<'a> {
 pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
-    hearbeat: Duration,
+    heartbeat: Duration,
     expires: usize,
     consumer: &'a Consumer<Config>,
 }
@@ -778,7 +905,7 @@ impl<'a> FetchBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: 0,
-            hearbeat: Duration::default(),
+            heartbeat: Duration::default(),
         }
     }
 
@@ -854,7 +981,7 @@ impl<'a> FetchBuilder<'a> {
         self
     }
 
-    /// Sets hearbeat which will be send by the server if there are no messages for a given
+    /// Sets heartbeat which will be send by the server if there are no messages for a given
     /// [Consumer] pending.
     ///
     /// # Examples
@@ -872,7 +999,7 @@ impl<'a> FetchBuilder<'a> {
     ///     .get_consumer("pull").await?;
     ///
     /// let mut messages = consumer.fetch()
-    ///     .hearbeat(std::time::Duration::from_secs(10))
+    ///     .heartbeat(std::time::Duration::from_secs(10))
     ///     .messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
@@ -882,8 +1009,8 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn hearbeat(mut self, hearbeat: Duration) -> Self {
-        self.hearbeat = hearbeat;
+    pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.heartbeat = heartbeat;
         self
     }
 
@@ -956,7 +1083,7 @@ impl<'a> FetchBuilder<'a> {
                 expires: Some(self.expires),
                 no_wait: true,
                 max_bytes: self.max_bytes,
-                idle_heartbeat: self.hearbeat,
+                idle_heartbeat: self.heartbeat,
             },
             self.consumer,
         )
@@ -995,7 +1122,7 @@ impl<'a> FetchBuilder<'a> {
 pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
-    hearbeat: Duration,
+    heartbeat: Duration,
     expires: usize,
     consumer: &'a Consumer<Config>,
 }
@@ -1007,7 +1134,7 @@ impl<'a> BatchBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: 0,
-            hearbeat: Duration::default(),
+            heartbeat: Duration::default(),
         }
     }
 
@@ -1085,7 +1212,7 @@ impl<'a> BatchBuilder<'a> {
         self
     }
 
-    /// Sets hearbeat which will be send by the server if there are no messages for a given
+    /// Sets heartbeat which will be send by the server if there are no messages for a given
     /// [Consumer] pending.
     ///
     /// # Examples
@@ -1103,7 +1230,7 @@ impl<'a> BatchBuilder<'a> {
     ///     .get_consumer("pull").await?;
     ///
     /// let mut messages = consumer.batch()
-    ///     .hearbeat(std::time::Duration::from_secs(10))
+    ///     .heartbeat(std::time::Duration::from_secs(10))
     ///     .messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
@@ -1113,8 +1240,8 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
-    pub fn hearbeat(mut self, hearbeat: Duration) -> Self {
-        self.hearbeat = hearbeat;
+    pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.heartbeat = heartbeat;
         self
     }
 
@@ -1186,7 +1313,7 @@ impl<'a> BatchBuilder<'a> {
                 expires: Some(self.expires),
                 no_wait: false,
                 max_bytes: self.max_bytes,
-                idle_heartbeat: self.hearbeat,
+                idle_heartbeat: self.heartbeat,
             },
             self.consumer,
         )
@@ -1214,7 +1341,7 @@ pub struct BatchConfig {
     /// Whichever value is reached first, batch will complete.
     pub max_bytes: usize,
 
-    /// Setting this other than zero will cause the server to send 100 Idle Hearbeat status to the
+    /// Setting this other than zero will cause the server to send 100 Idle Heartbeat status to the
     /// client
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,

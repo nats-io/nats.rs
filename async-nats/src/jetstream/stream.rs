@@ -34,11 +34,69 @@ use super::{
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug)]
 pub struct Stream {
-    pub info: Info,
+    pub(crate) info: Info,
     pub(crate) context: Context,
 }
 
 impl Stream {
+    /// Retrieves `info` about [Stream] from the server, updates the cached `info` inside
+    /// [Stream] and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut stream = jetstream
+    ///     .get_stream("events").await?;
+    ///
+    /// let info = stream.info().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn info(&mut self) -> Result<&Info, Error> {
+        let subject = format!("STREAM.INFO.{}", self.info.config.name);
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok::<Info>(info) => {
+                self.info = info;
+                Ok(&self.info)
+            }
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting stream info: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+        }
+    }
+
+    /// Returns cached [Info] for the [Stream].
+    /// Cache is either from initial creation/retrival of the [Stream] or last call to
+    /// [Stream::info].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream
+    ///     .get_stream("events").await?;
+    ///
+    /// let info = stream.cached_info();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn cached_info(&self) -> &Info {
+        &self.info
+    }
     /// Get a raw message from the stream.
     ///
     /// # Examples
@@ -97,6 +155,164 @@ impl Stream {
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(ErrorKind::Other, error))),
             Response::Ok(value) => Ok(value.message),
+        }
+    }
+
+    /// Get the last raw message from the stream by subject.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    ///
+    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let raw_message = stream.get_last_raw_message_by_subject("events".into()).await?;
+    /// println!("Retreived raw message {:?}", raw_message);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_last_raw_message_by_subject(
+        &self,
+        stream_subject: &str,
+    ) -> Result<RawMessage, Error> {
+        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let payload = json!({
+            "last_by_subj":  stream_subject,
+        });
+
+        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting message: {}, {}",
+                    error.code, error.description
+                ),
+            ))),
+            Response::Ok(value) => Ok(value.message),
+        }
+    }
+
+    /// Delete a message from the stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    ///
+    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     max_messages: 10_000,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// stream.delete_message(publish_ack.sequence).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_message(&self, sequence: u64) -> Result<bool, Error> {
+        let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
+        let payload = json!({
+            "seq": sequence,
+        });
+
+        let response: Response<DeleteStatus> = self.context.request(subject, &payload).await?;
+
+        match response {
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while deleting message: {}, {}",
+                    error.code, error.status
+                ),
+            ))),
+            Response::Ok(value) => Ok(value.success),
+        }
+    }
+
+    /// Purge `Stream` messages.
+    ///
+    /// # Examples
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// stream.purge().await?;
+    /// # Ok(())
+    /// # }
+    pub async fn purge(&self) -> Result<PurgeResponse, Error> {
+        let subject = format!("STREAM.PURGE.{}", self.info.config.name);
+
+        let response: Response<PurgeResponse> = self.context.request(subject, &()).await?;
+        match response {
+            Response::Err { error } => Err(Box::new(io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "error while purging stream: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+            Response::Ok(response) => Ok(response),
+        }
+    }
+
+    /// Purge `Stream` messages for a matching subject.
+    ///
+    /// # Examples
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// stream.purge_subject("data").await?;
+    /// # Ok(())
+    /// # }
+    pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
+    where
+        T: Into<String>,
+    {
+        let request_subject = format!("STREAM.PURGE.{}", self.info.config.name);
+
+        let response: Response<PurgeResponse> = self
+            .context
+            .request(
+                request_subject,
+                &PurgeRequest {
+                    filter: Some(subject.into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        match response {
+            Response::Err { error } => Err(Box::new(io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "error while purging stream: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+            Response::Ok(response) => Ok(response),
         }
     }
 
@@ -364,6 +580,9 @@ pub struct Config {
     /// Indicates if purges will be denied or not.
     #[serde(default, skip_serializing_if = "is_default")]
     pub deny_purge: bool,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub republish: Option<Republish>,
 }
 
 impl From<&Config> for Config {
@@ -379,6 +598,19 @@ impl From<&str> for Config {
             ..Default::default()
         }
     }
+}
+// Republish is for republishing messages once committed to a stream.
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Republish {
+    /// Subject that should be republished.
+    #[serde(rename = "src")]
+    pub source: String,
+    /// Subject where messages will be republished.
+    #[serde(rename = "dest")]
+    pub destination: String,
+    /// If true, only headers should be republished.
+    #[serde(default)]
+    pub headers_only: bool,
 }
 
 /// `DiscardPolicy` determines how we proceed when limits of messages or bytes are hit. The default, `Old` will
@@ -626,7 +858,7 @@ fn parse_headers(
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct GetRawMessage {
-    pub message: RawMessage,
+    pub(crate) message: RawMessage,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -661,4 +893,28 @@ pub struct PeerInfo {
     pub offline: bool,
     /// How many uncommitted operations this peer is behind the leader.
     pub lag: Option<u64>,
+}
+
+/// The response generated by trying ot purge a stream.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct PurgeResponse {
+    /// Whether the purge request was successful.
+    pub success: bool,
+    /// The number of purged messages in a stream.
+    pub purged: u64,
+}
+/// The payload used to generate a purge request.
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+pub struct PurgeRequest {
+    /// Purge up to but not including sequence.
+    #[serde(default, rename = "seq", skip_serializing_if = "is_default")]
+    pub sequence: Option<u64>,
+
+    /// Subject to match against messages for the purge command.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter: Option<String>,
+
+    /// Number of messages to keep.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub keep: Option<u64>,
 }

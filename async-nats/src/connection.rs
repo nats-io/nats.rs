@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::str::{self, FromStr};
 
 use subslice::SubsliceExt;
@@ -20,7 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncWrite};
 use bytes::{Buf, BytesMut};
 use tokio::io;
 
-use crate::header::{HeaderMap, HeaderName, HeaderValue};
+use crate::header::{HeaderMap, HeaderName};
 use crate::status::StatusCode;
 use crate::{ClientOp, ServerError, ServerOp};
 
@@ -29,6 +30,23 @@ pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
 
 /// Blanked implementation that applies to both TLS and non-TLS `TcpStream`.
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum State {
+    Pending,
+    Connected,
+    Disconnected,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Pending => write!(f, "pending"),
+            State::Connected => write!(f, "connected"),
+            State::Disconnected => write!(f, "disconnected"),
+        }
+    }
+}
 
 /// A framed connection
 pub(crate) struct Connection {
@@ -260,10 +278,7 @@ impl Connection {
                     value.push_str(v);
                 }
 
-                headers.append(
-                    HeaderName::from_str(key).unwrap(),
-                    HeaderValue::from_str(value.trim()).unwrap(),
-                );
+                headers.append(HeaderName::from_str(key).unwrap(), value.trim().to_string());
             }
 
             return Ok(Some(ServerOp::Message {
@@ -335,20 +350,11 @@ impl Connection {
                 }
 
                 if let Some(headers) = headers {
-                    let mut header = Vec::new();
-                    header.extend_from_slice(b"NATS/1.0\r\n");
-                    for (key, value) in headers.iter() {
-                        header.extend_from_slice(key.as_ref());
-                        header.push(b':');
-                        header.extend_from_slice(value.as_ref());
-                        header.extend_from_slice(b"\r\n");
-                    }
-
-                    header.extend_from_slice(b"\r\n");
+                    let headers = headers.to_bytes();
 
                     let mut header_len_buf = itoa::Buffer::new();
                     self.stream
-                        .write_all(header_len_buf.format(header.len()).as_bytes())
+                        .write_all(header_len_buf.format(headers.len()).as_bytes())
                         .await?;
 
                     self.stream.write_all(b" ").await?;
@@ -357,13 +363,13 @@ impl Connection {
                     self.stream
                         .write_all(
                             total_len_buf
-                                .format(header.len() + payload.len())
+                                .format(headers.len() + payload.len())
                                 .as_bytes(),
                         )
                         .await?;
 
                     self.stream.write_all(b"\r\n").await?;
-                    self.stream.write_all(&header).await?;
+                    self.stream.write_all(&headers).await?;
                 } else {
                     let mut len_buf = itoa::Buffer::new();
                     self.stream
@@ -583,6 +589,7 @@ mod read_op {
         server.write_all(b"Hello World\r\n").await.unwrap();
 
         let result = connection.read_op().await.unwrap();
+
         assert_eq!(
             result,
             Some(ServerOp::Message {
@@ -792,7 +799,7 @@ mod write_op {
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
             buffer,
-            "HPUB FOO.BAR INBOX.67 22 33\r\nNATS/1.0\r\nheader:X\r\n\r\n"
+            "HPUB FOO.BAR INBOX.67 23 34\r\nNATS/1.0\r\nHeader: X\r\n\r\n"
         );
     }
 

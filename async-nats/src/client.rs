@@ -11,16 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::connection::State;
+use crate::ServerInfo;
+
 use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
+
+lazy_static! {
+    static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
+}
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
@@ -45,18 +54,88 @@ impl error::Error for PublishError {}
 /// [crate::connect] and [crate::ConnectOptions::connect]
 #[derive(Clone, Debug)]
 pub struct Client {
+    info: tokio::sync::watch::Receiver<ServerInfo>,
+    pub(crate) state: tokio::sync::watch::Receiver<State>,
     sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
+    inbox_prefix: String,
 }
 
 impl Client {
-    pub(crate) fn new(sender: mpsc::Sender<Command>, capacity: usize) -> Client {
+    pub(crate) fn new(
+        info: tokio::sync::watch::Receiver<ServerInfo>,
+        state: tokio::sync::watch::Receiver<State>,
+        sender: mpsc::Sender<Command>,
+        capacity: usize,
+        inbox_prefix: String,
+    ) -> Client {
         Client {
+            info,
+            state,
             sender,
             next_subscription_id: Arc::new(AtomicU64::new(0)),
             subscription_capacity: capacity,
+            inbox_prefix,
         }
+    }
+
+    /// Returns last received info from the server.
+    ///
+    /// Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main () -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("info: {:?}", client.server_info());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn server_info(&self) -> ServerInfo {
+        // We ignore notifying the watcher, as that requires mutable client reference.
+        self.info.borrow().to_owned()
+    }
+
+    /// Returns true if the server version is compatible with the version components.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// assert!(client.is_server_compatible(2, 8, 4));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn is_server_compatible(&self, major: i64, minor: i64, patch: i64) -> bool {
+        let info = self.server_info();
+
+        let server_version_captures = VERSION_RE.captures(&info.version).unwrap();
+
+        let server_major = server_version_captures
+            .get(1)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_minor = server_version_captures
+            .get(2)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        let server_patch = server_version_captures
+            .get(3)
+            .map(|m| m.as_str().parse::<i64>().unwrap())
+            .unwrap();
+
+        if server_major < major
+            || (server_major == major && server_minor < minor)
+            || (server_major == major && server_minor == minor && server_patch < patch)
+        {
+            return false;
+        }
+        true
     }
 
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
@@ -191,7 +270,7 @@ impl Client {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("_INBOX.{}", nuid::next())
+        format!("{}.{}", self.inbox_prefix, nuid::next())
     }
 
     pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
@@ -236,5 +315,20 @@ impl Client {
         // first question mark is an error from rx itself, second for error from flush.
         rx.await??;
         Ok(())
+    }
+
+    /// Returns the current state of the connection.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("connection state: {}", client.connection_state());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn connection_state(&self) -> State {
+        self.state.borrow().to_owned()
     }
 }

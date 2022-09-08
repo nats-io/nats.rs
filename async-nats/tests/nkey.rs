@@ -13,52 +13,44 @@
 
 mod client {
     use futures::stream::StreamExt;
-    use std::path::PathBuf;
+
+    const SECRET_SEED: &str = "SUACH75SWCM5D2JMJM6EKLR2WDARVGZT4QC6LX3AGHSWOMVAKERABBBRWM";
 
     #[tokio::test]
-    async fn jwt_auth() {
-        let s = nats_server::run_server("tests/configs/jwt.conf");
+    async fn nkey_auth() {
+        let s = nats_server::run_server("tests/configs/nkey.conf");
 
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let nc = async_nats::ConnectOptions::with_credentials_file(
-            path.join("tests/configs/TestUser.creds"),
-        )
-        .await
-        .expect("loaded user creds file")
-        .connect(s.client_url())
-        .await
-        .unwrap();
+        let nc = async_nats::ConnectOptions::with_nkey(SECRET_SEED.into())
+            .connect(s.client_url())
+            .await
+            .unwrap();
 
         // publish something
         nc.publish("hello".into(), "world".into())
             .await
             .expect("published");
     }
+
     #[tokio::test]
-    async fn jwt_reconnect() {
+    async fn nkey_reconnect() {
         use async_nats::ServerAddr;
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
         let mut servers = vec![
-            nats_server::run_server("tests/configs/jwt.conf"),
-            nats_server::run_server("tests/configs/jwt.conf"),
-            nats_server::run_server("tests/configs/jwt.conf"),
+            nats_server::run_server("tests/configs/nkey.conf"),
+            nats_server::run_server("tests/configs/nkey.conf"),
+            nats_server::run_server("tests/configs/nkey.conf"),
         ];
 
-        let client = async_nats::ConnectOptions::with_credentials_file(
-            path.join("tests/configs/TestUser.creds"),
-        )
-        .await
-        .unwrap()
-        .connect(
-            servers
-                .iter()
-                .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
-                .collect::<Vec<ServerAddr>>()
-                .as_slice(),
-        )
-        .await
-        .unwrap();
+        let client = async_nats::ConnectOptions::with_nkey(SECRET_SEED.into())
+            .connect(
+                servers
+                    .iter()
+                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>()
+                    .as_slice(),
+            )
+            .await
+            .unwrap();
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
