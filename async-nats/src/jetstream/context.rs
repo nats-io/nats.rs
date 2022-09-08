@@ -18,7 +18,7 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
-use futures::{FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, json};
@@ -26,7 +26,7 @@ use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
 
-use super::kv::{self, Store, MAX_HISTORY};
+use super::kv::{Store, MAX_HISTORY};
 use super::stream::{self, Config, DeleteStatus, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.

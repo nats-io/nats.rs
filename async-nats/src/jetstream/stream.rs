@@ -779,6 +779,7 @@ fn is_continuation(c: char) -> bool {
 const HEADER_LINE: &str = "NATS/1.0";
 const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 
+#[allow(clippy::type_complexity)]
 fn parse_headers(
     buf: &[u8],
 ) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), Error> {

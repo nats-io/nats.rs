@@ -26,10 +26,7 @@ use crate::{header, jetstream::response, Error, Message};
 
 use self::bucket::Status;
 
-use super::{
-    consumer::OrderedPushConsumer,
-    stream::{RawMessage, StorageType, Stream},
-};
+use super::stream::{RawMessage, StorageType, Stream};
 
 // Helper to extract key value operation from message headers
 fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation {
@@ -53,6 +50,8 @@ lazy_static! {
 }
 
 pub(crate) const MAX_HISTORY: i64 = 64;
+// TODO: will be used in this PR
+#[allow(dead_code)]
 const ALL_KEYS: &str = ">";
 
 const KV_OPERATION: &str = "KV-Operation";
@@ -336,7 +335,7 @@ impl<'a> futures::Stream for History<'a> {
                         .and_then(|headers| headers.get(KV_OPERATION))
                         .unwrap_or(&HeaderValue::from(KV_OPERATION_PUT))
                         .iter()
-                        .nth(0)
+                        .next()
                         .unwrap()
                         .as_str()
                     {

@@ -13,7 +13,6 @@
 
 use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
 use crate::{
-    header::{NATS_LAST_CONSUMER, NATS_LAST_STREAM},
     jetstream::{self, Context, Message},
     Error, StatusCode, Subscriber,
 };
