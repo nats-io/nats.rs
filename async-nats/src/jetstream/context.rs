@@ -19,7 +19,6 @@ use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
 use futures::TryFutureExt;
-use http::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
@@ -117,7 +116,7 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let mut headers = async_nats::HeaderMap::new();
-    /// headers.append("X-key", b"Value".as_ref().try_into()?);
+    /// headers.append("X-key", "Value");
     /// let ack = jetstream.publish_with_headers("events".to_string(), headers, "data".into()).await?;
     /// # Ok(())
     /// # }
@@ -125,7 +124,7 @@ impl Context {
     pub async fn publish_with_headers(
         &self,
         subject: String,
-        headers: HeaderMap,
+        headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAck, Error> {
         let message = self
