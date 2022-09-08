@@ -14,7 +14,7 @@
 use crate::connection::State;
 use crate::ServerInfo;
 
-use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
+use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
@@ -24,6 +24,7 @@ use std::error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::sync::mpsc;
 
 lazy_static! {
@@ -283,7 +284,7 @@ impl Client {
         &self,
         subject: String,
         queue_group: String,
-    ) -> Result<Subscriber, Error> {
+    ) -> Result<Subscriber, SubscribeError> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
