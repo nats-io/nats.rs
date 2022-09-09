@@ -112,6 +112,7 @@ pub enum Operation {
     Purge,
 }
 
+/// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
 pub struct Store {
     pub name: String,
@@ -121,6 +122,25 @@ pub struct Store {
 }
 
 impl Store {
+    /// Queries the server and returns status from the server.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let status = kv.status().await?;
+    /// println!("status: {:?}", status);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn status(&self) -> Result<Status, Error> {
         // TODO: should we poll for fresh info here? probably yes.
         let info = self.stream.info.clone();
@@ -131,6 +151,26 @@ impl Store {
         })
     }
 
+    /// Puts new key value pair into the bucket.
+    /// If key didn't exist, it is created. If it did exist, a new value with a new version is
+    /// added.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let status = kv.put("key", "value".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn put<T: AsRef<str>>(&self, key: T, value: bytes::Bytes) -> Result<u64, Error> {
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
@@ -146,6 +186,26 @@ impl Store {
         Ok(publish_ack.sequence)
     }
 
+    /// Retrieves the last [Entry] for a given key from a bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let status = kv.put("key", "value".into()).await?;
+    /// let entry = kv.entry("key").await?;
+    /// println!("entry: {:?}", entry);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn entry<T: AsRef<str>>(&self, key: T) -> Result<Option<Entry>, Error> {
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
@@ -197,6 +257,29 @@ impl Store {
         }
     }
 
+    /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
+    /// values whenever there are changes for that key.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let mut entries = kv.watch("kv").await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
@@ -219,6 +302,29 @@ impl Store {
         })
     }
 
+    /// Creates a [futures::Stream] over [Entries][Entry] for all keys, which yields
+    /// values whenever there are changes in the bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let mut entries = kv.watch_all().await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn watch_all(&self) -> Result<Watch<'_>, Error> {
         self.watch(ALL_KEYS).await
     }
@@ -234,6 +340,27 @@ impl Store {
         }
     }
 
+    /// Updates a value for a given key, but only if passed `revision` is the last `revision` in
+    /// the bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let revision = kv.put("key", "value".into()).await?;
+    /// kv.update("key", "updated".into(), revision).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn update<T: AsRef<str>>(
         &self,
         key: T,
@@ -261,6 +388,26 @@ impl Store {
             .map(|publish_ack| publish_ack.sequence)
     }
 
+    /// Deletes a given key. This is a non-destructive operation, which sets a `DELETE` marker.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// kv.put("key", "value".into()).await?;
+    /// kv.delete("key").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), Error> {
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
@@ -281,6 +428,27 @@ impl Store {
         Ok(())
     }
 
+    /// Purges the given key, destructively removing everything from the bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// kv.put("key", "value".into()).await?;
+    /// kv.put("key", "another".into()).await?;
+    /// kv.purge("key").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), Error> {
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
@@ -302,6 +470,29 @@ impl Store {
         Ok(())
     }
 
+    /// Returns a [futures::Stream] that allows iterating over all [Operations][Operation] that
+    /// happen for given key.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let mut entries = kv.history("kv").await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, Error> {
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
@@ -330,6 +521,28 @@ impl Store {
         })
     }
 
+    /// Returns a [futures::Stream] that allows iterating over all keys in the bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let mut entries = kv.keys().await?;
+    /// while let Some(key) = entries.next() {
+    ///     println!("key: {:?}", key);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn keys(&self) -> Result<collections::hash_set::IntoIter<String>, Error> {
         let subject = format!("{}>", self.prefix.as_str());
 

@@ -29,7 +29,6 @@ mod kv {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
-            // .connect(server.client_url())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -108,7 +107,6 @@ mod kv {
             })
             .await
             .unwrap();
-        println!("{:?}", kv.status().await.unwrap());
         let payload: Bytes = "data".into();
         let rev = kv.put("key", payload.clone()).await.unwrap();
         let value = kv.get("key").await.unwrap();
