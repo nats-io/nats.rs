@@ -15,7 +15,7 @@ pub mod bucket;
 
 use std::{
     collections::{self, HashSet},
-    future, io,
+    io,
     task::Poll,
 };
 
@@ -353,7 +353,7 @@ impl Store {
             })
             .await?;
 
-        let entries = History {
+        let mut entries = History {
             subscription: consumer.messages().await?,
             done: false,
             prefix: self.prefix.clone(),
@@ -361,13 +361,10 @@ impl Store {
         };
 
         let mut keys = HashSet::new();
-        entries
-            .try_for_each(|entry| {
-                keys.insert(entry.key);
-                future::ready(Ok(()))
-            })
-            .await?;
 
+        while let Some(entry) = entries.try_next().await? {
+            keys.insert(entry.key);
+        }
         Ok(keys.into_iter())
     }
 }
