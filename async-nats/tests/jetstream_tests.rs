@@ -1587,7 +1587,7 @@ mod jetstream {
 
         while let Some((i, message)) = messages.next().await {
             let message = message.unwrap();
-            assert_eq!(format!("source.{}", i), message.subject);
+            assert_eq!(format!("dest.source.{}", i), message.subject);
             assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
             message.ack().await.unwrap();
         }
