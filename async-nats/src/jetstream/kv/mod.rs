@@ -156,7 +156,11 @@ impl Store {
 
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
-        match self.stream.get_last_message(subject).await {
+        match self
+            .stream
+            .get_last_raw_message_by_subject(subject.as_str())
+            .await
+        {
             Ok(message) => {
                 let operation = kv_operation_from_stream_message(&message);
                 // TODO: unnecessary expensive, cloning whole Message.
