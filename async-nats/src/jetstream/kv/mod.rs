@@ -107,7 +107,7 @@ pub enum Operation {
     Purge,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Store {
     pub name: String,
     pub stream_name: String,
@@ -187,12 +187,6 @@ impl Store {
     }
 
     pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch, Error> {
-        if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
-        }
         let mut subject = String::new();
         subject.push_str(&self.prefix);
         subject.push_str(key.as_ref());
@@ -215,7 +209,7 @@ impl Store {
         })
     }
 
-    pub async fn watch_all<T: AsRef<str>>(&self) -> Result<Watch, Error> {
+    pub async fn watch_all(&self) -> Result<Watch, Error> {
         self.watch(ALL_KEYS).await
     }
 

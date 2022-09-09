@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod kv {
-    use std::str::from_utf8;
+    use std::{str::from_utf8, time::Duration};
 
     use async_nats::{
         jetstream::{
@@ -210,7 +210,6 @@ mod kv {
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
             .connect(server.client_url())
-            // .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -240,6 +239,117 @@ mod kv {
                 from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
             );
             assert_eq!(i + 6, entry.revision as usize);
+        }
+    }
+
+    #[tokio::test]
+    async fn watch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".to_string(),
+                description: "test_description".to_string(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut watch = kv.watch("foo").await.unwrap().enumerate();
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("foo", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("var", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+        while let Some((i, entry)) = watch.next().await {
+            let entry = entry.unwrap();
+            assert_eq!(entry.key, "foo".to_string());
+            assert_eq!(
+                i,
+                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            );
+            if i == 9 {
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn watch_all() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".to_string(),
+                description: "test_description".to_string(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut watch = kv.watch_all().await.unwrap().enumerate();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("bar", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("foo", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+
+        while let Some((i, entry)) = watch.next().await {
+            let entry = entry.unwrap();
+            assert_eq!(i +1, entry.revision as usize);
+            if i == 19 {
+                break;
+            }
         }
     }
 }

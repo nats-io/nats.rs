@@ -32,7 +32,7 @@ use super::{
 };
 
 /// Handle to operations that can be performed on a `Stream`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Stream {
     pub(crate) info: Info,
     pub(crate) context: Context,
