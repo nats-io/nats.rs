@@ -186,7 +186,7 @@ impl Store {
         }
     }
 
-    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch, Error> {
+    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let consumer = self
@@ -208,7 +208,7 @@ impl Store {
         })
     }
 
-    pub async fn watch_all(&self) -> Result<Watch, Error> {
+    pub async fn watch_all(&self) -> Result<Watch<'_>, Error> {
         self.watch(ALL_KEYS).await
     }
 
@@ -342,7 +342,6 @@ impl Store {
         };
 
         let mut keys = HashSet::new();
-
         while let Some(entry) = entries.try_next().await? {
             keys.insert(entry.key);
         }
