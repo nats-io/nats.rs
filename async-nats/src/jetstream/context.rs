@@ -377,6 +377,19 @@ impl Context {
         }
     }
 
+    /// Returns an existing key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.get_key_value("bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_key_value<T: Borrow<str>>(&self, bucket: T) -> Result<Store, Error> {
         let bucket = bucket.borrow();
         if !crate::jetstream::kv::is_valid_bucket_name(bucket) {
@@ -404,6 +417,23 @@ impl Context {
         })
     }
 
+    /// Creates a new key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn create_key_value(
         &self,
         config: crate::jetstream::kv::Config,
@@ -460,6 +490,23 @@ impl Context {
         })
     }
 
+    /// Deletes given key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete_key_value<T: AsRef<str>>(&self, bucket: T) -> Result<DeleteStatus, Error> {
         if !crate::jetstream::kv::is_valid_bucket_name(bucket.as_ref()) {
             return Err(Box::new(std::io::Error::new(
