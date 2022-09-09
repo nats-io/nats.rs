@@ -57,8 +57,6 @@ lazy_static! {
 }
 
 pub(crate) const MAX_HISTORY: i64 = 64;
-// TODO: will be used in this PR
-#[allow(dead_code)]
 const ALL_KEYS: &str = ">";
 
 const KV_OPERATION: &str = "KV-Operation";
@@ -141,10 +139,7 @@ impl Store {
             )));
         }
 
-        // TODO: figure out what to do with the domain prefix (it's a litle weird)
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let publish_ack = self.stream.context.publish(subject, value).await?;
 
@@ -159,9 +154,7 @@ impl Store {
             )));
         }
 
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         match self.stream.get_last_message(subject).await {
             Ok(message) => {
@@ -194,9 +187,7 @@ impl Store {
     }
 
     pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch, Error> {
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let consumer = self
             .stream
@@ -244,9 +235,7 @@ impl Store {
                 "invalid key",
             )));
         }
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         headers.insert(
@@ -268,9 +257,7 @@ impl Store {
                 "invalid key",
             )));
         }
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         // TODO: figure out which headers k/v should be where.
@@ -291,9 +278,7 @@ impl Store {
             )));
         }
 
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
@@ -313,9 +298,7 @@ impl Store {
                 "invalid key",
             )));
         }
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push_str(key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let consumer = self
             .stream
@@ -337,9 +320,7 @@ impl Store {
     }
 
     pub async fn keys(&self) -> Result<collections::hash_set::IntoIter<String>, Error> {
-        let mut subject = String::new();
-        subject.push_str(&self.prefix);
-        subject.push('>');
+        let subject = format!("{}>", self.prefix.as_str());
 
         let consumer = self
             .stream

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod kv {
-    use std::{collections::HashSet, str::from_utf8, time::Duration};
+    use std::{str::from_utf8, time::Duration};
 
     use async_nats::{
         jetstream::{
