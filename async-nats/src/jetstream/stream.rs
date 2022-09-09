@@ -831,7 +831,7 @@ fn parse_headers(
         }
     }
 
-    if true {
+    if headers.is_empty() {
         Ok((None, maybe_status, maybe_description))
     } else {
         Ok((Some(headers), maybe_status, maybe_description))
