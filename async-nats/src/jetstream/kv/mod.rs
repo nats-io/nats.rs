@@ -186,6 +186,39 @@ impl Store {
         }
     }
 
+    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch, Error> {
+        if !is_valid_key(key.as_ref()) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid key",
+            )));
+        }
+        let mut subject = String::new();
+        subject.push_str(&self.prefix);
+        subject.push_str(key.as_ref());
+
+        let consumer = self
+            .stream
+            .create_consumer(super::consumer::push::OrderedConfig {
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("kv watch consumer".to_string()),
+                filter_subject: subject,
+                replay_policy: super::consumer::ReplayPolicy::Instant,
+                ..Default::default()
+            })
+            .await?;
+
+        Ok(Watch {
+            subscription: consumer.messages().await?,
+            prefix: self.prefix.clone(),
+            bucket: self.name.clone(),
+        })
+    }
+
+    pub async fn watch_all<T: AsRef<str>>(&self) -> Result<Watch, Error> {
+        self.watch(ALL_KEYS).await
+    }
+
     pub async fn get<T: AsRef<str>>(&self, key: T) -> Result<Option<Vec<u8>>, Error> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
@@ -299,6 +332,67 @@ impl Store {
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
         })
+    }
+}
+
+pub struct Watch<'a> {
+    subscription: super::consumer::push::Ordered<'a>,
+    prefix: String,
+    bucket: String,
+}
+
+impl<'a> futures::Stream for Watch<'a> {
+    type Item = Result<Entry, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.subscription.poll_next_unpin(cx) {
+            Poll::Ready(message) => match message {
+                None => Poll::Ready(None),
+                Some(message) => {
+                    let message = message?;
+                    let info = message.info()?;
+
+                    let operation = match message
+                        .headers
+                        .as_ref()
+                        .and_then(|headers| headers.get(KV_OPERATION))
+                        .unwrap_or(&HeaderValue::from(KV_OPERATION_PUT))
+                        .iter()
+                        .next()
+                        .unwrap()
+                        .as_str()
+                    {
+                        KV_OPERATION_DELETE => Operation::Delete,
+                        KV_OPERATION_PURGE => Operation::Purge,
+                        _ => Operation::Put,
+                    };
+
+                    let key = message
+                        .subject
+                        .strip_prefix(&self.prefix)
+                        .map(|s| s.to_string())
+                        .unwrap();
+
+                    Poll::Ready(Some(Ok(Entry {
+                        bucket: self.bucket.clone(),
+                        key,
+                        value: message.payload.to_vec(),
+                        revision: info.stream_sequence,
+                        created: info.published,
+                        delta: info.pending,
+                        operation,
+                    })))
+                }
+            },
+            std::task::Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
     }
 }
 
