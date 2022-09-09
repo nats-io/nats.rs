@@ -26,7 +26,10 @@ use crate::{header, jetstream::response, Error, Message};
 
 use self::bucket::Status;
 
-use super::stream::{RawMessage, StorageType, Stream};
+use super::{
+    consumer::DeliverPolicy,
+    stream::{RawMessage, StorageType, Stream},
+};
 
 // Helper to extract key value operation from message headers
 fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation {
@@ -198,6 +201,7 @@ impl Store {
                 description: Some("kv watch consumer".to_string()),
                 filter_subject: subject,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
+                deliver_policy: DeliverPolicy::New,
                 ..Default::default()
             })
             .await?;
@@ -327,6 +331,8 @@ impl Store {
             bucket: self.name.clone(),
         })
     }
+
+    // pub async fn keys(&self) -> Result<Vec<String>, Error> {}
 }
 
 pub struct Watch<'a> {
