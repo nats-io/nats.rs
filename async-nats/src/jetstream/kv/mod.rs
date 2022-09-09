@@ -15,11 +15,11 @@ pub mod bucket;
 
 use std::{
     collections::{self, HashSet},
-    io,
+    io::{self, ErrorKind},
     task::Poll,
 };
 
-use crate::HeaderValue;
+use crate::{HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use lazy_static::lazy_static;
@@ -161,6 +161,13 @@ impl Store {
                 let operation = kv_operation_from_stream_message(&message);
                 // TODO: unnecessary expensive, cloning whole Message.
                 let nats_message = Message::try_from(message.clone())?;
+                if nats_message.status == Some(StatusCode::NO_RESPONDERS) {
+                    return Err(Box::new(std::io::Error::new(
+                        ErrorKind::NotFound,
+                        "nats: no responders",
+                    )));
+                }
+
                 let entry = Entry {
                     bucket: self.name.clone(),
                     key: key.as_ref().to_string(),
