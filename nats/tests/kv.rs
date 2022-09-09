@@ -20,7 +20,7 @@ use nats::kv::*;
 #[test]
 fn key_value_entry() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(server.client_url()).unwrap();
+    let client = nats::connect(&server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -49,29 +49,29 @@ fn key_value_entry() {
     // Delete
     kv.delete("foo").unwrap();
 
-    // let entry = kv.entry("foo").unwrap().unwrap();
-    // assert_eq!(entry.operation, Operation::Delete);
+    let entry = kv.entry("foo").unwrap().unwrap();
+    assert_eq!(entry.operation, Operation::Delete);
 
-    // let value = kv.get("foo").unwrap();
-    // assert_eq!(value, None);
+    let value = kv.get("foo").unwrap();
+    assert_eq!(value, None);
 
-    // // Create
-    // let revision = kv.create("foo", b"bar").unwrap();
-    // assert_eq!(revision, 3);
+    // Create
+    let revision = kv.create("foo", b"bar").unwrap();
+    assert_eq!(revision, 3);
 
-    // // Test conditional updates
-    // let revision = kv.update("foo", b"rip", revision).unwrap();
-    // kv.update("foo", b"rip", revision).unwrap();
+    // Test conditional updates
+    let revision = kv.update("foo", b"rip", revision).unwrap();
+    kv.update("foo", b"rip", revision).unwrap();
 
-    // let revision = kv.create("bar", b"baz").unwrap();
-    // kv.update("bar", b"baz", revision).unwrap();
+    let revision = kv.create("bar", b"baz").unwrap();
+    kv.update("bar", b"baz", revision).unwrap();
 
-    // // Status
-    // let status = kv.status().unwrap();
-    // assert_eq!(status.history(), 5);
-    // assert_eq!(status.bucket(), "ENTRY");
-    // assert_eq!(status.max_age(), std::time::Duration::from_secs(3600));
-    // assert_eq!(status.values(), 7);
+    // Status
+    let status = kv.status().unwrap();
+    assert_eq!(status.history(), 5);
+    assert_eq!(status.bucket(), "ENTRY");
+    assert_eq!(status.max_age(), std::time::Duration::from_secs(3600));
+    assert_eq!(status.values(), 7);
 }
 
 #[test]
@@ -292,11 +292,11 @@ fn key_value_purge() {
 
     bucket.purge("foo").unwrap();
 
-    // let value = bucket.get("foo").unwrap();
-    // assert_eq!(value, None);
+    let value = bucket.get("foo").unwrap();
+    assert_eq!(value, None);
 
-    // let entries = bucket.history("foo").unwrap();
-    // assert_eq!(entries.into_iter().count(), 1);
+    let entries = bucket.history("foo").unwrap();
+    assert_eq!(entries.into_iter().count(), 1);
 }
 
 #[test]

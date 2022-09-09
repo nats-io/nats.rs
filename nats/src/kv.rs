@@ -237,7 +237,6 @@ impl JetStream {
             storage: config.storage,
             allow_rollup: true,
             deny_delete: true,
-            deny_purge: false,
             num_replicas,
             discard: discard_policy,
             ..Default::default()
@@ -633,8 +632,6 @@ impl Store {
         let mut headers = HeaderMap::default();
         headers.insert(KV_OPERATION, KV_OPERATION_PURGE.to_string());
         headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
-
-        println!("SYNC PURGE:{:?}", headers);
 
         let message = Message::new(&subject, None, b"", Some(headers));
         self.context.publish_message(&message)?;
