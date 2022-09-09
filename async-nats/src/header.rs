@@ -68,6 +68,10 @@ impl HeaderMap {
     pub fn new() -> Self {
         HeaderMap::default()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 impl HeaderMap {
@@ -336,5 +340,16 @@ mod tests {
         let bytes = headers.to_bytes();
 
         println!("bytes: {:?}", from_utf8(&bytes));
+    }
+
+    #[test]
+    fn is_empty() {
+        let mut headers = HeaderMap::new();
+        assert!(headers.is_empty());
+
+        headers.append("Key", "value");
+        headers.append("Key", "second_value");
+        headers.insert("Second", "SecondValue");
+        assert!(!headers.is_empty());
     }
 }
