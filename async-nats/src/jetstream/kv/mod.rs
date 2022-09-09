@@ -13,11 +13,15 @@
 
 pub mod bucket;
 
-use std::{io, task::Poll};
+use std::{
+    collections::{self, HashSet},
+    future, io,
+    task::Poll,
+};
 
 use crate::HeaderValue;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use time::OffsetDateTime;
@@ -332,7 +336,40 @@ impl Store {
         })
     }
 
-    // pub async fn keys(&self) -> Result<Vec<String>, Error> {}
+    pub async fn keys(&self) -> Result<collections::hash_set::IntoIter<String>, Error> {
+        let mut subject = String::new();
+        subject.push_str(&self.prefix);
+        subject.push('>');
+
+        let consumer = self
+            .stream
+            .create_consumer(super::consumer::push::OrderedConfig {
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("kv history consumer".to_string()),
+                filter_subject: subject,
+                headers_only: true,
+                replay_policy: super::consumer::ReplayPolicy::Instant,
+                ..Default::default()
+            })
+            .await?;
+
+        let entries = History {
+            subscription: consumer.messages().await?,
+            done: false,
+            prefix: self.prefix.clone(),
+            bucket: self.name.clone(),
+        };
+
+        let mut keys = HashSet::new();
+        entries
+            .try_for_each(|entry| {
+                keys.insert(entry.key);
+                future::ready(Ok(()))
+            })
+            .await?;
+
+        Ok(keys.into_iter())
+    }
 }
 
 pub struct Watch<'a> {

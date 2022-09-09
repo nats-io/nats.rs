@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod kv {
-    use std::{str::from_utf8, time::Duration};
+    use std::{collections::HashSet, str::from_utf8, time::Duration};
 
     use async_nats::{
         jetstream::{
@@ -265,6 +265,8 @@ mod kv {
             .await
             .unwrap();
 
+        // check if we get only updated values. This should not pop up in watcher.
+        kv.put("foo", 22.to_string().into()).await.unwrap();
         let mut watch = kv.watch("foo").await.unwrap().enumerate();
 
         tokio::task::spawn({
@@ -346,10 +348,44 @@ mod kv {
 
         while let Some((i, entry)) = watch.next().await {
             let entry = entry.unwrap();
-            assert_eq!(i +1, entry.revision as usize);
+            assert_eq!(i + 1, entry.revision as usize);
             if i == 19 {
                 break;
             }
         }
+    }
+    #[tokio::test]
+    async fn keys() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".to_string(),
+                description: "test_description".to_string(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..10 {
+            kv.put("bar", i.to_string().into()).await.unwrap();
+        }
+        for i in 0..10 {
+            kv.put("foo", i.to_string().into()).await.unwrap();
+        }
+
+        let mut keys = kv.keys().await.unwrap().collect::<Vec<String>>();
+        keys.sort();
+        assert_eq!(vec!["bar", "foo"], keys);
     }
 }
