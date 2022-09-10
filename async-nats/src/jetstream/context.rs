@@ -390,16 +390,16 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_key_value<T: Borrow<str>>(&self, bucket: T) -> Result<Store, Error> {
-        let bucket = bucket.borrow();
-        if !crate::jetstream::kv::is_valid_bucket_name(bucket) {
+    pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, Error> {
+        let bucket: String = bucket.into();
+        if !crate::jetstream::kv::is_valid_bucket_name(&bucket) {
             return Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
                 "invalid bucket name",
             )));
         }
 
-        let stream_name = format!("KV_{}", bucket);
+        let stream_name = format!("KV_{}", &bucket);
         let stream = self.get_stream(stream_name.clone()).await?;
 
         if stream.info.config.max_messages_per_subject < 1 {
@@ -410,10 +410,10 @@ impl Context {
         }
 
         Ok(Store {
-            name: bucket.to_string(),
+            prefix: format!("$KV.{}.", &bucket),
+            name: bucket,
             stream_name,
             stream,
-            prefix: format!("$KV.{}.", bucket),
         })
     }
 

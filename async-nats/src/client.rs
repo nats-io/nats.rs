@@ -194,7 +194,6 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        println!("HEADERS: {:?}", headers);
         self.sender
             .send(Command::Publish {
                 subject,

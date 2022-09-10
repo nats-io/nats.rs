@@ -180,16 +180,6 @@ impl FromStr for HeaderValue {
     }
 }
 
-// impl TryFrom<&str> for HeaderValue {
-//     type Error = ParseError;
-
-//     fn try_from(value: &str) -> Result<Self, Self::Error> {
-//         let mut set = HeaderValue::new();
-//         set.value.insert(value.to_string());
-//         Ok(set)
-//     }
-// }
-
 impl From<u64> for HeaderValue {
     fn from(v: u64) -> Self {
         let mut set = HeaderValue::new();
