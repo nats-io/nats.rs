@@ -206,7 +206,8 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn entry<T: AsRef<str>>(&self, key: T) -> Result<Option<Entry>, Error> {
+    pub async fn entry<T: Into<String>>(&self, key: T) -> Result<Option<Entry>, Error> {
+        let key: String = key.into();
         if !is_valid_key(key.as_ref()) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -214,7 +215,7 @@ impl Store {
             )));
         }
 
-        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
+        let subject = format!("{}{}", self.prefix.as_str(), &key);
 
         match self
             .stream
@@ -234,7 +235,7 @@ impl Store {
 
                 let entry = Entry {
                     bucket: self.name.clone(),
-                    key: key.as_ref().to_string(),
+                    key,
                     value: nats_message.payload.to_vec(),
                     revision: message.sequence,
                     created: message.time,
@@ -329,7 +330,7 @@ impl Store {
         self.watch(ALL_KEYS).await
     }
 
-    pub async fn get<T: AsRef<str>>(&self, key: T) -> Result<Option<Vec<u8>>, Error> {
+    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Vec<u8>>, Error> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
                 Operation::Put => Ok(Some(entry.value)),
