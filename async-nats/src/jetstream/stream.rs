@@ -16,7 +16,6 @@
 use std::{
     fmt::Debug,
     io::{self, ErrorKind},
-    marker,
     time::Duration,
 };
 
