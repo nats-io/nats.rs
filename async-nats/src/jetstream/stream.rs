@@ -166,7 +166,35 @@ impl Stream {
         Ok(response)
     }
 
-    pub async fn direct_get_by_sequence(&self, sequence: u64) -> Result<Message, Error> {
+    /// Gets message from [Stream] with given `sequence id`.
+    /// Requires a [Stream] with `allow_direct` set to `true`.
+    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// from any replica member. This means read after write is possible,
+    /// as that given replica might not yet catch up with the leader.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     subjects: vec!["events.>".to_string()],
+    ///     allow_direct: true,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    ///
+    /// let message =  stream.get_direct(pub_ack.sequence).await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_direct(&self, sequence: u64) -> Result<Message, Error> {
         let subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -196,7 +224,7 @@ impl Stream {
         Ok(response)
     }
 
-    pub async fn direct_get_last_for_subject(&self, subject: String) -> Result<Message, Error> {
+    pub async fn get_direct_last_for_subject(&self, subject: String) -> Result<Message, Error> {
         let subject = format!(
             "{}.DIRECT.GET.{}.{}",
             &self.context.prefix, &self.info.config.name, subject

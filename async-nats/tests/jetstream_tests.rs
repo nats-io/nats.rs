@@ -443,7 +443,7 @@ mod jetstream {
             .unwrap();
 
         let message = stream
-            .direct_get_last_for_subject("events".into())
+            .get_direct_last_for_subject("events".into())
             .await
             .unwrap();
 
@@ -460,7 +460,7 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream
-            .direct_get_last_for_subject("wrong".into())
+            .get_direct_last_for_subject("wrong".into())
             .await
             .expect_err("should error");
     }
@@ -515,7 +515,7 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream
-            .direct_get_last_for_subject("wrong".into())
+            .get_direct_last_for_subject("wrong".into())
             .await
             .expect_err("should error");
     }
@@ -621,7 +621,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        let message = stream.direct_get_by_sequence(2).await.unwrap();
+        let message = stream.get_direct(2).await.unwrap();
 
         let sequence = message
             .headers
@@ -635,10 +635,7 @@ mod jetstream {
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
-        stream
-            .direct_get_by_sequence(22)
-            .await
-            .expect_err("should error");
+        stream.get_direct(22).await.expect_err("should error");
     }
 
     #[tokio::test]
