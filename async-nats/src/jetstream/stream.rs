@@ -21,6 +21,7 @@ use std::{
 };
 
 use crate::Error;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -28,7 +29,7 @@ use time::serde::rfc3339;
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
     response::Response,
-    Context,
+    Context, Message,
 };
 
 /// Handle to operations that can be performed on a `Stream`.
@@ -98,17 +99,129 @@ impl Stream {
         &self.info
     }
 
-    async fn direct_get_next_after_sequence_for_subject(
+    pub async fn direct_get_next_for_subject_after_sequence(
         &self,
         subject: String,
         sequence: u64,
-    ) -> Result<RawMessage, Error> {
+    ) -> Result<Message, Error> {
+        let request_subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload = json!({
+            "seq": sequence,
+            "next_by_subj": subject,
+        });
+
+        let response = self
+            .context
+            .client
+            .request(
+                request_subject,
+                serde_json::to_vec(&payload).map(Bytes::from)?,
+            )
+            .await
+            .map(|message| Message {
+                message,
+                context: self.context.clone(),
+            })?;
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
+    }
+    pub async fn direct_get_next_for_subject(&self, subject: String) -> Result<Message, Error> {
+        let request_subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload = json!({
+            "next_by_subj": subject,
+        });
+
+        let response = self
+            .context
+            .client
+            .request(
+                request_subject,
+                serde_json::to_vec(&payload).map(Bytes::from)?,
+            )
+            .await
+            .map(|message| Message {
+                message,
+                context: self.context.clone(),
+            })?;
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
     }
 
-    async fn direct_get_by_sequence(&self, sequence: u64) -> Result<RawMessage, Error> {}
+    pub async fn direct_get_by_sequence(&self, sequence: u64) -> Result<Message, Error> {
+        let subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload = json!({
+            "seq": sequence,
+        });
 
-    async fn direct_get_last_for_subject(&self, subject: String) -> Result<RawMessage, Error> {}
+        let response = self
+            .context
+            .client
+            .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
+            .await
+            .map(|message| Message {
+                context: self.context.clone(),
+                message,
+            })?;
 
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
+    }
+
+    pub async fn direct_get_last_for_subject(&self, subject: String) -> Result<Message, Error> {
+        let subject = format!(
+            "{}.DIRECT.GET.{}.{}",
+            &self.context.prefix, &self.info.config.name, subject
+        );
+
+        let response = self
+            .context
+            .client
+            .request(subject, "".into())
+            .await
+            .map(|message| Message {
+                context: self.context.clone(),
+                message,
+            })?;
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
+    }
     /// Get a raw message from the stream.
     ///
     /// # Examples
@@ -578,6 +691,9 @@ pub struct Config {
 
     #[serde(default, skip_serializing_if = "is_default")]
     pub republish: Option<Republish>,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub allow_direct: bool,
 }
 
 impl From<&Config> for Config {
@@ -797,108 +913,3 @@ pub struct PurgeRequest {
     #[serde(default, skip_serializing_if = "is_default")]
     pub keep: Option<u64>,
 }
-
-#[derive(Default, Clone)]
-pub struct DirectBuilder<Seq, Next, Last>
-where
-    Seq: ToAssign,
-    Next: ToAssign,
-    Last: ToAssign,
-{
-    sequence: Option<u64>,
-    get_by: Option<DirectGetBy>,
-    seq: marker::PhantomData<Seq>,
-    next: marker::PhantomData<Next>,
-    last: marker::PhantomData<Last>,
-}
-
-impl<Seq, Next, Last> DirectBuilder<Seq, Next, Last>
-where
-    Seq: ToAssign,
-    Next: ToAssign,
-    Last: ToAssign,
-{
-    fn send(self) -> Result<(), Error> {
-        println!("sent");
-        Ok(())
-    }
-}
-
-impl<Next> DirectBuilder<No, Next, No>
-where
-    Next: ToAssign,
-{
-    fn sequence(self, sequence: u64) -> DirectBuilder<Yes, Next, No> {
-        self.sequence = Some(sequence);
-        DirectBuilder {
-            sequence: Some(sequence),
-            get_by: self.get_by,
-            seq: marker::PhantomData,
-            next: marker::PhantomData,
-            last: marker::PhantomData,
-        }
-    }
-}
-
-impl DirectBuilder<No, No, No> {
-    fn last_by_subject(self, subject: String) -> DirectBuilder<No, No, Yes> {
-        DirectBuilder {
-            sequence: self.sequence,
-            get_by: Some(DirectGetBy::Last(subject)),
-            seq: marker::PhantomData,
-            next: marker::PhantomData,
-            last: marker::PhantomData,
-        }
-    }
-}
-
-impl<Seq> DirectBuilder<Seq, No, No>
-where
-    Seq: ToAssign,
-{
-    fn next_by_subject(self, subject: String) -> DirectBuilder<Seq, Yes, No> {
-        self.get_by = Some(DirectGetBy::Next(subject));
-        DirectBuilder {
-            sequence: self.sequence,
-            get_by: Some(DirectGetBy::Next(subject)),
-            seq: marker::PhantomData,
-            next: marker::PhantomData,
-            last: marker::PhantomData,
-        }
-    }
-}
-
-fn direct_get() -> DirectBuilder<No, No, No> {
-    DirectBuilder::default()
-}
-
-#[cfg(test)]
-mod direct_builder_tests {
-    use super::{direct_get, DirectBuilder};
-
-    #[test]
-    fn builder() {
-        let message = direct_get()
-            .sequence(50)
-            .next_by_subject("test".into())
-            .send();
-
-        let message = direct_get().last_by_subject("test".into()).send();
-    }
-}
-
-#[derive(Clone)]
-pub enum DirectGetBy {
-    Last(String),
-    Next(String),
-}
-
-#[derive(Debug, Default)]
-pub struct Yes;
-#[derive(Debug, Default)]
-pub struct No;
-
-pub trait ToAssign: Debug {}
-
-impl ToAssign for Yes {}
-impl ToAssign for No {}
