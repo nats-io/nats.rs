@@ -22,6 +22,10 @@ use std::{
 use serde::Serialize;
 
 pub const NATS_LAST_STREAM: &str = "nats-last-stream";
+pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
+
+/// Nats-Expected-Last-Subject-Sequence
+pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
 
 /// A struct for handling NATS headers.
 /// Has a similar API to [http::header], but properly serializes and desiaralizes
@@ -173,6 +177,21 @@ impl FromStr for HeaderValue {
         let mut set = HeaderValue::new();
         set.value.insert(s.to_string());
         Ok(set)
+    }
+}
+
+impl From<u64> for HeaderValue {
+    fn from(v: u64) -> Self {
+        let mut set = HeaderValue::new();
+        set.value.insert(v.to_string());
+        set
+    }
+}
+impl From<&str> for HeaderValue {
+    fn from(v: &str) -> Self {
+        let mut set = HeaderValue::new();
+        set.value.insert(v.to_string());
+        set
     }
 }
 
