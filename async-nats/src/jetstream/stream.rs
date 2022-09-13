@@ -723,22 +723,14 @@ impl TryFrom<RawMessage> for Message {
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
         let decoded_paylaod = base64::decode(value.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
-        let decoded_headers = {
-            if let Some(headers) = value.headers {
-                let decoded = base64::decode(headers)?;
-                Some(decoded)
-            } else {
-                None
-            }
-        };
+        let decoded_headers = value
+            .headers
+            .map(base64::decode)
+            .map_or(Ok(None), |v| v.map(Some))?;
 
-        let (headers, status, description) = {
-            if let Some(headers) = decoded_headers {
-                parse_headers(&headers)?
-            } else {
-                (None, None, None)
-            }
-        };
+        let (headers, status, description) =
+            decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
+
         Ok(Message {
             subject: value.subject,
             reply: None,
