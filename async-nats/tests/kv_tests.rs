@@ -25,7 +25,7 @@ mod kv {
     use futures::StreamExt;
 
     #[tokio::test]
-    async fn kv_create() {
+    async fn create() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
@@ -54,7 +54,7 @@ mod kv {
     }
 
     #[tokio::test]
-    async fn kv_put() {
+    async fn put() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
@@ -86,7 +86,75 @@ mod kv {
     }
 
     #[tokio::test]
-    async fn kv_update() {
+    async fn get() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".to_string(),
+                description: "test_description".to_string(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let payload: Bytes = "data".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+        let payload: Bytes = "data2".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+        let nothing = kv.get("nothing").await.unwrap();
+        assert_eq!(None, nothing);
+    }
+
+    #[tokio::test]
+    async fn entry() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".to_string(),
+                description: "test_description".to_string(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let payload: Bytes = "data".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+        let payload: Bytes = "data2".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.entry("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap().value).unwrap(), payload);
+        let nothing = kv.get("nothing").await.unwrap();
+        assert_eq!(None, nothing);
+    }
+
+    #[tokio::test]
+    async fn update() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
@@ -122,7 +190,7 @@ mod kv {
     }
 
     #[tokio::test]
-    async fn kv_delete() {
+    async fn delete() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
@@ -162,7 +230,7 @@ mod kv {
     }
 
     #[tokio::test]
-    async fn kv_purge() {
+    async fn purge() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })
@@ -203,7 +271,7 @@ mod kv {
     }
 
     #[tokio::test]
-    async fn kv_history() {
+    async fn history() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {:?}", event) })

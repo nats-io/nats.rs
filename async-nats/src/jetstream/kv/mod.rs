@@ -15,7 +15,7 @@ pub mod bucket;
 
 use std::{
     collections::{self, HashSet},
-    io::{self, ErrorKind},
+    io,
     task::Poll,
 };
 
@@ -227,10 +227,7 @@ impl Store {
                 // TODO: unnecessary expensive, cloning whole Message.
                 let nats_message = Message::try_from(message.clone())?;
                 if nats_message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
+                    return Ok(None);
                 }
 
                 let entry = Entry {
