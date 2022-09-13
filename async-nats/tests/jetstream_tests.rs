@@ -442,10 +442,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        let message = stream
-            .get_direct_last_for_subject("events".into())
-            .await
-            .unwrap();
+        let message = stream.direct_get_last_for_subject("events").await.unwrap();
 
         let sequence = message
             .headers
@@ -460,7 +457,7 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream
-            .get_direct_last_for_subject("wrong".into())
+            .direct_get_last_for_subject("wrong")
             .await
             .expect_err("should error");
     }
@@ -498,7 +495,7 @@ mod jetstream {
             .unwrap();
 
         let message = stream
-            .direct_get_next_for_subject("events".into())
+            .direct_get_next_for_subject("events", None)
             .await
             .unwrap();
 
@@ -515,7 +512,7 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream
-            .get_direct_last_for_subject("wrong".into())
+            .direct_get_next_for_subject("wrong", None)
             .await
             .expect_err("should error");
     }
@@ -562,7 +559,7 @@ mod jetstream {
             .unwrap();
 
         let message = stream
-            .direct_get_next_for_subject_after_sequence("events".into(), 3)
+            .direct_get_next_for_subject("events", Some(3))
             .await
             .unwrap();
 
@@ -579,11 +576,11 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream
-            .direct_get_next_for_subject_after_sequence("events".into(), 14)
+            .direct_get_next_for_subject("events", Some(14))
             .await
             .expect_err("should error");
         stream
-            .direct_get_next_for_subject_after_sequence("entries".into(), 1)
+            .direct_get_next_for_subject("entries", Some(1))
             .await
             .expect_err("should error");
     }
@@ -621,7 +618,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        let message = stream.get_direct(2).await.unwrap();
+        let message = stream.direct_get(2).await.unwrap();
 
         let sequence = message
             .headers
@@ -635,7 +632,7 @@ mod jetstream {
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
-        stream.get_direct(22).await.expect_err("should error");
+        stream.direct_get(22).await.expect_err("should error");
     }
 
     #[tokio::test]
