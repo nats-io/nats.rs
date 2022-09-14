@@ -16,10 +16,12 @@
 use std::{
     fmt::Debug,
     io::{self, ErrorKind},
+    str::FromStr,
     time::Duration,
 };
 
-use crate::Error;
+use crate::{header::HeaderName, HeaderMap, HeaderValue};
+use crate::{Error, Message, StatusCode};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -32,7 +34,7 @@ use super::{
 };
 
 /// Handle to operations that can be performed on a `Stream`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Stream {
     pub(crate) info: Info,
     pub(crate) context: Context,
@@ -435,13 +437,7 @@ impl Stream {
 
         let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting message: {}, {}",
-                    error.code, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(ErrorKind::Other, error))),
             Response::Ok(value) => Ok(value.message),
         }
     }
@@ -982,6 +978,119 @@ pub struct RawMessage {
     /// The time the message was published.
     #[serde(rename = "time", with = "rfc3339")]
     pub time: time::OffsetDateTime,
+}
+
+impl TryFrom<RawMessage> for Message {
+    type Error = Error;
+
+    fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
+        let decoded_paylaod = base64::decode(value.payload)
+            .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
+        let decoded_headers = value
+            .headers
+            .map(base64::decode)
+            .map_or(Ok(None), |v| v.map(Some))?;
+
+        let (headers, status, description) =
+            decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
+
+        Ok(Message {
+            subject: value.subject,
+            reply: None,
+            payload: decoded_paylaod.into(),
+            headers,
+            status,
+            description,
+        })
+    }
+}
+
+fn is_continuation(c: char) -> bool {
+    c == ' ' || c == '\t'
+}
+const HEADER_LINE: &str = "NATS/1.0";
+const HEADER_LINE_LEN: usize = HEADER_LINE.len();
+
+#[allow(clippy::type_complexity)]
+fn parse_headers(
+    buf: &[u8],
+) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), Error> {
+    let mut headers = HeaderMap::new();
+    let mut maybe_status: Option<StatusCode> = None;
+    let mut maybe_description: Option<String> = None;
+    let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
+        line.lines().peekable()
+    } else {
+        return Err(Box::new(std::io::Error::new(
+            ErrorKind::Other,
+            "invalid header",
+        )));
+    };
+
+    if let Some(line) = lines.next() {
+        if !line.starts_with(HEADER_LINE) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "version lie does not start with NATS/1.0",
+            )));
+        }
+
+        // TODO: return this as description to be consistent?
+        if let Some(slice) = line.get(HEADER_LINE_LEN..).map(|s| s.trim()) {
+            match slice.split_once(' ') {
+                Some((status, description)) => {
+                    if !status.is_empty() {
+                        maybe_status = Some(status.trim().parse()?);
+                    }
+
+                    if !description.is_empty() {
+                        maybe_description = Some(description.trim().to_string());
+                    }
+                }
+                None => {
+                    if !slice.is_empty() {
+                        maybe_status = Some(slice.trim().parse()?);
+                    }
+                }
+            }
+        }
+    } else {
+        return Err(Box::new(std::io::Error::new(
+            ErrorKind::Other,
+            "expected header information not found",
+        )));
+    };
+
+    while let Some(line) = lines.next() {
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some((k, v)) = line.split_once(':').to_owned() {
+            let mut s = String::from(v.trim());
+            while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)).to_owned() {
+                s.push(' ');
+                s.push_str(v.trim());
+            }
+
+            headers.insert(
+                HeaderName::from_str(k)?,
+                HeaderValue::from_str(&s)
+                    .map_err(|err| Box::new(io::Error::new(ErrorKind::Other, err)))?,
+            );
+        } else {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "malformed header line",
+            )));
+        }
+    }
+
+    if headers.is_empty() {
+        Ok((None, maybe_status, maybe_description))
+    } else {
+        Ok((Some(headers), maybe_status, maybe_description))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
