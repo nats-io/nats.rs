@@ -509,6 +509,18 @@ mod jetstream {
             })
             .await
             .unwrap();
+
+        context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("namex".to_string()),
+                name: Some("namey".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
     }
     #[tokio::test]
     async fn delete_consumer() {

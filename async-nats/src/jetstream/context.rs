@@ -25,6 +25,7 @@ use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
+use tracing::debug;
 
 use super::kv::{Store, MAX_HISTORY};
 use super::stream::{self, Config, DeleteStatus, Info, Stream};
@@ -560,6 +561,8 @@ impl Context {
         V: DeserializeOwned,
     {
         let request = serde_json::to_vec(&payload).map(Bytes::from)?;
+
+        debug!("JetStream request sent: {:?}", request);
 
         let message = self
             .client

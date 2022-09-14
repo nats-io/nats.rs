@@ -1370,6 +1370,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -1430,6 +1434,7 @@ impl IntoConsumerConfig for Config {
     fn into_consumer_config(self) -> consumer::Config {
         jetstream::consumer::Config {
             deliver_subject: None,
+            name: self.name,
             durable_name: self.durable_name,
             description: self.description,
             deliver_group: None,
@@ -1463,6 +1468,7 @@ impl FromConsumer for Config {
         }
         Ok(Config {
             durable_name: config.durable_name,
+            name: config.name,
             description: config.description,
             deliver_policy: config.deliver_policy,
             ack_policy: config.ack_policy,

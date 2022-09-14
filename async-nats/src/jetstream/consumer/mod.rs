@@ -33,7 +33,7 @@ pub trait IntoConsumerConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
@@ -241,6 +241,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
