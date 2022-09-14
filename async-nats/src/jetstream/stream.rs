@@ -21,7 +21,7 @@ use std::{
 };
 
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
-use crate::{Error, Message, StatusCode};
+use crate::{Error, StatusCode};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -980,7 +980,7 @@ pub struct RawMessage {
     pub time: time::OffsetDateTime,
 }
 
-impl TryFrom<RawMessage> for Message {
+impl TryFrom<RawMessage> for crate::Message {
     type Error = Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
@@ -994,7 +994,7 @@ impl TryFrom<RawMessage> for Message {
         let (headers, status, description) =
             decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
 
-        Ok(Message {
+        Ok(crate::Message {
             subject: value.subject,
             reply: None,
             payload: decoded_paylaod.into(),
