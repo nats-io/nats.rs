@@ -194,6 +194,9 @@ pub struct Config {
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub memory_storage: bool,
 }
 
 impl FromConsumer for Config {
@@ -225,6 +228,7 @@ impl FromConsumer for Config {
             flow_control: config.flow_control,
             idle_heartbeat: config.idle_heartbeat,
             num_replicas: config.num_replicas,
+            memory_storage: config.memory_storage,
         })
     }
 }
@@ -254,6 +258,7 @@ impl IntoConsumerConfig for Config {
             max_expires: Duration::default(),
             inactive_threshold: Duration::default(),
             num_replicas: self.num_replicas,
+            memory_storage: self.memory_storage,
         }
     }
 }
@@ -357,6 +362,7 @@ impl IntoConsumerConfig for OrderedConfig {
             max_expires: Duration::default(),
             inactive_threshold: Duration::from_secs(30),
             num_replicas: self.num_replicas,
+            memory_storage: true,
         }
     }
 }

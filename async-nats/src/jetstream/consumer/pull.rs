@@ -1422,6 +1422,9 @@ pub struct Config {
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub memory_storage: bool,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -1455,6 +1458,7 @@ impl IntoConsumerConfig for Config {
             max_expires: self.max_expires,
             inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
+            memory_storage: self.memory_storage,
         }
     }
 }
@@ -1485,6 +1489,7 @@ impl FromConsumer for Config {
             max_expires: config.max_expires,
             inactive_threshold: config.inactive_threshold,
             num_replicas: config.num_replicas,
+            memory_storage: config.memory_storage,
         })
     }
 }
