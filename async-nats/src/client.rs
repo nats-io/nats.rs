@@ -211,7 +211,7 @@ impl Client {
     }
 
     pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
-        let request = RequestBuilder::new().payload(payload);
+        let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
 
@@ -234,27 +234,23 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, Error> {
-        let request = RequestBuilder::new().headers(headers).payload(payload);
+        let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
 
-    /// Sends the request created by the [RequestBuilder].
+    /// Sends the request created by the [Request].
     ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::RequestBuilder::new().payload("data".into());
+    /// let request = async_nats::Request::new().payload("data".into());
     /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_request(
-        &self,
-        subject: String,
-        request: RequestBuilder,
-    ) -> Result<Message, Error> {
+    pub async fn send_request(&self, subject: String, request: Request) -> Result<Message, Error> {
         let inbox = request.inbox.unwrap_or_else(|| self.new_inbox());
         let timeout = request.timeout.unwrap_or(self.request_timeout);
         let mut sub = self.subscribe(inbox.clone()).await?;
@@ -370,15 +366,15 @@ impl Client {
 
 /// Used for building customized requests.
 #[derive(Default)]
-pub struct RequestBuilder {
+pub struct Request {
     payload: Option<Bytes>,
     headers: Option<HeaderMap>,
     timeout: Option<Option<Duration>>,
     inbox: Option<String>,
 }
 
-impl RequestBuilder {
-    pub fn new() -> RequestBuilder {
+impl Request {
+    pub fn new() -> Request {
         Default::default()
     }
 
@@ -389,12 +385,12 @@ impl RequestBuilder {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::RequestBuilder::new().payload("data".into());
+    /// let request = async_nats::Request::new().payload("data".into());
     /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn payload(mut self, payload: Bytes) -> RequestBuilder {
+    pub fn payload(mut self, payload: Bytes) -> Request {
         self.payload = Some(payload);
         self
     }
@@ -409,14 +405,14 @@ impl RequestBuilder {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("X-Example", async_nats::HeaderValue::from_str("Value").unwrap());
-    /// let request = async_nats::RequestBuilder::new()
+    /// let request = async_nats::Request::new()
     ///     .headers(headers)
     ///     .payload("data".into());
     /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn headers(mut self, headers: HeaderMap) -> RequestBuilder {
+    pub fn headers(mut self, headers: HeaderMap) -> Request {
         self.headers = Some(headers);
         self
     }
@@ -430,14 +426,14 @@ impl RequestBuilder {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::RequestBuilder::new()
+    /// let request = async_nats::Request::new()
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
     ///     .payload("data".into());
     /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn timeout(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout(mut self, timeout: Option<Duration>) -> Request {
         self.timeout = Some(timeout);
         self
     }
@@ -450,14 +446,14 @@ impl RequestBuilder {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::RequestBuilder::new()
+    /// let request = async_nats::Request::new()
     ///     .inbox("custom_inbox".into())
     ///     .payload("data".into());
     /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn inbox(mut self, inbox: String) -> RequestBuilder {
+    pub fn inbox(mut self, inbox: String) -> Request {
         self.inbox = Some(inbox);
         self
     }
