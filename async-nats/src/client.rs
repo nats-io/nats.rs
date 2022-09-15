@@ -211,44 +211,91 @@ impl Client {
     }
 
     pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
-        self.build_request().payload(payload).send(subject).await
+        let request = RequestBuilder::new().payload(payload);
+        self.send_request(subject, request).await
     }
 
-    pub async fn request_with_headers(
-        &self,
-        subject: String,
-        headers: HeaderMap,
-        payload: Bytes,
-    ) -> Result<Message, Error> {
-        self.build_request()
-            .headers(headers)
-            .payload(payload)
-            .send(subject)
-            .await
-    }
-
-    /// Creates a request builder that allows for deep control over request contents and behaviour.
+    /// Sends the request with headers.
     ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.build_request()
-    ///     .timeout(Some(std::time::Duration::from_secs(5)))
-    ///     .payload("data".into())
-    ///     .send("service".into()).await?;
+    /// let mut headers = async_nats::HeaderMap::new();
+    /// headers.insert("Key", "Value");
+    /// client.request_with_headers("service".into(), headers).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn build_request(&self) -> RequestBuilder {
-        RequestBuilder::new(self)
+    pub async fn request_with_headers(
+        &self,
+        subject: String,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<Message, Error> {
+        let request = RequestBuilder::new().headers(headers).payload(payload);
+        self.send_request(subject, request).await
+    }
+
+    /// Sends the request created by the [RequestBuilder].
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let request = async_nats::RequestBuilder::new().paylaod("data".into());
+    /// client.send_request("service".into(), request).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn send_request(
+        &self,
+        subject: String,
+        request: RequestBuilder,
+    ) -> Result<Message, Error> {
+        let inbox = request.inbox.unwrap_or_else(|| self.new_inbox());
+        let timeout = request.timeout.unwrap_or(self.request_timeout);
+        let mut sub = self.subscribe(inbox.clone()).await?;
+        let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
+        match request.headers {
+            Some(headers) => {
+                self.publish_with_reply_and_headers(subject, inbox, headers, payload)
+                    .await?
+            }
+            None => self.publish_with_reply(subject, inbox, payload).await?,
+        }
+        self.flush().await?;
+        let request = match timeout {
+            Some(timeout) => {
+                tokio::time::timeout(timeout, sub.next())
+                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
+                    .await?
+            }
+            None => sub.next().await,
+        };
+        match request {
+            Some(message) => {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
+                    return Err(Box::new(std::io::Error::new(
+                        ErrorKind::NotFound,
+                        "nats: no responders",
+                    )));
+                }
+                Ok(message)
+            }
+            None => Err(Box::new(io::Error::new(
+                ErrorKind::BrokenPipe,
+                "did not receive any message",
+            ))),
+        }
     }
 
     /// Create a new globally unique inbox which can be used for replies.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// # let mut nc = async_nats::connect("demo.nats.io").await?;
@@ -308,7 +355,7 @@ impl Client {
     /// Returns the current state of the connection.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -322,23 +369,17 @@ impl Client {
 }
 
 /// Used for building customized requests.
-pub struct RequestBuilder<'a> {
-    client: &'a Client,
+#[derive(Default)]
+pub struct RequestBuilder {
     payload: Option<Bytes>,
     headers: Option<HeaderMap>,
     timeout: Option<Option<Duration>>,
     inbox: Option<String>,
 }
 
-impl<'a> RequestBuilder<'a> {
-    fn new(client: &Client) -> RequestBuilder {
-        RequestBuilder {
-            client,
-            payload: None,
-            headers: None,
-            timeout: None,
-            inbox: None,
-        }
+impl RequestBuilder {
+    pub fn new() -> RequestBuilder {
+        Default::default()
     }
 
     /// Sets the payload of the request. If not used, empty paylaod will be sent.
@@ -354,7 +395,7 @@ impl<'a> RequestBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn payload(mut self, payload: Bytes) -> RequestBuilder<'a> {
+    pub fn payload(mut self, payload: Bytes) -> RequestBuilder {
         self.payload = Some(payload);
         self
     }
@@ -375,7 +416,7 @@ impl<'a> RequestBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn headers(mut self, headers: HeaderMap) -> RequestBuilder<'a> {
+    pub fn headers(mut self, headers: HeaderMap) -> RequestBuilder {
         self.headers = Some(headers);
         self
     }
@@ -396,7 +437,7 @@ impl<'a> RequestBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn timeout(mut self, timeout: Option<Duration>) -> RequestBuilder<'a> {
+    pub fn timeout(mut self, timeout: Option<Duration>) -> RequestBuilder {
         self.timeout = Some(timeout);
         self
     }
@@ -408,6 +449,7 @@ impl<'a> RequestBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let request = async_nats::RequestBuilder::new().inbox("custom_inbox").paylaod("data".into));
     /// client.build_request()
     ///     .inbox("custom_inbox".into())
     ///     .payload("data".into())
@@ -415,64 +457,8 @@ impl<'a> RequestBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn inbox(mut self, inbox: String) -> RequestBuilder<'a> {
+    pub fn inbox(mut self, inbox: String) -> RequestBuilder {
         self.inbox = Some(inbox);
         self
-    }
-
-    /// Sends the request with specified options.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.build_request()
-    ///     .payload("data".into())
-    ///     .send("service".into()).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send(self, subject: String) -> Result<Message, Error> {
-        let inbox = self.inbox.unwrap_or_else(|| self.client.new_inbox());
-        let timeout = self.timeout.unwrap_or(self.client.request_timeout);
-        let mut sub = self.client.subscribe(inbox.clone()).await?;
-        let payload: Bytes = self.payload.unwrap_or_else(Bytes::new);
-        match self.headers {
-            Some(headers) => {
-                self.client
-                    .publish_with_reply_and_headers(subject, inbox, headers, payload)
-                    .await?
-            }
-            None => {
-                self.client
-                    .publish_with_reply(subject, inbox, payload)
-                    .await?
-            }
-        }
-        self.client.flush().await?;
-        let request = match timeout {
-            Some(timeout) => {
-                tokio::time::timeout(timeout, sub.next())
-                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
-                    .await?
-            }
-            None => sub.next().await,
-        };
-        match request {
-            Some(message) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
-                }
-                Ok(message)
-            }
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
-        }
     }
 }

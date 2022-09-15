@@ -13,7 +13,7 @@
 
 mod client {
     use async_nats::connection::State;
-    use async_nats::{ConnectOptions, Event};
+    use async_nats::{ConnectOptions, Event, RequestBuilder};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -249,10 +249,9 @@ mod client {
             }
         });
 
+        let request = RequestBuilder::new().inbox(inbox.clone());
         client
-            .build_request()
-            .inbox(inbox.clone())
-            .send("service".into())
+            .send_request("service".into(), request)
             .await
             .unwrap();
     }
