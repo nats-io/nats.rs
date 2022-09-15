@@ -141,7 +141,7 @@ mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
-pub use client::{Client, PublishError};
+pub use client::{Client, PublishError, Request};
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
@@ -649,6 +649,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         sender.clone(),
         options.subscription_capacity,
         options.inbox_prefix,
+        options.request_timeout,
     );
     tokio::spawn({
         let sender = sender.clone();

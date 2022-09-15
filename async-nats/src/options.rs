@@ -51,6 +51,7 @@ pub struct ConnectOptions {
     pub(crate) sender_capacity: usize,
     pub(crate) event_callback: CallbackArg1<Event, ()>,
     pub(crate) inbox_prefix: String,
+    pub(crate) request_timeout: Option<Duration>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -100,6 +101,7 @@ impl Default for ConnectOptions {
                 })
             })),
             inbox_prefix: "_INBOX".to_string(),
+            request_timeout: Some(Duration::from_secs(10)),
         }
     }
 }
@@ -417,6 +419,21 @@ impl ConnectOptions {
     /// ```
     pub fn connection_timeout(mut self, timeout: Duration) -> ConnectOptions {
         self.connection_timeout = timeout;
+        self
+    }
+
+    /// Sets a timeout for `Client::request`. Default value is set to 10 seconds.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().request_timeout(Some(std::time::Duration::from_secs(3))).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn request_timeout(mut self, timeout: Option<Duration>) -> ConnectOptions {
+        self.request_timeout = timeout;
         self
     }
 
