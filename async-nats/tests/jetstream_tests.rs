@@ -735,6 +735,31 @@ mod jetstream {
             })
             .await
             .unwrap();
+
+        let consumer = context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(consumer::pull::Config {
+                name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!("name".to_string(), consumer.cached_info().name);
+
+        context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("namex".to_string()),
+                name: Some("namey".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
     }
     #[tokio::test]
     async fn delete_consumer() {

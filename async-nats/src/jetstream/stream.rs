@@ -578,14 +578,40 @@ impl Stream {
         config: C,
     ) -> Result<Consumer<C>, Error> {
         let config = config.into_consumer_config();
-        let subject = if let Some(ref durable_name) = config.durable_name {
-            format!(
-                "CONSUMER.DURABLE.CREATE.{}.{}",
-                self.info.config.name, durable_name
-            )
-        } else {
-            format!("CONSUMER.CREATE.{}", self.info.config.name)
+
+        let subject = {
+            if self.context.client.is_server_compatible(2, 9, 0) {
+                let filter = if config.filter_subject.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(".{}", config.filter_subject)
+                };
+                config
+                    .name
+                    .as_ref()
+                    .or(config.durable_name.as_ref())
+                    .map(|name| {
+                        format!(
+                            "CONSUMER.CREATE.{}.{}{}",
+                            self.info.config.name, name, filter
+                        )
+                    })
+                    .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", self.info.config.name))
+            } else if config.name.is_some() {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    "can't use consumer name with server below version 2.9",
+                )));
+            } else if let Some(ref durable_name) = config.durable_name {
+                format!(
+                    "CONSUMER.DURABLE.CREATE.{}.{}",
+                    self.info.config.name, durable_name
+                )
+            } else {
+                format!("CONSUMER.CREATE.{}", self.info.config.name)
+            }
         };
+        println!("SUBJECT: {:?}", subject);
 
         match self
             .context
