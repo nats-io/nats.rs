@@ -224,7 +224,7 @@ impl Client {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
-    /// client.request_with_headers("service".into(), headers).await?;
+    /// client.request_with_headers("service".into(), headers, "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -245,7 +245,7 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::RequestBuilder::new().paylaod("data".into());
+    /// let request = async_nats::RequestBuilder::new().payload("data".into());
     /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
@@ -389,9 +389,8 @@ impl RequestBuilder {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.build_request()
-    ///     .payload("data".into())
-    ///     .send("service".into()).await?;
+    /// let request = async_nats::RequestBuilder::new().payload("data".into());
+    /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -406,13 +405,14 @@ impl RequestBuilder {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
-    /// headers.append("X-Example", b"value".as_ref().try_into().unwrap());
-    /// client.build_request()
+    /// headers.insert("X-Example", async_nats::HeaderValue::from_str("Value").unwrap());
+    /// let request = async_nats::RequestBuilder::new()
     ///     .headers(headers)
-    ///     .payload("data".into())
-    ///     .send("service".into()).await?;
+    ///     .payload("data".into());
+    /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -430,10 +430,10 @@ impl RequestBuilder {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.build_request()
+    /// let request = async_nats::RequestBuilder::new()
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
-    ///     .payload("data".into())
-    ///     .send("service".into()).await?;
+    ///     .payload("data".into());
+    /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -448,12 +448,12 @@ impl RequestBuilder {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::RequestBuilder::new().inbox("custom_inbox").paylaod("data".into));
-    /// client.build_request()
+    /// let request = async_nats::RequestBuilder::new()
     ///     .inbox("custom_inbox".into())
-    ///     .payload("data".into())
-    ///     .send("service".into()).await?;
+    ///     .payload("data".into());
+    /// client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
