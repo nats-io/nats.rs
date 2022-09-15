@@ -85,7 +85,7 @@ impl futures::Stream for Messages {
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status {
-                        Some(StatusCode::IDLE_HEARBEAT) => {
+                        Some(StatusCode::IDLE_HEARTBEAT) => {
                             if let Some(subject) = message.reply {
                                 // TODO store pending_publish as a future and return errors from it
                                 let client = self.context.client.clone();
@@ -422,23 +422,15 @@ impl<'a> futures::Stream for Ordered<'a> {
                         match maybe_message {
                             Some(message) => {
                                 match message.status {
-                                    Some(StatusCode::IDLE_HEARBEAT) => {
+                                    Some(StatusCode::IDLE_HEARTBEAT) => {
                                         if let Some(headers) = message.headers.as_ref() {
                                             if let Some(sequence) =
                                                 headers.get(crate::header::NATS_LAST_STREAM)
                                             {
                                                 let sequence: u64 = sequence
-                                                    .to_str()
-                                                    .map_err(|err| {
-                                                        Box::new(std::io::Error::new(
-                                                            std::io::ErrorKind::Other,
-                                                            format!(
-                                                                "could not parse header: {}",
-                                                                err
-                                                            ),
-                                                        ))
-                                                    })?
-                                                    .parse().map_err(|err|
+                                                    .iter().next().unwrap()
+                                                    .parse()
+                                                    .map_err(|err|
                                                            Box::new(std::io::Error::new(
                                                                    std::io::ErrorKind::Other,
                                                                    format!("could not parse header into u64: {}", err))

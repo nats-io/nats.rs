@@ -95,6 +95,8 @@
 //! #     Ok(())
 //! # }
 
+#![deny(unreachable_pub)]
+
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
@@ -130,7 +132,7 @@ pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
-pub use header::{HeaderMap, HeaderValue};
+pub use header::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) mod auth_utils;
 mod client;
@@ -139,7 +141,7 @@ mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
-pub use client::{Client, RequestBuilder};
+pub use client::{Client, PublishError, RequestBuilder};
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
@@ -308,7 +310,7 @@ impl ConnectionHandler {
         }
     }
 
-    pub async fn process(
+    pub(crate) async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {

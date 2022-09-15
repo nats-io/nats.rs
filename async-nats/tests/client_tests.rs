@@ -13,11 +13,13 @@
 
 mod client {
     use async_nats::connection::State;
+    use async_nats::header::HeaderValue;
     use async_nats::{ConnectOptions, Event, RequestBuilder};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
     use std::io::ErrorKind;
+    use std::str::FromStr;
     use std::time::Duration;
 
     #[tokio::test]
@@ -130,7 +132,7 @@ mod client {
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
 
         let mut headers = async_nats::HeaderMap::new();
-        headers.append("X-Test", b"Test".as_ref().try_into().unwrap());
+        headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
 
         client
             .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
@@ -138,6 +140,18 @@ mod client {
             .unwrap();
 
         client.flush().await.unwrap();
+
+        let message = subscriber.next().await.unwrap();
+        assert_eq!(message.headers.unwrap(), headers);
+
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
+        headers.append("X-Test", "Second");
+
+        client
+            .publish_with_headers("test".into(), headers.clone(), "test".into())
+            .await
+            .unwrap();
 
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.headers.unwrap(), headers);
@@ -665,5 +679,13 @@ mod client {
         drop(server);
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(State::Disconnected, client.connection_state());
+    }
+
+    #[tokio::test]
+    async fn publish_error_should_be_nameable() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let _error: Result<(), async_nats::PublishError> =
+            client.publish("foo".into(), "data".into()).await;
     }
 }
