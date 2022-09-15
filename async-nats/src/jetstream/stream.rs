@@ -337,6 +337,11 @@ impl Stream {
                         )
                     })
                     .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", self.info.config.name))
+            } else if config.name.is_some() {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    "can't use consumer name with server below version 2.9",
+                )));
             } else if let Some(ref durable_name) = config.durable_name {
                 format!(
                     "CONSUMER.DURABLE.CREATE.{}.{}",
