@@ -125,7 +125,6 @@ pub struct Config {
     /// The delivery subject used by the push consumer.
     #[serde(default)]
     pub deliver_subject: String,
-
     /// Setting `durable_name` to `Some(...)` will cause this consumer
     /// to be "durable". This may be a good choice for workloads that
     /// benefit from the `JetStream` server or cluster remembering the
@@ -143,6 +142,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -191,6 +194,9 @@ pub struct Config {
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub memory_storage: bool,
 }
 
 impl FromConsumer for Config {
@@ -205,6 +211,7 @@ impl FromConsumer for Config {
         Ok(Config {
             deliver_subject: config.deliver_subject.unwrap(),
             durable_name: config.durable_name,
+            name: config.name,
             description: config.description,
             deliver_group: config.deliver_group,
             deliver_policy: config.deliver_policy,
@@ -221,6 +228,7 @@ impl FromConsumer for Config {
             flow_control: config.flow_control,
             idle_heartbeat: config.idle_heartbeat,
             num_replicas: config.num_replicas,
+            memory_storage: config.memory_storage,
         })
     }
 }
@@ -230,6 +238,7 @@ impl IntoConsumerConfig for Config {
         jetstream::consumer::Config {
             deliver_subject: Some(self.deliver_subject),
             durable_name: self.durable_name,
+            name: self.name,
             description: self.description,
             deliver_group: self.deliver_group,
             deliver_policy: self.deliver_policy,
@@ -249,6 +258,7 @@ impl IntoConsumerConfig for Config {
             max_expires: Duration::default(),
             inactive_threshold: Duration::default(),
             num_replicas: self.num_replicas,
+            memory_storage: self.memory_storage,
         }
     }
 }
@@ -269,6 +279,10 @@ pub struct OrderedConfig {
     /// The delivery subject used by the push consumer.
     #[serde(default)]
     pub deliver_subject: String,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -308,6 +322,7 @@ impl FromConsumer for OrderedConfig {
             )));
         }
         Ok(OrderedConfig {
+            name: config.name,
             deliver_subject: config.deliver_subject.unwrap(),
             description: config.description,
             filter_subject: config.filter_subject,
@@ -327,6 +342,7 @@ impl IntoConsumerConfig for OrderedConfig {
         jetstream::consumer::Config {
             deliver_subject: Some(self.deliver_subject),
             durable_name: None,
+            name: self.name,
             description: self.description,
             deliver_group: None,
             deliver_policy: self.deliver_policy,
@@ -346,6 +362,7 @@ impl IntoConsumerConfig for OrderedConfig {
             max_expires: Duration::default(),
             inactive_threshold: Duration::from_secs(30),
             num_replicas: self.num_replicas,
+            memory_storage: true,
         }
     }
 }

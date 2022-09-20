@@ -33,7 +33,7 @@ pub trait IntoConsumerConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
@@ -241,6 +241,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -295,10 +299,12 @@ pub struct Config {
     /// Threshold for ephemeral consumer intactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-
     /// Number of consumer replucas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub memory_storage: bool,
 }
 
 impl From<&Config> for Config {

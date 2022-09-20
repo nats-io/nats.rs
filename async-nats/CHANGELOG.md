@@ -1,3 +1,24 @@
+# 0.20.0
+## Overview
+
+This release focuses on KV and 2.9 nats-server features.
+
+## Added
+* Add Key Value by @Jarema and @caspervonb  in https://github.com/nats-io/nats.rs/pull/586
+* Add Direct get by @Jarema in https://github.com/nats-io/nats.rs/pull/636
+* Add timeout to request & request builder by @Jarema  in https://github.com/nats-io/nats.rs/pull/616
+* Add memory storage option to consumers by @Jarema in https://github.com/nats-io/nats.rs/pull/638
+* Add Consumer name by @Jarema in https://github.com/nats-io/nats.rs/pull/637
+
+## Fixed
+* Fix heartbeat typo by @Jarema in https://github.com/nats-io/nats.rs/pull/630
+
+## What's Changed
+* Headers refactor by @Jarema in https://github.com/nats-io/nats.rs/pull/629
+* Use new Consumer API  by @Jarema in https://github.com/nats-io/nats.rs/pull/637
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.19.0...async-nats/v0.20.0
+# 0.19.0
 ## Overview
 
 This release is focused on resilience of the client against network issues.

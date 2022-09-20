@@ -410,6 +410,232 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn direct_get_last_for_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .get_or_create_stream(stream::Config {
+                subjects: vec!["events".to_string(), "entries".to_string()],
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
+                allow_direct: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"payload";
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        context
+            .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let message = stream.direct_get_last_for_subject("events").await.unwrap();
+
+        let sequence = message
+            .headers
+            .as_ref()
+            .unwrap()
+            .get("Nats-Sequence")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(payload, message.payload.as_ref());
+
+        stream
+            .direct_get_last_for_subject("wrong")
+            .await
+            .expect_err("should error");
+    }
+    #[tokio::test]
+    async fn direct_get_next_for_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .get_or_create_stream(stream::Config {
+                subjects: vec!["events".to_string(), "entries".to_string()],
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
+                allow_direct: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"payload";
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+
+        context
+            .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let message = stream
+            .direct_get_next_for_subject("events", None)
+            .await
+            .unwrap();
+
+        let sequence = message
+            .headers
+            .as_ref()
+            .unwrap()
+            .get("Nats-Sequence")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(payload, message.payload.as_ref());
+
+        stream
+            .direct_get_next_for_subject("wrong", None)
+            .await
+            .expect_err("should error");
+    }
+
+    #[tokio::test]
+    async fn direct_get_next_for_subject_after_sequence() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .get_or_create_stream(stream::Config {
+                subjects: vec!["events".to_string(), "entries".to_string()],
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
+                allow_direct: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"payload";
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+
+        let message = stream
+            .direct_get_next_for_subject("events", Some(3))
+            .await
+            .unwrap();
+
+        let sequence = message
+            .headers
+            .as_ref()
+            .unwrap()
+            .get("Nats-Sequence")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(payload, message.payload.as_ref());
+
+        stream
+            .direct_get_next_for_subject("events", Some(14))
+            .await
+            .expect_err("should error");
+        stream
+            .direct_get_next_for_subject("entries", Some(1))
+            .await
+            .expect_err("should error");
+    }
+
+    #[tokio::test]
+    async fn direct_get_for_sequence() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .get_or_create_stream(stream::Config {
+                subjects: vec!["events".to_string(), "entries".to_string()],
+                name: "events".to_string(),
+                max_messages: 1000,
+                max_messages_per_subject: 100,
+                allow_direct: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"payload";
+        context
+            .publish("events".into(), "not this".into())
+            .await
+            .unwrap();
+        let publish_ack = context
+            .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        context
+            .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let message = stream.direct_get(2).await.unwrap();
+
+        let sequence = message
+            .headers
+            .as_ref()
+            .unwrap()
+            .get("Nats-Sequence")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(payload, message.payload.as_ref());
+
+        stream.direct_get(22).await.expect_err("should error");
+    }
+
+    #[tokio::test]
     async fn delete_message() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -509,6 +735,31 @@ mod jetstream {
             })
             .await
             .unwrap();
+
+        let consumer = context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(consumer::pull::Config {
+                name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!("name".to_string(), consumer.cached_info().name);
+
+        context
+            .get_or_create_stream("events")
+            .await
+            .unwrap()
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("namex".to_string()),
+                name: Some("namey".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
     }
     #[tokio::test]
     async fn delete_consumer() {
@@ -768,6 +1019,51 @@ mod jetstream {
                 }
             }
         });
+
+        let mut messages = consumer.messages().await.unwrap().take(1000);
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
+    // test added just to be sure, that if messages have arrived to the stream already, we won't
+    // miss them in AckPolicy::None setup.
+    #[tokio::test]
+    async fn push_ordered_delayed() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        // let client = async_nats::connect("localhost:4222").await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..1000 {
+            context
+                .publish("events".to_string(), "dat".into())
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let mut messages = consumer.messages().await.unwrap().take(1000);
         while let Some(message) = messages.next().await {
@@ -1542,7 +1838,7 @@ mod jetstream {
 
         while let Some((i, message)) = messages.next().await {
             let message = message.unwrap();
-            assert_eq!(format!("source.{}", i), message.subject);
+            assert_eq!(format!("dest.source.{}", i), message.subject);
             assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
             message.ack().await.unwrap();
         }

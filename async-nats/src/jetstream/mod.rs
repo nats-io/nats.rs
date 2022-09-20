@@ -88,6 +88,7 @@ use crate::Client;
 pub mod account;
 pub mod consumer;
 pub mod context;
+pub mod kv;
 pub mod message;
 pub mod object_store;
 pub mod publish;
