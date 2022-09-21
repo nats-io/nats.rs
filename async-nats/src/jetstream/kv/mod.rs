@@ -557,8 +557,8 @@ impl Store {
             .await?;
 
         let mut entries = History {
+            done: consumer.info.num_pending == 0,
             subscription: consumer.messages().await?,
-            done: false,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
         };
