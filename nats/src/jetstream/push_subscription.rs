@@ -40,6 +40,8 @@ pub(crate) struct Inner {
     /// Ack policy used in while processing messages.
     pub(crate) consumer_ack_policy: AckPolicy,
 
+    pub(crate) num_pending: u64,
+
     /// Indicates if we own the consumer and are responsible for deleting it or not.
     pub(crate) consumer_ownership: ConsumerOwnership,
 
@@ -84,6 +86,7 @@ impl PushSubscription {
             stream: consumer_info.stream_name,
             consumer: consumer_info.name,
             consumer_ack_policy: consumer_info.config.ack_policy,
+            num_pending: consumer_info.num_pending,
             consumer_ownership,
             messages,
             context,

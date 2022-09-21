@@ -13,6 +13,8 @@
 
 #![cfg(feature = "unstable")]
 
+use std::assert_eq;
+
 use nats::jetstream::StreamConfig;
 
 use nats::kv::*;
@@ -337,6 +339,21 @@ fn key_value_keys() {
 
     assert!(keys.iter().any(|s| s == "baz"));
     assert_eq!(keys.len(), 1);
+
+    let kv = context
+        .create_key_value(&Config {
+            bucket: "KVS2".to_string(),
+            history: 2,
+            max_age: std::time::Duration::from_millis(100),
+            ..Default::default()
+        })
+        .unwrap();
+
+    kv.put("data", b"").unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    assert_eq!(kv.keys().unwrap().count(), 0);
 }
 
 #[test]
