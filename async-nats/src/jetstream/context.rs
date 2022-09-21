@@ -27,10 +27,9 @@ use std::io::{self, ErrorKind};
 use std::time::Duration;
 use tracing::debug;
 
-use super::object_store::{is_valid_bucket_name, ObjectStore};
-use super::stream::{Config, DeleteStatus, DiscardPolicy, Info, Stream};
 use super::kv::{Store, MAX_HISTORY};
-use super::stream::{self, Config, DeleteStatus, Info, Stream};
+use super::object_store::{is_valid_bucket_name, ObjectStore};
+use super::stream::{self, Config, DeleteStatus, DiscardPolicy, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
