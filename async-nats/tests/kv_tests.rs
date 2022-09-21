@@ -453,5 +453,22 @@ mod kv {
         let mut keys = kv.keys().await.unwrap().collect::<Vec<String>>();
         keys.sort();
         assert_eq!(vec!["bar", "foo"], keys);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history2".to_string(),
+                description: "test_description".to_string(),
+                history: 15,
+                max_age: Duration::from_millis(100),
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        kv.put("baz", "value".into()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(kv.keys().await.unwrap().count(), 0);
     }
 }
