@@ -24,9 +24,8 @@ pub struct AccountInfo {
 
 mod jetstream {
 
-    use std::io::ErrorKind;
     use std::str::from_utf8;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use super::*;
     use async_nats::connection::State;
@@ -40,7 +39,6 @@ mod jetstream {
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
-    use tokio::time::Instant;
     use tokio_retry::Retry;
 
     #[tokio::test]
@@ -77,10 +75,39 @@ mod jetstream {
         let ack = context
             .publish_with_headers("foo".into(), headers, payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
 
         assert_eq!(ack.stream, "TEST");
         assert_eq!(ack.sequence, 1);
+    }
+
+    #[tokio::test]
+    async fn publish_async() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let ack = context
+            .publish("foo".to_string(), "paylaod".into())
+            .await
+            .unwrap();
+        assert!(ack.await.is_ok());
+        let ack = context
+            .publish("not_stream".to_string(), "paylaod".into())
+            .await
+            .unwrap();
+        assert!(ack.await.is_err());
     }
 
     #[tokio::test]
@@ -103,6 +130,8 @@ mod jetstream {
         // Basic publish like NATS core.
         let ack = context
             .publish("foo".into(), payload.as_ref().into())
+            .await
+            .unwrap()
             .await
             .unwrap();
         assert_eq!(ack.stream, "TEST");
@@ -368,6 +397,8 @@ mod jetstream {
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
 
         let raw_message = stream.get_raw_message(publish_ack.sequence).await.unwrap();
@@ -407,7 +438,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(raw_message.sequence, publish_ack.sequence);
+        assert_eq!(raw_message.sequence, publish_ack.await.unwrap().sequence);
     }
 
     #[tokio::test]
@@ -454,7 +485,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -509,7 +543,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -573,7 +610,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -630,7 +670,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream.direct_get(22).await.expect_err("should error");
@@ -668,7 +711,10 @@ mod jetstream {
             .unwrap();
 
         let mut messages = consumer.messages().await.unwrap();
-        stream.delete_message(publish_ack.sequence).await.unwrap();
+        stream
+            .delete_message(publish_ack.await.unwrap().sequence)
+            .await
+            .unwrap();
 
         assert_eq!(
             messages
@@ -1071,6 +1117,8 @@ mod jetstream {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     context
                         .publish(format!("events.{}", i), i.to_string().into())
+                        .await
+                        .unwrap()
                         .await
                         .ok();
                 }
@@ -1876,7 +1924,7 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn timeod_out_request() {
+    async fn timeout_out_request() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         tokio::time::sleep(Duration::from_secs(5)).await;
         let client = async_nats::ConnectOptions::new()
@@ -1898,14 +1946,23 @@ mod jetstream {
                 .unwrap();
         }
         drop(server);
-        let ack = jetstream.publish("events".into(), "fail".into()).await;
-        assert_eq!(
-            ack.unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            ErrorKind::TimedOut
-        )
+        let ack = jetstream
+            .publish("events".into(), "fail".into())
+            .await
+            .unwrap()
+            .await;
+        println!("ACK: {:?}", ack);
+        println!(
+            "DOWNCAST: {:?}",
+            ack.unwrap_err().downcast::<std::io::Error>()
+        );
+        // assert_eq!(
+        //     ack.unwrap_err()
+        //         .downcast::<std::io::Error>()
+        //         .unwrap()
+        //         .kind(),
+        //     ErrorKind::TimedOut
+        // )
     }
 
     #[tokio::test]
@@ -1987,13 +2044,19 @@ mod jetstream {
         jetstream
             .publish("events.1".to_string(), "data".into())
             .await
-            .unwrap();
-        jetstream
-            .publish("events.1".to_string(), "data".into())
+            .unwrap()
             .await
             .unwrap();
         jetstream
             .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap()
             .await
             .expect_err("should get 503 maximum messages per subject exceeded error");
     }

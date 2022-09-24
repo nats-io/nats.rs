@@ -183,8 +183,9 @@ impl Store {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let publish_ack = self.stream.context.publish(subject, value).await?;
+        let ack = publish_ack.await?;
 
-        Ok(publish_ack.sequence)
+        Ok(ack.sequence)
     }
 
     /// Retrieves the last [Entry] for a given key from a bucket.
@@ -478,6 +479,7 @@ impl Store {
         self.stream
             .context
             .publish_with_headers(subject, headers, value)
+            .await?
             .await
             .map(|publish_ack| publish_ack.sequence)
     }
