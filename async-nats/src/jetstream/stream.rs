@@ -126,7 +126,7 @@ impl Stream {
     /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
     ///
     /// let message =  stream
-    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.sequence)).await?;
+    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.await?.sequence)).await?;
     ///
     /// # Ok(())
     /// # }
@@ -263,7 +263,7 @@ impl Stream {
     ///
     /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
     ///
-    /// let message =  stream.direct_get(pub_ack.sequence).await?;
+    /// let message =  stream.direct_get(pub_ack.await?.sequence).await?;
     ///
     /// # Ok(())
     /// # }
@@ -394,7 +394,7 @@ impl Stream {
     /// }).await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
-    /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
+    /// let raw_message = stream.get_raw_message(publish_ack.await?.sequence).await?;
     /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
@@ -476,7 +476,7 @@ impl Stream {
     /// }).await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
-    /// stream.delete_message(publish_ack.sequence).await?;
+    /// stream.delete_message(publish_ack.await?.sequence).await?;
     /// # Ok(())
     /// # }
     /// ```

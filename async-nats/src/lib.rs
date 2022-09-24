@@ -762,6 +762,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
