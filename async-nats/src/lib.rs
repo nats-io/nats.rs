@@ -1105,7 +1105,7 @@ impl ToServerAddrs for str {
 impl ToServerAddrs for String {
     type Iter = option::IntoIter<ServerAddr>;
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
-        (&**self).to_server_addrs()
+        (**self).to_server_addrs()
     }
 }
 
