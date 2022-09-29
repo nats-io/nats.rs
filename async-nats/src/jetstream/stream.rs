@@ -29,7 +29,7 @@ use time::serde::rfc3339;
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
-    response::Response,
+    response::{self, Response},
     Context, Message,
 };
 
@@ -347,11 +347,17 @@ impl Stream {
                 context: self.context.clone(),
                 message,
             })?;
+        println!("RESPOSNE: {:?}", response);
         if let Some(status) = response.status {
+            println!("STATUS: {}", status);
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    response::Error {
+                        code: if status == 404 { 10037 } else { 0 },
+                        status: status.as_u16(),
+                        description: description.to_string(),
+                    },
                 )));
             }
         }

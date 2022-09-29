@@ -24,7 +24,7 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
-use time::OffsetDateTime;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{header, jetstream::response, Error, Message};
 
@@ -217,25 +217,100 @@ impl Store {
 
         let subject = format!("{}{}", self.prefix.as_str(), &key);
 
-        match self
-            .stream
-            .get_last_raw_message_by_subject(subject.as_str())
-            .await
-        {
-            Ok(message) => {
-                let operation = kv_operation_from_stream_message(&message);
-                // TODO: unnecessary expensive, cloning whole Message.
-                let nats_message = Message::try_from(message.clone())?;
-                if nats_message.status == Some(StatusCode::NO_RESPONDERS) {
+        let result: Result<(Message, Operation, u64, OffsetDateTime), Error> = {
+            if self.stream.info.config.allow_direct {
+                let message = self
+                    .stream
+                    .direct_get_last_for_subject(subject.as_str())
+                    .await?;
+                let headers = message.headers.as_ref().ok_or_else(|| {
+                    std::io::Error::new(io::ErrorKind::Other, "did not found headers")
+                })?;
+                let operation = headers.get(KV_OPERATION).map_or_else(
+                    || Operation::Put,
+                    |operation| match operation
+                        .iter()
+                        .next()
+                        .cloned()
+                        .unwrap_or_else(|| KV_OPERATION_PUT.to_string())
+                        .as_ref()
+                    {
+                        KV_OPERATION_PURGE => Operation::Purge,
+                        KV_OPERATION_DELETE => Operation::Delete,
+                        _ => Operation::Put,
+                    },
+                );
+                let sequence = headers
+                    .get("Nats-Sequence")
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::NotFound, "did not found sequence header")
+                    })?
+                    .iter()
+                    .next()
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "did not found sequence header value",
+                        )
+                    })?
+                    .parse()?;
+                let created = headers
+                    .get("Nats-Time-Stamp")
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::NotFound, "did not found timestamp header")
+                    })?
+                    .iter()
+                    .next()
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "did not found timestamp header value",
+                        )
+                    })
+                    .and_then(|created| {
+                        OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
+                            std::io::Error::new(
+                                io::ErrorKind::Other,
+                                "failed to parse Nats-Time-Stamp",
+                            )
+                        })
+                    })?;
+
+                Ok((message.message, operation, sequence, created))
+            } else {
+                let raw_message = self
+                    .stream
+                    .get_last_raw_message_by_subject(subject.as_str())
+                    .await;
+                match raw_message {
+                    Ok(raw_message) => {
+                        let operation = kv_operation_from_stream_message(&raw_message);
+                        // TODO: unnecessary expensive, cloning whole Message.
+                        let nats_message = Message::try_from(raw_message.clone())?;
+                        Ok((
+                            nats_message,
+                            operation,
+                            raw_message.sequence,
+                            raw_message.time,
+                        ))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+        };
+
+        match result {
+            Ok((message, operation, revision, created)) => {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Ok(None);
                 }
 
                 let entry = Entry {
                     bucket: self.name.clone(),
                     key,
-                    value: nats_message.payload.to_vec(),
-                    revision: message.sequence,
-                    created: message.time,
+                    value: message.payload.to_vec(),
+                    revision,
+                    created,
                     operation,
                     delta: 0,
                 };
