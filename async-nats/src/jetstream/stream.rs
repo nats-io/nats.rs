@@ -353,8 +353,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    response::Error {
-                        code: if status == 404 { 10037 } else { 0 },
+                    response::DirectError {
                         status: status.as_u16(),
                         description: description.to_string(),
                     },

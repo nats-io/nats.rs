@@ -217,66 +217,87 @@ impl Store {
 
         let subject = format!("{}{}", self.prefix.as_str(), &key);
 
-        let result: Result<(Message, Operation, u64, OffsetDateTime), Error> = {
+        let result: Option<(Message, Operation, u64, OffsetDateTime)> = {
             if self.stream.info.config.allow_direct {
                 let message = self
                     .stream
                     .direct_get_last_for_subject(subject.as_str())
-                    .await?;
-                let headers = message.headers.as_ref().ok_or_else(|| {
-                    std::io::Error::new(io::ErrorKind::Other, "did not found headers")
-                })?;
-                let operation = headers.get(KV_OPERATION).map_or_else(
-                    || Operation::Put,
-                    |operation| match operation
-                        .iter()
-                        .next()
-                        .cloned()
-                        .unwrap_or_else(|| KV_OPERATION_PUT.to_string())
-                        .as_ref()
-                    {
-                        KV_OPERATION_PURGE => Operation::Purge,
-                        KV_OPERATION_DELETE => Operation::Delete,
-                        _ => Operation::Put,
-                    },
-                );
-                let sequence = headers
-                    .get("Nats-Sequence")
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::NotFound, "did not found sequence header")
-                    })?
-                    .iter()
-                    .next()
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::NotFound,
-                            "did not found sequence header value",
-                        )
-                    })?
-                    .parse()?;
-                let created = headers
-                    .get("Nats-Time-Stamp")
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::NotFound, "did not found timestamp header")
-                    })?
-                    .iter()
-                    .next()
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::NotFound,
-                            "did not found timestamp header value",
-                        )
-                    })
-                    .and_then(|created| {
-                        OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
-                            std::io::Error::new(
-                                io::ErrorKind::Other,
-                                "failed to parse Nats-Time-Stamp",
-                            )
-                        })
-                    })?;
+                    .await;
 
-                Ok((message.message, operation, sequence, created))
+                match message {
+                    Ok(message) => {
+                        let headers = message.headers.as_ref().ok_or_else(|| {
+                            std::io::Error::new(io::ErrorKind::Other, "did not found headers")
+                        })?;
+                        let operation = headers.get(KV_OPERATION).map_or_else(
+                            || Operation::Put,
+                            |operation| match operation
+                                .iter()
+                                .next()
+                                .cloned()
+                                .unwrap_or_else(|| KV_OPERATION_PUT.to_string())
+                                .as_ref()
+                            {
+                                KV_OPERATION_PURGE => Operation::Purge,
+                                KV_OPERATION_DELETE => Operation::Delete,
+                                _ => Operation::Put,
+                            },
+                        );
+                        let sequence = headers
+                            .get("Nats-Sequence")
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found sequence header",
+                                )
+                            })?
+                            .iter()
+                            .next()
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found sequence header value",
+                                )
+                            })?
+                            .parse()?;
+                        let created = headers
+                            .get("Nats-Time-Stamp")
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found timestamp header",
+                                )
+                            })?
+                            .iter()
+                            .next()
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found timestamp header value",
+                                )
+                            })
+                            .and_then(|created| {
+                                OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
+                                    std::io::Error::new(
+                                        io::ErrorKind::Other,
+                                        format!("failed to parse Nats-Time-Stamp: {}", err),
+                                    )
+                                })
+                            })?;
+
+                        Some((message.message, operation, sequence, created))
+                    }
+                    Err(err) => {
+                        let e: std::io::Error = *err.downcast().unwrap();
+                        let d = e.get_ref().unwrap();
+                        let de = d.downcast_ref::<response::DirectError>().unwrap();
+                        if de.status == 404 {
+                            None
+                        } else {
+                            return Err(Box::new(e));
+                        }
+                    }
+                }
             } else {
                 let raw_message = self
                     .stream
@@ -287,20 +308,31 @@ impl Store {
                         let operation = kv_operation_from_stream_message(&raw_message);
                         // TODO: unnecessary expensive, cloning whole Message.
                         let nats_message = Message::try_from(raw_message.clone())?;
-                        Ok((
+                        Some((
                             nats_message,
                             operation,
                             raw_message.sequence,
                             raw_message.time,
                         ))
                     }
-                    Err(err) => Err(err),
+                    Err(err) => {
+                        let e: std::io::Error = *err.downcast().unwrap();
+                        let d = e.get_ref().unwrap();
+                        let de = d.downcast_ref::<response::Error>().unwrap();
+                        if de.code == 10037 {
+                            println!("GOT 10037");
+                            None
+                        } else {
+                            println!("GOT ANOTHER ERROR");
+                            return Err(Box::new(e));
+                        }
+                    }
                 }
             }
         };
 
         match result {
-            Ok((message, operation, revision, created)) => {
+            Some((message, operation, revision, created)) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Ok(None);
                 }
@@ -317,16 +349,7 @@ impl Store {
                 Ok(Some(entry))
             }
             // TODO: remember to touch this when Errors are in place.
-            Err(err) => {
-                let e: std::io::Error = *err.downcast().unwrap();
-                let d = e.get_ref().unwrap();
-                let de = d.downcast_ref::<response::Error>().unwrap();
-                if de.code == 10037 {
-                    return Ok(None);
-                }
-
-                Err(Box::new(e))
-            }
+            None => Ok(None),
         }
     }
 

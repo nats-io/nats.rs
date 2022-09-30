@@ -46,11 +46,10 @@ mod kv {
             })
             .await
             .unwrap();
+        let info = kv.stream.info().await.unwrap();
         assert_eq!("KV_test", kv.stream_name);
-        assert_eq!(
-            kv.stream.info().await.unwrap().config.discard,
-            DiscardPolicy::New
-        );
+        assert_eq!(info.config.discard, DiscardPolicy::New);
+        assert!(info.config.allow_direct);
     }
 
     #[tokio::test]
@@ -130,7 +129,7 @@ mod kv {
 
         let context = async_nats::jetstream::new(client);
 
-        let kv = context
+        let mut kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
                 bucket: "test".to_string(),
                 description: "test_description".to_string(),
@@ -151,6 +150,25 @@ mod kv {
         assert_eq!(from_utf8(&value.unwrap().value).unwrap(), payload);
         let nothing = kv.get("nothing").await.unwrap();
         assert_eq!(None, nothing);
+
+        context
+            .update_stream(async_nats::jetstream::stream::Config {
+                max_messages_per_subject: 10,
+                name: "KV_test".to_string(),
+                deny_delete: true,
+                allow_direct: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = kv.stream.info().await.unwrap();
+        assert!(!info.config.allow_direct);
+
+        let nothing = kv.get("nothing").await.unwrap();
+        assert_eq!(None, nothing);
+        let value = kv.entry("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap().value).unwrap(), payload);
     }
 
     #[tokio::test]

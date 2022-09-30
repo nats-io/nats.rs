@@ -51,3 +51,20 @@ pub enum Response<T> {
     Err { error: Error },
     Ok(T),
 }
+
+#[derive(Debug)]
+pub struct DirectError {
+    pub status: u16,
+    pub description: String,
+}
+impl std::error::Error for DirectError {}
+
+impl fmt::Display for DirectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Direct Get response status: {}, description: {}",
+            self.status, self.description
+        )
+    }
+}
