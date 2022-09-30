@@ -477,6 +477,7 @@ impl Context {
                 allow_rollup: true,
                 deny_delete: true,
                 deny_purge: false,
+                allow_direct: true,
                 num_replicas,
                 discard: stream::DiscardPolicy::New,
                 ..Default::default()
