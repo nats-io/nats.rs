@@ -100,6 +100,7 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
+use tracing::debug;
 
 use core::fmt;
 use std::collections::HashMap;
@@ -360,7 +361,8 @@ impl ConnectionHandler {
                 self.connection.flush().await?;
             }
             ServerOp::Pong => {
-                self.pending_pings -= 1;
+                debug!("received PONG");
+                self.pending_pings = self.pending_pings.saturating_sub(1);
             }
             ServerOp::Error(error) => {
                 self.connector
@@ -463,9 +465,17 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
+                debug!(
+                    "PING command. Pending pings {}, max pings {}",
+                    self.pending_pings, self.max_pings
+                );
                 self.pending_pings += 1;
 
                 if self.pending_pings > self.max_pings {
+                    debug!(
+                        "pendings pings {}, max pings {}. disconnecting",
+                        self.pending_pings, self.max_pings
+                    );
                     self.handle_disconnect().await?;
                 }
 
@@ -558,6 +568,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
+        self.pending_pings = 0;
         self.connector.events_tx.try_send(Event::Disconnect).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
         self.handle_reconnect().await?;
