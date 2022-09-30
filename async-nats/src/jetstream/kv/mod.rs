@@ -244,7 +244,7 @@ impl Store {
                             },
                         );
                         let sequence = headers
-                            .get("Nats-Sequence")
+                            .get(header::NATS_SEQUENCE)
                             .ok_or_else(|| {
                                 io::Error::new(
                                     io::ErrorKind::NotFound,
@@ -261,7 +261,7 @@ impl Store {
                             })?
                             .parse()?;
                         let created = headers
-                            .get("Nats-Time-Stamp")
+                            .get(header::NATS_TIME_STAMP)
                             .ok_or_else(|| {
                                 io::Error::new(
                                     io::ErrorKind::NotFound,
