@@ -321,7 +321,7 @@ impl futures::Stream for Batch {
                     status => Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         format!(
-                            "eror while processing messages from the stream: {}, {:?}",
+                            "error while processing messages from the stream: {}, {:?}",
                             status, message.description
                         ),
                     ))))),
