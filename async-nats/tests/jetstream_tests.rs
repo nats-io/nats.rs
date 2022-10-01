@@ -1027,6 +1027,60 @@ mod jetstream {
             assert_eq!(message.payload.as_ref(), b"dat");
         }
     }
+    #[tokio::test]
+    async fn push_ordered_recreate() {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+        let mut server =
+            nats_server::run_server_with_port("tests/configs/jetstream.conf", Some("5656"));
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        tokio::task::spawn(async move {
+            for _ in 0..10000 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                println!("publishing");
+                context
+                    .publish("events".to_string(), "dat".into())
+                    .await
+                    .ok();
+            }
+        });
+
+        let mut messages = consumer.messages().await.unwrap().take(1000).enumerate();
+        while let Some((i, message)) = messages.next().await {
+            if i == 10 {
+                server.restart();
+                println!("restared server");
+            }
+
+            println!("MESSAGE {}", i);
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
 
     // test added just to be sure, that if messages have arrived to the stream already, we won't
     // miss them in AckPolicy::None setup.
