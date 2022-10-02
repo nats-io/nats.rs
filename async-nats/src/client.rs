@@ -262,10 +262,8 @@ impl Client {
             }
             None => self.publish_with_reply(subject, inbox, payload).await?,
         }
-        println!("flushing");
         self.flush().await?;
 
-        println!("flushed");
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())
@@ -274,7 +272,6 @@ impl Client {
             }
             None => sub.next().await,
         };
-        println!("request sent");
         match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {

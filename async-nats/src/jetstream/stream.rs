@@ -611,7 +611,11 @@ impl Stream {
                 format!("CONSUMER.CREATE.{}", self.info.config.name)
             }
         };
-        println!("SUBJECT: {:?}", subject);
+
+        println!(
+            "SENDING CONSUMER CREATE: {:?} on subject {:?}",
+            config, subject
+        );
 
         match self
             .context

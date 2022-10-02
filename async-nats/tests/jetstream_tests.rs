@@ -1042,7 +1042,7 @@ mod jetstream {
             .create_stream(stream::Config {
                 name: "events".to_string(),
                 subjects: vec!["events".to_string()],
-                storage: StorageType::Memory,
+                storage: StorageType::File,
                 ..Default::default()
             })
             .await
@@ -1058,9 +1058,12 @@ mod jetstream {
             .unwrap();
 
         tokio::task::spawn(async move {
-            for _ in 0..10000 {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                println!("publishing");
+            for i in 0..10000 {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+                if i == 10 {
+                    server.restart();
+                    println!("restared server");
+                }
                 context
                     .publish("events".to_string(), "dat".into())
                     .await
@@ -1070,11 +1073,6 @@ mod jetstream {
 
         let mut messages = consumer.messages().await.unwrap().take(1000).enumerate();
         while let Some((i, message)) = messages.next().await {
-            if i == 10 {
-                server.restart();
-                println!("restared server");
-            }
-
             println!("MESSAGE {}", i);
             let message = message.unwrap();
             assert_eq!(message.status, None);

@@ -387,41 +387,63 @@ impl Consumer<OrderedConfig> {
 
         let last_seen = Arc::new(Mutex::new(Instant::now()));
         let last_sequence = Arc::new(AtomicU64::new(0));
+        let consumer_sequence = Arc::new(AtomicU64::new(0));
         tokio::task::spawn({
             let last_seen = last_seen.clone();
             let stream_name = self.info.stream_name.clone();
             let config = self.config.clone();
-            let context = self.context.clone();
+            let mut context = self.context.clone();
             let last_sequence = last_sequence.clone();
+            let consumer_sequence = consumer_sequence.clone();
+            let state = self.context.client.state.clone();
             async move {
                 loop {
-                    // TODO: don't wait for missing heartbets. if we reconnected, do it instantly.
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    if last_seen
-                        .lock()
-                        .unwrap()
-                        .elapsed()
-                        .gt(&Duration::from_secs(10))
-                    {
-                        // TODO: if we're disconnected, wait for reconnect.
-                        debug!(
-                            "idle hearbeats expired. recreating consumer s: {},  {:?}",
-                            stream_name, config
-                        );
-                        let retry_strategy =
-                            ExponentialBackoff::from_millis(500).map(jitter).take(5);
-                        Retry::spawn(retry_strategy, || {
-                            recreate_ephemeral_consumer(
-                                context.clone(),
-                                config.clone(),
-                                stream_name.clone(),
-                                last_sequence.load(Ordering::Relaxed),
-                            )
-                        })
-                        .await
-                        .unwrap();
-                        *last_seen.lock().unwrap() = Instant::now()
+                    let current_state = state.borrow().to_owned();
+                    println!("CURRENT STATE: {:?}", current_state);
+                    tokio::select! {
+                        _ = context.client.state.changed() => {
+                            println!("state changed to {:?}", state.borrow());
+                            if state.borrow().to_owned() != State::Connected  || current_state == State::Connected {
+                                println!("CONTINUE. OK!");
+                               continue;
+                            }
+                            println!("NOT CONTUNUE, WARNING");
+                        },
+                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                            println!("hearbeat check");
+
+                            if !last_seen
+                                .lock()
+                                .unwrap()
+                                .elapsed()
+                                .gt(&Duration::from_secs(10)) {
+                                    println!("last seen ok. wait");
+                                    continue;
+                                    }
+                        println!("last seen not ok");
+                                }
                     }
+                    // TODO: don't wait for missing heartbets. if we reconnected, do it instantly.
+                    // tokio::time::sleep(Duration::from_secs(15)).await;
+                    // TODO: if we're disconnected, wait for reconnect.
+                    debug!(
+                        "idle hearbeats expired. recreating consumer s: {},  {:?}",
+                        stream_name, config
+                    );
+                    let retry_strategy = ExponentialBackoff::from_millis(500).take(5);
+                    Retry::spawn(retry_strategy, || {
+                        recreate_ephemeral_consumer(
+                            context.clone(),
+                            config.clone(),
+                            stream_name.clone(),
+                            last_sequence.load(Ordering::Relaxed),
+                        )
+                    })
+                    .await
+                    .unwrap();
+                    *last_seen.lock().unwrap() = Instant::now();
+                    println!("resseting consume sequence to 0");
+                    consumer_sequence.store(0, Ordering::Relaxed);
                 }
             }
         });
@@ -432,7 +454,7 @@ impl Consumer<OrderedConfig> {
             subscriber: Some(subscriber),
             subscriber_future: None,
             stream_sequence: last_sequence,
-            consumer_sequence: 0,
+            consumer_sequence,
             last_seen,
         })
     }
@@ -444,7 +466,7 @@ pub struct Ordered<'a> {
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, Error>>>,
     stream_sequence: Arc<AtomicU64>,
-    consumer_sequence: u64,
+    consumer_sequence: Arc<AtomicU64>,
     last_seen: Arc<Mutex<Instant>>,
 }
 
@@ -482,7 +504,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                     Some(subscriber) => match subscriber.as_mut().poll(cx) {
                         Poll::Ready(subscriber) => {
                             self.subscriber_future = None;
-                            self.consumer_sequence = 0;
+                            self.consumer_sequence.store(0, Ordering::Relaxed);
                             self.subscriber = Some(subscriber?);
                         }
                         Poll::Pending => {
@@ -496,9 +518,14 @@ impl<'a> futures::Stream for Ordered<'a> {
                     Poll::Ready(maybe_message) => {
                         match maybe_message {
                             Some(message) => {
+                                println!(
+                                    "MESSAGE. consumer {:?}, stream {:?}",
+                                    self.consumer_sequence, self.stream_sequence
+                                );
                                 *self.last_seen.lock().unwrap() = Instant::now();
                                 match message.status {
                                     Some(StatusCode::IDLE_HEARTBEAT) => {
+                                        println!("IUDLE HBS");
                                         if let Some(headers) = message.headers.as_ref() {
                                             if let Some(sequence) =
                                                 headers.get(crate::header::NATS_LAST_STREAM)
@@ -541,16 +568,24 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         };
 
                                         let info = jetstream_message.info()?;
-                                        if info.consumer_sequence != self.consumer_sequence + 1
+                                        println!("CONSUMER: {:?}, STREAM {:?}, INFO CONSUMER: {:?} INFO STREAM: {:?}", self.consumer_sequence, self.stream_sequence, info.consumer_sequence, info.stream_sequence);
+                                        if info.consumer_sequence
+                                            != self.consumer_sequence.load(Ordering::Relaxed) + 1
                                             && info.stream_sequence
                                                 != self.stream_sequence.load(Ordering::Relaxed) + 1
                                         {
+                                            debug!(
+                                                "ordered consumer mismatch. current {}, info: {}",
+                                                self.consumer_sequence.load(Ordering::Relaxed),
+                                                info.consumer_sequence
+                                            );
                                             self.subscriber = None;
                                             continue;
                                         }
                                         self.stream_sequence
                                             .store(info.stream_sequence, Ordering::Relaxed);
-                                        self.consumer_sequence = info.consumer_sequence;
+                                        self.consumer_sequence
+                                            .store(info.consumer_sequence, Ordering::Relaxed);
                                         return Poll::Ready(Some(Ok(jetstream_message)));
                                     }
                                 }
@@ -571,6 +606,7 @@ async fn recreate_ephemeral_subscriber(
     stream_name: String,
     sequence: u64,
 ) -> Result<Subscriber, Error> {
+    println!("FOR NAME {:?}", stream_name);
     let stream = context.get_stream(stream_name.clone()).await?;
 
     let subscriber = context
@@ -600,8 +636,9 @@ async fn recreate_ephemeral_consumer(
     stream_name: String,
     sequence: u64,
 ) -> Result<(), Error> {
-    println!("SENDING REQUEST");
+    println!("SENDING REQUEST for stream name: {:?}", stream_name);
     let stream = context.get_stream(stream_name.clone()).await?;
+    println!("GOT STREAM");
 
     let deliver_policy = {
         if sequence == 0 {
@@ -612,12 +649,17 @@ async fn recreate_ephemeral_consumer(
             }
         }
     };
-    let r = stream
-        .create_consumer(jetstream::consumer::push::OrderedConfig {
+    let r = tokio::time::timeout(
+        Duration::from_secs(5),
+        stream.create_consumer(jetstream::consumer::push::OrderedConfig {
             deliver_policy,
             ..config
-        })
-        .await?;
+        }),
+    )
+    .await
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))
+    .unwrap()
+    .unwrap();
     println!("RESPONSE: {:?}", r);
     Ok(())
 }
