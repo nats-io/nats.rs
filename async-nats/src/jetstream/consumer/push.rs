@@ -21,11 +21,11 @@ use crate::{
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot::error::TryRecvError;
 use std::{
-    borrow::Borrow,
     pin::Pin,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::Instant, io::{ErrorKind, self},
 };
 use std::{
     sync::atomic::AtomicU64,
@@ -33,10 +33,10 @@ use std::{
 };
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
+    strategy::ExponentialBackoff,
     Retry,
 };
-use tracing::debug;
+use tracing::{debug, trace};
 
 impl Consumer<Config> {
     /// Returns a stream of messages for Push Consumer.
@@ -216,8 +216,8 @@ pub struct Config {
 impl FromConsumer for Config {
     fn try_from_consumer_config(config: super::Config) -> Result<Self, Error> {
         if config.deliver_subject.is_none() {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(io::Error::new(
+                ErrorKind::Other,
                 "push consumer must have delivery subject",
             )));
         }
@@ -327,8 +327,8 @@ impl FromConsumer for OrderedConfig {
         Self: Sized,
     {
         if config.deliver_subject.is_none() {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(io::Error::new(
+                ErrorKind::Other,
                 "push consumer must have delivery subject",
             )));
         }
@@ -388,6 +388,7 @@ impl Consumer<OrderedConfig> {
         let last_seen = Arc::new(Mutex::new(Instant::now()));
         let last_sequence = Arc::new(AtomicU64::new(0));
         let consumer_sequence = Arc::new(AtomicU64::new(0));
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         tokio::task::spawn({
             let last_seen = last_seen.clone();
             let stream_name = self.info.stream_name.clone();
@@ -399,18 +400,15 @@ impl Consumer<OrderedConfig> {
             async move {
                 loop {
                     let current_state = state.borrow().to_owned();
-                    println!("CURRENT STATE: {:?}", current_state);
                     tokio::select! {
                         _ = context.client.state.changed() => {
-                            println!("state changed to {:?}", state.borrow());
                             if state.borrow().to_owned() != State::Connected  || current_state == State::Connected {
-                                println!("CONTINUE. OK!");
                                continue;
                             }
-                            println!("NOT CONTUNUE, WARNING");
+                            debug!("reconnected. trigger consumer recreation");
                         },
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                            println!("hearbeat check");
+                            debug!("hearbeat check");
 
                             if !last_seen
                                 .lock()
@@ -423,15 +421,12 @@ impl Consumer<OrderedConfig> {
                         println!("last seen not ok");
                                 }
                     }
-                    // TODO: don't wait for missing heartbets. if we reconnected, do it instantly.
-                    // tokio::time::sleep(Duration::from_secs(15)).await;
-                    // TODO: if we're disconnected, wait for reconnect.
                     debug!(
                         "idle hearbeats expired. recreating consumer s: {},  {:?}",
                         stream_name, config
                     );
                     let retry_strategy = ExponentialBackoff::from_millis(500).take(5);
-                    Retry::spawn(retry_strategy, || {
+                    let consumer = Retry::spawn(retry_strategy, || {
                         recreate_ephemeral_consumer(
                             context.clone(),
                             config.clone(),
@@ -439,10 +434,13 @@ impl Consumer<OrderedConfig> {
                             last_sequence.load(Ordering::Relaxed),
                         )
                     })
-                    .await
-                    .unwrap();
+                    .await;
+                    if let Err(err) = consumer {
+                       shutdown_tx.send(err).unwrap(); 
+                       break;
+                    }
                     *last_seen.lock().unwrap() = Instant::now();
-                    println!("resseting consume sequence to 0");
+                    debug!("resseting consume sequence to 0");
                     consumer_sequence.store(0, Ordering::Relaxed);
                 }
             }
@@ -456,6 +454,7 @@ impl Consumer<OrderedConfig> {
             stream_sequence: last_sequence,
             consumer_sequence,
             last_seen,
+            shutdown: shutdown_rx,
         })
     }
 }
@@ -468,6 +467,7 @@ pub struct Ordered<'a> {
     stream_sequence: Arc<AtomicU64>,
     consumer_sequence: Arc<AtomicU64>,
     last_seen: Arc<Mutex<Instant>>,
+    shutdown: tokio::sync::oneshot::Receiver<Error>,
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
@@ -475,6 +475,11 @@ impl<'a> futures::Stream for Ordered<'a> {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
+            match self.shutdown.try_recv() {
+                Ok(err) => return Poll::Ready(Some(Err(err))),
+                Err(TryRecvError::Closed) => return Poll::Ready(Some(Err(Box::from(io::Error::new(ErrorKind::Other, "closed"))))),
+                Err(TryRecvError::Empty) => {},
+            }
             if self.subscriber.is_none() {
                 match self.subscriber_future.as_mut() {
                     None => {
@@ -518,14 +523,10 @@ impl<'a> futures::Stream for Ordered<'a> {
                     Poll::Ready(maybe_message) => {
                         match maybe_message {
                             Some(message) => {
-                                println!(
-                                    "MESSAGE. consumer {:?}, stream {:?}",
-                                    self.consumer_sequence, self.stream_sequence
-                                );
                                 *self.last_seen.lock().unwrap() = Instant::now();
                                 match message.status {
                                     Some(StatusCode::IDLE_HEARTBEAT) => {
-                                        println!("IUDLE HBS");
+                                        debug!("received idle hearbeats");
                                         if let Some(headers) = message.headers.as_ref() {
                                             if let Some(sequence) =
                                                 headers.get(crate::header::NATS_LAST_STREAM)
@@ -534,8 +535,8 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                     .iter().next().unwrap()
                                                     .parse()
                                                     .map_err(|err|
-                                                           Box::new(std::io::Error::new(
-                                                                   std::io::ErrorKind::Other,
+                                                           Box::new(io::Error::new(
+                                                                   ErrorKind::Other,
                                                                    format!("could not parse header into u64: {}", err))
                                                                ))?;
 
@@ -568,7 +569,11 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         };
 
                                         let info = jetstream_message.info()?;
-                                        println!("CONSUMER: {:?}, STREAM {:?}, INFO CONSUMER: {:?} INFO STREAM: {:?}", self.consumer_sequence, self.stream_sequence, info.consumer_sequence, info.stream_sequence);
+                                        trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}", 
+                                               self.consumer_sequence, 
+                                               self.stream_sequence, 
+                                               info.consumer_sequence, 
+                                               info.stream_sequence);
                                         if info.consumer_sequence
                                             != self.consumer_sequence.load(Ordering::Relaxed) + 1
                                             && info.stream_sequence
@@ -590,7 +595,9 @@ impl<'a> futures::Stream for Ordered<'a> {
                                     }
                                 }
                             }
-                            None => return Poll::Ready(None),
+                            None => {
+                                debug!("received None from subscription");
+                                return Poll::Ready(None)},
                         }
                     }
                     Poll::Pending => return Poll::Pending,
@@ -606,7 +613,6 @@ async fn recreate_ephemeral_subscriber(
     stream_name: String,
     sequence: u64,
 ) -> Result<Subscriber, Error> {
-    println!("FOR NAME {:?}", stream_name);
     let stream = context.get_stream(stream_name.clone()).await?;
 
     let subscriber = context
@@ -618,7 +624,7 @@ async fn recreate_ephemeral_subscriber(
             DeliverPolicy::All
         } else {
             DeliverPolicy::ByStartSequence {
-                start_sequence: sequence,
+                start_sequence: sequence + 1,
             }
         }
     };
@@ -636,20 +642,18 @@ async fn recreate_ephemeral_consumer(
     stream_name: String,
     sequence: u64,
 ) -> Result<(), Error> {
-    println!("SENDING REQUEST for stream name: {:?}", stream_name);
     let stream = context.get_stream(stream_name.clone()).await?;
-    println!("GOT STREAM");
 
     let deliver_policy = {
         if sequence == 0 {
             DeliverPolicy::All
         } else {
             DeliverPolicy::ByStartSequence {
-                start_sequence: sequence,
+                start_sequence: sequence + 1,
             }
         }
     };
-    let r = tokio::time::timeout(
+    tokio::time::timeout(
         Duration::from_secs(5),
         stream.create_consumer(jetstream::consumer::push::OrderedConfig {
             deliver_policy,
@@ -657,9 +661,6 @@ async fn recreate_ephemeral_consumer(
         }),
     )
     .await
-    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))
-    .unwrap()
-    .unwrap();
-    println!("RESPONSE: {:?}", r);
+    .map_err(|_| io::Error::new(ErrorKind::TimedOut, "timed out"))??;
     Ok(())
 }

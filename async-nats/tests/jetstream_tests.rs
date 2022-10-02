@@ -29,6 +29,7 @@ mod jetstream {
     use std::time::Duration;
 
     use super::*;
+    use async_nats::connection::State;
     use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::{
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
@@ -1029,19 +1030,15 @@ mod jetstream {
     }
     #[tokio::test]
     async fn push_ordered_recreate() {
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber).unwrap();
         let mut server =
             nats_server::run_server_with_port("tests/configs/jetstream.conf", Some("5656"));
         let client = async_nats::connect(server.client_url()).await.unwrap();
-        let context = async_nats::jetstream::new(client);
+        let context = async_nats::jetstream::new(client.clone());
 
         context
             .create_stream(stream::Config {
                 name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                subjects: vec!["events.>".to_string()],
                 storage: StorageType::File,
                 ..Default::default()
             })
@@ -1057,26 +1054,45 @@ mod jetstream {
             .await
             .unwrap();
 
-        tokio::task::spawn(async move {
-            for i in 0..10000 {
-                tokio::time::sleep(Duration::from_millis(1000)).await;
-                if i == 10 {
-                    server.restart();
-                    println!("restared server");
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                for i in 0..10000 {
+                    if i == 10 || i == 500 {
+                        server.restart();
+                        loop {
+                            // FIXME(jarema): publish is not resilient against disconnects.
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            if client.connection_state() == State::Connected {
+                                break;
+                            }
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    context
+                        .publish(format!("events.{}", i), i.to_string().into())
+                        .await
+                        .ok();
                 }
-                context
-                    .publish("events".to_string(), "dat".into())
-                    .await
-                    .ok();
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
 
-        let mut messages = consumer.messages().await.unwrap().take(1000).enumerate();
+        let mut messages = consumer.messages().await.unwrap().take(1001).enumerate();
         while let Some((i, message)) = messages.next().await {
-            println!("MESSAGE {}", i);
+            if i == 1001 {
+                assert!(message.is_err());
+                break;
+            }
             let message = message.unwrap();
+            assert_eq!(
+                from_utf8(&message.payload)
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+                i
+            );
             assert_eq!(message.status, None);
-            assert_eq!(message.payload.as_ref(), b"dat");
         }
     }
 
