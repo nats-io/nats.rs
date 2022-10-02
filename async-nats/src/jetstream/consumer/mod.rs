@@ -303,7 +303,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
     /// Force consumer to use memory storage.
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
     pub memory_storage: bool,
 }
 
