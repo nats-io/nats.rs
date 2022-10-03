@@ -797,6 +797,9 @@ pub struct Config {
     /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
     /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
     pub discard: DiscardPolicy,
+    /// Prevents a message from being added to a stream if the max_msgs_per_subject limit for the subject has been reached
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub discard_new_per_subject: bool,
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

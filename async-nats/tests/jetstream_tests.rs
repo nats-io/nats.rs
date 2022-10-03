@@ -1846,4 +1846,38 @@ mod jetstream {
             message.ack().await.unwrap();
         }
     }
+
+    #[tokio::test]
+    async fn discard_new_per_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let _source_stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "source".to_string(),
+                max_messages: 10,
+                max_messages_per_subject: 2,
+                discard_new_per_subject: true,
+                subjects: vec!["events.>".to_string()],
+                discard: DiscardPolicy::New,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .expect_err("should get 503 maximum messages per subject exceeded error");
+    }
 }
