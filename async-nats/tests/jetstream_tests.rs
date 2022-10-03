@@ -1242,7 +1242,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+        let mut consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
             for i in 0..1000 {
@@ -1257,6 +1257,9 @@ mod jetstream {
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
         }
+
+        let info = consumer.info().await.unwrap();
+        assert!(info.delivered.last_active.is_some());
     }
 
     #[tokio::test]

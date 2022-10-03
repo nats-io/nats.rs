@@ -156,9 +156,9 @@ pub struct Info {
     /// The consumer's configuration
     pub config: Config,
     /// Statistics for delivered messages
-    pub delivered: SequencePair,
+    pub delivered: SequenceInfo,
     /// Statistics for acknowleged messages
-    pub ack_floor: SequencePair,
+    pub ack_floor: SequenceInfo,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
     /// The number of messages re-sent after acknowledgement was not received within the configured
@@ -176,14 +176,17 @@ pub struct Info {
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct SequencePair {
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceInfo {
     /// How far along the consumer has progressed
     #[serde(rename = "consumer_seq")]
     pub consumer_sequence: u64,
     /// The aggregate for all stream consumers
     #[serde(rename = "stream_seq")]
     pub stream_sequence: u64,
+    // Last activity for the sequence
+    #[serde(default, with = "rfc3339::option")]
+    pub last_active: Option<time::OffsetDateTime>,
 }
 
 /// Configuration for consumers. From a high level, the
