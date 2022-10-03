@@ -320,10 +320,8 @@ impl Store {
                         let d = e.get_ref().unwrap();
                         let de = d.downcast_ref::<response::Error>().unwrap();
                         if de.code == 10037 {
-                            println!("GOT 10037");
                             None
                         } else {
-                            println!("GOT ANOTHER ERROR");
                             return Err(Box::new(e));
                         }
                     }

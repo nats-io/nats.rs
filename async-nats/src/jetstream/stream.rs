@@ -347,9 +347,7 @@ impl Stream {
                 context: self.context.clone(),
                 message,
             })?;
-        println!("RESPOSNE: {:?}", response);
         if let Some(status) = response.status {
-            println!("STATUS: {}", status);
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
