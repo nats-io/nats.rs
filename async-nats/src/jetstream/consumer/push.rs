@@ -21,21 +21,19 @@ use crate::{
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot::error::TryRecvError;
 use std::{
+    io::{self, ErrorKind},
     pin::Pin,
     sync::{Arc, Mutex},
-    time::Instant, io::{ErrorKind, self},
+    time::Instant,
 };
 use std::{
     sync::atomic::AtomicU64,
     task::{self, Poll},
 };
 use std::{sync::atomic::Ordering, time::Duration};
-use tokio_retry::{
-    strategy::ExponentialBackoff,
-    Retry,
-};
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tracing::{debug, trace};
 
 impl Consumer<Config> {
@@ -436,8 +434,8 @@ impl Consumer<OrderedConfig> {
                     })
                     .await;
                     if let Err(err) = consumer {
-                       shutdown_tx.send(err).unwrap(); 
-                       break;
+                        shutdown_tx.send(err).unwrap();
+                        break;
                     }
                     *last_seen.lock().unwrap() = Instant::now();
                     debug!("resseting consume sequence to 0");
@@ -477,8 +475,13 @@ impl<'a> futures::Stream for Ordered<'a> {
         loop {
             match self.shutdown.try_recv() {
                 Ok(err) => return Poll::Ready(Some(Err(err))),
-                Err(TryRecvError::Closed) => return Poll::Ready(Some(Err(Box::from(io::Error::new(ErrorKind::Other, "closed"))))),
-                Err(TryRecvError::Empty) => {},
+                Err(TryRecvError::Closed) => {
+                    return Poll::Ready(Some(Err(Box::from(io::Error::new(
+                        ErrorKind::Other,
+                        "closed",
+                    )))))
+                }
+                Err(TryRecvError::Empty) => {}
             }
             if self.subscriber.is_none() {
                 match self.subscriber_future.as_mut() {
@@ -570,9 +573,9 @@ impl<'a> futures::Stream for Ordered<'a> {
 
                                         let info = jetstream_message.info()?;
                                         trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}", 
-                                               self.consumer_sequence, 
-                                               self.stream_sequence, 
-                                               info.consumer_sequence, 
+                                               self.consumer_sequence,
+                                               self.stream_sequence,
+                                               info.consumer_sequence,
                                                info.stream_sequence);
                                         if info.consumer_sequence
                                             != self.consumer_sequence.load(Ordering::Relaxed) + 1
@@ -597,7 +600,8 @@ impl<'a> futures::Stream for Ordered<'a> {
                             }
                             None => {
                                 debug!("received None from subscription");
-                                return Poll::Ready(None)},
+                                return Poll::Ready(None);
+                            }
                         }
                     }
                     Poll::Pending => return Poll::Pending,
