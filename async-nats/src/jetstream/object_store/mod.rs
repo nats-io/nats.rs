@@ -24,7 +24,7 @@ use bytes::Bytes;
 use tokio::io::AsyncReadExt;
 
 use base64_url::base64;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -240,11 +240,49 @@ impl ObjectStore {
         Ok(object_info)
     }
 
-    // pub async fn watch(&self) -> Result<Watch, Error> {}
+    pub async fn watch(&self) -> Result<Watch, Error> {
+        let subject = format!("$O.{}.M.>", self.name);
+        let ordered = self
+            .stream
+            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("object store watcher".to_string()),
+                filter_subject: subject,
+                ..Default::default()
+            })
+            .await?;
+        Ok(Watch {
+            subscription: ordered.messages().await?,
+        })
+    }
 }
 
 pub struct Watch<'a> {
     subscription: crate::jetstream::consumer::push::Ordered<'a>,
+}
+
+impl Stream for Watch<'_> {
+    type Item = Result<ObjectInfo, Error>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        match self.subscription.poll_next_unpin(cx) {
+            Poll::Ready(message) => match message {
+                Some(message) => serde_json::from_slice::<ObjectInfo>(&message?.payload)
+                    .map_err(|err| {
+                        Box::new(io::Error::new(
+                            ErrorKind::Other,
+                            "failed to deserialize the reponse",
+                        ))
+                    })
+                    .map(|message| Poll::Ready(Some(Ok(message)))),
+                None => Poll::Ready(None),
+            },
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 /// Represents an object stored in a bucket.
