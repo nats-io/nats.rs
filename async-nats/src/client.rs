@@ -263,7 +263,6 @@ impl Client {
             None => self.publish_with_reply(subject, inbox, payload).await?,
         }
         self.flush().await?;
-
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())

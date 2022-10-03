@@ -478,7 +478,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                 Err(TryRecvError::Closed) => {
                     return Poll::Ready(Some(Err(Box::from(io::Error::new(
                         ErrorKind::Other,
-                        "closed",
+                        "push consumer task closed",
                     )))))
                 }
                 Err(TryRecvError::Empty) => {}
