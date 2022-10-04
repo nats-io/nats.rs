@@ -11,10 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Object Store module
 use std::{
-    borrow::BorrowMut,
     cmp,
-    fs::read_to_string,
     io::{self, ErrorKind},
     str::FromStr,
     task::Poll,
@@ -84,6 +83,22 @@ pub struct ObjectStore {
 }
 
 impl ObjectStore {
+    /// Gets an [Object] from the [Store].
+    ///
+    /// [Object] implements [use tokio::io::AsyncRead] that allows
+    /// to read the data from Object Store.
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let object = bucket.get("FOO").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get<T: AsRef<str>>(&self, object_name: T) -> Result<Object, Error> {
         let object_info = self.info(object_name).await?;
         // if let Some(link) = object_info.link {
@@ -106,6 +121,22 @@ impl ObjectStore {
         Ok(Object::new(subscription, object_info))
     }
 
+    /// Gets an [Object] from the [Store].
+    ///
+    /// [Object] implements [use tokio::io::AsyncRead] that allows
+    /// to read the data from Object Store.
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// bucket.delete("FOO").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete<T: AsRef<str>>(&self, object_name: T) -> Result<(), Error> {
         let object_name = object_name.as_ref();
         let mut object_info = self.info(object_name).await?;
@@ -132,6 +163,19 @@ impl ObjectStore {
         Ok(())
     }
 
+    /// Retrieves [Object] [Info].
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let info = bucket.info("FOO").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
         let object_name = object_name.as_ref();
         let object_name = sanitize_object_name(object_name);

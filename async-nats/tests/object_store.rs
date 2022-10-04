@@ -41,10 +41,6 @@ mod object_store {
 
         bucket.put("FOO", &mut bytes.as_slice()).await.unwrap();
 
-        let info = bucket.info("FOO").await.unwrap();
-
-        println!("info: {:?}", info);
-
         let mut object = bucket.get("FOO").await.unwrap();
 
         let mut result = Vec::new();

@@ -579,7 +579,7 @@ impl Context {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -631,7 +631,7 @@ impl Context {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -670,7 +670,7 @@ impl Context {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
