@@ -100,7 +100,7 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get<T: AsRef<str>>(&self, object_name: T) -> Result<Object, Error> {
+    pub async fn get<T: AsRef<str>>(&self, object_name: T) -> Result<Object<'_>, Error> {
         let object_info = self.info(object_name).await?;
         // if let Some(link) = object_info.link {
         //     return self.get(link.name).await;
@@ -326,7 +326,7 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch(&self) -> Result<Watch, Error> {
+    pub async fn watch(&self) -> Result<Watch<'_>, Error> {
         let subject = format!("$O.{}.M.>", self.name);
         let ordered = self
             .stream
