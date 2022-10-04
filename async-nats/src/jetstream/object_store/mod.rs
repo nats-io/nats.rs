@@ -13,6 +13,7 @@
 
 use std::{
     cmp,
+    fs::read_to_string,
     io::{self, ErrorKind},
     str::FromStr,
     task::Poll,
@@ -20,6 +21,7 @@ use std::{
 };
 
 use crate::{HeaderMap, HeaderValue};
+use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
 
 use base64_url::base64;
@@ -182,6 +184,7 @@ impl ObjectStore {
         let mut object_size = 0;
 
         let mut buffer = [0; DEFAULT_CHUNK_SIZE];
+        let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
             let n = data.read(&mut buffer).await?;
@@ -189,6 +192,7 @@ impl ObjectStore {
             if n == 0 {
                 break;
             }
+            context.update(&buffer[..n]);
 
             object_size += n;
             object_chunks += 1;
@@ -201,6 +205,7 @@ impl ObjectStore {
                 .publish(chunk_subject.clone(), paylaod)
                 .await?;
         }
+        let digest = context.finish();
         // Create a random subject prefixed with the object stream name.
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
         let object_info = ObjectInfo {
@@ -211,7 +216,10 @@ impl ObjectStore {
             nuid: object_nuid,
             chunks: object_chunks,
             size: object_size,
-            digest: "".to_string(),
+            digest: format!(
+                "SHA-256={}",
+                base64::encode_config(digest, base64::URL_SAFE)
+            ),
             modified: OffsetDateTime::now_utc(),
             deleted: false,
         };
@@ -295,7 +303,7 @@ impl Stream for Watch<'_> {
 
 /// Represents an object stored in a bucket.
 pub struct Object<'a> {
-    info: ObjectInfo,
+    pub info: ObjectInfo,
     remaining_bytes: Vec<u8>,
     has_pending_messages: bool,
     subscription: crate::jetstream::consumer::push::Ordered<'a>,

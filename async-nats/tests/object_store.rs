@@ -14,6 +14,7 @@
 mod object_store {
 
     use rand::RngCore;
+    use ring::digest::SHA256;
     use tokio::io::AsyncReadExt;
     use tracing::Level;
 
@@ -40,6 +41,8 @@ mod object_store {
         let mut bytes = vec![0; 1024 * 1024 + 22];
         rng.try_fill_bytes(&mut bytes).unwrap();
 
+        let digest = ring::digest::digest(&SHA256, &bytes);
+
         bucket.put("FOO", &mut bytes.as_slice()).await.unwrap();
 
         let info = bucket.info("FOO").await.unwrap();
@@ -60,6 +63,10 @@ mod object_store {
                 result.extend_from_slice(&buffer[..n]);
             }
         }
+        assert_eq!(
+            format!("SHA-256={}", base64::encode(digest)),
+            object.info.digest
+        );
         assert_eq!(result, bytes);
     }
 
@@ -127,5 +134,35 @@ mod object_store {
         let mut stream = jetstream.get_stream("OBJ_bucket").await.unwrap();
         let info = stream.info().await.unwrap();
         assert!(info.config.sealed);
+    }
+
+    #[tokio::test]
+    async fn digest() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let file = std::fs::read("tests/configs/digests/digester_test_bytes_000100.txt").unwrap();
+
+        bucket.put("FOO", &mut file.as_slice()).await.unwrap();
+
+        let mut object = bucket.get("FOO").await.unwrap();
+        assert_eq!(
+            object.info.digest,
+            "SHA-256=IdgP4UYMGt47rgecOqFoLrd24AXukHf5-SVzqQ5Psg8=".to_string()
+        );
+
+        let mut result = Vec::new();
+        object.read_to_end(&mut result).await.unwrap();
+        assert_eq!(result, file);
     }
 }
