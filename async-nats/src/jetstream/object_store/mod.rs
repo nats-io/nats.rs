@@ -201,6 +201,23 @@ impl ObjectStore {
         Ok(object_info)
     }
 
+    /// Puts an [Object] into the [ObjectStore].
+    /// This method implements `tokio::io::AsyncRead`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let mut file = tokio::fs::File::open("foo.txt").await?;
+    /// bucket.put("file", &mut file).await.unwrap();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn put<T>(
         &self,
         meta: T,
@@ -290,6 +307,25 @@ impl ObjectStore {
         Ok(object_info)
     }
 
+    /// Creates a [Watch] stream over changes in the [ObjectStore].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let mut watcher = bucket.watch().await.unwrap();
+    /// while let Some(object) = watcher.next().await {
+    ///     println!("detected changes in {:?}", object?);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn watch(&self) -> Result<Watch, Error> {
         let subject = format!("$O.{}.M.>", self.name);
         let ordered = self
@@ -306,6 +342,22 @@ impl ObjectStore {
         })
     }
 
+    /// Seals a [ObjestStore], preventing any further changes to it or its [Objects][Object].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut bucket = jetstream.get_object_store("store").await?;
+    /// bucket.seal().await.unwrap();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn seal(&mut self) -> Result<(), Error> {
         let mut stream_config = self.stream.info().await?.to_owned();
         stream_config.config.sealed = true;
