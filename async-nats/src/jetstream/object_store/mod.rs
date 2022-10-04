@@ -123,7 +123,6 @@ impl ObjectStore {
             .publish_with_headers(subject, headers, data.into())
             .await?;
 
-        let stream_name = format!("OBJ_{}", self.name);
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
 
         self.stream.purge_subject(&chunk_subject).await?;

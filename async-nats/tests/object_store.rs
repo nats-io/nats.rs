@@ -17,11 +17,8 @@ mod object_store {
     use tokio::io::AsyncReadExt;
     use tracing::Level;
 
-    use super::*;
-
     #[tokio::test]
-
-    async fn get() {
+    async fn get_and_put() {
         let subscriber = tracing_subscriber::FmtSubscriber::builder()
             .with_max_level(Level::DEBUG)
             .finish();
@@ -64,5 +61,71 @@ mod object_store {
             }
         }
         assert_eq!(result, bytes);
+    }
+
+    #[tokio::test]
+    async fn delete() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut rng = rand::thread_rng();
+        let mut bytes = vec![0; 1024 * 1024 + 22];
+        rng.try_fill_bytes(&mut bytes).unwrap();
+
+        bucket.put("FOO", &mut bytes.as_slice()).await.unwrap();
+
+        let info = bucket.info("FOO").await.unwrap();
+
+        assert!(!info.deleted);
+        assert!(info.size > 0);
+
+        bucket.delete("FOO").await.unwrap();
+
+        let info = bucket.info("FOO").await.unwrap();
+        assert!(info.deleted);
+        assert!(info.size == 0);
+    }
+
+    #[tokio::test]
+    async fn seal() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let mut bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut rng = rand::thread_rng();
+        let mut bytes = vec![0; 1024 * 1024 + 22];
+        rng.try_fill_bytes(&mut bytes).unwrap();
+
+        bucket.put("FOO", &mut bytes.as_slice()).await.unwrap();
+
+        let info = bucket.info("FOO").await.unwrap();
+
+        assert!(!info.deleted);
+        assert!(info.size > 0);
+
+        bucket.seal().await.unwrap();
+
+        let mut stream = jetstream.get_stream("OBJ_bucket").await.unwrap();
+        let info = stream.info().await.unwrap();
+        assert!(info.config.sealed);
     }
 }
