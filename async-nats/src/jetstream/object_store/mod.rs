@@ -142,7 +142,6 @@ impl ObjectStore {
         }
 
         // Grab last meta value we have.
-        let stream_name = format!("OBJ_{}", &self.name);
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
 
         let message = self
@@ -231,7 +230,6 @@ impl ObjectStore {
 
         // Purge any old chunks.
         if let Some(existing_object_info) = maybe_existing_object_info {
-            let stream_name = format!("OBJ_{}", self.name);
             let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
 
             self.stream.purge_subject(&chunk_subject).await?;
@@ -255,6 +253,17 @@ impl ObjectStore {
             subscription: ordered.messages().await?,
         })
     }
+
+    pub async fn seal(&mut self) -> Result<(), Error> {
+        let mut stream_config = self.stream.info().await?.to_owned();
+        stream_config.config.sealed = true;
+
+        self.stream
+            .context
+            .update_stream(&stream_config.config)
+            .await?;
+        Ok(())
+    }
 }
 
 pub struct Watch<'a> {
@@ -265,19 +274,21 @@ impl Stream for Watch<'_> {
     type Item = Result<ObjectInfo, Error>;
 
     fn poll_next(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         match self.subscription.poll_next_unpin(cx) {
             Poll::Ready(message) => match message {
-                Some(message) => serde_json::from_slice::<ObjectInfo>(&message?.payload)
-                    .map_err(|err| {
-                        Box::new(io::Error::new(
-                            ErrorKind::Other,
-                            "failed to deserialize the reponse",
-                        ))
-                    })
-                    .map(|message| Poll::Ready(Some(Ok(message)))),
+                Some(message) => Poll::Ready(
+                    serde_json::from_slice::<ObjectInfo>(&message?.payload)
+                        .map_err(|err| {
+                            Box::from(io::Error::new(
+                                ErrorKind::Other,
+                                format!("failed to deserialize the reponse: {:?}", err),
+                            ))
+                        })
+                        .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
+                ),
                 None => Poll::Ready(None),
             },
             Poll::Pending => Poll::Pending,
