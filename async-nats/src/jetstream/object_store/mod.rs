@@ -20,7 +20,6 @@ use std::{
 };
 
 use crate::{HeaderMap, HeaderValue};
-use bytes::Bytes;
 use tokio::io::AsyncReadExt;
 
 use base64_url::base64;
@@ -28,7 +27,6 @@ use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::Error;
 
