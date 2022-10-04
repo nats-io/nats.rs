@@ -475,6 +475,7 @@ impl Context {
                 max_age: config.max_age,
                 max_message_size: config.max_value_size,
                 storage: config.storage,
+                republish: config.republish,
                 allow_rollup: true,
                 deny_delete: true,
                 deny_purge: false,

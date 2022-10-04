@@ -32,7 +32,7 @@ use self::bucket::Status;
 
 use super::{
     consumer::DeliverPolicy,
-    stream::{RawMessage, StorageType, Stream},
+    stream::{RawMessage, Republish, StorageType, Stream},
 };
 
 // Helper to extract key value operation from message headers
@@ -98,7 +98,8 @@ pub struct Config {
     pub storage: StorageType,
     /// How many replicas to keep for each entry in a cluster.
     pub num_replicas: usize,
-    // TODO: add placement
+    /// Republish is for republishing messages once persisten in the Key Value Bucket.
+    pub republish: Option<Republish>,
 }
 
 /// Describes what kind of operation and entry represents
@@ -557,8 +558,8 @@ impl Store {
             .await?;
 
         let mut entries = History {
+            done: consumer.info.num_pending == 0,
             subscription: consumer.messages().await?,
-            done: false,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
         };

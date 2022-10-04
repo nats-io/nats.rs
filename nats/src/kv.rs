@@ -781,6 +781,9 @@ impl Iterator for Keys {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            if self.subscription.0.num_pending == 0 {
+                return None;
+            }
             if self.done {
                 return None;
             }

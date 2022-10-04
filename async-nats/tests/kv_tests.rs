@@ -17,7 +17,7 @@ mod kv {
     use async_nats::{
         jetstream::{
             kv::Operation,
-            stream::{DiscardPolicy, StorageType},
+            stream::{DiscardPolicy, Republish, StorageType},
         },
         ConnectOptions,
     };
@@ -453,5 +453,58 @@ mod kv {
         let mut keys = kv.keys().await.unwrap().collect::<Vec<String>>();
         keys.sort();
         assert_eq!(vec!["bar", "foo"], keys);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history2".to_string(),
+                description: "test_description".to_string(),
+                history: 15,
+                max_age: Duration::from_millis(100),
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        kv.put("baz", "value".into()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(kv.keys().await.unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn republish() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client.clone());
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".to_string(),
+                description: "test_description".to_string(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                republish: Some(Republish {
+                    source: ">".to_string(),
+                    destination: "bar.>".to_string(),
+                    headers_only: false,
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut subscribe = client.subscribe("bar.>".to_string()).await.unwrap();
+
+        kv.put("key".to_string(), "data".into()).await.unwrap();
+
+        let message = subscribe.next().await.unwrap();
+        assert_eq!("bar.$KV.test.key", message.subject);
     }
 }

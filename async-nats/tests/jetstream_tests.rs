@@ -1242,7 +1242,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+        let mut consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
             for i in 0..1000 {
@@ -1257,6 +1257,9 @@ mod jetstream {
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
         }
+
+        let info = consumer.info().await.unwrap();
+        assert!(info.delivered.last_active.is_some());
     }
 
     #[tokio::test]
@@ -1842,5 +1845,39 @@ mod jetstream {
             assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
             message.ack().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn discard_new_per_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let _source_stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "source".to_string(),
+                max_messages: 10,
+                max_messages_per_subject: 2,
+                discard_new_per_subject: true,
+                subjects: vec!["events.>".to_string()],
+                discard: DiscardPolicy::New,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .expect_err("should get 503 maximum messages per subject exceeded error");
     }
 }
