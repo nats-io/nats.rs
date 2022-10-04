@@ -13,10 +13,10 @@
 
 mod object_store {
 
+    use base64::URL_SAFE;
     use rand::RngCore;
     use ring::digest::SHA256;
     use tokio::io::AsyncReadExt;
-    use tracing::Level;
 
     #[tokio::test]
     async fn get_and_put() {
@@ -60,7 +60,7 @@ mod object_store {
             }
         }
         assert_eq!(
-            format!("SHA-256={}", base64::encode(digest)),
+            format!("SHA-256={}", base64::encode_config(digest, URL_SAFE)),
             object.info.digest
         );
         assert_eq!(result, bytes);
@@ -132,6 +132,7 @@ mod object_store {
         assert!(info.config.sealed);
     }
 
+    // check for digester parity https://github.com/nats-io/nats-architecture-and-design/issues/150
     #[tokio::test]
     async fn digest() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");

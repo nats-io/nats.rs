@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use std::{
+    borrow::BorrowMut,
     cmp,
     fs::read_to_string,
     io::{self, ErrorKind},
@@ -21,6 +22,7 @@ use std::{
 };
 
 use crate::{HeaderMap, HeaderValue};
+use base64::URL_SAFE;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
 
@@ -306,6 +308,7 @@ pub struct Object<'a> {
     pub info: ObjectInfo,
     remaining_bytes: Vec<u8>,
     has_pending_messages: bool,
+    digest: Option<ring::digest::Context>,
     subscription: crate::jetstream::consumer::push::Ordered<'a>,
 }
 
@@ -316,6 +319,7 @@ impl<'a> Object<'a> {
             info,
             remaining_bytes: Vec::new(),
             has_pending_messages: true,
+            digest: Some(ring::digest::Context::new(&SHA256)),
         }
     }
 
@@ -350,6 +354,9 @@ impl tokio::io::AsyncRead for Object<'_> {
                         })?;
                         let len = cmp::min(buf.remaining(), message.payload.len());
                         buf.put_slice(&message.payload[..len]);
+                        if let Some(context) = &mut self.digest {
+                            context.update(&message.payload);
+                        }
                         self.remaining_bytes
                             .extend_from_slice(&message.payload[len..]);
 
@@ -360,6 +367,22 @@ impl tokio::io::AsyncRead for Object<'_> {
                             )
                         })?;
                         if info.pending == 0 {
+                            let digest = self.digest.take().map(|context| context.finish());
+                            if let Some(digest) = digest {
+                                if format!("SHA-256={}", base64::encode_config(&digest, URL_SAFE))
+                                    != self.info.digest
+                                {
+                                    return Poll::Ready(Err(io::Error::new(
+                                        ErrorKind::InvalidData,
+                                        "wrong digest",
+                                    )));
+                                }
+                            } else {
+                                return Poll::Ready(Err(io::Error::new(
+                                    ErrorKind::InvalidData,
+                                    "digest should be Some",
+                                )));
+                            }
                             self.has_pending_messages = false;
                         }
                         Poll::Ready(Ok(()))
