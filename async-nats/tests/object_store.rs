@@ -20,10 +20,6 @@ mod object_store {
 
     #[tokio::test]
     async fn get_and_put() {
-        let subscriber = tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(Level::DEBUG)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber).unwrap();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
@@ -151,18 +147,36 @@ mod object_store {
             .await
             .unwrap();
 
-        let file = std::fs::read("tests/configs/digests/digester_test_bytes_000100.txt").unwrap();
+        let cases = vec![
+            (
+                "tests/configs/digests/digester_test_bytes_000100.txt",
+                "IdgP4UYMGt47rgecOqFoLrd24AXukHf5-SVzqQ5Psg8=",
+            ),
+            (
+                "tests/configs/digests/digester_test_bytes_001000.txt",
+                "DZj4RnBpuEukzFIY0ueZ-xjnHY4Rt9XWn4Dh8nkNfnI=",
+            ),
+            (
+                "tests/configs/digests/digester_test_bytes_010000.txt",
+                "RgaJ-VSJtjNvgXcujCKIvaheiX_6GRCcfdRYnAcVy38=",
+            ),
+            (
+                "tests/configs/digests/digester_test_bytes_100000.txt",
+                "yan7pwBVnC1yORqqgBfd64_qAw6q9fNA60_KRiMMooE=",
+            ),
+        ];
 
-        bucket.put("FOO", &mut file.as_slice()).await.unwrap();
+        for (filename, digest) in cases {
+            let file = std::fs::read(filename).unwrap();
 
-        let mut object = bucket.get("FOO").await.unwrap();
-        assert_eq!(
-            object.info.digest,
-            "SHA-256=IdgP4UYMGt47rgecOqFoLrd24AXukHf5-SVzqQ5Psg8=".to_string()
-        );
+            bucket.put(filename, &mut file.as_slice()).await.unwrap();
 
-        let mut result = Vec::new();
-        object.read_to_end(&mut result).await.unwrap();
-        assert_eq!(result, file);
+            let mut object = bucket.get(filename).await.unwrap();
+            assert_eq!(object.info.digest, format!("SHA-256={}", digest));
+
+            let mut result = Vec::new();
+            object.read_to_end(&mut result).await.unwrap();
+            assert_eq!(result, file);
+        }
     }
 }
