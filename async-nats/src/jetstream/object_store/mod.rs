@@ -77,6 +77,7 @@ pub struct Config {
 }
 
 /// A blob store capable of storing large objects efficiently in streams.
+#[derive(Clone)]
 pub struct ObjectStore {
     pub(crate) name: String,
     pub(crate) stream: crate::jetstream::stream::Stream,

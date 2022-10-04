@@ -13,7 +13,10 @@
 
 mod object_store {
 
+    use std::{io, time::Duration};
+
     use base64::URL_SAFE;
+    use futures::StreamExt;
     use rand::RngCore;
     use ring::digest::SHA256;
     use tokio::io::AsyncReadExt;
@@ -60,6 +63,49 @@ mod object_store {
             object.info.digest
         );
         assert_eq!(result, bytes);
+    }
+
+    #[tokio::test]
+    async fn watch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket
+            .put("FOO", &mut std::io::Cursor::new(vec![1, 2, 3, 4]))
+            .await
+            .unwrap();
+
+        let mut watcher = bucket.watch().await.unwrap();
+
+        tokio::task::spawn({
+            let bucket = bucket.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                bucket
+                    .put("BAR", &mut io::Cursor::new(vec![2, 3, 4, 5]))
+                    .await
+                    .unwrap();
+            }
+        });
+
+        assert_eq!(
+            watcher.next().await.unwrap().unwrap().name,
+            "FOO".to_string()
+        );
+        assert_eq!(
+            watcher.next().await.unwrap().unwrap().name,
+            "BAR".to_string()
+        );
     }
 
     #[tokio::test]
