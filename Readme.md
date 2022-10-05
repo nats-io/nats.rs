@@ -52,6 +52,7 @@ Currently supports:
 * JetStream API
 * JetStream Management API
 * Key Value Store
+* Object Store
 
 And should soon catch up with in terms of feature parity with synchronous client.
 When it reaches feature parity with `nats` crate, synchronous wrapper over `async-nats` will
