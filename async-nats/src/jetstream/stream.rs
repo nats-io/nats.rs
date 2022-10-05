@@ -611,7 +611,6 @@ impl Stream {
                 format!("CONSUMER.CREATE.{}", self.info.config.name)
             }
         };
-        println!("SUBJECT: {:?}", subject);
 
         match self
             .context
