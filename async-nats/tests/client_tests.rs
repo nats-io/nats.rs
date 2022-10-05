@@ -688,4 +688,22 @@ mod client {
         let _error: Result<(), async_nats::PublishError> =
             client.publish("foo".into(), "data".into()).await;
     }
+    #[tokio::test]
+    async fn max_reconnects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect_with_options(
+            server.client_url(),
+            ConnectOptions::new()
+                .max_reconnects(Some(5))
+                .event_callback(|event| async move {
+                    if let Event::ClientError(..) = event {
+                        println!("EVENT: {:?}", event);
+                    }
+                }),
+        )
+        .await
+        .unwrap();
+        drop(server);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
 }

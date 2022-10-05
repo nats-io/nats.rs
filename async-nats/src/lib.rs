@@ -100,7 +100,7 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tracing::debug;
+use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -320,6 +320,10 @@ impl ConnectionHandler {
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
+                            if err.kind() == ErrorKind::ConnectionRefused {
+                                error!("connection refused");
+                                break;
+                            }
                             println!("error handling command {}", err);
                         }
                         None => {
@@ -331,16 +335,28 @@ impl ConnectionHandler {
                 maybe_op_result = self.connection.read_op().fuse() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
+                            if err.kind() == ErrorKind::ConnectionRefused {
+                                error!("connection refused");
+                                break;
+                            }
                             println!("error handling operation {}", err);
                         }
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
+                            if err.kind() == ErrorKind::ConnectionRefused {
+                                error!("connection refused");
+                                break;
+                            }
                                 println!("error handling operation {}", err);
                             } else {
                             }
                         }
                         Err(op_err) => {
                             if let Err(err) = self.handle_disconnect().await {
+                            if err.kind() == ErrorKind::ConnectionRefused {
+                                error!("connection refused");
+                                break;
+                            }
                                 println!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
@@ -640,6 +656,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
+            max_reconnects: options.max_reconnects,
         },
         events_tx,
         state_tx,

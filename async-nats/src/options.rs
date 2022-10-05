@@ -531,8 +531,12 @@ impl ConnectOptions {
         self.inbox_prefix = prefix.to_string();
         self
     }
-}
 
+    pub fn max_reconnects(mut self, max_reconnects: Option<usize>) -> ConnectOptions {
+        self.max_reconnects = max_reconnects;
+        self
+    }
+}
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 

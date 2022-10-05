@@ -49,12 +49,14 @@ pub(crate) struct ConnectorOptions {
     pub(crate) auth: Authorization,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
+    pub(crate) max_reconnects: Option<usize>,
 }
 
 /// Maintains a list of servers and establishes connections.
 pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     servers: HashMap<ServerAddr, usize>,
+    connect_attempts: usize,
     options: ConnectorOptions,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
@@ -74,6 +76,7 @@ impl Connector {
             .collect();
 
         Ok(Connector {
+            connect_attempts: 0,
             servers,
             options,
             events_tx,
@@ -83,8 +86,21 @@ impl Connector {
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
         loop {
+            println!("LOOP att: {}", self.connect_attempts);
+            if let Some(max_reconnects) = self.options.max_reconnects {
+                if self.connect_attempts >= max_reconnects {
+                    return Err(std::io::Error::new(
+                        ErrorKind::ConnectionRefused,
+                        "reached max number of reconnects",
+                    ));
+                }
+            }
+            self.connect_attempts += 1;
             match self.try_connect().await {
-                Ok(inner) => return Ok(inner),
+                Ok(inner) => {
+                    self.connect_attempts = 0;
+                    return Ok(inner);
+                }
                 Err(error) => {
                     self.events_tx
                         .send(Event::ClientError(ClientError::Other(error.to_string())))
