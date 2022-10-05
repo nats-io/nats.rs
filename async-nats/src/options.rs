@@ -531,8 +531,21 @@ impl ConnectOptions {
         self.inbox_prefix = prefix.to_string();
         self
     }
-}
 
+    /// Sets the name for the client.
+    ///
+    /// # Examples
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// async_nats::ConnectOptions::new().name("rust-service").connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    pub fn name<T: ToString>(mut self, name: T) -> ConnectOptions {
+        self.name = Some(name.to_string());
+        self
+    }
+}
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 

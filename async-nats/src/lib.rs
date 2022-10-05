@@ -640,6 +640,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
+            name: options.name,
         },
         events_tx,
         state_tx,
