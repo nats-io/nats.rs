@@ -645,11 +645,15 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         state_tx,
     )?;
 
-    let (info, connection) = connector.try_connect().await?;
+    let mut info: ServerInfo = Default::default();
+    let mut connection = None;
+    if !options.retry_on_initial_connect {
+        let (info_ok, connection_ok) = connector.try_connect().await?;
+        connection = Some(connection_ok);
+        info = info_ok;
+    }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-
-    let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
@@ -691,7 +695,16 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move { connection_handler.process(receiver).await });
+    task::spawn(async move {
+        if connection.is_none() && options.retry_on_initial_connect {
+            let (info, connection_ok) = connector.connect().await.unwrap();
+            info_sender.send(info).ok();
+            connection = Some(connection_ok);
+        }
+        let connection = connection.unwrap();
+        let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
+        connection_handler.process(receiver).await
+    });
 
     Ok(client)
 }
