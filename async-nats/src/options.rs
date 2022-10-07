@@ -52,6 +52,7 @@ pub struct ConnectOptions {
     pub(crate) event_callback: CallbackArg1<Event, ()>,
     pub(crate) inbox_prefix: String,
     pub(crate) request_timeout: Option<Duration>,
+    pub(crate) retry_on_initial_connect: bool,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -72,6 +73,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
+            .entry(&"retry_on_initial_conenct", &self.retry_on_failed_connect)
             .finish()
     }
 }
@@ -102,6 +104,7 @@ impl Default for ConnectOptions {
             })),
             inbox_prefix: "_INBOX".to_string(),
             request_timeout: Some(Duration::from_secs(10)),
+            retry_on_initial_connect: false,
         }
     }
 }
@@ -543,6 +546,11 @@ impl ConnectOptions {
     /// ```
     pub fn name<T: ToString>(mut self, name: T) -> ConnectOptions {
         self.name = Some(name.to_string());
+        self
+    }
+
+    pub fn retry_on_intial_connect(mut self) -> ConnectOptions {
+        self.retry_on_initial_connect = true;
         self
     }
 }

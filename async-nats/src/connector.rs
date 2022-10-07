@@ -154,6 +154,7 @@ impl Connector {
                             Authorization::None => {
                                 connection.write_op(ClientOp::Connect(connect_info)).await?;
 
+                                self.events_tx.send(Event::Reconnect).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
@@ -221,6 +222,7 @@ impl Connector {
                                 ));
                             }
                             Some(_) => {
+                                self.events_tx.send(Event::Reconnect).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }

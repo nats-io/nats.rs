@@ -688,4 +688,29 @@ mod client {
         let _error: Result<(), async_nats::PublishError> =
             client.publish("foo".into(), "data".into()).await;
     }
+
+    #[tokio::test]
+    async fn retry_on_initial_connect() {
+        let _client = ConnectOptions::new()
+            .connect("localhost:7777")
+            .await
+            .expect_err("should fail to connect");
+        let client = ConnectOptions::new()
+            .event_callback(|ev| async move {
+                println!("event: {}", ev);
+            })
+            .retry_on_intial_connect()
+            .connect("localhost:7777")
+            .await
+            .unwrap();
+
+        let mut sub = client.subscribe("DATA".into()).await.unwrap();
+        client
+            .publish("DATA".into(), "payload".into())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _server = nats_server::run_server_with_port("", Some("7777"));
+        sub.next().await.unwrap();
+    }
 }
