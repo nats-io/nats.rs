@@ -79,12 +79,14 @@ impl HeaderMap {
     ///
     /// # Examples
     ///
+    /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
     /// # Ok(())
     /// # }
+    /// ```
     pub fn insert<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         self.inner
             .insert(name.into_header_name(), value.into_header_value());

@@ -508,7 +508,6 @@ impl ConnectOptions {
     /// async_nats::ConnectOptions::new().client_capacity(256).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
-
     /// ```
     ///
     pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
@@ -535,12 +534,13 @@ impl ConnectOptions {
     /// Sets the name for the client.
     ///
     /// # Examples
-    ///
+    /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// async_nats::ConnectOptions::new().name("rust-service").connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub fn name<T: ToString>(mut self, name: T) -> ConnectOptions {
         self.name = Some(name.to_string());
         self

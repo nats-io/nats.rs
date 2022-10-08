@@ -86,8 +86,10 @@ pub struct ObjectStore {
 impl ObjectStore {
     /// Gets an [Object] from the [Store].
     ///
-    /// [Object] implements [use tokio::io::AsyncRead] that allows
+    /// [Object] implements [tokio::io::AsyncRead] that allows
     /// to read the data from Object Store.
+    ///
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -124,8 +126,10 @@ impl ObjectStore {
 
     /// Gets an [Object] from the [Store].
     ///
-    /// [Object] implements [use tokio::io::AsyncRead] that allows
+    /// [Object] implements [tokio::io::AsyncRead] that allows
     /// to read the data from Object Store.
+    ///
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -166,6 +170,8 @@ impl ObjectStore {
 
     /// Retrieves [Object] [Info].
     ///
+    /// # Examples
+    ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
@@ -194,9 +200,9 @@ impl ObjectStore {
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
             .await?;
-        let decoded_paylaod = base64::decode(message.payload)
+        let decoded_payload = base64::decode(message.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
-        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_paylaod)?;
+        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_payload)?;
 
         Ok(object_info)
     }
@@ -235,7 +241,7 @@ impl ObjectStore {
                 "invalid object name",
             )));
         }
-        // Fetch any existing object info, if ther is any for later use.
+        // Fetch any existing object info, if there is any for later use.
         let maybe_existing_object_info = match self.info(&object_name).await {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
@@ -342,7 +348,7 @@ impl ObjectStore {
         })
     }
 
-    /// Seals a [ObjestStore], preventing any further changes to it or its [Objects][Object].
+    /// Seals a [ObjectStore], preventing any further changes to it or its [Objects][Object].
     ///
     /// # Examples
     ///

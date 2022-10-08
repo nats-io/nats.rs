@@ -305,7 +305,7 @@ pub struct OrderedConfig {
     /// The maximum number of waiting consumers.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_waiting: i64,
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
 }

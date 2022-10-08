@@ -86,7 +86,7 @@ impl Client {
 
     /// Returns last received info from the server.
     ///
-    /// Examples
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]

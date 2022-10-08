@@ -98,7 +98,7 @@ pub struct Config {
     pub storage: StorageType,
     /// How many replicas to keep for each entry in a cluster.
     pub num_replicas: usize,
-    /// Republish is for republishing messages once persisten in the Key Value Bucket.
+    /// Republish is for republishing messages once persistent in the Key Value Bucket.
     pub republish: Option<Republish>,
 }
 
@@ -708,7 +708,7 @@ pub struct Entry {
     pub bucket: String,
     /// The key that was retrieved.
     pub key: String,
-    /// The value that was retreived.
+    /// The value that was retrieved.
     // TODO: should we use Bytes?
     pub value: Vec<u8>,
     /// A unique sequence for this value.

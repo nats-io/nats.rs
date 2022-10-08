@@ -79,7 +79,7 @@ impl Stream {
 
     /// Returns cached [Info] for the [Stream].
     /// Cache is either from initial creation/retrival of the [Stream] or last call to
-    /// [Stream::info].
+    /// [Stream::Info].
     ///
     /// # Examples
     ///
@@ -378,7 +378,7 @@ impl Stream {
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
-    /// println!("Retreived raw message {:?}", raw_message);
+    /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
@@ -422,7 +422,7 @@ impl Stream {
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
-    /// println!("Retreived raw message {:?}", raw_message);
+    /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
@@ -487,6 +487,7 @@ impl Stream {
     ///
     /// # Examples
     ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -496,6 +497,7 @@ impl Stream {
     /// stream.purge().await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn purge(&self) -> Result<PurgeResponse, Error> {
         let subject = format!("STREAM.PURGE.{}", self.info.config.name);
 
@@ -516,6 +518,7 @@ impl Stream {
     ///
     /// # Examples
     ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -525,6 +528,7 @@ impl Stream {
     /// stream.purge_subject("data").await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
     where
         T: Into<String>,

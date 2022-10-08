@@ -61,7 +61,6 @@
 //! # use bytes::Bytes;
 //! # use std::error::Error;
 //! # use std::time::Instant;
-//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
@@ -82,7 +81,6 @@
 //! # use futures::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
-//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
@@ -94,6 +92,7 @@
 //! }
 //! #     Ok(())
 //! # }
+//! ```
 
 #![deny(unreachable_pub)]
 
@@ -784,6 +783,7 @@ impl Subscriber {
     ///  subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn unsubscribe(&mut self) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
@@ -797,8 +797,8 @@ impl Subscriber {
     }
 
     /// Unsubscribes from subscription after reaching given number of messages.
-    /// This is the total number of messages received by this subcsription in it's whole
-    /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
+    /// This is the total number of messages received by this subscription in it's whole
+    /// lifespan. If it already reached or surpassed the passed value, it will immediately stop.
     ///
     /// # Examples
     /// ```
@@ -821,6 +821,7 @@ impl Subscriber {
     /// println!("no more messages, unsubscribed");
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
