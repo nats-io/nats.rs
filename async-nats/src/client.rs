@@ -50,7 +50,7 @@ impl fmt::Display for PublishError {
 
 impl error::Error for PublishError {}
 
-/// Client is a `Clonable` handle to NATS connection.
+/// Client is a `Cloneable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [crate::connect] and [crate::ConnectOptions::connect]
 #[derive(Clone, Debug)]
@@ -378,7 +378,7 @@ impl Request {
         Default::default()
     }
 
-    /// Sets the payload of the request. If not used, empty paylaod will be sent.
+    /// Sets the payload of the request. If not used, empty payload will be sent.
     ///
     /// # Examples
     /// ```no_run
