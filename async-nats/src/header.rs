@@ -82,7 +82,7 @@ impl HeaderMap {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let headers = async_nats::HeaderMap::new();
+    /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
     /// # Ok(())
     /// # }
