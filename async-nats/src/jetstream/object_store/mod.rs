@@ -200,9 +200,9 @@ impl ObjectStore {
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
             .await?;
-        let decoded_payload = base64::decode(message.payload)
+        let decoded_paylaod = base64::decode(message.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
-        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_payload)?;
+        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_paylaod)?;
 
         Ok(object_info)
     }
