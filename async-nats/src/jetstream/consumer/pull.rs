@@ -110,6 +110,7 @@ impl Consumer<Config> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn stream(&self) -> StreamBuilder<'_> {
         StreamBuilder::new(self)
     }
@@ -711,6 +712,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_bytes_per_batch(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -748,6 +750,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_messages_per_batch(mut self, batch: usize) -> Self {
         self.batch = batch;
         self
@@ -781,6 +784,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
         self.heartbeat = heartbeat;
         self
@@ -815,6 +819,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
         self.expires = expires.as_nanos().try_into().unwrap();
         self
@@ -847,6 +852,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn messages(self) -> Result<Stream, Error> {
         Stream::stream(
             BatchConfig {
@@ -862,7 +868,7 @@ impl<'a> StreamBuilder<'a> {
     }
 }
 
-/// Used for building configuration for a [Fetch]. Created by a [Consumer::fetch_builder] on a [Consumer].
+/// Used for building configuration for a [`Fetch`]. Created by a [FetchBuilder] on a [Consumer].
 ///
 /// # Examples
 ///
@@ -890,6 +896,7 @@ impl<'a> StreamBuilder<'a> {
 /// }
 /// # Ok(())
 /// # }
+/// ```
 pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
@@ -940,6 +947,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_bytes(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -976,6 +984,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_messages(mut self, batch: usize) -> Self {
         self.batch = batch;
         self
@@ -1009,6 +1018,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
         self.heartbeat = heartbeat;
         self
@@ -1044,6 +1054,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
         self.expires = expires.as_nanos().try_into().unwrap();
         self
@@ -1076,6 +1087,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn messages(self) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
@@ -1119,6 +1131,7 @@ impl<'a> FetchBuilder<'a> {
 /// }
 /// # Ok(())
 /// # }
+/// ```
 pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
@@ -1170,6 +1183,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_bytes(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -1207,6 +1221,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_messages(mut self, batch: usize) -> Self {
         self.batch = batch;
         self
@@ -1240,6 +1255,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
         self.heartbeat = heartbeat;
         self
@@ -1274,6 +1290,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
         self.expires = expires.as_nanos().try_into().unwrap();
         self
@@ -1306,6 +1323,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn messages(self) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
@@ -1413,13 +1431,13 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
     /// Force consumer to use memory storage.

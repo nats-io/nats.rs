@@ -104,8 +104,8 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     }
 
     /// Returns cached [Info] for the [Consumer].
-    /// Cache is either from initial creation/retrival of the [Consumer] or last call to
-    /// [Consumer::info].
+    /// Cache is either from initial creation/retrieval of the [Consumer] or last call to
+    /// [Info].
     ///
     /// # Examples
     ///
@@ -157,7 +157,7 @@ pub struct Info {
     pub config: Config,
     /// Statistics for delivered messages
     pub delivered: SequenceInfo,
-    /// Statistics for acknowleged messages
+    /// Statistics for acknowledged messages
     pub ack_floor: SequenceInfo,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
@@ -296,13 +296,13 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
     /// Force consumer to use memory storage.
@@ -368,7 +368,7 @@ pub enum DeliverPolicy {
         #[serde(rename = "opt_start_seq")]
         start_sequence: u64,
     },
-    /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
+    /// `ByStartTime` will select the first message with a timestamp >= to the consumer's
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime {

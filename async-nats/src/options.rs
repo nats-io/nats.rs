@@ -391,7 +391,7 @@ impl ConnectOptions {
 
     /// Sets the capacity for `Subscribers`. Exceeding it will trigger `slow consumer` error
     /// callback and drop messages.
-    /// Defualt is set to 1024 messages buffer.
+    /// Default is set to 1024 messages buffer.
     ///
     /// # Examples
     /// ```no_run
@@ -440,7 +440,7 @@ impl ConnectOptions {
     /// Registers asynchronous callback for errors that are receiver over the wire from the server.
     ///
     /// # Examples
-    /// As asynchronous callbacks are stil not in `stable` channel, here are some examples how to
+    /// As asynchronous callbacks are still not in `stable` channel, here are some examples how to
     /// work around this
     ///
     /// ## Basic
@@ -450,7 +450,7 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
-    ///         println!("event occured: {}", event);
+    ///         println!("event occurred: {}", event);
     /// }).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -465,7 +465,7 @@ impl ConnectOptions {
     ///     match event {
     ///     async_nats::Event::Disconnect => println!("disconnected"),
     ///         async_nats::Event::Reconnect => println!("reconnected"),
-    ///         async_nats::Event::ClientError(err) => println!("client error occured: {}", err),
+    ///         async_nats::Event::ClientError(err) => println!("client error occurred: {}", err),
     ///         other => println!("other event happened: {}", other),
     /// }
     /// }).connect("demo.nats.io").await?;
@@ -508,7 +508,6 @@ impl ConnectOptions {
     /// async_nats::ConnectOptions::new().client_capacity(256).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
-
     /// ```
     ///
     pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
@@ -535,12 +534,13 @@ impl ConnectOptions {
     /// Sets the name for the client.
     ///
     /// # Examples
-    ///
+    /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// async_nats::ConnectOptions::new().name("rust-service").connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub fn name<T: ToString>(mut self, name: T) -> ConnectOptions {
         self.name = Some(name.to_string());
         self

@@ -118,7 +118,7 @@ pub fn new(client: Client) -> Context {
     Context::new(client)
 }
 
-/// Creates a new JetStream [Context] with given JetStteam domain.
+/// Creates a new JetStream [Context] with given JetStream domain.
 ///
 /// # Examples
 ///
