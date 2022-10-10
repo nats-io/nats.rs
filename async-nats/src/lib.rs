@@ -568,7 +568,7 @@ impl ConnectionHandler {
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
         self.pending_pings = 0;
-        self.connector.events_tx.try_send(Event::Disconnect).ok();
+        self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
         self.handle_reconnect().await?;
 
@@ -598,7 +598,7 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.connector.events_tx.try_send(Event::Reconnect).ok();
+        self.connector.events_tx.try_send(Event::Connected).ok();
 
         Ok(())
     }
@@ -711,8 +711,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Reconnect,
-    Disconnect,
+    Connected,
+    Disconnected,
     LameDuckMode,
     SlowConsumer(u64),
     ServerError(ServerError),
@@ -722,8 +722,8 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Reconnect => write!(f, "reconnected"),
-            Event::Disconnect => write!(f, "disconnected"),
+            Event::Connected => write!(f, "reconnected"),
+            Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
             Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
             Event::ServerError(err) => write!(f, "server error: {}", err),
