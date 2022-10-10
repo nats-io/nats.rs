@@ -429,11 +429,11 @@ mod client {
                 let tx = tx.clone();
                 let dc_tx = dc_tx.clone();
                 async move {
-                    if let Event::Reconnect = event {
+                    if let Event::Connected = event {
                         println!("reconnection callback fired");
                         tx.send(()).await.unwrap();
                     }
-                    if let Event::Disconnect = event {
+                    if let Event::Disconnected = event {
                         println!("disconnect callback fired");
                         dc_tx.send(()).await.unwrap();
                     }
