@@ -349,13 +349,27 @@ impl Stream {
             })?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    response::DirectError {
-                        status: status.as_u16(),
-                        description: description.to_string(),
-                    },
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::NotFound,
+                            "message not found in stream",
+                        )))
+                    }
+                    // 408 is used in Direct Message for bad/empty paylaod.
+                    StatusCode::TIMEOUT => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            "empty or invalid request",
+                        )))
+                    }
+                    other => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            format!("{}: {}", other, description),
+                        )))
+                    }
+                }
             }
         }
         Ok(response)

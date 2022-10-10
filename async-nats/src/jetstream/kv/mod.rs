@@ -15,7 +15,7 @@ pub mod bucket;
 
 use std::{
     collections::{self, HashSet},
-    io,
+    io::{self, ErrorKind},
     task::Poll,
 };
 
@@ -289,9 +289,7 @@ impl Store {
                     }
                     Err(err) => {
                         let e: std::io::Error = *err.downcast().unwrap();
-                        let d = e.get_ref().unwrap();
-                        let de = d.downcast_ref::<response::DirectError>().unwrap();
-                        if de.status == 404 {
+                        if e.kind() == ErrorKind::NotFound {
                             None
                         } else {
                             return Err(Box::new(e));
