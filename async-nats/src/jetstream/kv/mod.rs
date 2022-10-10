@@ -317,6 +317,7 @@ impl Store {
                         let e: std::io::Error = *err.downcast().unwrap();
                         let d = e.get_ref().unwrap();
                         let de = d.downcast_ref::<response::Error>().unwrap();
+                        // 10037 is returned when there are no messages found.
                         if de.code == 10037 {
                             None
                         } else {
