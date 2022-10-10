@@ -29,7 +29,7 @@ use time::serde::rfc3339;
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
-    response::{self, Response},
+    response::Response,
     Context, Message,
 };
 
