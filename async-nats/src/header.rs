@@ -24,6 +24,13 @@ use serde::Serialize;
 pub const NATS_LAST_STREAM: &str = "nats-last-stream";
 pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
 
+/// Direct Get headers
+pub const NATS_STREAM: &str = "Nats-Stream";
+pub const NATS_SEQUENCE: &str = "Nats-Sequence";
+pub const NATS_TIME_STAMP: &str = "Nats-Time-Stamp";
+pub const NATS_SUBJECT: &str = "Nats-Subject";
+pub const NATS_LAST_SEQUENCE: &str = "Nats-Last-Sequence";
+
 /// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
 

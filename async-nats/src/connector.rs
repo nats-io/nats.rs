@@ -38,7 +38,7 @@ use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tokio_rustls::rustls::{self};
+use tokio_rustls::rustls;
 
 pub(crate) struct ConnectorOptions {
     pub(crate) tls_required: bool,
