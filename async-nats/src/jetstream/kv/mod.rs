@@ -15,7 +15,7 @@ pub mod bucket;
 
 use std::{
     collections::{self, HashSet},
-    io,
+    io::{self, ErrorKind},
     task::Poll,
 };
 
@@ -24,7 +24,7 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
-use time::OffsetDateTime;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{header, jetstream::response, Error, Message};
 
@@ -32,7 +32,7 @@ use self::bucket::Status;
 
 use super::{
     consumer::DeliverPolicy,
-    stream::{RawMessage, StorageType, Stream},
+    stream::{RawMessage, Republish, StorageType, Stream},
 };
 
 // Helper to extract key value operation from message headers
@@ -98,7 +98,8 @@ pub struct Config {
     pub storage: StorageType,
     /// How many replicas to keep for each entry in a cluster.
     pub num_replicas: usize,
-    // TODO: add placement
+    /// Republish is for republishing messages once persistent in the Key Value Bucket.
+    pub republish: Option<Republish>,
 }
 
 /// Describes what kind of operation and entry represents
@@ -217,41 +218,136 @@ impl Store {
 
         let subject = format!("{}{}", self.prefix.as_str(), &key);
 
-        match self
-            .stream
-            .get_last_raw_message_by_subject(subject.as_str())
-            .await
-        {
-            Ok(message) => {
-                let operation = kv_operation_from_stream_message(&message);
-                // TODO: unnecessary expensive, cloning whole Message.
-                let nats_message = Message::try_from(message.clone())?;
-                if nats_message.status == Some(StatusCode::NO_RESPONDERS) {
+        let result: Option<(Message, Operation, u64, OffsetDateTime)> = {
+            if self.stream.info.config.allow_direct {
+                let message = self
+                    .stream
+                    .direct_get_last_for_subject(subject.as_str())
+                    .await;
+
+                match message {
+                    Ok(message) => {
+                        let headers = message.headers.as_ref().ok_or_else(|| {
+                            std::io::Error::new(io::ErrorKind::Other, "did not found headers")
+                        })?;
+                        let operation = headers.get(KV_OPERATION).map_or_else(
+                            || Operation::Put,
+                            |operation| match operation
+                                .iter()
+                                .next()
+                                .cloned()
+                                .unwrap_or_else(|| KV_OPERATION_PUT.to_string())
+                                .as_ref()
+                            {
+                                KV_OPERATION_PURGE => Operation::Purge,
+                                KV_OPERATION_DELETE => Operation::Delete,
+                                _ => Operation::Put,
+                            },
+                        );
+                        let sequence = headers
+                            .get(header::NATS_SEQUENCE)
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found sequence header",
+                                )
+                            })?
+                            .iter()
+                            .next()
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found sequence header value",
+                                )
+                            })?
+                            .parse()?;
+                        let created = headers
+                            .get(header::NATS_TIME_STAMP)
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found timestamp header",
+                                )
+                            })?
+                            .iter()
+                            .next()
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "did not found timestamp header value",
+                                )
+                            })
+                            .and_then(|created| {
+                                OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
+                                    std::io::Error::new(
+                                        io::ErrorKind::Other,
+                                        format!("failed to parse Nats-Time-Stamp: {}", err),
+                                    )
+                                })
+                            })?;
+
+                        Some((message.message, operation, sequence, created))
+                    }
+                    Err(err) => {
+                        let e: std::io::Error = *err.downcast().unwrap();
+                        if e.kind() == ErrorKind::NotFound {
+                            None
+                        } else {
+                            return Err(Box::new(e));
+                        }
+                    }
+                }
+            } else {
+                let raw_message = self
+                    .stream
+                    .get_last_raw_message_by_subject(subject.as_str())
+                    .await;
+                match raw_message {
+                    Ok(raw_message) => {
+                        let operation = kv_operation_from_stream_message(&raw_message);
+                        // TODO: unnecessary expensive, cloning whole Message.
+                        let nats_message = Message::try_from(raw_message.clone())?;
+                        Some((
+                            nats_message,
+                            operation,
+                            raw_message.sequence,
+                            raw_message.time,
+                        ))
+                    }
+                    Err(err) => {
+                        let e: std::io::Error = *err.downcast().unwrap();
+                        let d = e.get_ref().unwrap();
+                        let de = d.downcast_ref::<response::Error>().unwrap();
+                        // 10037 is returned when there are no messages found.
+                        if de.code == 10037 {
+                            None
+                        } else {
+                            return Err(Box::new(e));
+                        }
+                    }
+                }
+            }
+        };
+
+        match result {
+            Some((message, operation, revision, created)) => {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Ok(None);
                 }
 
                 let entry = Entry {
                     bucket: self.name.clone(),
                     key,
-                    value: nats_message.payload.to_vec(),
-                    revision: message.sequence,
-                    created: message.time,
+                    value: message.payload.to_vec(),
+                    revision,
+                    created,
                     operation,
                     delta: 0,
                 };
                 Ok(Some(entry))
             }
             // TODO: remember to touch this when Errors are in place.
-            Err(err) => {
-                let e: std::io::Error = *err.downcast().unwrap();
-                let d = e.get_ref().unwrap();
-                let de = d.downcast_ref::<response::Error>().unwrap();
-                if de.code == 10037 {
-                    return Ok(None);
-                }
-
-                Err(Box::new(e))
-            }
+            None => Ok(None),
         }
     }
 
@@ -707,7 +803,7 @@ pub struct Entry {
     pub bucket: String,
     /// The key that was retrieved.
     pub key: String,
-    /// The value that was retreived.
+    /// The value that was retrieved.
     // TODO: should we use Bytes?
     pub value: Vec<u8>,
     /// A unique sequence for this value.

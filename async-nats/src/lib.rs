@@ -61,7 +61,6 @@
 //! # use bytes::Bytes;
 //! # use std::error::Error;
 //! # use std::time::Instant;
-//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
@@ -82,7 +81,6 @@
 //! # use futures::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
-//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
@@ -94,6 +92,7 @@
 //! }
 //! #     Ok(())
 //! # }
+//! ```
 
 #![deny(unreachable_pub)]
 
@@ -569,7 +568,7 @@ impl ConnectionHandler {
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
         self.pending_pings = 0;
-        self.connector.events_tx.try_send(Event::Disconnect).ok();
+        self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
         self.handle_reconnect().await?;
 
@@ -599,7 +598,7 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.connector.events_tx.try_send(Event::Reconnect).ok();
+        self.connector.events_tx.try_send(Event::Connected).ok();
 
         Ok(())
     }
@@ -640,16 +639,21 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
+            name: options.name,
         },
         events_tx,
         state_tx,
     )?;
 
-    let (info, connection) = connector.try_connect().await?;
+    let mut info: ServerInfo = Default::default();
+    let mut connection = None;
+    if !options.retry_on_initial_connect {
+        let (info_ok, connection_ok) = connector.try_connect().await?;
+        connection = Some(connection_ok);
+        info = info_ok;
+    }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-
-    let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
 
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
@@ -691,15 +695,24 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move { connection_handler.process(receiver).await });
+    task::spawn(async move {
+        if connection.is_none() && options.retry_on_initial_connect {
+            let (info, connection_ok) = connector.connect().await.unwrap();
+            info_sender.send(info).ok();
+            connection = Some(connection_ok);
+        }
+        let connection = connection.unwrap();
+        let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
+        connection_handler.process(receiver).await
+    });
 
     Ok(client)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Reconnect,
-    Disconnect,
+    Connected,
+    Disconnected,
     LameDuckMode,
     SlowConsumer(u64),
     ServerError(ServerError),
@@ -709,8 +722,8 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Reconnect => write!(f, "reconnected"),
-            Event::Disconnect => write!(f, "disconnected"),
+            Event::Connected => write!(f, "reconnected"),
+            Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
             Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
             Event::ServerError(err) => write!(f, "server error: {}", err),
@@ -783,6 +796,7 @@ impl Subscriber {
     ///  subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn unsubscribe(&mut self) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
@@ -796,8 +810,8 @@ impl Subscriber {
     }
 
     /// Unsubscribes from subscription after reaching given number of messages.
-    /// This is the total number of messages received by this subcsription in it's whole
-    /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
+    /// This is the total number of messages received by this subscription in it's whole
+    /// lifespan. If it already reached or surpassed the passed value, it will immediately stop.
     ///
     /// # Examples
     /// ```
@@ -820,6 +834,7 @@ impl Subscriber {
     /// println!("no more messages, unsubscribed");
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {

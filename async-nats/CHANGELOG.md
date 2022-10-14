@@ -1,3 +1,29 @@
+# 0.21.0
+## Overview
+
+This release's highlight is added support for Object Store.
+
+## Breaking changes
+* Add last_active to SequenceInfo and rename SequencePair to SequenceInfo by @Jarema in https://github.com/nats-io/nats.rs/pull/657
+
+## Added
+* Add Object Store by @Jarema in https://github.com/nats-io/nats.rs/pull/655
+* Add discard_new_per_subject to Stream by @Jarema in https://github.com/nats-io/nats.rs/pull/656
+* Add republish to KV by @Jarema in https://github.com/nats-io/nats.rs/pull/653
+* Add name option by @Jarema in https://github.com/nats-io/nats.rs/pull/659
+
+## Fixed
+* Fix empty keys deadlock by @Jarema in https://github.com/nats-io/nats.rs/pull/641
+* Fix lint error by @Jarema in https://github.com/nats-io/nats.rs/pull/645
+* Fix benchmark in CI by @Jarema in https://github.com/nats-io/nats.rs/pull/647
+* Fix potential pending pings mismatch on reconnects by @Jarema in https://github.com/nats-io/nats.rs/pull/650
+* Fix typo (eror -> error) by @paulgb in https://github.com/nats-io/nats.rs/pull/652
+* Remove println by @Jarema in https://github.com/nats-io/nats.rs/pull/658
+
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.20.0...async-nats/v0.21.0
+
 # 0.20.0
 ## Overview
 

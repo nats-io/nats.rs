@@ -203,7 +203,7 @@ pub struct Config {
     /// Enable idle heartbeat messages
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
     /// Force consumer to use memory storage.
@@ -572,7 +572,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         };
 
                                         let info = jetstream_message.info()?;
-                                        trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}", 
+                                        trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
                                                self.consumer_sequence,
                                                self.stream_sequence,
                                                info.consumer_sequence,

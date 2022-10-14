@@ -28,7 +28,8 @@ use std::time::Duration;
 use tracing::debug;
 
 use super::kv::{Store, MAX_HISTORY};
-use super::stream::{self, Config, DeleteStatus, Info, Stream};
+use super::object_store::{is_valid_bucket_name, ObjectStore};
+use super::stream::{self, Config, DeleteStatus, DiscardPolicy, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -474,9 +475,11 @@ impl Context {
                 max_age: config.max_age,
                 max_message_size: config.max_value_size,
                 storage: config.storage,
+                republish: config.republish,
                 allow_rollup: true,
                 deny_delete: true,
                 deny_purge: false,
+                allow_direct: true,
                 num_replicas,
                 discard: stream::DiscardPolicy::New,
                 ..Default::default()
@@ -571,5 +574,115 @@ impl Context {
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
+    }
+
+    /// Creates a new object store bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.create_object_store(async_nats::jetstream::object_store::Config {
+    ///     bucket: "bucket".to_string(),
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_object_store(
+        &self,
+        config: super::object_store::Config,
+    ) -> Result<super::object_store::ObjectStore, Error> {
+        if !super::object_store::is_valid_bucket_name(&config.bucket) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "invalid bucket name",
+            )));
+        }
+
+        let bucket_name = config.bucket.clone();
+        let stream_name = format!("OBJ_{}", bucket_name);
+        let chunk_subject = format!("$O.{}.C.>", bucket_name);
+        let meta_subject = format!("$O.{}.M.>", bucket_name);
+
+        let stream = self
+            .create_stream(super::stream::Config {
+                name: stream_name,
+                description: config.description.clone(),
+                subjects: vec![chunk_subject, meta_subject],
+                max_age: config.max_age,
+                storage: config.storage,
+                num_replicas: config.num_replicas,
+                discard: DiscardPolicy::New,
+                allow_rollup: true,
+                ..Default::default()
+            })
+            .await?;
+
+        Ok(ObjectStore {
+            name: bucket_name,
+            stream,
+        })
+    }
+
+    /// Creates a new object store bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.get_object_store("bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_object_store<T: AsRef<str>>(
+        &self,
+        bucket_name: T,
+    ) -> Result<ObjectStore, Error> {
+        if !self.client.is_server_compatible(2, 6, 2) {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::Other,
+                "object-store requires at least server version 2.6.2",
+            )));
+        }
+        let bucket_name = bucket_name.as_ref();
+        if !is_valid_bucket_name(bucket_name) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid bucket name",
+            )));
+        }
+        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream = self.get_stream(stream_name).await?;
+
+        Ok(ObjectStore {
+            name: bucket_name.to_string(),
+            stream,
+        })
+    }
+
+    /// Delete a object store bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.delete_object_store("bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_object_store<T: AsRef<str>>(&self, bucket_name: T) -> Result<(), Error> {
+        let stream_name = format!("OBJ_{}", bucket_name.as_ref());
+        self.delete_stream(stream_name).await?;
+        Ok(())
     }
 }

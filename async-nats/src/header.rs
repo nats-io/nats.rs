@@ -24,6 +24,13 @@ use serde::Serialize;
 pub const NATS_LAST_STREAM: &str = "nats-last-stream";
 pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
 
+/// Direct Get headers
+pub const NATS_STREAM: &str = "Nats-Stream";
+pub const NATS_SEQUENCE: &str = "Nats-Sequence";
+pub const NATS_TIME_STAMP: &str = "Nats-Time-Stamp";
+pub const NATS_SUBJECT: &str = "Nats-Subject";
+pub const NATS_LAST_SEQUENCE: &str = "Nats-Last-Sequence";
+
 /// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
 
@@ -79,12 +86,14 @@ impl HeaderMap {
     ///
     /// # Examples
     ///
+    /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let headers = async_nats::HeaderMap::new();
+    /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
     /// # Ok(())
     /// # }
+    /// ```
     pub fn insert<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         self.inner
             .insert(name.into_header_name(), value.into_header_value());

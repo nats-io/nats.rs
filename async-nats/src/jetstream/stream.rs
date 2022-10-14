@@ -79,7 +79,7 @@ impl Stream {
 
     /// Returns cached [Info] for the [Stream].
     /// Cache is either from initial creation/retrival of the [Stream] or last call to
-    /// [Stream::info].
+    /// [Stream::Info].
     ///
     /// # Examples
     ///
@@ -349,10 +349,27 @@ impl Stream {
             })?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{} {}", status, description),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::NotFound,
+                            "message not found in stream",
+                        )))
+                    }
+                    // 408 is used in Direct Message for bad/empty paylaod.
+                    StatusCode::TIMEOUT => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            "empty or invalid request",
+                        )))
+                    }
+                    other => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            format!("{}: {}", other, description),
+                        )))
+                    }
+                }
             }
         }
         Ok(response)
@@ -378,7 +395,7 @@ impl Stream {
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
-    /// println!("Retreived raw message {:?}", raw_message);
+    /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
@@ -422,7 +439,7 @@ impl Stream {
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
-    /// println!("Retreived raw message {:?}", raw_message);
+    /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
@@ -487,6 +504,7 @@ impl Stream {
     ///
     /// # Examples
     ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -496,6 +514,7 @@ impl Stream {
     /// stream.purge().await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn purge(&self) -> Result<PurgeResponse, Error> {
         let subject = format!("STREAM.PURGE.{}", self.info.config.name);
 
@@ -516,6 +535,7 @@ impl Stream {
     ///
     /// # Examples
     ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -525,6 +545,7 @@ impl Stream {
     /// stream.purge_subject("data").await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
     where
         T: Into<String>,
@@ -611,11 +632,6 @@ impl Stream {
                 format!("CONSUMER.CREATE.{}", self.info.config.name)
             }
         };
-
-        println!(
-            "SENDING CONSUMER CREATE: {:?} on subject {:?}",
-            config, subject
-        );
 
         match self
             .context
@@ -801,6 +817,9 @@ pub struct Config {
     /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
     /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
     pub discard: DiscardPolicy,
+    /// Prevents a message from being added to a stream if the max_msgs_per_subject limit for the subject has been reached
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub discard_new_per_subject: bool,
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
