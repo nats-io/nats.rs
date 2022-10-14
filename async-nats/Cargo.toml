@@ -39,6 +39,7 @@ tracing = "0.1"
 itertools = "0.10"
 lazy_static = "1.4"
 base64 = "0.13"
+tokio-retry = "0.3"
 ring = "0.16"
 
 [dev-dependencies]
