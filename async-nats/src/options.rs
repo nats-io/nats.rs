@@ -430,7 +430,7 @@ impl ConnectOptions {
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> std::io::Result<()> {
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().request_timeout(Some(std::time::Duration::from_secs(3))).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }

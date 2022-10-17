@@ -210,7 +210,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
+    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, RequestError> {
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
@@ -233,7 +233,7 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, RequestError> {
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
@@ -250,7 +250,11 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_request(&self, subject: String, request: Request) -> Result<Message, Error> {
+    pub async fn send_request(
+        &self,
+        subject: String,
+        request: Request,
+    ) -> Result<Message, RequestError> {
         let inbox = request.inbox.unwrap_or_else(|| self.new_inbox());
         let timeout = request.timeout.unwrap_or(self.request_timeout);
         let mut sub = self.subscribe(inbox.clone()).await?;
@@ -262,11 +266,13 @@ impl Client {
             }
             None => self.publish_with_reply(subject, inbox, payload).await?,
         }
-        self.flush().await?;
+        self.flush()
+            .await
+            .map_err(|_| RequestError::Io(IoErrorKind::FlushError))?;
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())
-                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
+                    .map_err(|_| RequestError::TimedOut)
                     .await?
             }
             None => sub.next().await,
@@ -274,17 +280,11 @@ impl Client {
         match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
+                    return Err(RequestError::NoResponders);
                 }
                 Ok(message)
             }
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
+            None => Err(RequestError::Io(IoErrorKind::BrokenPipe)),
         }
     }
 
@@ -345,7 +345,7 @@ impl Client {
         self.sender
             .send(Command::Flush { result: tx })
             .await
-            .map_err(FlushError::SendError)?;
+            .map_err(|err| FlushError::SendError(Box::new(err)))?;
         // first question mark is an error from rx itself, second for error from flush.
         rx.await
             .map_err(|_| FlushError::FlushError)?
@@ -481,7 +481,7 @@ pub enum RequestError {
 #[derive(Debug, Error)]
 pub enum FlushError {
     #[error("failed to send flush request")]
-    SendError(mpsc::error::SendError<Command>),
+    SendError(Box<mpsc::error::SendError<Command>>),
     #[error("flush failed")]
     FlushError,
 }

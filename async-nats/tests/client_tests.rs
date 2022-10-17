@@ -14,11 +14,10 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectError, ConnectOptions, Event, Request};
+    use async_nats::{ConnectError, ConnectOptions, Event, Request, RequestError};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
-    use std::io::ErrorKind;
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -219,14 +218,11 @@ mod client {
         client.flush().await.unwrap();
 
         let err = client.request("service".into(), "payload".into()).await;
-        println!("ERR: {:?}", err);
-        assert_eq!(
-            err.unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            ErrorKind::TimedOut
-        );
+        // FIXME: we cant do PartialOrd, because mpsc errors are not PartialOrd
+        match err {
+            Err(RequestError::TimedOut) => {}
+            _ => panic!("error should be timeout"),
+        }
     }
 
     #[tokio::test]

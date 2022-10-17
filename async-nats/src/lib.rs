@@ -143,7 +143,7 @@ mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
-pub use client::{Client, PublishError, Request};
+pub use client::{Client, IoErrorKind, PublishError, Request, RequestError};
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
