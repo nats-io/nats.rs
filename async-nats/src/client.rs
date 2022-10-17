@@ -142,6 +142,17 @@ impl Client {
         true
     }
 
+    /// Publish a [Message] to a given subject.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// client.publish("events.data".into(), "payload".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
@@ -155,6 +166,20 @@ impl Client {
         Ok(())
     }
 
+    /// Publish a [Message] with headers to a given subject.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use std::str::FromStr;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut headers = async_nats::HeaderMap::new();
+    /// headers.insert("X-Header", async_nats::HeaderValue::from_str("Value").unwrap());
+    /// client.publish_with_headers("events.data".into(), headers, "payload".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish_with_headers(
         &self,
         subject: String,
@@ -173,6 +198,20 @@ impl Client {
         Ok(())
     }
 
+    /// Publish a [Message] to a given subject, with specified response subject
+    /// to which the subscriber can respond.
+    /// This method does not await for the response.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// client.publish_with_reply("events.data".into(), "reply_subject".into(), "payload".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish_with_reply(
         &self,
         subject: String,
@@ -191,6 +230,22 @@ impl Client {
         Ok(())
     }
 
+    /// Publish a [Message] to a given subject with headers and specified response subject
+    /// to which the subscriber can respond.
+    /// This method does not await for the response.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use std::str::FromStr;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut headers = async_nats::HeaderMap::new();
+    /// client.publish_with_reply_and_headers("events.data".into(), "reply_subject".into(), headers, "payload".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn publish_with_reply_and_headers(
         &self,
         subject: String,
@@ -210,6 +265,18 @@ impl Client {
         Ok(())
     }
 
+    /// Sends the request with headers.
+    ///
+    /// # Examples
+    /// ```no_run
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let response = client.request("service".into(), "data".into()).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
@@ -219,12 +286,13 @@ impl Client {
     ///
     /// # Examples
     /// ```no_run
+    ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
-    /// client.request_with_headers("service".into(), headers, "data".into()).await?;
+    /// let response = client.request_with_headers("service".into(), headers, "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -241,12 +309,13 @@ impl Client {
     /// Sends the request created by the [Request].
     ///
     /// # Examples
+    ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let request = async_nats::Request::new().payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// let response = client.send_request("service".into(), request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -291,6 +360,7 @@ impl Client {
     /// Create a new globally unique inbox which can be used for replies.
     ///
     /// # Examples
+    ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
@@ -304,6 +374,22 @@ impl Client {
         format!("{}.{}", self.inbox_prefix, nuid::next())
     }
 
+    /// Subscribes to a subject to receive [messages][Message].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut subscription = client.subscribe("events.>".into()).await?;
+    /// while let Some(message) = subscription.next().await {
+    ///     println!("received message: {:?}", message);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -320,6 +406,22 @@ impl Client {
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
+    /// Subscribes to a subject with a queue group to receive [messages][Message].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut subscription = client.queue_subscribe("events.>".into(), "queue".into()).await?;
+    /// while let Some(message) = subscription.next().await {
+    ///     println!("received message: {:?}", message);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn queue_subscribe(
         &self,
         subject: String,
@@ -340,6 +442,18 @@ impl Client {
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
+    /// Flushes the internal buffer ensuring that all messages are sent.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// client.flush().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn flush(&self) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sender.send(Command::Flush { result: tx }).await?;
