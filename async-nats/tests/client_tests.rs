@@ -14,10 +14,11 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectError, ConnectOptions, Event};
+    use async_nats::{ConnectError, ConnectOptions, Event, Request};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::io::ErrorKind;
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -208,6 +209,26 @@ mod client {
         .unwrap();
         assert_eq!(resp.unwrap().payload, Bytes::from("reply"));
     }
+
+    #[tokio::test]
+    async fn request_timeout() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let _sub = client.subscribe("service".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        let err = client.request("service".into(), "payload".into()).await;
+        println!("ERR: {:?}", err);
+        assert_eq!(
+            err.unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            ErrorKind::TimedOut
+        );
+    }
+
     #[tokio::test]
     async fn request_no_responders() {
         let server = nats_server::run_basic_server();
@@ -220,6 +241,33 @@ mod client {
         .await
         .unwrap()
         .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn request_builder() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let inbox = "CUSTOMIZED".to_string();
+        let mut sub = client.subscribe("service".into()).await.unwrap();
+
+        tokio::task::spawn({
+            let client = client.clone();
+            let inbox = inbox.clone();
+            async move {
+                let request = sub.next().await.unwrap();
+                let reply = request.reply.unwrap();
+                assert_eq!(reply, inbox);
+                client.publish(reply, "ok".into()).await.unwrap();
+                client.flush().await.unwrap();
+            }
+        });
+
+        let request = Request::new().inbox(inbox.clone());
+        client
+            .send_request("service".into(), request)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -381,11 +429,11 @@ mod client {
                 let tx = tx.clone();
                 let dc_tx = dc_tx.clone();
                 async move {
-                    if let Event::Reconnect = event {
+                    if let Event::Connected = event {
                         println!("reconnection callback fired");
                         tx.send(()).await.unwrap();
                     }
-                    if let Event::Disconnect = event {
+                    if let Event::Disconnected = event {
                         println!("disconnect callback fired");
                         dc_tx.send(()).await.unwrap();
                     }
@@ -640,5 +688,30 @@ mod client {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let _error: Result<(), async_nats::PublishError> =
             client.publish("foo".into(), "data".into()).await;
+    }
+
+    #[tokio::test]
+    async fn retry_on_initial_connect() {
+        let _client = ConnectOptions::new()
+            .connect("localhost:7777")
+            .await
+            .expect_err("should fail to connect");
+        let client = ConnectOptions::new()
+            .event_callback(|ev| async move {
+                println!("event: {}", ev);
+            })
+            .retry_on_intial_connect()
+            .connect("localhost:7777")
+            .await
+            .unwrap();
+
+        let mut sub = client.subscribe("DATA".into()).await.unwrap();
+        client
+            .publish("DATA".into(), "payload".into())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _server = nats_server::run_server_with_port("", Some("7777"));
+        sub.next().await.unwrap();
     }
 }

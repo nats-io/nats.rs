@@ -51,6 +51,8 @@ pub struct ConnectOptions {
     pub(crate) sender_capacity: usize,
     pub(crate) event_callback: CallbackArg1<Event, ()>,
     pub(crate) inbox_prefix: String,
+    pub(crate) request_timeout: Option<Duration>,
+    pub(crate) retry_on_initial_connect: bool,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -71,6 +73,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
+            .entry(&"retry_on_initial_conenct", &self.retry_on_failed_connect)
             .finish()
     }
 }
@@ -100,6 +103,8 @@ impl Default for ConnectOptions {
                 })
             })),
             inbox_prefix: "_INBOX".to_string(),
+            request_timeout: Some(Duration::from_secs(10)),
+            retry_on_initial_connect: false,
         }
     }
 }
@@ -389,7 +394,7 @@ impl ConnectOptions {
 
     /// Sets the capacity for `Subscribers`. Exceeding it will trigger `slow consumer` error
     /// callback and drop messages.
-    /// Defualt is set to 1024 messages buffer.
+    /// Default is set to 1024 messages buffer.
     ///
     /// # Examples
     /// ```no_run
@@ -420,10 +425,25 @@ impl ConnectOptions {
         self
     }
 
+    /// Sets a timeout for `Client::request`. Default value is set to 10 seconds.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// async_nats::ConnectOptions::new().request_timeout(Some(std::time::Duration::from_secs(3))).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn request_timeout(mut self, timeout: Option<Duration>) -> ConnectOptions {
+        self.request_timeout = timeout;
+        self
+    }
+
     /// Registers asynchronous callback for errors that are receiver over the wire from the server.
     ///
     /// # Examples
-    /// As asynchronous callbacks are stil not in `stable` channel, here are some examples how to
+    /// As asynchronous callbacks are still not in `stable` channel, here are some examples how to
     /// work around this
     ///
     /// ## Basic
@@ -433,7 +453,7 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
-    ///         println!("event occured: {}", event);
+    ///         println!("event occurred: {}", event);
     /// }).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -446,9 +466,9 @@ impl ConnectOptions {
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new().event_callback(|event| async move {
     ///     match event {
-    ///     async_nats::Event::Disconnect => println!("disconnected"),
-    ///         async_nats::Event::Reconnect => println!("reconnected"),
-    ///         async_nats::Event::ClientError(err) => println!("client error occured: {}", err),
+    ///     async_nats::Event::Disconnected => println!("disconnected"),
+    ///         async_nats::Event::Connected => println!("reconnected"),
+    ///         async_nats::Event::ClientError(err) => println!("client error occurred: {}", err),
     ///         other => println!("other event happened: {}", other),
     /// }
     /// }).connect("demo.nats.io").await?;
@@ -491,7 +511,6 @@ impl ConnectOptions {
     /// async_nats::ConnectOptions::new().client_capacity(256).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
-
     /// ```
     ///
     pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
@@ -514,8 +533,27 @@ impl ConnectOptions {
         self.inbox_prefix = prefix.to_string();
         self
     }
-}
 
+    /// Sets the name for the client.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// async_nats::ConnectOptions::new().name("rust-service").connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn name<T: ToString>(mut self, name: T) -> ConnectOptions {
+        self.name = Some(name.to_string());
+        self
+    }
+
+    pub fn retry_on_intial_connect(mut self) -> ConnectOptions {
+        self.retry_on_initial_connect = true;
+        self
+    }
+}
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 

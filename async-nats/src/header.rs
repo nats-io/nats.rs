@@ -22,6 +22,17 @@ use std::{
 use serde::Serialize;
 
 pub const NATS_LAST_STREAM: &str = "nats-last-stream";
+pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
+
+/// Direct Get headers
+pub const NATS_STREAM: &str = "Nats-Stream";
+pub const NATS_SEQUENCE: &str = "Nats-Sequence";
+pub const NATS_TIME_STAMP: &str = "Nats-Time-Stamp";
+pub const NATS_SUBJECT: &str = "Nats-Subject";
+pub const NATS_LAST_SEQUENCE: &str = "Nats-Last-Sequence";
+
+/// Nats-Expected-Last-Subject-Sequence
+pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
 
 /// A struct for handling NATS headers.
 /// Has a similar API to [http::header], but properly serializes and desiaralizes
@@ -64,6 +75,10 @@ impl HeaderMap {
     pub fn new() -> Self {
         HeaderMap::default()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 impl HeaderMap {
@@ -71,12 +86,14 @@ impl HeaderMap {
     ///
     /// # Examples
     ///
+    /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let headers = async_nats::HeaderMap::new();
+    /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
     /// # Ok(())
     /// # }
+    /// ```
     pub fn insert<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         self.inner
             .insert(name.into_header_name(), value.into_header_value());
@@ -169,6 +186,21 @@ impl FromStr for HeaderValue {
         let mut set = HeaderValue::new();
         set.value.insert(s.to_string());
         Ok(set)
+    }
+}
+
+impl From<u64> for HeaderValue {
+    fn from(v: u64) -> Self {
+        let mut set = HeaderValue::new();
+        set.value.insert(v.to_string());
+        set
+    }
+}
+impl From<&str> for HeaderValue {
+    fn from(v: &str) -> Self {
+        let mut set = HeaderValue::new();
+        set.value.insert(v.to_string());
+        set
     }
 }
 
@@ -307,5 +339,16 @@ mod tests {
         let bytes = headers.to_bytes();
 
         println!("bytes: {:?}", from_utf8(&bytes));
+    }
+
+    #[test]
+    fn is_empty() {
+        let mut headers = HeaderMap::new();
+        assert!(headers.is_empty());
+
+        headers.append("Key", "value");
+        headers.append("Key", "second_value");
+        headers.insert("Second", "SecondValue");
+        assert!(!headers.is_empty());
     }
 }

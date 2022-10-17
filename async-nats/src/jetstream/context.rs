@@ -19,13 +19,17 @@ use crate::jetstream::response::Response;
 use crate::{Client, Error};
 use bytes::Bytes;
 use futures::TryFutureExt;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
+use tracing::debug;
 
-use super::stream::{Config, DeleteStatus, Info, Stream};
+use super::kv::{Store, MAX_HISTORY};
+use super::object_store::{is_valid_bucket_name, ObjectStore};
+use super::stream::{self, Config, DeleteStatus, DiscardPolicy, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -375,6 +379,165 @@ impl Context {
         }
     }
 
+    /// Returns an existing key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.get_key_value("bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, Error> {
+        let bucket: String = bucket.into();
+        if !crate::jetstream::kv::is_valid_bucket_name(&bucket) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "invalid bucket name",
+            )));
+        }
+
+        let stream_name = format!("KV_{}", &bucket);
+        let stream = self.get_stream(stream_name.clone()).await?;
+
+        if stream.info.config.max_messages_per_subject < 1 {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "not a valid key-value store",
+            )));
+        }
+
+        Ok(Store {
+            prefix: format!("$KV.{}.", &bucket),
+            name: bucket,
+            stream_name,
+            stream,
+        })
+    }
+
+    /// Creates a new key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_key_value(
+        &self,
+        config: crate::jetstream::kv::Config,
+    ) -> Result<Store, Error> {
+        if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "invalid bucket name",
+            )));
+        }
+
+        let history = if config.history > 0 {
+            if config.history > MAX_HISTORY {
+                return Err(Box::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "history limited to a max of 64",
+                )));
+            }
+            config.history
+        } else {
+            1
+        };
+
+        let num_replicas = if config.num_replicas == 0 {
+            1
+        } else {
+            config.num_replicas
+        };
+
+        let stream = self
+            .create_stream(stream::Config {
+                name: format!("KV_{}", config.bucket),
+                description: Some(config.description),
+                subjects: vec![format!("$KV.{}.>", config.bucket)],
+                max_messages_per_subject: history,
+                max_bytes: config.max_bytes,
+                max_age: config.max_age,
+                max_message_size: config.max_value_size,
+                storage: config.storage,
+                republish: config.republish,
+                allow_rollup: true,
+                deny_delete: true,
+                deny_purge: false,
+                allow_direct: true,
+                num_replicas,
+                discard: stream::DiscardPolicy::New,
+                ..Default::default()
+            })
+            .await?;
+
+        Ok(Store {
+            name: config.bucket.clone(),
+            stream_name: stream.info.config.name.clone(),
+            prefix: format!("$KV.{}.", config.bucket),
+            stream,
+        })
+    }
+
+    /// Deletes given key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_key_value<T: AsRef<str>>(&self, bucket: T) -> Result<DeleteStatus, Error> {
+        if !crate::jetstream::kv::is_valid_bucket_name(bucket.as_ref()) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "invalid bucket name",
+            )));
+        }
+
+        let stream_name = format!("KV_{}", bucket.as_ref());
+        self.delete_stream(stream_name).await
+    }
+
+    // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), Error> {
+    //     let config = config.borrow();
+    //     if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
+    //         return Err(Box::new(std::io::Error::new(
+    //             ErrorKind::Other,
+    //             "invalid bucket name",
+    //         )));
+    //     }
+
+    //     let stream_name = format!("KV_{}", config.bucket);
+    //     self.update_stream()
+    //         .await
+    //         .and_then(|info| Ok(()))
+    // }
+
     /// Send a request to the jetstream JSON API.
     ///
     /// This is a low level API used mostly internally, that should be used only in
@@ -402,6 +565,8 @@ impl Context {
     {
         let request = serde_json::to_vec(&payload).map(Bytes::from)?;
 
+        debug!("JetStream request sent: {:?}", request);
+
         let message = self
             .client
             .request(format!("{}.{}", self.prefix, subject), request)
@@ -409,5 +574,115 @@ impl Context {
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
+    }
+
+    /// Creates a new object store bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.create_object_store(async_nats::jetstream::object_store::Config {
+    ///     bucket: "bucket".to_string(),
+    ///     ..Default::default()
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_object_store(
+        &self,
+        config: super::object_store::Config,
+    ) -> Result<super::object_store::ObjectStore, Error> {
+        if !super::object_store::is_valid_bucket_name(&config.bucket) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "invalid bucket name",
+            )));
+        }
+
+        let bucket_name = config.bucket.clone();
+        let stream_name = format!("OBJ_{}", bucket_name);
+        let chunk_subject = format!("$O.{}.C.>", bucket_name);
+        let meta_subject = format!("$O.{}.M.>", bucket_name);
+
+        let stream = self
+            .create_stream(super::stream::Config {
+                name: stream_name,
+                description: config.description.clone(),
+                subjects: vec![chunk_subject, meta_subject],
+                max_age: config.max_age,
+                storage: config.storage,
+                num_replicas: config.num_replicas,
+                discard: DiscardPolicy::New,
+                allow_rollup: true,
+                ..Default::default()
+            })
+            .await?;
+
+        Ok(ObjectStore {
+            name: bucket_name,
+            stream,
+        })
+    }
+
+    /// Creates a new object store bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.get_object_store("bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_object_store<T: AsRef<str>>(
+        &self,
+        bucket_name: T,
+    ) -> Result<ObjectStore, Error> {
+        if !self.client.is_server_compatible(2, 6, 2) {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::Other,
+                "object-store requires at least server version 2.6.2",
+            )));
+        }
+        let bucket_name = bucket_name.as_ref();
+        if !is_valid_bucket_name(bucket_name) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid bucket name",
+            )));
+        }
+        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream = self.get_stream(stream_name).await?;
+
+        Ok(ObjectStore {
+            name: bucket_name.to_string(),
+            stream,
+        })
+    }
+
+    /// Delete a object store bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.delete_object_store("bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_object_store<T: AsRef<str>>(&self, bucket_name: T) -> Result<(), Error> {
+        let stream_name = format!("OBJ_{}", bucket_name.as_ref());
+        self.delete_stream(stream_name).await?;
+        Ok(())
     }
 }

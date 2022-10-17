@@ -13,6 +13,8 @@
 
 //! A low level `JetStream` responses.
 
+use core::fmt;
+
 use serde::Deserialize;
 
 /// An error description returned in a response to a jetstream request.
@@ -28,6 +30,18 @@ pub struct Error {
 
     /// Description
     pub description: String,
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "JetStream response error code: {}, status: {}, description: {}",
+            self.code, self.status, self.description
+        )
+    }
 }
 
 /// A response returned from a request to jetstream.

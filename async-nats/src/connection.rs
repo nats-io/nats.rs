@@ -55,7 +55,7 @@ pub(crate) struct Connection {
 }
 
 /// Internal representation of the connection.
-/// Helds connection with NATS Server and communicates with `Client` via channels.
+/// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         let maybe_len = self.buffer.find(b"\r\n");

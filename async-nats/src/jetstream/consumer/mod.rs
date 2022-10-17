@@ -33,7 +33,7 @@ pub trait IntoConsumerConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
@@ -104,8 +104,8 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     }
 
     /// Returns cached [Info] for the [Consumer].
-    /// Cache is either from initial creation/retrival of the [Consumer] or last call to
-    /// [Consumer::info].
+    /// Cache is either from initial creation/retrieval of the [Consumer] or last call to
+    /// [Info].
     ///
     /// # Examples
     ///
@@ -156,9 +156,9 @@ pub struct Info {
     /// The consumer's configuration
     pub config: Config,
     /// Statistics for delivered messages
-    pub delivered: SequencePair,
-    /// Statistics for acknowleged messages
-    pub ack_floor: SequencePair,
+    pub delivered: SequenceInfo,
+    /// Statistics for acknowledged messages
+    pub ack_floor: SequenceInfo,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
     /// The number of messages re-sent after acknowledgement was not received within the configured
@@ -176,14 +176,17 @@ pub struct Info {
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct SequencePair {
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceInfo {
     /// How far along the consumer has progressed
     #[serde(rename = "consumer_seq")]
     pub consumer_sequence: u64,
     /// The aggregate for all stream consumers
     #[serde(rename = "stream_seq")]
     pub stream_sequence: u64,
+    // Last activity for the sequence
+    #[serde(default, with = "rfc3339::option")]
+    pub last_active: Option<time::OffsetDateTime>,
 }
 
 /// Configuration for consumers. From a high level, the
@@ -241,6 +244,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -289,16 +296,18 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
+    pub memory_storage: bool,
 }
 
 impl From<&Config> for Config {
@@ -359,7 +368,7 @@ pub enum DeliverPolicy {
         #[serde(rename = "opt_start_seq")]
         start_sequence: u64,
     },
-    /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
+    /// `ByStartTime` will select the first message with a timestamp >= to the consumer's
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime {

@@ -58,10 +58,10 @@ jobs:
       - name: Set up go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.16'
+          go-version: '1.19'
 
       - name: Install nats-server
-        run: go get github.com/nats-io/nats-server/v2
+        run: go install github.com/nats-io/nats-server/v2@latest
 
       - name: Configure nats hosts
         run: |
@@ -173,10 +173,10 @@ jobs:
       - name: Set up go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.16'
+          go-version: '1.19'
 
       - name: Install nats-server
-        run: go get github.com/nats-io/nats-server/v2
+        run: go install github.com/nats-io/nats-server/v2@latest
       - name: Check examples
         env:
           RUST_LOG: trace

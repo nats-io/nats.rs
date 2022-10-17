@@ -111,6 +111,7 @@ impl Consumer<Config> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn stream(&self) -> StreamBuilder<'_> {
         StreamBuilder::new(self)
     }
@@ -322,7 +323,7 @@ impl futures::Stream for Batch {
                     status => Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         format!(
-                            "eror while processing messages from the stream: {}, {:?}",
+                            "error while processing messages from the stream: {}, {:?}",
                             status, message.description
                         ),
                     ))))),
@@ -707,6 +708,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_bytes_per_batch(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -744,6 +746,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_messages_per_batch(mut self, batch: usize) -> Self {
         self.batch = batch;
         self
@@ -777,6 +780,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
         self.heartbeat = heartbeat;
         self
@@ -811,6 +815,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
         self.expires = expires.as_nanos().try_into().unwrap();
         self
@@ -843,6 +848,7 @@ impl<'a> StreamBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn messages(self) -> Result<Stream, Error> {
         Stream::stream(
             BatchConfig {
@@ -858,7 +864,7 @@ impl<'a> StreamBuilder<'a> {
     }
 }
 
-/// Used for building configuration for a [Fetch]. Created by a [Consumer::fetch_builder] on a [Consumer].
+/// Used for building configuration for a [`Fetch`]. Created by a [FetchBuilder] on a [Consumer].
 ///
 /// # Examples
 ///
@@ -886,6 +892,7 @@ impl<'a> StreamBuilder<'a> {
 /// }
 /// # Ok(())
 /// # }
+/// ```
 pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
@@ -936,6 +943,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_bytes(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -972,6 +980,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_messages(mut self, batch: usize) -> Self {
         self.batch = batch;
         self
@@ -1005,6 +1014,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
         self.heartbeat = heartbeat;
         self
@@ -1040,6 +1050,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
         self.expires = expires.as_nanos().try_into().unwrap();
         self
@@ -1072,6 +1083,7 @@ impl<'a> FetchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn messages(self) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
@@ -1115,6 +1127,7 @@ impl<'a> FetchBuilder<'a> {
 /// }
 /// # Ok(())
 /// # }
+/// ```
 pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
@@ -1166,6 +1179,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_bytes(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -1203,6 +1217,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn max_messages(mut self, batch: usize) -> Self {
         self.batch = batch;
         self
@@ -1236,6 +1251,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn heartbeat(mut self, heartbeat: Duration) -> Self {
         self.heartbeat = heartbeat;
         self
@@ -1270,6 +1286,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
         self.expires = expires.as_nanos().try_into().unwrap();
         self
@@ -1302,6 +1319,7 @@ impl<'a> BatchBuilder<'a> {
     /// }
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn messages(self) -> Result<Batch, Error> {
         Batch::batch(
             BatchConfig {
@@ -1366,6 +1384,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -1405,15 +1427,18 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub memory_storage: bool,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -1426,6 +1451,7 @@ impl IntoConsumerConfig for Config {
     fn into_consumer_config(self) -> consumer::Config {
         jetstream::consumer::Config {
             deliver_subject: None,
+            name: self.name,
             durable_name: self.durable_name,
             description: self.description,
             deliver_group: None,
@@ -1446,6 +1472,7 @@ impl IntoConsumerConfig for Config {
             max_expires: self.max_expires,
             inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
+            memory_storage: self.memory_storage,
         }
     }
 }
@@ -1459,6 +1486,7 @@ impl FromConsumer for Config {
         }
         Ok(Config {
             durable_name: config.durable_name,
+            name: config.name,
             description: config.description,
             deliver_policy: config.deliver_policy,
             ack_policy: config.ack_policy,
@@ -1475,6 +1503,7 @@ impl FromConsumer for Config {
             max_expires: config.max_expires,
             inactive_threshold: config.inactive_threshold,
             num_replicas: config.num_replicas,
+            memory_storage: config.memory_storage,
         })
     }
 }

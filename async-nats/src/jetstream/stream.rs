@@ -14,11 +14,15 @@
 //! Manage operations on a [Stream], create/delete/update [Consumer][crate::jetstream::consumer::Consumer].
 
 use std::{
+    fmt::Debug,
     io::{self, ErrorKind},
+    str::FromStr,
     time::Duration,
 };
 
-use crate::Error;
+use crate::{header::HeaderName, HeaderMap, HeaderValue};
+use crate::{Error, StatusCode};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -26,11 +30,11 @@ use time::serde::rfc3339;
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
     response::Response,
-    Context,
+    Context, Message,
 };
 
 /// Handle to operations that can be performed on a `Stream`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Stream {
     pub(crate) info: Info,
     pub(crate) context: Context,
@@ -75,7 +79,7 @@ impl Stream {
 
     /// Returns cached [Info] for the [Stream].
     /// Cache is either from initial creation/retrival of the [Stream] or last call to
-    /// [Stream::info].
+    /// [Stream::Info].
     ///
     /// # Examples
     ///
@@ -94,6 +98,281 @@ impl Stream {
     /// ```
     pub fn cached_info(&self) -> &Info {
         &self.info
+    }
+
+    /// Gets next message for a [Stream].
+    ///
+    /// Requires a [Stream] with `allow_direct` set to `true`.
+    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// from any replica member. This means read after write is possible,
+    /// as that given replica might not yet catch up with the leader.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     subjects: vec!["events.>".to_string()],
+    ///     allow_direct: true,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events.data".into(), "data".into()).await?;
+    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    ///
+    /// let message =  stream
+    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.sequence)).await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn direct_get_next_for_subject<T: AsRef<str>>(
+        &self,
+        subject: T,
+        sequence: Option<u64>,
+    ) -> Result<Message, Error> {
+        let request_subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload;
+        if let Some(sequence) = sequence {
+            payload = json!({
+                "seq": sequence,
+                "next_by_subj": subject.as_ref(),
+            });
+        } else {
+            payload = json!({
+                 "next_by_subj": subject.as_ref(),
+            });
+        }
+
+        let response = self
+            .context
+            .client
+            .request(
+                request_subject,
+                serde_json::to_vec(&payload).map(Bytes::from)?,
+            )
+            .await
+            .map(|message| Message {
+                message,
+                context: self.context.clone(),
+            })?;
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
+    }
+
+    /// Gets first message from [Stream].
+    ///
+    /// Requires a [Stream] with `allow_direct` set to `true`.
+    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// from any replica member. This means read after write is possible,
+    /// as that given replica might not yet catch up with the leader.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     subjects: vec!["events.>".to_string()],
+    ///     allow_direct: true,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    ///
+    /// let message =  stream.direct_get_first_for_subject("events.data").await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn direct_get_first_for_subject<T: AsRef<str>>(
+        &self,
+        subject: T,
+    ) -> Result<Message, Error> {
+        let request_subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload = json!({
+            "next_by_subj": subject.as_ref(),
+        });
+
+        let response = self
+            .context
+            .client
+            .request(
+                request_subject,
+                serde_json::to_vec(&payload).map(Bytes::from)?,
+            )
+            .await
+            .map(|message| Message {
+                message,
+                context: self.context.clone(),
+            })?;
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
+    }
+
+    /// Gets message from [Stream] with given `sequence id`.
+    ///
+    /// Requires a [Stream] with `allow_direct` set to `true`.
+    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// from any replica member. This means read after write is possible,
+    /// as that given replica might not yet catch up with the leader.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     subjects: vec!["events.>".to_string()],
+    ///     allow_direct: true,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    ///
+    /// let message =  stream.direct_get(pub_ack.sequence).await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn direct_get(&self, sequence: u64) -> Result<Message, Error> {
+        let subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload = json!({
+            "seq": sequence,
+        });
+
+        let response = self
+            .context
+            .client
+            .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
+            .await
+            .map(|message| Message {
+                context: self.context.clone(),
+                message,
+            })?;
+
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                return Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("{} {}", status, description),
+                )));
+            }
+        }
+        Ok(response)
+    }
+
+    /// Gets last message for a given `subject`.
+    ///
+    /// Requires a [Stream] with `allow_direct` set to `true`.
+    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// from any replica member. This means read after write is possible,
+    /// as that given replica might not yet catch up with the leader.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
+    ///     name: "events".to_string(),
+    ///     subjects: vec!["events.>".to_string()],
+    ///     allow_direct: true,
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// jetstream.publish("events.data".into(), "data".into()).await?;
+    ///
+    /// let message =  stream.direct_get_last_for_subject("events.data").await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn direct_get_last_for_subject<T: AsRef<str>>(
+        &self,
+        subject: T,
+    ) -> Result<Message, Error> {
+        let subject = format!(
+            "{}.DIRECT.GET.{}.{}",
+            &self.context.prefix,
+            &self.info.config.name,
+            subject.as_ref()
+        );
+
+        let response = self
+            .context
+            .client
+            .request(subject, "".into())
+            .await
+            .map(|message| Message {
+                context: self.context.clone(),
+                message,
+            })?;
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::NotFound,
+                            "message not found in stream",
+                        )))
+                    }
+                    // 408 is used in Direct Message for bad/empty paylaod.
+                    StatusCode::TIMEOUT => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            "empty or invalid request",
+                        )))
+                    }
+                    other => {
+                        return Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            format!("{}: {}", other, description),
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(response)
     }
     /// Get a raw message from the stream.
     ///
@@ -116,7 +395,7 @@ impl Stream {
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.sequence).await?;
-    /// println!("Retreived raw message {:?}", raw_message);
+    /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
@@ -159,8 +438,8 @@ impl Stream {
     /// }).await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
-    /// let raw_message = stream.get_last_raw_message_by_subject("events".into()).await?;
-    /// println!("Retreived raw message {:?}", raw_message);
+    /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
+    /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
     /// # }
     /// ```
@@ -175,13 +454,7 @@ impl Stream {
 
         let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting message: {}, {}",
-                    error.code, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(ErrorKind::Other, error))),
             Response::Ok(value) => Ok(value.message),
         }
     }
@@ -231,6 +504,7 @@ impl Stream {
     ///
     /// # Examples
     ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -240,6 +514,7 @@ impl Stream {
     /// stream.purge().await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn purge(&self) -> Result<PurgeResponse, Error> {
         let subject = format!("STREAM.PURGE.{}", self.info.config.name);
 
@@ -260,6 +535,7 @@ impl Stream {
     ///
     /// # Examples
     ///
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -269,6 +545,7 @@ impl Stream {
     /// stream.purge_subject("data").await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
     where
         T: Into<String>,
@@ -322,13 +599,38 @@ impl Stream {
         config: C,
     ) -> Result<Consumer<C>, Error> {
         let config = config.into_consumer_config();
-        let subject = if let Some(ref durable_name) = config.durable_name {
-            format!(
-                "CONSUMER.DURABLE.CREATE.{}.{}",
-                self.info.config.name, durable_name
-            )
-        } else {
-            format!("CONSUMER.CREATE.{}", self.info.config.name)
+
+        let subject = {
+            if self.context.client.is_server_compatible(2, 9, 0) {
+                let filter = if config.filter_subject.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(".{}", config.filter_subject)
+                };
+                config
+                    .name
+                    .as_ref()
+                    .or(config.durable_name.as_ref())
+                    .map(|name| {
+                        format!(
+                            "CONSUMER.CREATE.{}.{}{}",
+                            self.info.config.name, name, filter
+                        )
+                    })
+                    .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", self.info.config.name))
+            } else if config.name.is_some() {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    "can't use consumer name with server below version 2.9",
+                )));
+            } else if let Some(ref durable_name) = config.durable_name {
+                format!(
+                    "CONSUMER.DURABLE.CREATE.{}.{}",
+                    self.info.config.name, durable_name
+                )
+            } else {
+                format!("CONSUMER.CREATE.{}", self.info.config.name)
+            }
         };
 
         match self
@@ -515,6 +817,9 @@ pub struct Config {
     /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
     /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
     pub discard: DiscardPolicy,
+    /// Prevents a message from being added to a stream if the max_msgs_per_subject limit for the subject has been reached
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub discard_new_per_subject: bool,
     /// Which NATS subjects to populate this stream with. Supports wildcards. Defaults to just the
     /// configured stream `name`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -564,6 +869,9 @@ pub struct Config {
 
     #[serde(default, skip_serializing_if = "is_default")]
     pub republish: Option<Republish>,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub allow_direct: bool,
 }
 
 impl From<&Config> for Config {
@@ -719,6 +1027,119 @@ pub struct RawMessage {
     /// The time the message was published.
     #[serde(rename = "time", with = "rfc3339")]
     pub time: time::OffsetDateTime,
+}
+
+impl TryFrom<RawMessage> for crate::Message {
+    type Error = Error;
+
+    fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
+        let decoded_paylaod = base64::decode(value.payload)
+            .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
+        let decoded_headers = value
+            .headers
+            .map(base64::decode)
+            .map_or(Ok(None), |v| v.map(Some))?;
+
+        let (headers, status, description) =
+            decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
+
+        Ok(crate::Message {
+            subject: value.subject,
+            reply: None,
+            payload: decoded_paylaod.into(),
+            headers,
+            status,
+            description,
+        })
+    }
+}
+
+fn is_continuation(c: char) -> bool {
+    c == ' ' || c == '\t'
+}
+const HEADER_LINE: &str = "NATS/1.0";
+const HEADER_LINE_LEN: usize = HEADER_LINE.len();
+
+#[allow(clippy::type_complexity)]
+fn parse_headers(
+    buf: &[u8],
+) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), Error> {
+    let mut headers = HeaderMap::new();
+    let mut maybe_status: Option<StatusCode> = None;
+    let mut maybe_description: Option<String> = None;
+    let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
+        line.lines().peekable()
+    } else {
+        return Err(Box::new(std::io::Error::new(
+            ErrorKind::Other,
+            "invalid header",
+        )));
+    };
+
+    if let Some(line) = lines.next() {
+        if !line.starts_with(HEADER_LINE) {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "version lie does not start with NATS/1.0",
+            )));
+        }
+
+        // TODO: return this as description to be consistent?
+        if let Some(slice) = line.get(HEADER_LINE_LEN..).map(|s| s.trim()) {
+            match slice.split_once(' ') {
+                Some((status, description)) => {
+                    if !status.is_empty() {
+                        maybe_status = Some(status.trim().parse()?);
+                    }
+
+                    if !description.is_empty() {
+                        maybe_description = Some(description.trim().to_string());
+                    }
+                }
+                None => {
+                    if !slice.is_empty() {
+                        maybe_status = Some(slice.trim().parse()?);
+                    }
+                }
+            }
+        }
+    } else {
+        return Err(Box::new(std::io::Error::new(
+            ErrorKind::Other,
+            "expected header information not found",
+        )));
+    };
+
+    while let Some(line) = lines.next() {
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some((k, v)) = line.split_once(':').to_owned() {
+            let mut s = String::from(v.trim());
+            while let Some(v) = lines.next_if(|s| s.starts_with(is_continuation)).to_owned() {
+                s.push(' ');
+                s.push_str(v.trim());
+            }
+
+            headers.insert(
+                HeaderName::from_str(k)?,
+                HeaderValue::from_str(&s)
+                    .map_err(|err| Box::new(io::Error::new(ErrorKind::Other, err)))?,
+            );
+        } else {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                "malformed header line",
+            )));
+        }
+    }
+
+    if headers.is_empty() {
+        Ok((None, maybe_status, maybe_description))
+    } else {
+        Ok((Some(headers), maybe_status, maybe_description))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
