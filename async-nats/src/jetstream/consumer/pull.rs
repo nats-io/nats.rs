@@ -542,21 +542,23 @@ impl futures::Stream for Stream {
                 self.request_tx.send(()).unwrap();
                 self.pending_request = true;
             }
-            match self.heartbeats_missing.try_recv() {
-                Ok(_) => {
-                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "did not receive idle heartbeat in time",
-                    )))))
-                }
-                // ignore this error as that means we haven't got any missing heartbeats that we
-                // haven't read.
-                Err(TryRecvError::Empty) => (),
-                Err(TryRecvError::Closed) => {
-                    return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "unexpected heartbeat error closure",
-                    )))))
+            if self.heartbeat_handle.is_some() {
+                match self.heartbeats_missing.try_recv() {
+                    Ok(_) => {
+                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "did not receive idle heartbeat in time",
+                        )))))
+                    }
+                    // ignore this error as that means we haven't got any missing heartbeats that we
+                    // haven't read.
+                    Err(TryRecvError::Empty) => (),
+                    Err(TryRecvError::Closed) => {
+                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "unexpected heartbeat error closure",
+                        )))))
+                    }
                 }
             }
             match self.request_result_rx.poll_recv(cx) {
