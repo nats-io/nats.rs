@@ -1590,6 +1590,56 @@ mod jetstream {
         }
     }
     #[tokio::test]
+    async fn pull_consumer_stream_without_heartbeat() {
+        tracing_subscriber::fmt::init();
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        context
+            .publish("events".to_string(), "dat".into())
+            .await
+            .unwrap();
+
+        let mut messages = consumer
+            .stream()
+            .max_messages_per_batch(3)
+            .messages()
+            .await
+            .unwrap();
+
+        messages.next().await.unwrap().unwrap().ack().await.unwrap();
+        let name = &consumer.cached_info().name;
+        stream.delete_consumer(name).await.unwrap();
+        let now = Instant::now();
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        println!("time elapsed {:?}", now.elapsed());
+    }
+    #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
