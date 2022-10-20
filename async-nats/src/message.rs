@@ -17,7 +17,7 @@ use crate::status::StatusCode;
 use bytes::Bytes;
 
 /// A Core NATS message.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Message {
     /// Subject to which message is published to.
     pub subject: String,

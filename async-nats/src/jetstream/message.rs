@@ -252,6 +252,7 @@ impl Message {
         // case first because we expect it to
         // be the most common. We use >= to be
         // future-proof.
+        println!("TOKENS: {}", n_tokens);
         if n_tokens >= 9 {
             Ok(Info {
                 domain: {
@@ -278,8 +279,9 @@ impl Message {
                 } else {
                     None
                 },
+                last: try_parse!(),
             })
-        } else if n_tokens == 7 {
+        } else if n_tokens == 8 {
             // we expect this to be increasingly rare, as older
             // servers are phased out.
             Ok(Info {
@@ -296,6 +298,7 @@ impl Message {
                 },
                 pending: try_parse!(),
                 token: None,
+                last: try_parse!(),
             })
         } else {
             Err(Box::new(std::io::Error::new(
@@ -364,4 +367,6 @@ pub struct Info<'a> {
     pub published: time::OffsetDateTime,
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
+
+    pub last: usize,
 }
