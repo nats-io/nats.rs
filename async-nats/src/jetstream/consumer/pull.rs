@@ -587,14 +587,32 @@ impl futures::Stream for Stream {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
-                            debug!("timeout reached, resetting pending messages");
+                            let headers = message.headers.unwrap();
+                            let pending_messages: usize = headers
+                                .get("Nats-Pending-Messages")
+                                .unwrap()
+                                .iter()
+                                .next()
+                                .unwrap()
+                                .parse()
+                                .unwrap();
+                            let pending_bytes = headers
+                                .get("Nats-Pending-Bytes")
+                                .unwrap()
+                                .iter()
+                                .next()
+                                .unwrap();
+                            debug!(
+                                "timeout reached. remaining messages: {}, bytes {}",
+                                pending_messages, pending_bytes
+                            );
                             // We do not want to reset to 0, as more than 1 fetch request might be
                             // ongoing. This is not perfect, as we don't know how many messages
                             // were consumed from that specific fetch, but that's best what we can
                             // do until server can identify fetches.
                             self.pending_messages = self
                                 .pending_messages
-                                .saturating_sub(self.batch_config.batch);
+                                .saturating_sub(self.batch_config.batch - pending_messages);
                             continue;
                         }
                         StatusCode::IDLE_HEARTBEAT => {

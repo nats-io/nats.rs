@@ -924,7 +924,6 @@ mod jetstream {
                 .unwrap();
         }
 
-        println!("pubbed");
         let mut messages = consumer
             .stream()
             .max_messages_per_batch(1)
@@ -1591,7 +1590,7 @@ mod jetstream {
     }
     #[tokio::test]
     async fn pull_consumer_stream_without_heartbeat() {
-        tracing_subscriber::fmt::init();
+        // tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {:?}", err) })
