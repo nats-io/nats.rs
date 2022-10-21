@@ -460,7 +460,6 @@ impl Stream {
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
-                        _ = tokio::time::sleep(Duration::from_nanos(batch.expires.unwrap() as u64)) => debug!("reached expires timer"),
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
@@ -587,21 +586,23 @@ impl futures::Stream for Stream {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
-                            let headers = message.headers.unwrap();
-                            let pending_messages: usize = headers
-                                .get("Nats-Pending-Messages")
-                                .unwrap()
-                                .iter()
-                                .next()
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                            let pending_bytes = headers
-                                .get("Nats-Pending-Bytes")
-                                .unwrap()
-                                .iter()
-                                .next()
-                                .unwrap();
+                            trace!("TIMEOUT MESSAGE: {:?}", message);
+                            let pending_messages = message
+                                .headers
+                                .as_ref()
+                                .and_then(|headers| headers.get("Nats-Pending-Messages"))
+                                .map(|h| h.iter())
+                                .and_then(|mut i| i.next())
+                                .map(|e| e.parse::<usize>())
+                                .unwrap_or(Ok(self.batch_config.batch))?;
+                            let pending_bytes = message
+                                .headers
+                                .as_ref()
+                                .and_then(|headers| headers.get("Nats-Pending-Bytes"))
+                                .map(|h| h.iter())
+                                .and_then(|mut i| i.next())
+                                .map(|e| e.parse::<usize>())
+                                .unwrap_or(Ok(self.batch_config.max_bytes))?;
                             debug!(
                                 "timeout reached. remaining messages: {}, bytes {}",
                                 pending_messages, pending_bytes
@@ -610,18 +611,20 @@ impl futures::Stream for Stream {
                             // ongoing. This is not perfect, as we don't know how many messages
                             // were consumed from that specific fetch, but that's best what we can
                             // do until server can identify fetches.
-                            self.pending_messages = self
-                                .pending_messages
-                                .saturating_sub(self.batch_config.batch - pending_messages);
+                            self.pending_messages =
+                                self.pending_messages.saturating_sub(pending_messages);
                             continue;
                         }
+
                         StatusCode::IDLE_HEARTBEAT => {
+                            debug!("received idle hearbeat");
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
                             continue;
                         }
                         StatusCode::OK => {
+                            trace!("message received");
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
