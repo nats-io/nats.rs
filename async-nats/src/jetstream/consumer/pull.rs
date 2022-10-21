@@ -617,6 +617,24 @@ impl futures::Stream for Stream {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT => {
                             println!("TIMEOUT: {:?}", message);
+
+                            let headers = message.headers.unwrap();
+                            let pending_messages = headers
+                                .get("Nats-Pending-Messages")
+                                .unwrap()
+                                .iter()
+                                .next()
+                                .unwrap();
+                            let pending_bytes = headers
+                                .get("Nats-Pending-Bytes")
+                                .unwrap()
+                                .iter()
+                                .next()
+                                .unwrap();
+                            println!(
+                                "PENDING MESSAGES: {}, PENDING BYTES {}",
+                                pending_messages, pending_bytes
+                            );
                             debug!("timeout reached, resetting pending messages");
                             // We do not want to reset to 0, as more than 1 fetch request might be
                             // ongoing. This is not perfect, as we don't know how many messages
