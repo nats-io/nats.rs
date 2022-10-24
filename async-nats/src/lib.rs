@@ -722,7 +722,7 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Connected => write!(f, "reconnected"),
+            Event::Connected => write!(f, "connected"),
             Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
             Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
