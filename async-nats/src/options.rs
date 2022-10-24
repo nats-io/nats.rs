@@ -99,7 +99,7 @@ impl Default for ConnectOptions {
             subscription_capacity: 1024,
             event_callback: CallbackArg1::<Event, ()>(Box::new(move |error| {
                 Box::pin(async move {
-                    println!("error : {}", error);
+                    tracing::error!("error : {}", error);
                 })
             })),
             inbox_prefix: "_INBOX".to_string(),
