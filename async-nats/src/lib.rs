@@ -99,7 +99,7 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tracing::debug;
+use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -319,7 +319,7 @@ impl ConnectionHandler {
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
-                            println!("error handling command {}", err);
+                            error!("error handling command {}", err);
                         }
                         None => {
                             break;
@@ -330,17 +330,17 @@ impl ConnectionHandler {
                 maybe_op_result = self.connection.read_op().fuse() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
-                            println!("error handling operation {}", err);
+                            error!("error handling operation {}", err);
                         }
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error handling operation {}", err);
+                                error!("error handling operation {}", err);
                             } else {
                             }
                         }
                         Err(op_err) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error reconnecting {}. original error={}", err, op_err);
+                                error!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
                     }
@@ -459,7 +459,7 @@ impl ConnectionHandler {
                         .write_op(ClientOp::Unsubscribe { sid, max })
                         .await
                     {
-                        println!("Send failed with {:?}", err);
+                        error!("Send failed with {:?}", err);
                     }
                 }
             }
@@ -529,7 +529,7 @@ impl ConnectionHandler {
                     })
                     .await
                 {
-                    println!("Sending Subscribe failed with {:?}", err);
+                    error!("Sending Subscribe failed with {:?}", err);
                 }
             }
             Command::Publish {
@@ -549,7 +549,7 @@ impl ConnectionHandler {
                     .await
                 {
                     self.handle_disconnect().await?;
-                    println!("Sending Publish failed with {:?}", err);
+                    error!("Sending Publish failed with {:?}", err);
                 }
             }
             Command::Connect(connect_info) => {
