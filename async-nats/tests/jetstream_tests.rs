@@ -1414,7 +1414,7 @@ mod jetstream {
 
         tokio::task::spawn(async move {
             for i in 0..25 {
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                tokio::time::sleep(Duration::from_millis(400)).await;
                 context
                     .publish(
                         "events".to_string(),
@@ -1429,13 +1429,12 @@ mod jetstream {
             .stream()
             .max_messages_per_batch(25)
             .expires(Duration::from_millis(500))
-            .heartbeat(Duration::from_millis(150))
+            .heartbeat(Duration::from_millis(250))
             .messages()
             .await
             .unwrap()
             .take(25);
         while let Some(result) = iter.next().await {
-            println!("MESSAGE: {:?}", result);
             result.unwrap().ack().await.unwrap();
         }
     }
