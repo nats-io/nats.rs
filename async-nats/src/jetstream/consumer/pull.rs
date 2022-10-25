@@ -18,7 +18,7 @@ use std::{
     task::Poll,
     time::Duration,
 };
-use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle, time::Instant};
+use tokio::{task::JoinHandle, time::Instant};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -403,7 +403,7 @@ pub struct Stream {
     task_handle: JoinHandle<()>,
     heartbeat_handle: Option<JoinHandle<()>>,
     last_seen: Arc<Mutex<Instant>>,
-    heartbeats_missing: tokio::sync::oneshot::Receiver<()>,
+    heartbeats_missing: tokio::sync::mpsc::Receiver<()>,
 }
 
 impl Drop for Stream {
@@ -484,7 +484,7 @@ impl Stream {
             }
         });
         let last_seen = Arc::new(Mutex::new(Instant::now()));
-        let (missed_heartbeat_tx, missed_heartbeat_rx) = tokio::sync::oneshot::channel();
+        let (missed_heartbeat_tx, missed_heartbeat_rx) = tokio::sync::mpsc::channel(1);
         let heartbeat_handle = if !batch_config.idle_heartbeat.is_zero() {
             debug!("spawning heartbeat checker task");
             Some(tokio::task::spawn({
@@ -497,10 +497,10 @@ impl Stream {
                             .lock()
                             .unwrap()
                             .elapsed()
-                            .ge(&batch_config.idle_heartbeat.saturating_mul(3))
+                            .gt(&batch_config.idle_heartbeat.saturating_mul(2))
                         {
                             debug!("missed heartbeat threshold met");
-                            missed_heartbeat_tx.send(()).unwrap();
+                            missed_heartbeat_tx.send(()).await.unwrap();
                             break;
                         }
                     }
@@ -543,21 +543,24 @@ impl futures::Stream for Stream {
                 self.pending_request = true;
             }
             if self.heartbeat_handle.is_some() {
-                match self.heartbeats_missing.try_recv() {
-                    Ok(_) => {
-                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "did not receive idle heartbeat in time",
-                        )))))
-                    }
-                    // ignore this error as that means we haven't got any missing heartbeats that we
-                    // haven't read.
-                    Err(TryRecvError::Empty) => (),
-                    Err(TryRecvError::Closed) => {
-                        return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "unexpected heartbeat error closure",
-                        )))))
+                match self.heartbeats_missing.poll_recv(cx) {
+                    Poll::Ready(resp) => match resp {
+                        Some(()) => {
+                            trace!("received missing hearbeats notification");
+                            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "did not receive idle heartbeat in time",
+                            )))));
+                        }
+                        None => {
+                            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                "unexpected termination of hearbeat checker",
+                            )))))
+                        }
+                    },
+                    Poll::Pending => {
+                        trace!("pending message from missing hearbeats notification channel");
                     }
                 }
             }
