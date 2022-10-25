@@ -1691,7 +1691,7 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
-        println!("time elapsed {:?}", now.elapsed());
+        assert!(now.elapsed().le(&Duration::from_secs(50)));
     }
 
     #[tokio::test]
