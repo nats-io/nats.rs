@@ -394,6 +394,7 @@ impl<'a> futures::Stream for Sequence<'a> {
 
 pub struct Stream {
     pending_messages: usize,
+    pending_bytes: usize,
     request_result_rx: tokio::sync::mpsc::Receiver<Result<bool, crate::Error>>,
     request_tx: tokio::sync::watch::Sender<()>,
     subscriber: Subscriber,
@@ -516,6 +517,7 @@ impl Stream {
             request_tx,
             batch_config,
             pending_messages: 0,
+            pending_bytes: 0,
             subscriber: subscription,
             context: consumer.context.clone(),
             pending_request: false,
@@ -534,7 +536,9 @@ impl futures::Stream for Stream {
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
             trace!("pending messages: {}", self.pending_messages);
-            if self.pending_messages <= std::cmp::min(self.batch_config.batch / 2, 100)
+            if (self.pending_messages <= self.batch_config.batch / 2
+                || (self.batch_config.max_bytes > 0
+                    && self.pending_bytes <= self.batch_config.max_bytes / 2))
                 && !self.pending_request
             {
                 debug!("pending messages reached threshold to send new fetch request");
@@ -542,12 +546,14 @@ impl futures::Stream for Stream {
                 self.pending_request = true;
             }
             if self.heartbeat_handle.is_some() {
+                println!("HEARBAETS IS SOME");
                 match self.heartbeats_missing.try_recv() {
                     Ok(_) => {
+                        println!("MISSSSSING HEARBEAT MET");
                         return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
                             "did not receive idle heartbeat in time",
-                        )))))
+                        )))));
                     }
                     // ignore this error as that means we haven't got any missing heartbeats that we
                     // haven't read.
@@ -613,6 +619,7 @@ impl futures::Stream for Stream {
                             // do until server can identify fetches.
                             self.pending_messages =
                                 self.pending_messages.saturating_sub(pending_messages);
+                            self.pending_bytes = self.pending_bytes.saturating_sub(pending_bytes);
                             continue;
                         }
 
