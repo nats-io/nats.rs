@@ -1997,4 +1997,164 @@ mod jetstream {
             .await
             .expect_err("should get 503 maximum messages per subject exceeded error");
     }
+
+    #[tokio::test]
+    async fn mirrors() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .publish("events".to_string(), "skipped".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events".to_string(), "data".into())
+            .await
+            .unwrap();
+
+        let mut mirror = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "MIRROR".to_string(),
+                mirror: Some(async_nats::jetstream::stream::Source {
+                    name: stream.cached_info().config.name.clone(),
+                    start_sequence: Some(2),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mirror_info = mirror.info().await.unwrap();
+        assert_eq!(
+            mirror_info.config.mirror.as_ref().unwrap().name.as_str(),
+            "TEST"
+        );
+
+        let mut messages = mirror
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        )
+    }
+    #[tokio::test]
+    async fn sources() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let stream2 = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST2".to_string(),
+                subjects: vec!["events2".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .publish("events".to_string(), "skipped".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events2".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events2".to_string(), "data".into())
+            .await
+            .unwrap();
+
+        let mut source = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "SOURCE".to_string(),
+                sources: Some(vec![
+                    async_nats::jetstream::stream::Source {
+                        name: stream.cached_info().config.name.clone(),
+                        start_sequence: Some(2),
+                        ..Default::default()
+                    },
+                    async_nats::jetstream::stream::Source {
+                        name: stream2.cached_info().config.name.clone(),
+                        start_sequence: Some(1),
+                        ..Default::default()
+                    },
+                ]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let source_info = source.info().await.unwrap();
+        assert_eq!(
+            source_info.config.sources.as_ref().unwrap()[0]
+                .name
+                .as_str(),
+            "TEST"
+        );
+        assert_eq!(
+            source_info.config.sources.as_ref().unwrap()[1]
+                .name
+                .as_str(),
+            "TEST2"
+        );
+
+        let mut messages = source
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        );
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        );
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        );
+    }
 }

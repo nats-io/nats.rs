@@ -25,7 +25,7 @@ use crate::{Error, StatusCode};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use time::serde::rfc3339;
+use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
@@ -867,11 +867,22 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub deny_purge: bool,
 
+    /// Optional republish config.
     #[serde(default, skip_serializing_if = "is_default")]
     pub republish: Option<Republish>,
 
+    /// Enables direct get, which would get messages from
+    /// non-leader.
     #[serde(default, skip_serializing_if = "is_default")]
     pub allow_direct: bool,
+
+    /// Stream mirror configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<Source>,
+
+    /// Sources configration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<Source>>,
 }
 
 impl From<&Config> for Config {
@@ -1203,4 +1214,40 @@ pub struct PurgeRequest {
     /// Number of messages to keep.
     #[serde(default, skip_serializing_if = "is_default")]
     pub keep: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
+pub struct Source {
+    /// Name of the stream source.
+    pub name: String,
+    /// Optional source start sequence.
+    #[serde(default, rename = "opt_start_seq", skip_serializing_if = "is_default")]
+    pub start_sequence: Option<u64>,
+    #[serde(
+        default,
+        rename = "opt_start_time",
+        skip_serializing_if = "is_default",
+        with = "rfc3339::option"
+    )]
+    /// Optional source start time.
+    pub start_time: Option<OffsetDateTime>,
+    /// Optional additional filter subject.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subject: Option<String>,
+    /// Optional config for sourcing streams from another prefix, used for cross-account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<External>,
+    /// Optional config to set a domain, if source is residing in different one.
+    #[serde(default, rename = "opt_start", skip_serializing_if = "is_default")]
+    pub doamin: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
+pub struct External {
+    /// Api prefix of external source.
+    #[serde(rename = "api")]
+    pub api_prefix: String,
+    /// Optional configuration of delivery prefix.
+    #[serde(rename = "deliver", skip_serializing_if = "is_default")]
+    pub delivery_prefix: Option<String>,
 }
