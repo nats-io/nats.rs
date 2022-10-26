@@ -24,9 +24,11 @@ use std::error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 lazy_static! {
     static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
@@ -62,6 +64,10 @@ pub struct Client {
     subscription_capacity: usize,
     inbox_prefix: String,
     request_timeout: Option<Duration>,
+    shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    flush_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    events_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    connect_task: Arc<Mutex<Option<JoinHandle<Result<(), std::io::Error>>>>>,
 }
 
 impl Client {
@@ -72,6 +78,10 @@ impl Client {
         capacity: usize,
         inbox_prefix: String,
         request_timeout: Option<Duration>,
+        shutdown_tx: tokio::sync::broadcast::Sender<()>,
+        flush_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+        events_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+        connect_task: Arc<Mutex<Option<JoinHandle<Result<(), std::io::Error>>>>>,
     ) -> Client {
         Client {
             info,
@@ -81,7 +91,32 @@ impl Client {
             subscription_capacity: capacity,
             inbox_prefix,
             request_timeout,
+            shutdown_tx,
+            flush_task,
+            events_task,
+            connect_task,
         }
+    }
+
+    pub async fn close(self) -> Result<(), Error> {
+        self.shutdown_tx.send(()).unwrap();
+
+        self.flush_task
+            .lock()
+            .unwrap()
+            .take()
+            .map(|handle| async { handle.await });
+        self.events_task
+            .lock()
+            .unwrap()
+            .take()
+            .map(|handle| async { handle.await });
+        self.connect_task
+            .lock()
+            .unwrap()
+            .take()
+            .map(|handle| async { handle.await });
+        Ok(())
     }
 
     /// Returns last received info from the server.

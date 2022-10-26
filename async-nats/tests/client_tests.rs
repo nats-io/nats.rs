@@ -713,4 +713,18 @@ mod client {
         let _server = nats_server::run_server_with_port("", Some("7777"));
         sub.next().await.unwrap();
     }
+
+    #[tokio::test]
+    async fn connection_close() {
+        tracing_subscriber::fmt().init();
+        let client = async_nats::connect("localhost:4222").await.unwrap();
+
+        println!("SLEEP ON CONN");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        client.clone().close().await.unwrap();
+        client.subscribe("blabla".into()).await.unwrap();
+        println!("CLOSED");
+        tokio::time::sleep(Duration::from_secs(9)).await;
+        client.subscribe("blabla".into()).await.unwrap();
+    }
 }

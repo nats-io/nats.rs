@@ -99,7 +99,7 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -109,6 +109,7 @@ use std::option;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
 use url::{Host, Url};
@@ -313,9 +314,16 @@ impl ConnectionHandler {
     pub(crate) async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<Command>,
+        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> Result<(), io::Error> {
         loop {
+            println!("LOOPING");
             select! {
+                _ = shutdown_rx.recv().fuse() => {
+                    println!("WTFFFF");
+                    trace!("shutting down process loop");
+                    break;
+                }
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
@@ -347,8 +355,10 @@ impl ConnectionHandler {
                 }
             }
         }
+        println!("ESPCAPED THE LOOP");
 
         self.connection.flush().await?;
+        println!("DROPPED");
 
         Ok(())
     }
@@ -627,6 +637,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
 
     let mut connector = Connector::new(
         addrs,
@@ -643,6 +654,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         },
         events_tx,
         state_tx,
+        shutdown_rx,
     )?;
 
     let mut info: ServerInfo = Default::default();
@@ -658,54 +670,76 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
-    let client = Client::new(
-        info_watcher,
-        state_rx,
-        sender.clone(),
-        options.subscription_capacity,
-        options.inbox_prefix,
-        options.request_timeout,
-    );
-    tokio::spawn({
+    let ping_task = tokio::spawn({
         let sender = sender.clone();
+        let mut shutdown_rx = shutdown_tx.subscribe();
         async move {
             loop {
                 match sender.send(Command::Ping).await {
                     Ok(()) => {}
                     Err(_) => return,
                 }
-                tokio::time::sleep(ping_interval).await;
+                tokio::select! {
+                    _ = shutdown_rx.recv()  => {
+                        break;
+                    },
+                    _ = tokio::time::sleep(ping_interval) => {}
+                }
             }
         }
     });
 
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(flush_interval).await;
-            match sender.send(Command::TryFlush).await {
-                Ok(()) => {}
-                Err(_) => return,
+    let flush_task = tokio::spawn({
+        let sender = sender.clone();
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        async move {
+            loop {
+                tokio::select! {
+                _ = tokio::time::sleep(flush_interval) => {},
+                _ = shutdown_rx.recv() => {
+                    break;
+                },
+                }
+                match sender.send(Command::TryFlush).await {
+                    Ok(()) => {}
+                    Err(_) => return,
+                }
             }
         }
     });
 
-    task::spawn(async move {
+    let events_task = task::spawn(async move {
         while let Some(event) = events_rx.recv().await {
             options.event_callback.call(event).await
         }
     });
 
-    task::spawn(async move {
-        if connection.is_none() && options.retry_on_initial_connect {
-            let (info, connection_ok) = connector.connect().await.unwrap();
-            info_sender.send(info).ok();
-            connection = Some(connection_ok);
+    let connect_task = task::spawn({
+        let shutdown_rx = shutdown_tx.subscribe();
+        async move {
+            if connection.is_none() && options.retry_on_initial_connect {
+                let (info, connection_ok) = connector.connect().await.unwrap();
+                info_sender.send(info).ok();
+                connection = Some(connection_ok);
+            }
+            let connection = connection.unwrap();
+            let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
+            connection_handler.process(receiver, shutdown_rx).await
         }
-        let connection = connection.unwrap();
-        let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
-        connection_handler.process(receiver).await
     });
 
+    let client = Client::new(
+        info_watcher,
+        state_rx,
+        sender,
+        options.subscription_capacity,
+        options.inbox_prefix,
+        options.request_timeout,
+        shutdown_tx.clone(),
+        Arc::new(Mutex::new(Some(flush_task))),
+        Arc::new(Mutex::new(Some(events_task))),
+        Arc::new(Mutex::new(Some(connect_task))),
+    );
     Ok(client)
 }
 

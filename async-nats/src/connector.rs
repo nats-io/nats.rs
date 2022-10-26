@@ -59,6 +59,7 @@ pub(crate) struct Connector {
     options: ConnectorOptions,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
+    pub(crate) shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 }
 
 impl Connector {
@@ -67,6 +68,7 @@ impl Connector {
         options: ConnectorOptions,
         events_tx: tokio::sync::mpsc::Sender<Event>,
         state_tx: tokio::sync::watch::Sender<State>,
+        shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> Result<Connector, io::Error> {
         let servers = addrs
             .to_server_addrs()?
@@ -79,11 +81,19 @@ impl Connector {
             options,
             events_tx,
             state_tx,
+            shutdown_rx,
         })
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
         loop {
+            if let Ok(()) = self.shutdown_rx.try_recv() {
+                return Err(std::io::Error::new(
+                    ErrorKind::BrokenPipe,
+                    "client shutdown",
+                ));
+            }
+
             match self.try_connect().await {
                 Ok(inner) => return Ok(inner),
                 Err(error) => {
