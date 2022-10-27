@@ -654,8 +654,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-
-    // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(
