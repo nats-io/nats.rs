@@ -31,7 +31,7 @@ use tracing::debug;
 
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
-use super::stream::{self, Config, DeleteStatus, DiscardPolicy, Info, Stream};
+use super::stream::{self, Config, DeleteStatus, DiscardPolicy, External, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -220,12 +220,43 @@ impl Context {
     where
         Config: From<S>,
     {
-        let config: Config = stream_config.into();
+        let mut config: Config = stream_config.into();
         if config.name.is_empty() {
             return Err(Box::new(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             )));
+        }
+        if let Some(ref mut mirror) = config.mirror {
+            if let Some(ref mut domain) = mirror.domain {
+                if mirror.external.is_some() {
+                    return Err(Box::new(io::Error::new(
+                        ErrorKind::Other,
+                        "domain and external are both set",
+                    )));
+                }
+                mirror.external = Some(External {
+                    api_prefix: format!("$JS.{}.API", domain),
+                    delivery_prefix: None,
+                })
+            }
+        }
+
+        if let Some(ref mut sources) = config.sources {
+            for source in sources {
+                if let Some(ref mut domain) = source.domain {
+                    if source.external.is_some() {
+                        return Err(Box::new(io::Error::new(
+                            ErrorKind::Other,
+                            "domain and external are both set",
+                        )));
+                    }
+                    source.external = Some(External {
+                        api_prefix: format!("$JS.{}.API", domain),
+                        delivery_prefix: None,
+                    })
+                }
+            }
         }
         let subject = format!("STREAM.CREATE.{}", config.name);
         let response: Response<Info> = self.request(subject, &config).await?;
@@ -438,13 +469,28 @@ impl Context {
                 "not a valid key-value store",
             )));
         }
-
-        Ok(Store {
+        let mut store = Store {
             prefix: format!("$KV.{}.", &bucket),
             name: bucket,
             stream_name,
-            stream,
-        })
+            stream: stream.clone(),
+            put_prefix: None,
+            use_jetstream_prefix: self.prefix != "$JS.API",
+        };
+        if let Some(ref mirror) = stream.info.config.mirror {
+            let bucket = mirror.name.trim_start_matches("KV_");
+            if let Some(ref external) = mirror.external {
+                if !external.api_prefix.is_empty() {
+                    store.use_jetstream_prefix = false;
+                    store.prefix = format!("$KV.{}.", bucket);
+                    store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
+                } else {
+                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                }
+            }
+        };
+
+        Ok(store)
     }
 
     /// Creates a new key-value bucket.
@@ -466,7 +512,7 @@ impl Context {
     /// ```
     pub async fn create_key_value(
         &self,
-        config: crate::jetstream::kv::Config,
+        mut config: crate::jetstream::kv::Config,
     ) -> Result<Store, Error> {
         if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
             return Err(Box::new(std::io::Error::new(
@@ -493,11 +539,27 @@ impl Context {
             config.num_replicas
         };
 
+        let mut subjects = Vec::new();
+        if let Some(ref mut mirror) = config.mirror {
+            if !mirror.name.starts_with("KV_") {
+                mirror.name = format!("KV_{}", mirror.name);
+            }
+            config.mirror_direct = true;
+        } else if let Some(ref mut sources) = config.sources {
+            for source in sources {
+                if !source.name.starts_with("KV_") {
+                    source.name = format!("KV_{}", source.name);
+                }
+            }
+        } else {
+            subjects = vec![format!("$KV.{}.>", config.bucket)];
+        }
+
         let stream = self
             .create_stream(stream::Config {
                 name: format!("KV_{}", config.bucket),
                 description: Some(config.description),
-                subjects: vec![format!("$KV.{}.>", config.bucket)],
+                subjects,
                 max_messages_per_subject: history,
                 max_bytes: config.max_bytes,
                 max_age: config.max_age,
@@ -508,18 +570,37 @@ impl Context {
                 deny_delete: true,
                 deny_purge: false,
                 allow_direct: true,
+                sources: config.sources,
+                mirror: config.mirror,
                 num_replicas,
                 discard: stream::DiscardPolicy::New,
+                mirror_direct: config.mirror_direct,
                 ..Default::default()
             })
             .await?;
 
-        Ok(Store {
-            name: config.bucket.clone(),
-            stream_name: stream.info.config.name.clone(),
-            prefix: format!("$KV.{}.", config.bucket),
-            stream,
-        })
+        let mut store = Store {
+            prefix: format!("$KV.{}.", &config.bucket),
+            name: config.bucket,
+            stream: stream.clone(),
+            stream_name: stream.info.config.name,
+            put_prefix: None,
+            use_jetstream_prefix: self.prefix != "$JS.API",
+        };
+        if let Some(ref mirror) = stream.info.config.mirror {
+            let bucket = mirror.name.trim_start_matches("KV_");
+            if let Some(ref external) = mirror.external {
+                if !external.api_prefix.is_empty() {
+                    store.use_jetstream_prefix = false;
+                    store.prefix = format!("$KV.{}.", bucket);
+                    store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
+                } else {
+                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                }
+            }
+        };
+
+        Ok(store)
     }
 
     /// Deletes given key-value bucket.

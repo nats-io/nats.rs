@@ -876,6 +876,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub allow_direct: bool,
 
+    /// Enable direct access also for mirrors.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub mirror_direct: bool,
+
     /// Stream mirror configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror: Option<Source>,
@@ -1238,8 +1242,8 @@ pub struct Source {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<External>,
     /// Optional config to set a domain, if source is residing in different one.
-    #[serde(default, rename = "opt_start", skip_serializing_if = "is_default")]
-    pub doamin: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub domain: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
