@@ -1118,8 +1118,6 @@ mod jetstream {
                     context
                         .publish(format!("events.{}", i), i.to_string().into())
                         .await
-                        .unwrap()
-                        .await
                         .ok();
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1133,13 +1131,7 @@ mod jetstream {
                 break;
             }
             let message = message.unwrap();
-            assert_eq!(
-                from_utf8(&message.payload)
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap(),
-                i
-            );
+            assert_eq!(i + 1, message.info().unwrap().stream_sequence as usize);
             assert_eq!(message.status, None);
         }
     }
