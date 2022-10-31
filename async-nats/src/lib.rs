@@ -111,6 +111,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
+use tokio::time::{interval, Duration};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -312,10 +313,21 @@ impl ConnectionHandler {
 
     pub(crate) async fn process(
         &mut self,
+        ping_period: Duration,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
+        let mut ping_interval = interval(ping_period);
+
         loop {
             select! {
+                _ = ping_interval.tick().fuse() => {
+                    self.pending_pings += 1;
+                    if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
+                        self.handle_disconnect().await?;
+                    }
+
+                    self.connection.flush().await?;
+                },
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
@@ -621,7 +633,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let ping_interval = options.ping_interval;
+    let ping_period = options.ping_interval;
     let flush_interval = options.flush_interval;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
@@ -663,18 +675,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.inbox_prefix,
         options.request_timeout,
     );
-    tokio::spawn({
-        let sender = sender.clone();
-        async move {
-            loop {
-                match sender.send(Command::Ping).await {
-                    Ok(()) => {}
-                    Err(_) => return,
-                }
-                tokio::time::sleep(ping_interval).await;
-            }
-        }
-    });
 
     tokio::spawn(async move {
         loop {
@@ -700,7 +700,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
         let connection = connection.unwrap();
         let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
-        connection_handler.process(receiver).await
+        connection_handler.process(ping_period, receiver).await
     });
 
     Ok(client)
