@@ -223,6 +223,7 @@ pub(crate) enum ServerOp {
         headers: Option<HeaderMap>,
         status: Option<StatusCode>,
         description: Option<String>,
+        length: usize,
     },
 }
 
@@ -377,6 +378,7 @@ impl ConnectionHandler {
                 headers,
                 status,
                 description,
+                length,
             } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message = Message {
@@ -386,6 +388,7 @@ impl ConnectionHandler {
                         headers,
                         status,
                         description,
+                        length,
                     };
 
                     // if the channel for subscription was dropped, remove the

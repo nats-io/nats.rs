@@ -622,10 +622,6 @@ impl futures::Stream for Stream {
                                 "timeout reached. remaining messages: {}, bytes {}",
                                 pending_messages, pending_bytes
                             );
-                            // We do not want to reset to 0, as more than 1 fetch request might be
-                            // ongoing. This is not perfect, as we don't know how many messages
-                            // were consumed from that specific fetch, but that's best what we can
-                            // do until server can identify fetches.
                             self.pending_messages =
                                 self.pending_messages.saturating_sub(pending_messages);
                             trace!("message bytes len: {}", pending_bytes);
@@ -655,7 +651,8 @@ impl futures::Stream for Stream {
                                     .map(|headers| {
                                         headers.iter().fold(0, |acc, (key, value)| {
                                             acc + key.as_ref().len()
-                                                + value.iter().fold(0, |acc, v| acc + v.len())
+                                                + 2
+                                                + value.iter().fold(0, |acc, v| acc + v.len() + 2)
                                         })
                                     })
                                     .unwrap_or(0);
