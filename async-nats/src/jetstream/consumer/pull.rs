@@ -574,8 +574,10 @@ impl futures::Stream for Stream {
                             debug!("request successful, setting pending messages");
                             if reset {
                                 self.pending_messages = self.batch_config.batch;
+                                self.pending_bytes = self.batch_config.max_bytes;
                             } else {
                                 self.pending_messages += self.batch_config.batch;
+                                self.pending_bytes += self.batch_config.max_bytes;
                             }
                             self.pending_request = false;
                             continue;
@@ -592,7 +594,7 @@ impl futures::Stream for Stream {
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
-                        StatusCode::TIMEOUT => {
+                        StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
                             trace!("TIMEOUT MESSAGE: {:?}", message);
                             let pending_messages = message
                                 .headers
@@ -620,6 +622,7 @@ impl futures::Stream for Stream {
                             // do until server can identify fetches.
                             self.pending_messages =
                                 self.pending_messages.saturating_sub(pending_messages);
+                            trace!("message bytes len: {}", pending_bytes);
                             self.pending_bytes = self.pending_bytes.saturating_sub(pending_bytes);
                             continue;
                         }
@@ -638,6 +641,19 @@ impl futures::Stream for Stream {
                             }
                             *self.last_seen.lock().unwrap() = Instant::now();
                             self.pending_messages = self.pending_messages.saturating_sub(1);
+                            let bytes = message.subject.len()
+                                + message.payload.len()
+                                + message
+                                    .headers
+                                    .as_ref()
+                                    .map(|headers| {
+                                        headers.iter().fold(0, |acc, (key, value)| {
+                                            acc + key.as_ref().len()
+                                                + value.iter().fold(0, |acc, v| acc + v.len())
+                                        })
+                                    })
+                                    .unwrap_or(0);
+                            self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,
