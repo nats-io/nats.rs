@@ -97,9 +97,9 @@ impl Default for ConnectOptions {
             ping_interval: Duration::from_secs(60),
             sender_capacity: 128,
             subscription_capacity: 1024,
-            event_callback: CallbackArg1::<Event, ()>(Box::new(move |error| {
+            event_callback: CallbackArg1::<Event, ()>(Box::new(move |event| {
                 Box::pin(async move {
-                    tracing::error!("error : {}", error);
+                    tracing::info!("event: {}", event);
                 })
             })),
             inbox_prefix: "_INBOX".to_string(),

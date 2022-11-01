@@ -150,8 +150,8 @@ jobs:
         run: |
           set -eo pipefail
           echo "msrv check"
-          rustup install 1.59.0
-          cargo +1.59.0 check
+          rustup install 1.64.0
+          cargo +1.64.0 check
 
   check_examples:
     name: check (examples)
