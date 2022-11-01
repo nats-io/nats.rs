@@ -595,6 +595,12 @@ impl futures::Stream for Stream {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
+                            if message.description.as_deref() == Some("Consumer is push based") {
+                                return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    format!("{:?}: {:?}", message.status, message.description),
+                                )))));
+                            }
                             trace!("TIMEOUT MESSAGE: {:?}", message);
                             let pending_messages = message
                                 .headers
