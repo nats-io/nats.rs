@@ -762,6 +762,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
@@ -818,15 +819,15 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut sub = client.subscribe("test".into()).await?;
-    /// sub.unsubscribe_after(3).await?;
+    /// let mut subscriber = client.subscribe("test".into()).await?;
+    /// subscriber.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
     /// for _ in 0..3 {
     ///     client.publish("test".into(), "data".into()).await?;
     /// }
     ///
-    /// while let Some(message) = sub.next().await {
+    /// while let Some(message) = subscriber.next().await {
     ///     println!("message received: {:?}", message);
     /// }
     /// println!("no more messages, unsubscribed");

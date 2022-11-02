@@ -27,6 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
+use tracing::trace;
 
 lazy_static! {
     static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
@@ -278,6 +279,7 @@ impl Client {
     /// # }
     /// ```
     pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
+        trace!("request sent to subject: {} ({})", subject, payload.len());
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
