@@ -99,7 +99,7 @@
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tracing::debug;
+use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -319,7 +319,7 @@ impl ConnectionHandler {
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
-                            println!("error handling command {}", err);
+                            error!("error handling command {}", err);
                         }
                         None => {
                             break;
@@ -330,16 +330,16 @@ impl ConnectionHandler {
                 maybe_op_result = self.connection.read_op().fuse() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
-                            println!("error handling operation {}", err);
+                            error!("error handling operation {}", err);
                         }
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error handling operation {}", err);
+                                error!("error handling operation {}", err);
                             }
                         }
                         Err(op_err) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error reconnecting {}. original error={}", err, op_err);
+                                error!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
                     }
@@ -458,7 +458,7 @@ impl ConnectionHandler {
                         .write_op(ClientOp::Unsubscribe { sid, max })
                         .await
                     {
-                        println!("Send failed with {:?}", err);
+                        error!("Send failed with {:?}", err);
                     }
                 }
             }
@@ -528,7 +528,7 @@ impl ConnectionHandler {
                     })
                     .await
                 {
-                    println!("Sending Subscribe failed with {:?}", err);
+                    error!("Sending Subscribe failed with {:?}", err);
                 }
             }
             Command::Publish {
@@ -548,7 +548,7 @@ impl ConnectionHandler {
                     .await
                 {
                     self.handle_disconnect().await?;
-                    println!("Sending Publish failed with {:?}", err);
+                    error!("Sending Publish failed with {:?}", err);
                 }
             }
             Command::Connect(connect_info) => {
@@ -653,8 +653,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-
-    // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(
@@ -721,7 +719,7 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Connected => write!(f, "reconnected"),
+            Event::Connected => write!(f, "connected"),
             Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
             Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
@@ -763,6 +761,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
@@ -819,15 +818,15 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut sub = client.subscribe("test".into()).await?;
-    /// sub.unsubscribe_after(3).await?;
+    /// let mut subscriber = client.subscribe("test".into()).await?;
+    /// subscriber.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
     /// for _ in 0..3 {
     ///     client.publish("test".into(), "data".into()).await?;
     /// }
     ///
-    /// while let Some(message) = sub.next().await {
+    /// while let Some(message) = subscriber.next().await {
     ///     println!("message received: {:?}", message);
     /// }
     /// println!("no more messages, unsubscribed");
