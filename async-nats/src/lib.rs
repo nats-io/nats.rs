@@ -335,7 +335,6 @@ impl ConnectionHandler {
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
                                 error!("error handling operation {}", err);
-                            } else {
                             }
                         }
                         Err(op_err) => {
