@@ -71,7 +71,7 @@ fn jetstream_publish() {
     let msg = b"Hello JS";
 
     // Basic publish like NATS core.
-    let ack = js.publish("foo", &msg).unwrap();
+    let ack = js.publish("foo", msg).unwrap();
     assert_eq!(ack.stream, "TEST");
     assert_eq!(ack.sequence, 1);
     assert_eq!(js.stream_info("TEST").unwrap().state.messages, 1);
@@ -102,7 +102,7 @@ fn jetstream_publish() {
     let err = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 expected_last_sequence: Some(10),
                 ..Default::default()
@@ -130,7 +130,7 @@ fn jetstream_publish() {
     let ack = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 id: Some("ZZZ".to_string()),
                 ..Default::default()
@@ -146,7 +146,7 @@ fn jetstream_publish() {
     let ack = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 id: Some("ZZZ".to_string()),
                 ..Default::default()
