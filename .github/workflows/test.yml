@@ -123,11 +123,24 @@ jobs:
           components: clippy
           override: true
 
-      - name: Check lint
+      - name: Check workflow permissions
+        id: check_permissions
+        uses: scherermichael-oss/action-has-permission@1.0.6
+        with:
+          required-permission: write
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check lint with annotations
         uses: actions-rs/clippy-check@v1.0.7
+        if: steps.check_permissions.outputs.has-permission
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --tests --examples --all-features -- --deny clippy::all
+
+      - name: Check lint without annotations
+        if: ${{ !steps.check_permissions.outputs.has-permission }}
+        run: cargo clippy --tests --examples --all-features -- -D warnings
 
   check_msrv:
     name: check (msrv)
