@@ -58,7 +58,7 @@ pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
 }
 
 pub(crate) fn sanitize_object_name(object_name: &str) -> String {
-    object_name.replace('.', "_").replace(' ', "_")
+    object_name.replace(['.', ' '], "_")
 }
 
 /// Configuration values for object store buckets.
@@ -472,7 +472,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         if info.pending == 0 {
                             let digest = self.digest.take().map(|context| context.finish());
                             if let Some(digest) = digest {
-                                if format!("SHA-256={}", base64::encode_config(&digest, URL_SAFE))
+                                if format!("SHA-256={}", base64::encode_config(digest, URL_SAFE))
                                     != self.info.digest
                                 {
                                     return Poll::Ready(Err(io::Error::new(
