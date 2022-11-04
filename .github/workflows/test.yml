@@ -119,15 +119,16 @@ jobs:
       - name: Set up rust
         uses: actions-rs/toolchain@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           toolchain: stable
           components: clippy
           override: true
 
       - name: Check lint
-        uses: actions-rs/clippy-check@v1.0.7
+        uses: actions-rs/cargo@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           args: --tests --examples --all-features -- --deny clippy::all
+          command: clippy
 
   check_msrv:
     name: check (msrv)
