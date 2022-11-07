@@ -601,7 +601,6 @@ impl futures::Stream for Stream {
                                     format!("{:?}: {:?}", message.status, message.description),
                                 )))));
                             }
-                            trace!("TIMEOUT MESSAGE: {:?}", message);
                             let pending_messages = message
                                 .headers
                                 .as_ref()
