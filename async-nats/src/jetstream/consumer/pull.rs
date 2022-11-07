@@ -643,20 +643,7 @@ impl futures::Stream for Stream {
                             }
                             *self.last_seen.lock().unwrap() = Instant::now();
                             self.pending_messages = self.pending_messages.saturating_sub(1);
-                            let bytes = message.subject.len()
-                                + message.payload.len()
-                                + message
-                                    .headers
-                                    .as_ref()
-                                    .map(|headers| {
-                                        headers.iter().fold(0, |acc, (key, value)| {
-                                            acc + key.as_ref().len()
-                                                + 2
-                                                + value.iter().fold(0, |acc, v| acc + v.len() + 2)
-                                        })
-                                    })
-                                    .unwrap_or(0);
-                            self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
+                            self.pending_bytes = self.pending_bytes.saturating_sub(message.length);
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,
