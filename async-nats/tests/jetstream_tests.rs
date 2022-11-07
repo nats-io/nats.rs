@@ -1711,7 +1711,13 @@ mod jetstream {
             .await
             .unwrap();
 
-        let mut messages = consumer.messages().await.unwrap();
+        let mut messages = consumer
+            .stream()
+            .expires(Duration::from_secs(10))
+            .heartbeat(Duration::from_secs(5))
+            .messages()
+            .await
+            .unwrap();
 
         messages.next().await.unwrap().unwrap().ack().await.unwrap();
         let name = &consumer.cached_info().name;
@@ -1728,7 +1734,7 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
-        assert!(now.elapsed().le(&Duration::from_secs(50)));
+        assert!(now.elapsed().le(&Duration::from_secs(15)));
     }
 
     #[tokio::test]
