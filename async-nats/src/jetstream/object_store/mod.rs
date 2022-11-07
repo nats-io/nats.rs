@@ -15,7 +15,7 @@
 use std::{
     cmp,
     io::{self, ErrorKind},
-    str::FromStr,
+    str::{from_utf8, FromStr},
     task::Poll,
     time::Duration,
 };
@@ -57,8 +57,8 @@ pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-pub(crate) fn sanitize_object_name(object_name: &str) -> String {
-    object_name.replace('.', "_").replace(' ', "_")
+pub(crate) fn enocde_object_name(object_name: &str) -> String {
+    base64::encode_config(object_name, base64::URL_SAFE)
 }
 
 /// Configuration values for object store buckets.
@@ -154,7 +154,7 @@ impl ObjectStore {
         let mut headers = HeaderMap::default();
         headers.insert(NATS_ROLLUP, HeaderValue::from_str(ROLLUP_SUBJECT)?);
 
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = format!("$O.{}.M.{}", &self.name, enocde_object_name(object_name));
 
         self.stream
             .context
@@ -185,7 +185,7 @@ impl ObjectStore {
     /// ```
     pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
         let object_name = object_name.as_ref();
-        let object_name = sanitize_object_name(object_name);
+        let object_name = enocde_object_name(object_name);
         if !is_valid_object_name(&object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -234,7 +234,7 @@ impl ObjectStore {
     {
         let object_meta: ObjectMeta = meta.into();
 
-        let object_name = sanitize_object_name(&object_meta.name);
+        let object_name = enocde_object_name(&object_meta.name);
         if !is_valid_object_name(&object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -391,6 +391,15 @@ impl Stream for Watch<'_> {
             Poll::Ready(message) => match message {
                 Some(message) => Poll::Ready(
                     serde_json::from_slice::<ObjectInfo>(&message?.payload)
+                        .map(|info| {
+                            let decoded =
+                                base64::decode_config(info.name.as_str(), URL_SAFE).unwrap();
+                            let name = from_utf8(&decoded).unwrap();
+                            ObjectInfo {
+                                name: name.to_string(),
+                                ..info
+                            }
+                        })
                         .map_err(|err| {
                             Box::from(io::Error::new(
                                 ErrorKind::Other,
