@@ -1452,8 +1452,8 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..10 {
-                tokio::time::sleep(Duration::from_millis(600)).await;
+            for i in 0..5 {
+                tokio::time::sleep(Duration::from_millis(1200)).await;
                 context
                     .publish(
                         "events".to_string(),
@@ -1467,12 +1467,12 @@ mod jetstream {
         let mut iter = consumer
             .stream()
             .max_messages_per_batch(10)
-            .expires(Duration::from_millis(1000))
-            .heartbeat(Duration::from_millis(500))
+            .expires(Duration::from_millis(2000))
+            .heartbeat(Duration::from_millis(1000))
             .messages()
             .await
             .unwrap()
-            .take(10);
+            .take(5);
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
         }
