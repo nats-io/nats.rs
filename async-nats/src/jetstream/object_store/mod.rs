@@ -234,15 +234,15 @@ impl ObjectStore {
     {
         let object_meta: ObjectMeta = meta.into();
 
-        let object_name = enocde_object_name(&object_meta.name);
-        if !is_valid_object_name(&object_name) {
+        let encoded_object_name = enocde_object_name(&object_meta.name);
+        if !is_valid_object_name(&encoded_object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "invalid object name",
             )));
         }
         // Fetch any existing object info, if there is any for later use.
-        let maybe_existing_object_info = match self.info(&object_name).await {
+        let maybe_existing_object_info = match self.info(&encoded_object_name).await {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
         };
@@ -276,10 +276,9 @@ impl ObjectStore {
                 .await?;
         }
         let digest = context.finish();
-        // Create a random subject prefixed with the object stream name.
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = format!("$O.{}.M.{}", &self.name, &encoded_object_name);
         let object_info = ObjectInfo {
-            name: object_name,
+            name: object_meta.name,
             description: object_meta.description,
             link: object_meta.link,
             bucket: self.name.clone(),
@@ -298,6 +297,7 @@ impl ObjectStore {
         headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.parse::<HeaderValue>()?);
         let data = serde_json::to_vec(&object_info)?;
 
+        // publish meta.
         self.stream
             .context
             .publish_with_headers(subject, headers, data.into())
@@ -396,26 +396,6 @@ impl Stream for Watch<'_> {
                                 ErrorKind::Other,
                                 format!("failed to deserialize the reponse: {:?}", err),
                             ))
-                        })
-                        .and_then(|info| {
-                            Ok(ObjectInfo {
-                                name: from_utf8(
-                                    &base64::decode_config(info.name, URL_SAFE).map_err(|err| {
-                                        Box::new(io::Error::new(
-                                            ErrorKind::Other,
-                                            format!("failed to deserialize the reponse: {:?}", err),
-                                        ))
-                                    })?,
-                                )
-                                .map_err(|err| {
-                                    Box::new(io::Error::new(
-                                        ErrorKind::Other,
-                                        format!("failed to deserialize the reponse: {:?}", err),
-                                    ))
-                                })?
-                                .to_string(),
-                                ..info
-                            })
                         })
                         .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
                 ),
