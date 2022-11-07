@@ -472,7 +472,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         if info.pending == 0 {
                             let digest = self.digest.take().map(|context| context.finish());
                             if let Some(digest) = digest {
-                                if format!("SHA-256={}", base64::encode_config(&digest, URL_SAFE))
+                                if format!("SHA-256={}", base64::encode_config(digest, URL_SAFE))
                                     != self.info.digest
                                 {
                                     return Poll::Ready(Err(io::Error::new(
