@@ -391,20 +391,31 @@ impl Stream for Watch<'_> {
             Poll::Ready(message) => match message {
                 Some(message) => Poll::Ready(
                     serde_json::from_slice::<ObjectInfo>(&message?.payload)
-                        .map(|info| {
-                            let decoded =
-                                base64::decode_config(info.name.as_str(), URL_SAFE).unwrap();
-                            let name = from_utf8(&decoded).unwrap();
-                            ObjectInfo {
-                                name: name.to_string(),
-                                ..info
-                            }
-                        })
                         .map_err(|err| {
                             Box::from(io::Error::new(
                                 ErrorKind::Other,
                                 format!("failed to deserialize the reponse: {:?}", err),
                             ))
+                        })
+                        .and_then(|info| {
+                            Ok(ObjectInfo {
+                                name: from_utf8(
+                                    &base64::decode_config(info.name, URL_SAFE).map_err(|err| {
+                                        Box::new(io::Error::new(
+                                            ErrorKind::Other,
+                                            format!("failed to deserialize the reponse: {:?}", err),
+                                        ))
+                                    })?,
+                                )
+                                .map_err(|err| {
+                                    Box::new(io::Error::new(
+                                        ErrorKind::Other,
+                                        format!("failed to deserialize the reponse: {:?}", err),
+                                    ))
+                                })?
+                                .to_string(),
+                                ..info
+                            })
                         })
                         .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
                 ),
