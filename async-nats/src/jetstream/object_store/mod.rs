@@ -15,7 +15,7 @@
 use std::{
     cmp,
     io::{self, ErrorKind},
-    str::{from_utf8, FromStr},
+    str::FromStr,
     task::Poll,
     time::Duration,
 };
