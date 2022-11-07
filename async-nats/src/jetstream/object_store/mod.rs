@@ -57,8 +57,8 @@ pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-pub(crate) fn sanitize_object_name(object_name: &str) -> String {
-    object_name.replace(['.', ' '], "_")
+pub(crate) fn encode_object_name(object_name: &str) -> String {
+    base64::encode_config(object_name, base64::URL_SAFE)
 }
 
 /// Configuration values for object store buckets.
@@ -185,7 +185,7 @@ impl ObjectStore {
     /// ```
     pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
         let object_name = object_name.as_ref();
-        let object_name = sanitize_object_name(object_name);
+        let object_name = encode_object_name(object_name);
         if !is_valid_object_name(&object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -234,15 +234,15 @@ impl ObjectStore {
     {
         let object_meta: ObjectMeta = meta.into();
 
-        let object_name = sanitize_object_name(&object_meta.name);
-        if !is_valid_object_name(&object_name) {
+        let encoded_object_name = encode_object_name(&object_meta.name);
+        if !is_valid_object_name(&encoded_object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "invalid object name",
             )));
         }
         // Fetch any existing object info, if there is any for later use.
-        let maybe_existing_object_info = match self.info(&object_name).await {
+        let maybe_existing_object_info = match self.info(&encoded_object_name).await {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
         };
@@ -277,9 +277,9 @@ impl ObjectStore {
         }
         let digest = context.finish();
         // Create a random subject prefixed with the object stream name.
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = format!("$O.{}.M.{}", &self.name, &encoded_object_name);
         let object_info = ObjectInfo {
-            name: object_name,
+            name: object_meta.name,
             description: object_meta.description,
             link: object_meta.link,
             bucket: self.name.clone(),
