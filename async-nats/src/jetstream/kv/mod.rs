@@ -543,7 +543,7 @@ impl Store {
         Ok(())
     }
 
-    /// Purges the given key, destructively removing everything from the bucket.
+    /// Purges all the revisions of a entry destructively, leaving behind a single purge entry in-place.
     ///
     /// # Examples
     ///
