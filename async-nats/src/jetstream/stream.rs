@@ -1055,6 +1055,12 @@ impl TryFrom<RawMessage> for crate::Message {
             .map(base64::decode)
             .map_or(Ok(None), |v| v.map(Some))?;
 
+        let length = decoded_headers
+            .as_ref()
+            .map_or_else(|| 0, |headers| headers.len())
+            + decoded_paylaod.len()
+            + value.subject.len();
+
         let (headers, status, description) =
             decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
 
@@ -1065,6 +1071,7 @@ impl TryFrom<RawMessage> for crate::Message {
             headers,
             status,
             description,
+            length,
         })
     }
 }

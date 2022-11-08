@@ -970,7 +970,6 @@ mod jetstream {
                 .unwrap();
         }
 
-        println!("pubbed");
         let mut messages = consumer
             .stream()
             .max_messages_per_batch(1)
@@ -1630,7 +1629,6 @@ mod jetstream {
     }
     #[tokio::test]
     async fn pull_consumer_stream_without_heartbeat() {
-        tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {:?}", err) })
@@ -1894,7 +1892,13 @@ mod jetstream {
                 .unwrap();
         }
 
-        let messages = consumer.messages().await.unwrap();
+        let messages = consumer
+            .stream()
+            .expires(Duration::from_secs(60))
+            .heartbeat(Duration::from_secs(30))
+            .messages()
+            .await
+            .unwrap();
 
         println!("starting interation");
         let mut messages = messages.enumerate();
@@ -2211,5 +2215,59 @@ mod jetstream {
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
             "data".to_string(),
         );
+    }
+
+    #[tokio::test]
+    async fn pull_by_bytes() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        tokio::task::spawn(async move {
+            for i in 0..1000 {
+                context
+                    .publish(
+                        "events".to_string(),
+                        format!("Some bytes to sent with sequence number included: {}", i).into(),
+                    )
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+
+        let mut iter = consumer
+            .stream()
+            .expires(Duration::from_secs(3))
+            .max_bytes_per_batch(1024)
+            .messages()
+            .await
+            .unwrap()
+            .take(1000);
+        while let Some(result) = iter.next().await {
+            result.unwrap().ack().await.unwrap();
+        }
+
+        let info = consumer.info().await.unwrap();
+        assert!(info.delivered.last_active.is_some());
     }
 }
