@@ -45,7 +45,7 @@ async fn main() -> Result<(), async_nats::Error> {
             ..Default::default()
         })
         .await?;
-        
+
     // Attach to the messages iterator for the Consumer.
     // The iterator does its best to optimize retrieval of messages from the server.
     let mut messages = consumer.messages().await?.take(10);

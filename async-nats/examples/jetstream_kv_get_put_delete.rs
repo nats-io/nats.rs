@@ -28,10 +28,12 @@ async fn main() -> Result<(), async_nats::Error> {
     let jetstream = jetstream::new(client);
 
     // Create a new key value store.
-    jetstream.create_key_value(async_nats::jetstream::kv::Config {
-        bucket: "kv_example".to_string(),
-         ..Default::default()
-    }).await?;
+    jetstream
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "kv_example".to_string(),
+            ..Default::default()
+        })
+        .await?;
 
     // Get the new key value store.
     let kv = jetstream.get_key_value("kv_example").await?;
