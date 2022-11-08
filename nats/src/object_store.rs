@@ -357,7 +357,7 @@ impl ObjectStore {
         let stream_name = format!("OBJ_{}", &self.name);
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
 
-        let message = self.context.get_last_message(&stream_name, &subject)?;
+        let message = self.context.get_last_message(stream_name, &subject)?;
         let object_info = serde_json::from_slice::<ObjectInfo>(&message.data)?;
 
         Ok(object_info)
@@ -469,7 +469,7 @@ impl ObjectStore {
             let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
 
             self.context
-                .purge_stream_subject(&stream_name, &chunk_subject)?;
+                .purge_stream_subject(stream_name, &chunk_subject)?;
         }
 
         Ok(object_info)
@@ -565,7 +565,7 @@ impl ObjectStore {
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
 
         self.context
-            .purge_stream_subject(&stream_name, &chunk_subject)?;
+            .purge_stream_subject(stream_name, &chunk_subject)?;
 
         Ok(())
     }

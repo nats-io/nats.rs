@@ -288,7 +288,7 @@ impl JetStream {
         }
 
         let stream_name = format!("KV_{}", bucket);
-        self.delete_stream(&stream_name)?;
+        self.delete_stream(stream_name)?;
 
         Ok(())
     }
