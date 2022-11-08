@@ -128,6 +128,19 @@ jobs:
         with:
           args: --tests --examples --all-features -- --deny clippy::all
           command: clippy
+  
+  check_licenses:
+    name: check (licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Run cargo deny
+        uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check
+          command-arguments: licenses
 
   check_msrv:
     name: check (msrv)
