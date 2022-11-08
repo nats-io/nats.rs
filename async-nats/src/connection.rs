@@ -490,10 +490,7 @@ mod read_op {
         server.flush().await.unwrap();
 
         let result = connection.read_op().await.unwrap();
-        assert_eq!(
-            result,
-            Some(ServerOp::Info(Box::new(ServerInfo::default())))
-        );
+        assert_eq!(result, Some(ServerOp::Info(Box::default())));
 
         server
             .write_all(b"INFO { \"version\": \"1.0.0\" }\r\n")
@@ -521,10 +518,7 @@ mod read_op {
 
         server.write_all(b"INFO {}\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
-        assert_eq!(
-            result,
-            Some(ServerOp::Info(Box::new(ServerInfo::default())))
-        );
+        assert_eq!(result, Some(ServerOp::Info(Box::default())));
 
         server
             .write_all(b"-ERR something went wrong\r\n")

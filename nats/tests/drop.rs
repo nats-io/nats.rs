@@ -22,8 +22,8 @@ use std::{
 fn drop_flushes() -> io::Result<()> {
     let s = nats_server::run_basic_server();
 
-    let nc1 = nats::connect(&s.client_url())?;
-    let nc2 = nats::connect(&s.client_url())?;
+    let nc1 = nats::connect(s.client_url())?;
+    let nc2 = nats::connect(s.client_url())?;
 
     let inbox = nc1.new_inbox();
     let sub = nc2.subscribe(&inbox)?;
@@ -41,7 +41,7 @@ fn drop_flushes() -> io::Result<()> {
 fn two_connections() -> io::Result<()> {
     let s = nats_server::run_basic_server();
 
-    let nc1 = nats::connect(&s.client_url())?;
+    let nc1 = nats::connect(s.client_url())?;
     let nc2 = nc1.clone();
 
     nc1.publish("foo", b"bar")?;
@@ -196,7 +196,7 @@ fn close_responsiveness_regression_jetstream_complex() {
 // Helper function to return server and client.
 pub fn run_basic_jetstream() -> (nats_server::Server, Connection, JetStream) {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = JetStream::new(nc.clone(), JetStreamOptions::default());
 
     (s, nc, js)

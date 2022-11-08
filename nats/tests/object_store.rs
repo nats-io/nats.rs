@@ -19,7 +19,7 @@ use std::io::Read;
 #[test]
 fn object_random() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
@@ -104,7 +104,7 @@ fn object_random() {
 #[test]
 fn object_sealed() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
@@ -123,7 +123,7 @@ fn object_sealed() {
 #[test]
 fn object_delete() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
@@ -150,7 +150,7 @@ fn object_delete() {
 #[test]
 fn object_multiple_delete() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
@@ -182,7 +182,7 @@ fn object_multiple_delete() {
 #[test]
 fn object_names() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
@@ -209,7 +209,7 @@ fn object_names() {
 #[test]
 fn object_watch() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context

@@ -22,7 +22,7 @@ use nats::kv::*;
 #[test]
 fn key_value_entry() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -79,7 +79,7 @@ fn key_value_entry() {
 #[test]
 fn key_value_short_history() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -106,7 +106,7 @@ fn key_value_short_history() {
 #[test]
 fn key_value_long_history() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -133,7 +133,7 @@ fn key_value_long_history() {
 #[test]
 fn key_value_watch() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -172,7 +172,7 @@ fn key_value_watch() {
 #[test]
 fn key_value_watch_all() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -222,7 +222,7 @@ fn key_value_watch_all() {
 #[test]
 fn key_value_bind() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     context
@@ -251,7 +251,7 @@ fn key_value_bind() {
 #[test]
 fn key_value_delete() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     context
@@ -270,7 +270,7 @@ fn key_value_delete() {
 #[test]
 fn key_value_purge() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let bucket = context
@@ -304,7 +304,7 @@ fn key_value_purge() {
 #[test]
 fn key_value_keys() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let client = nats::connect(&server.client_url()).unwrap();
+    let client = nats::connect(server.client_url()).unwrap();
     let context = nats::jetstream::new(client);
 
     let kv = context
@@ -364,7 +364,7 @@ fn key_value_keys() {
 fn key_value_domain() {
     let _server = nats_server::run_server("tests/configs/jetstream-domain.conf");
     let leaf_server = nats_server::run_server("tests/configs/jetstream-domain-leaf.conf");
-    let client = nats::connect(&leaf_server.client_url()).unwrap();
+    let client = nats::connect(leaf_server.client_url()).unwrap();
     let opts = nats::jetstream::JetStreamOptions::new().domain("foobar");
     let context = nats::jetstream::JetStream::new(client, opts);
 
