@@ -119,8 +119,7 @@ jobs:
       - name: Set up rust
         uses: actions-rs/toolchain@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          toolchain: stable
+          toolchain: nightly
           components: clippy
           override: true
 
