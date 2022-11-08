@@ -1629,7 +1629,6 @@ mod jetstream {
     }
     #[tokio::test]
     async fn pull_consumer_stream_without_heartbeat() {
-        // tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {:?}", err) })
@@ -2214,7 +2213,6 @@ mod jetstream {
 
     #[tokio::test]
     async fn pull_by_bytes() {
-        tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);

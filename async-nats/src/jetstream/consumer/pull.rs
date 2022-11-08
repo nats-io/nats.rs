@@ -14,6 +14,7 @@
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::{
+    future,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,
@@ -438,6 +439,17 @@ impl Stream {
             let inbox = inbox.clone();
             async move {
                 loop {
+                    // this is just in edge case of missing response for some reason.
+                    let expires = batch_config
+                        .expires
+                        .map(|expires| match expires {
+                            0 => futures::future::Either::Left(future::pending()),
+                            t => futures::future::Either::Right(tokio::time::sleep(
+                                Duration::from_nanos(t as u64)
+                                    .saturating_add(Duration::from_secs(5)),
+                            )),
+                        })
+                        .unwrap_or_else(|| futures::future::Either::Left(future::pending()));
                     // Need to check previous state, as `changed` will always fire on first
                     // call.
                     let prev_state = context.client.state.borrow().to_owned();
@@ -461,6 +473,7 @@ impl Stream {
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
+                        _ = expires => debug!("expired pull request"),
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
