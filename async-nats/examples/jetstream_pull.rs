@@ -1,3 +1,16 @@
+// Copyright 2020-2022 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::{env, str::from_utf8};
 
 use async_nats::jetstream::{self, consumer::PullConsumer};
@@ -32,14 +45,7 @@ async fn main() -> Result<(), async_nats::Error> {
             ..Default::default()
         })
         .await?;
-
-    // Publish a few messages for the example.
-    for i in 0..10 {
-        jetstream
-            .publish(format!("events.{}", i), "data".into())
-            .await?;
-    }
-
+        
     // Attach to the messages iterator for the Consumer.
     // The iterator does its best to optimize retrieval of messages from the server.
     let mut messages = consumer.messages().await?.take(10);
