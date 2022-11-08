@@ -1155,7 +1155,7 @@ impl JetStream {
         let bind_only = maybe_options.map_or(false, |options| options.bind_only);
         let maybe_consumer_info = if let Some(consumer_name) = maybe_consumer_name {
             let consumer_info_result = self
-                .consumer_info(&stream_name, &consumer_name)
+                .consumer_info(&stream_name, consumer_name)
                 .and_then(process_consumer_info);
 
             match consumer_info_result {
@@ -1415,7 +1415,7 @@ impl JetStream {
                         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "stream not found"))?;
 
                     let consumer_info = self
-                        .consumer_info(&stream_name, &consumer_name)
+                        .consumer_info(&stream_name, consumer_name)
                         .and_then(process_consumer_info)?;
 
                     let deliver_subject = consumer_info
