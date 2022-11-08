@@ -1892,7 +1892,13 @@ mod jetstream {
                 .unwrap();
         }
 
-        let messages = consumer.messages().await.unwrap();
+        let messages = consumer
+            .stream()
+            .expires(Duration::from_secs(60))
+            .heartbeat(Duration::from_secs(30))
+            .messages()
+            .await
+            .unwrap();
 
         println!("starting interation");
         let mut messages = messages.enumerate();
