@@ -14,6 +14,7 @@
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::{
+    future,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,
@@ -394,6 +395,7 @@ impl<'a> futures::Stream for Sequence<'a> {
 
 pub struct Stream {
     pending_messages: usize,
+    pending_bytes: usize,
     request_result_rx: tokio::sync::mpsc::Receiver<Result<bool, crate::Error>>,
     request_tx: tokio::sync::watch::Sender<()>,
     subscriber: Subscriber,
@@ -437,6 +439,17 @@ impl Stream {
             let inbox = inbox.clone();
             async move {
                 loop {
+                    // this is just in edge case of missing response for some reason.
+                    let expires = batch_config
+                        .expires
+                        .map(|expires| match expires {
+                            0 => futures::future::Either::Left(future::pending()),
+                            t => futures::future::Either::Right(tokio::time::sleep(
+                                Duration::from_nanos(t as u64)
+                                    .saturating_add(Duration::from_secs(5)),
+                            )),
+                        })
+                        .unwrap_or_else(|| futures::future::Either::Left(future::pending()));
                     // Need to check previous state, as `changed` will always fire on first
                     // call.
                     let prev_state = context.client.state.borrow().to_owned();
@@ -460,7 +473,7 @@ impl Stream {
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
-                        _ = tokio::time::sleep(Duration::from_nanos(batch.expires.unwrap() as u64)) => debug!("reached expires timer"),
+                        _ = expires => debug!("expired pull request"),
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
@@ -517,6 +530,7 @@ impl Stream {
             request_tx,
             batch_config,
             pending_messages: 0,
+            pending_bytes: 0,
             subscriber: subscription,
             context: consumer.context.clone(),
             pending_request: false,
@@ -535,7 +549,9 @@ impl futures::Stream for Stream {
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
             trace!("pending messages: {}", self.pending_messages);
-            if self.pending_messages <= std::cmp::min(self.batch_config.batch / 2, 100)
+            if (self.pending_messages <= self.batch_config.batch / 2
+                || (self.batch_config.max_bytes > 0
+                    && self.pending_bytes <= self.batch_config.max_bytes / 2))
                 && !self.pending_request
             {
                 debug!("pending messages reached threshold to send new fetch request");
@@ -571,8 +587,10 @@ impl futures::Stream for Stream {
                             debug!("request successful, setting pending messages");
                             if reset {
                                 self.pending_messages = self.batch_config.batch;
+                                self.pending_bytes = self.batch_config.max_bytes;
                             } else {
                                 self.pending_messages += self.batch_config.batch;
+                                self.pending_bytes += self.batch_config.max_bytes;
                             }
                             self.pending_request = false;
                             continue;
@@ -589,29 +607,55 @@ impl futures::Stream for Stream {
             match self.subscriber.receiver.poll_recv(cx) {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
-                        StatusCode::TIMEOUT => {
-                            debug!("timeout reached, resetting pending messages");
-                            // We do not want to reset to 0, as more than 1 fetch request might be
-                            // ongoing. This is not perfect, as we don't know how many messages
-                            // were consumed from that specific fetch, but that's best what we can
-                            // do until server can identify fetches.
-                            self.pending_messages = self
-                                .pending_messages
-                                .saturating_sub(self.batch_config.batch);
+                        StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
+                            if message.description.as_deref() == Some("Consumer is push based") {
+                                return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    format!("{:?}: {:?}", message.status, message.description),
+                                )))));
+                            }
+                            let pending_messages = message
+                                .headers
+                                .as_ref()
+                                .and_then(|headers| headers.get("Nats-Pending-Messages"))
+                                .map(|h| h.iter())
+                                .and_then(|mut i| i.next())
+                                .map(|e| e.parse::<usize>())
+                                .unwrap_or(Ok(self.batch_config.batch))?;
+                            let pending_bytes = message
+                                .headers
+                                .as_ref()
+                                .and_then(|headers| headers.get("Nats-Pending-Bytes"))
+                                .map(|h| h.iter())
+                                .and_then(|mut i| i.next())
+                                .map(|e| e.parse::<usize>())
+                                .unwrap_or(Ok(self.batch_config.max_bytes))?;
+                            debug!(
+                                "timeout reached. remaining messages: {}, bytes {}",
+                                pending_messages, pending_bytes
+                            );
+                            self.pending_messages =
+                                self.pending_messages.saturating_sub(pending_messages);
+                            trace!("message bytes len: {}", pending_bytes);
+                            self.pending_bytes = self.pending_bytes.saturating_sub(pending_bytes);
                             continue;
                         }
+
                         StatusCode::IDLE_HEARTBEAT => {
+                            debug!("received idle hearbeat");
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
                             continue;
                         }
                         StatusCode::OK => {
+                            trace!("message received");
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
                             *self.last_seen.lock().unwrap() = Instant::now();
                             self.pending_messages = self.pending_messages.saturating_sub(1);
+                            self.pending_bytes = self.pending_bytes.saturating_sub(message.length);
                             return Poll::Ready(Some(Ok(jetstream::Message {
                                 context: self.context.clone(),
                                 message,

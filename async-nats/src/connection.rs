@@ -142,6 +142,9 @@ impl Connection {
 
             return Ok(Some(ServerOp::Message {
                 sid,
+                length: payload_len
+                    + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                    + subject.len(),
                 reply: reply_to,
                 headers: None,
                 subject,
@@ -282,6 +285,9 @@ impl Connection {
             }
 
             return Ok(Some(ServerOp::Message {
+                length: reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                    + subject.len()
+                    + num_bytes,
                 sid,
                 reply: reply_to,
                 subject,
@@ -557,6 +563,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 11,
             })
         );
 
@@ -576,6 +583,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 8 + 11,
             })
         );
 
@@ -603,6 +611,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 8 + 34
             })
         );
 
@@ -629,6 +638,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 8 + 34,
             })
         );
 
@@ -654,6 +664,7 @@ mod read_op {
                 payload: "".into(),
                 status: Some(StatusCode::NOT_FOUND),
                 description: Some("No Messages".to_string()),
+                length: 7 + 8 + 28,
             })
         );
 
@@ -673,6 +684,7 @@ mod read_op {
                 payload: "Hello Again".into(),
                 status: None,
                 description: None,
+                length: 7 + 11,
             })
         );
     }
@@ -719,6 +731,7 @@ mod read_op {
                 payload: "".into(),
                 status: Some(StatusCode::NOT_FOUND),
                 description: Some("No Messages".to_string()),
+                length: 7 + 8 + 28,
             })
         );
 
