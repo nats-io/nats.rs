@@ -235,3 +235,51 @@ fn object_watch() {
     assert_eq!(info.name, "bar");
     assert_eq!(info.size, bytes.len());
 }
+
+#[test]
+fn object_digest() {
+    use std::io::Read;
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
+    let client = nats::connect(server.client_url()).unwrap();
+
+    let jetstream = nats::jetstream::new(client);
+
+    let bucket = jetstream
+        .create_object_store(&nats::object_store::Config {
+            bucket: "bucket".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let cases = vec![
+        (
+            "tests/configs/digests/digester_test_bytes_000100.txt",
+            "IdgP4UYMGt47rgecOqFoLrd24AXukHf5-SVzqQ5Psg8=",
+        ),
+        (
+            "tests/configs/digests/digester_test_bytes_001000.txt",
+            "DZj4RnBpuEukzFIY0ueZ-xjnHY4Rt9XWn4Dh8nkNfnI=",
+        ),
+        (
+            "tests/configs/digests/digester_test_bytes_010000.txt",
+            "RgaJ-VSJtjNvgXcujCKIvaheiX_6GRCcfdRYnAcVy38=",
+        ),
+        (
+            "tests/configs/digests/digester_test_bytes_100000.txt",
+            "yan7pwBVnC1yORqqgBfd64_qAw6q9fNA60_KRiMMooE=",
+        ),
+    ];
+
+    for (filename, digest) in cases {
+        let file = std::fs::read(filename).unwrap();
+
+        bucket.put(filename, &mut file.as_slice()).unwrap();
+
+        let mut object = bucket.get(filename).unwrap();
+        assert_eq!(object.info.digest, format!("SHA-256={}", digest));
+
+        let mut result = Vec::new();
+        object.read_to_end(&mut result).unwrap();
+        assert_eq!(result, file);
+    }
+}
