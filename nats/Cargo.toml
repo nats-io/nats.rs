@@ -57,6 +57,7 @@ serde_repr = "0.1.7"
 memchr = "2.4.0"
 url = "2.2.2"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
+ring = "0.16"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.98"
