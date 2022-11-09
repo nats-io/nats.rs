@@ -16,7 +16,7 @@
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{Client, Error};
+use crate::{Client, Command, Error};
 use bytes::Bytes;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
@@ -804,6 +804,7 @@ pub struct PublishAckFuture {
 
 impl PublishAckFuture {
     async fn next_with_timeout(mut self) -> Result<PublishAck, Error> {
+        self.subscription.sender.send(Command::TryFlush).await.ok();
         let next = tokio::time::timeout(self.timeout, self.subscription.next())
             .await
             .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "acknowledgment timed out"))?;
