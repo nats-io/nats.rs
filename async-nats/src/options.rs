@@ -549,7 +549,7 @@ impl ConnectOptions {
         self
     }
 
-    pub fn retry_on_intial_connect(mut self) -> ConnectOptions {
+    pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
         self
     }

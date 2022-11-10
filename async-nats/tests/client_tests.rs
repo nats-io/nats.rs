@@ -699,7 +699,7 @@ mod client {
             .event_callback(|ev| async move {
                 println!("event: {}", ev);
             })
-            .retry_on_intial_connect()
+            .retry_on_initial_connect()
             .connect("localhost:7777")
             .await
             .unwrap();
