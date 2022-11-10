@@ -53,7 +53,7 @@ fn is_valid_object_name(object_name: &str) -> bool {
 }
 
 fn encode_object_name(object_name: &str) -> String {
-    base64::encode_config(object_name, base64::URL_SAFE)
+    base64::encode_config(object_name, URL_SAFE)
 }
 
 /// Configuration values for object store buckets.
