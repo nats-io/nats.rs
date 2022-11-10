@@ -201,8 +201,8 @@ fn object_names() {
     bucket.put("foo bar", &mut empty.as_slice()).unwrap();
 
     // Errors
-    bucket.put("*", &mut empty.as_slice()).unwrap_err();
-    bucket.put(">", &mut empty.as_slice()).unwrap_err();
+    bucket.put("*", &mut empty.as_slice()).unwrap();
+    bucket.put(">", &mut empty.as_slice()).unwrap();
     bucket.put("", &mut empty.as_slice()).unwrap_err();
 }
 

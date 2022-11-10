@@ -52,8 +52,8 @@ fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-fn sanitize_object_name(object_name: &str) -> String {
-    object_name.replace(['.', ' '], "_")
+fn encode_object_name(object_name: &str) -> String {
+    base64::encode_config(object_name, URL_SAFE)
 }
 
 /// Configuration values for object store buckets.
@@ -366,7 +366,7 @@ impl ObjectStore {
     /// ```
     pub fn info(&self, object_name: &str) -> io::Result<ObjectInfo> {
         // LoOkup the stream to get the bound subject.
-        let object_name = sanitize_object_name(object_name);
+        let object_name = encode_object_name(object_name);
         if !is_valid_object_name(&object_name) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -426,7 +426,7 @@ impl ObjectStore {
         ObjectMeta: From<T>,
     {
         let object_meta: ObjectMeta = meta.into();
-        let object_name = sanitize_object_name(&object_meta.name);
+        let object_name = encode_object_name(&object_meta.name);
         if !is_valid_object_name(&object_name) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -466,7 +466,7 @@ impl ObjectStore {
         // Create a random subject prefixed with the object stream name.
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
         let object_info = ObjectInfo {
-            name: object_name,
+            name: object_meta.name,
             description: object_meta.description,
             link: object_meta.link,
             bucket: self.name.clone(),
@@ -580,7 +580,7 @@ impl ObjectStore {
         let mut headers = HeaderMap::default();
         headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = format!("$O.{}.M.{}", &self.name, &encode_object_name(object_name));
         let message = Message::new(&subject, None, data, Some(headers));
 
         self.context.publish_message(&message)?;
