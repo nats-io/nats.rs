@@ -94,11 +94,16 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use tokio::io::AsyncReadExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let bucket = jetstream.get_object_store("store").await?;
-    /// let object = bucket.get("FOO").await?;
+    /// let mut object = bucket.get("FOO").await?;
+    ///
+    /// // Object implements `tokio::io::AsyncRead`.
+    /// let mut bytes = vec![];
+    /// object.read_to_end(&mut bytes).await?;
     /// # Ok(())
     /// # }
     /// ```

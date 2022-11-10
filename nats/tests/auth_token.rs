@@ -15,16 +15,16 @@
 fn token_auth() {
     let s = nats_server::run_server("tests/configs/token_auth.conf");
 
-    assert!(nats::connect(&s.client_url()).is_err());
+    assert!(nats::connect(s.client_url()).is_err());
 
     assert!(nats::Options::with_token("some-auth-token")
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .is_ok());
 
-    assert!(nats::connect(&s.client_url_with_token("some-auth-token")).is_ok());
+    assert!(nats::connect(s.client_url_with_token("some-auth-token")).is_ok());
 
     // Check override.
     assert!(nats::Options::with_token("bad-auth-token")
-        .connect(&s.client_url_with_token("some-auth-token"))
+        .connect(s.client_url_with_token("some-auth-token"))
         .is_ok());
 }

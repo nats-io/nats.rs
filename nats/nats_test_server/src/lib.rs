@@ -554,8 +554,8 @@ fn test_pub_sub_2_clients() {
     env_logger::init();
     let server = NatsTestServer::build().spawn();
 
-    let conn1 = nats::connect(&server.address().to_string()).unwrap();
-    let conn2 = nats::connect(&server.address().to_string()).unwrap();
+    let conn1 = nats::connect(server.address().to_string()).unwrap();
+    let conn2 = nats::connect(server.address().to_string()).unwrap();
 
     let sub = conn1.subscribe("*").unwrap();
     // This test was sometimes failing due to some issues in `nats_test_server`.
