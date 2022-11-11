@@ -1,5 +1,22 @@
-# 0.22.0
+# 0.22.1
+## Overview
+A patch release, including early feedback to 0.22.0.
 
+## Breaking Changes
+
+Unfortunately, last release included a typo in `retry_on_initial_release`.
+This patch fixes it.
+We decided to make a normal patch release without yanking as we're pre 1.0.0 verison.
+To avoid similar situations in the future, spellecheck lint will be added before next release.
+
+## Changed
+* Flush on publish ack await by @Jarema in https://github.com/nats-io/nats.rs/pull/708
+## Fixed
+* Fix typo in retry_on_initial_connect by @Jarema in https://github.com/nats-io/nats.rs/pull/713
+## Added
+* Setup cargo deny to check licenses by @corbinu in https://github.com/nats-io/nats.rs/pull/703
+
+# 0.22.0
 ## Overview
 This release introduces a number of changes and two breaking changes:
 
