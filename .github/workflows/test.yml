@@ -178,6 +178,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: spellcheck
+          args: --code 1
 
   check_msrv:
     name: check (msrv)
