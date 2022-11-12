@@ -1,4 +1,0 @@
-[Hunspell]
-lang = "en_US"
-search_dirs = ["."]
-extra_dictionaries = ["nats.dic"]

@@ -22,7 +22,7 @@ use std::{
 /// Provides a vector that will scramble allocations as
 /// they are discarded when the vector grows.
 ///
-/// Allows users to scamble the data whenever they want.
+/// Allows users to scramble the data whenever they want.
 ///
 /// Also scrambles data on Drop.
 ///

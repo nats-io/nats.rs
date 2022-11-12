@@ -63,6 +63,8 @@ max_bytes
 >
 =
 '*',
+'.',
+.',
 *
 &
 +
@@ -108,3 +110,10 @@ urls
 jwt
 deserializes
 clonable
+8mb
+64k
+interleavings
+workqueue
+JSConsumerMaxRequestExpiresToSmall
+api
+preprocess

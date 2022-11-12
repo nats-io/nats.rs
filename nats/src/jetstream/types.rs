@@ -42,7 +42,7 @@ pub struct RawStreamMessage {
     #[serde(rename = "seq")]
     pub sequence: u64,
 
-    /// Data of the mssage.
+    /// Data of the message.
     #[serde(default, rename = "data")]
     pub data: String,
 
@@ -71,7 +71,7 @@ pub struct StreamMessage {
     pub subject: String,
     /// Sequence of the message
     pub sequence: u64,
-    /// HeaderMap that were sent with the mesage, if any.
+    /// HeaderMap that were sent with the message, if any.
     pub headers: Option<HeaderMap>,
     /// Payload of the message.
     pub data: Vec<u8>,
@@ -246,10 +246,10 @@ pub struct ConsumerConfig {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
 }
@@ -460,7 +460,7 @@ pub enum DeliverPolicy {
     /// parameter.
     #[serde(rename = "by_start_sequence")]
     ByStartSeq = 3,
-    /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
+    /// `ByStartTime` will select the first message with a timestamp >= to the consumer's
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime = 4,
@@ -693,7 +693,7 @@ pub struct ConsumerInfo {
     pub config: ConsumerConfig,
     /// Statistics for delivered messages
     pub delivered: SequencePair,
-    /// Statistics for acknowleged messages
+    /// Statistics for acknowledged messages
     pub ack_floor: SequencePair,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
@@ -781,7 +781,7 @@ pub(crate) struct StreamNamesResponse {
     pub streams: Option<Vec<String>>,
 }
 
-/// Options to configure Pull Subsscription
+/// Options to configure Pull Subscription
 #[derive(Debug, Default, Clone)]
 pub struct PullSubscribeOptions {
     pub(crate) stream_name: Option<String>,
@@ -1051,7 +1051,7 @@ pub struct AccountInfo {
     pub consumers: i64,
     /// Aggregated API statistics
     pub api: ApiStats,
-    /// Limits placed on the accuont
+    /// Limits placed on the account
     pub limits: AccountLimits,
 }
 

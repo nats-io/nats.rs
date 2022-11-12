@@ -179,7 +179,7 @@ impl PushSubscription {
     }
 
     /// Get the next message, or a timeout error
-    /// if no messages are available for timout.
+    /// if no messages are available for timeout.
     ///
     /// # Example
     ///

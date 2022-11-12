@@ -1,0 +1,9 @@
+[Hunspell]
+lang = "en_US"
+search_dirs = ["."]
+extra_dictionaries = ["nats.dic"]
+
+[Hunspell.quirks]
+allow_concatenation = true
+allow_dashed = true
+transform_regex = ["^[0-9a-fA-F]{5,}$"]

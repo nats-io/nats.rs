@@ -301,7 +301,7 @@ pub struct Entry {
     pub bucket: String,
     /// The key that was retrieved.
     pub key: String,
-    /// The value that was retreived.
+    /// The value that was retrieved.
     pub value: Vec<u8>,
     /// A unique sequence for this value.
     pub revision: u64,
