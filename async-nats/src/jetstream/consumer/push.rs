@@ -413,11 +413,11 @@ impl Consumer<OrderedConfig> {
                                 .unwrap()
                                 .elapsed()
                                 .gt(&Duration::from_secs(10)) {
-                                    println!("last seen ok. wait");
+                                    trace!("last seen ok. wait");
                                     continue;
                                     }
-                        println!("last seen not ok");
-                                }
+                            debug!("last seen not ok");
+                        }
                     }
                     debug!(
                         "idle hearbeats expired. recreating consumer s: {},  {:?}",
