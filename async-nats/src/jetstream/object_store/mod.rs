@@ -342,6 +342,7 @@ impl ObjectStore {
         let ordered = self
             .stream
             .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                deliver_policy: super::consumer::DeliverPolicy::New,
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("object store watcher".to_string()),
                 filter_subject: subject,
