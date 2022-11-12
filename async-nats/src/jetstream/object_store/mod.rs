@@ -24,6 +24,7 @@ use crate::{HeaderMap, HeaderValue};
 use base64::URL_SAFE;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
+use tokio::time::{timeout_at, Instant};
 
 use base64_url::base64;
 use futures::{Stream, StreamExt};
@@ -378,6 +379,56 @@ impl ObjectStore {
             .update_stream(&stream_config.config)
             .await?;
         Ok(())
+    }
+
+    /// Returns the keys of non deleted values in [ObjectStore].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let keys = bucket.list().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn list(&self) -> Result<Vec<String>, Error> {
+        let mut watcher = self.watch().await.unwrap();
+
+        let mut last_was_elapsed = false;
+
+        let mut objects = Vec::new();
+
+        loop {
+            let info =
+                timeout_at(Instant::now() + Duration::from_millis(100), watcher.next()).await;
+
+            match info {
+                Ok(Some(info)) => {
+                    if let Ok(i) = info {
+                        if !i.deleted {
+                            objects.push(i.name);
+                        }
+                    }
+                    last_was_elapsed = false;
+                }
+                Ok(None) => {
+                    last_was_elapsed = false;
+                }
+                Err(_) => {
+                    if last_was_elapsed {
+                        break; // two timeouts in a row is enough
+                    }
+                    last_was_elapsed = true;
+                }
+            }
+        }
+
+        Ok(objects)
     }
 }
 
