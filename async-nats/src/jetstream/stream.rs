@@ -1058,7 +1058,7 @@ impl TryFrom<RawMessage> for crate::Message {
         let length = decoded_headers
             .as_ref()
             .map_or_else(|| 0, |headers| headers.len())
-            + decoded_paylaod.len()
+            + decoded_payload.len()
             + value.subject.len();
 
         let (headers, status, description) =
