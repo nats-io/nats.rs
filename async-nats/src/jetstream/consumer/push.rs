@@ -413,7 +413,7 @@ impl Consumer<OrderedConfig> {
                                 .unwrap()
                                 .elapsed()
                                 .gt(&Duration::from_secs(10)) {
-                                    debug!("last seen ok. wait");
+                                    trace!("last seen ok. wait");
                                     continue;
                                     }
                             debug!("last seen not ok");
