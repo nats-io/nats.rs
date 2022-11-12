@@ -20,7 +20,7 @@ jobs:
       - name: Install nats-server
         run: go install github.com/nats-io/nats-server/v2@latest
 
-      - name: Install gunplot
+      - name: Install gnuplot
         run: |
           sudo apt-get update -y
           sudo apt-get install -y gnuplot
