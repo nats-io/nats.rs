@@ -222,4 +222,31 @@ mod object_store {
             assert_eq!(result, file);
         }
     }
+
+    #[tokio::test]
+    async fn list() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket.put("A", &mut "AAA".as_bytes()).await.unwrap();
+        bucket.put("B", &mut "BBB".as_bytes()).await.unwrap();
+        bucket.put("C", &mut "CCC".as_bytes()).await.unwrap();
+
+        bucket.delete("C").await.unwrap();
+
+        let list = bucket.list().await.unwrap();
+
+        assert_eq!(list.len(), 2);
+        assert_eq!(list, vec!["A", "B"]);
+    }
 }
