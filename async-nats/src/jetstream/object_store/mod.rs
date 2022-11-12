@@ -205,9 +205,9 @@ impl ObjectStore {
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
             .await?;
-        let decoded_paylaod = base64::decode(message.payload)
+        let decoded_payload = base64::decode(message.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
-        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_paylaod)?;
+        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_payload)?;
 
         Ok(object_info)
     }
@@ -273,11 +273,11 @@ impl ObjectStore {
             object_chunks += 1;
 
             // FIXME: this is ugly
-            let paylaod = bytes::Bytes::from(buffer[..n].to_vec());
+            let payload = bytes::Bytes::from(buffer[..n].to_vec());
 
             self.stream
                 .context
-                .publish(chunk_subject.clone(), paylaod)
+                .publish(chunk_subject.clone(), payload)
                 .await?;
         }
         let digest = context.finish();

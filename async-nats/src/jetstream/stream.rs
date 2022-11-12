@@ -356,7 +356,7 @@ impl Stream {
                             "message not found in stream",
                         )))
                     }
-                    // 408 is used in Direct Message for bad/empty paylaod.
+                    // 408 is used in Direct Message for bad/empty payload.
                     StatusCode::TIMEOUT => {
                         return Err(Box::from(std::io::Error::new(
                             ErrorKind::Other,
@@ -1048,7 +1048,7 @@ impl TryFrom<RawMessage> for crate::Message {
     type Error = Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
-        let decoded_paylaod = base64::decode(value.payload)
+        let decoded_payload = base64::decode(value.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
         let decoded_headers = value
             .headers
@@ -1067,7 +1067,7 @@ impl TryFrom<RawMessage> for crate::Message {
         Ok(crate::Message {
             subject: value.subject,
             reply: None,
-            payload: decoded_paylaod.into(),
+            payload: decoded_payload.into(),
             headers,
             status,
             description,
@@ -1255,7 +1255,7 @@ pub struct Source {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
 pub struct External {
-    /// Api prefix of external source.
+    /// API prefix of external source.
     #[serde(rename = "api")]
     pub api_prefix: String,
     /// Optional configuration of delivery prefix.

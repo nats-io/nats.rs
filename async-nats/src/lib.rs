@@ -810,7 +810,7 @@ impl Subscriber {
         Ok(())
     }
 
-    /// Unsubscribes from subscription after reaching given number of messages.
+    /// Unsubscribes from subscription after reaching a given number of messages.
     /// This is the total number of messages received by this subscription in it's whole
     /// lifespan. If it already reached or surpassed the passed value, it will immediately stop.
     ///

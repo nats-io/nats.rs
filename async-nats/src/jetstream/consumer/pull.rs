@@ -135,7 +135,7 @@ impl Consumer<Config> {
         Ok(())
     }
 
-    /// Returns a batch of specified number of messages, or if there are less messages on the
+    /// Returns a batch of specified number of messages, or if there are fewer messages on the
     /// [Stream] than requested, returns all available messages.
     ///
     /// # Example

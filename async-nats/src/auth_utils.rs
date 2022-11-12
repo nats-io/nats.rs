@@ -78,7 +78,7 @@ fn parse_decorated_jwt(contents: &str) -> Option<String> {
     Some(capture[1].to_string())
 }
 
-/// Parses a credentials file and returns its nkey.
+/// Parses a credentials file and returns its NKey.
 fn parse_decorated_nkey(contents: &str) -> Option<String> {
     let capture = USER_CONFIG_RE.captures_iter(contents).nth(1)?;
     Some(capture[1].to_string())
