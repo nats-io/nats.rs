@@ -939,7 +939,7 @@ impl std::fmt::Display for ServerError {
 /// Info to construct a CONNECT message.
 #[derive(Clone, Debug, Serialize)]
 pub struct ConnectInfo {
-    /// Turns on +OK protocol acknowledgements.
+    /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
 
     /// Turns on additional strict format checking, e.g. for properly formed

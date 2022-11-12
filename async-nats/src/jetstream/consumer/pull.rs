@@ -1463,7 +1463,7 @@ pub struct Config {
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
+    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.

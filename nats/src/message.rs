@@ -178,7 +178,7 @@ impl Message {
         false
     }
 
-    /// Acknowledge a `JetStream` message with a default acknowledgement.
+    /// Acknowledge a `JetStream` message with a default acknowledgment.
     /// See `AckKind` documentation for details of what other types of
     /// acks are available. If you need to send a non-default ack, use
     /// the `ack_kind` method below. If you need to block until the
@@ -202,8 +202,8 @@ impl Message {
         self.respond(ack_kind)
     }
 
-    /// Acknowledge a `JetStream` message and wait for acknowledgement from the server
-    /// that it has received our ack. Retry acknowledgement until we receive a response.
+    /// Acknowledge a `JetStream` message and wait for acknowledgment from the server
+    /// that it has received our ack. Retry acknowledgment until we receive a response.
     /// See `AckKind` documentation for details of what each variant means.
     ///
     /// Returns immediately if this message has already been double-acked.

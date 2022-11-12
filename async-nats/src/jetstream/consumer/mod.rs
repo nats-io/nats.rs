@@ -161,7 +161,7 @@ pub struct Info {
     pub ack_floor: SequenceInfo,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
-    /// The number of messages re-sent after acknowledgement was not received within the configured
+    /// The number of messages re-sent after acknowledgment was not received within the configured
     /// time threshold
     pub num_redelivered: usize,
     /// The number of waiting
@@ -198,7 +198,7 @@ pub struct Config {
     /// to be "push-based". This is analogous in some ways to a normal
     /// NATS subscription (rather than a queue subscriber) in that the
     /// consumer will receive all messages published to the stream that
-    /// the consumer is interested in. Acknowledgement policies such as
+    /// the consumer is interested in. acknowledgment policies such as
     /// `AckPolicy::None` and `AckPolicy::All` may be enabled for such
     /// push-based consumers, which reduce the amount of effort spent
     /// tracking delivery. Combining `AckPolicy::All` with
@@ -206,7 +206,7 @@ pub struct Config {
     /// optimizations.
     ///
     /// Setting `deliver_subject` to `None` will cause this consumer to
-    /// be "pull-based", and will require explicit acknowledgement of
+    /// be "pull-based", and will require explicit acknowledgment of
     /// each message. This is analogous in some ways to a normal NATS
     /// queue subscriber, where a message will be delivered to a single
     /// subscriber. Pull-based consumers are intended to be used for
@@ -273,7 +273,7 @@ pub struct Config {
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
+    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.
@@ -399,7 +399,7 @@ pub enum AckPolicy {
     #[serde(rename = "none")]
     None = 0,
     /// Acknowledges all messages with lower sequence numbers when a later
-    /// message is acknowledged. Useful for "batching" acknowledgement.
+    /// message is acknowledged. Useful for "batching" acknowledgment.
     #[serde(rename = "all")]
     All = 1,
 }

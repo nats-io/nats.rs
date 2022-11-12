@@ -41,7 +41,7 @@ fn is_empty_or_none(field: &Option<String>) -> bool {
 #[doc(hidden)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
-    /// Turns on +OK protocol acknowledgements.
+    /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
 
     /// Turns on additional strict format checking, e.g. for properly formed

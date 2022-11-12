@@ -410,7 +410,7 @@ impl ConnectOptions {
     }
 
     /// Sets a timeout for the underlying TcpStream connection to avoid hangs and deadlocks.
-    /// Defualt is set to 5 seconds.
+    /// Default is set to 5 seconds.
     ///
     /// # Examples
     /// ```no_run
