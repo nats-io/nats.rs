@@ -165,6 +165,9 @@ jobs:
           toolchain: nightly
           override: true
 
+      - name: Install llvm-config
+        run: sudo apt-get install -y libclang-dev
+
       - name: Install cargo spellcheck
         uses: actions-rs/cargo@v1
         with:
