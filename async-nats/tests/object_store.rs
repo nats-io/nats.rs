@@ -15,6 +15,7 @@ mod object_store {
 
     use std::{io, time::Duration};
 
+    use async_nats::jetstream::object_store::ObjectMeta;
     use base64::URL_SAFE;
     use futures::StreamExt;
     use rand::RngCore;
@@ -219,5 +220,50 @@ mod object_store {
             object.read_to_end(&mut result).await.unwrap();
             assert_eq!(result, file);
         }
+    }
+
+    #[tokio::test]
+    async fn list() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        bucket
+            .put(
+                ObjectMeta {
+                    name: "Foo".to_string(),
+                    description: Some("foo desc".to_string()),
+                    ..Default::default()
+                },
+                &mut "dadada".as_bytes(),
+            )
+            .await
+            .unwrap();
+        bucket
+            .put("DEL", &mut "32142421424".as_bytes())
+            .await
+            .unwrap();
+        bucket.delete("DEL").await.unwrap();
+        for i in 0..10 {
+            bucket
+                .put(format!("{}", i).as_ref(), &mut "blalbalballba".as_bytes())
+                .await
+                .unwrap();
+        }
+        let mut list = bucket.list().await.unwrap();
+        let obj = list.next().await.unwrap().unwrap();
+        assert_eq!("Foo".to_string(), obj.name);
+        assert_eq!(Some("foo desc".to_string()), obj.description);
+        assert_eq!(list.next().await.unwrap().unwrap().name, "0");
+        assert_eq!(list.next().await.unwrap().unwrap().name, "1");
+        assert_eq!(list.count().await, 8);
     }
 }
