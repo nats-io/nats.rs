@@ -30,6 +30,7 @@ use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
 
 use crate::Error;
 
@@ -354,6 +355,44 @@ impl ObjectStore {
         })
     }
 
+    /// Returns a [List] stream with all not deleted [Objects][Object] in the [ObjectStore].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let mut list = bucket.list().await.unwrap();
+    /// while let Some(object) = list.next().await {
+    ///     println!("object {:?}", object?);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn list(&self) -> Result<List<'_>, Error> {
+        trace!("starting Object List");
+        let subject = format!("$O.{}.M.>", self.name);
+        let ordered = self
+            .stream
+            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                deliver_policy: super::consumer::DeliverPolicy::All,
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("object store list".to_string()),
+                filter_subject: subject,
+                ..Default::default()
+            })
+            .await?;
+        Ok(List {
+            done: ordered.info.num_pending == 0,
+            subscription: ordered.messages().await?,
+        })
+    }
+
     /// Seals a [ObjectStore], preventing any further changes to it or its [Objects][Object].
     ///
     /// # Examples
@@ -408,6 +447,54 @@ impl Stream for Watch<'_> {
                 None => Poll::Ready(None),
             },
             Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub struct List<'a> {
+    subscription: crate::jetstream::consumer::push::Ordered<'a>,
+    done: bool,
+}
+
+impl Stream for List<'_> {
+    type Item = Result<ObjectInfo, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        loop {
+            if self.done {
+                debug!("Object Store list done");
+                return Poll::Ready(None);
+            }
+
+            match self.subscription.poll_next_unpin(cx) {
+                Poll::Ready(message) => match message {
+                    None => return Poll::Ready(None),
+                    Some(message) => {
+                        let message = message?;
+                        let info = message.info()?;
+                        trace!("num pending: {}", info.pending);
+                        if info.pending == 0 {
+                            self.done = true;
+                        }
+                        let response: ObjectInfo = serde_json::from_slice(&message.payload)?;
+                        if response.deleted {
+                            continue;
+                        }
+                        return Poll::Ready(Some(
+                            serde_json::from_slice(&message.payload).map_err(|err| {
+                                Box::from(std::io::Error::new(
+                                    ErrorKind::Other,
+                                    format!("failed to serialize object info: {}", err),
+                                ))
+                            }),
+                        ));
+                    }
+                },
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }
