@@ -853,17 +853,20 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
+    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> Result<(), UnsubscribeError> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
                 max: Some(unsub_after),
             })
-            .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+            .await?;
         Ok(())
     }
 }
+
+#[derive(Error, Debug)]
+#[error("failed to send unsubscribe")]
+pub struct UnsubscribeError(#[from] mpsc::error::SendError<Command>);
 
 impl Drop for Subscriber {
     fn drop(&mut self) {
