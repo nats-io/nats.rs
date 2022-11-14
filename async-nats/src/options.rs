@@ -20,7 +20,7 @@ use tokio_rustls::rustls;
 
 /// Connect options. Used to connect with NATS when custom config is needed.
 /// # Examples
-/// ```
+/// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::ConnectError> {
 /// let mut options =
