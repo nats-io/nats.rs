@@ -815,14 +815,13 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn unsubscribe(&mut self) -> io::Result<()> {
+    pub async fn unsubscribe(&mut self) -> Result<(), UnsubscribeError> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
                 max: None,
             })
-            .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+            .await?;
         self.receiver.close();
         Ok(())
     }
