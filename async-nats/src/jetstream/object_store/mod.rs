@@ -258,7 +258,7 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
-        let mut buffer = [0; DEFAULT_CHUNK_SIZE];
+        let mut buffer = Vec::with_capacity(DEFAULT_CHUNK_SIZE);
         let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
