@@ -32,7 +32,7 @@ use self::bucket::Status;
 
 use super::{
     consumer::DeliverPolicy,
-    stream::{RawMessage, Republish, StorageType, Stream},
+    stream::{RawMessage, Republish, Source, StorageType, Stream},
 };
 
 // Helper to extract key value operation from message headers
@@ -100,6 +100,12 @@ pub struct Config {
     pub num_replicas: usize,
     /// Republish is for republishing messages once persistent in the Key Value Bucket.
     pub republish: Option<Republish>,
+    /// Bucket mirror configuration.
+    pub mirror: Option<Source>,
+    /// Bucket sources configuration.
+    pub sources: Option<Vec<Source>>,
+    /// Allow mirrors using direct API.
+    pub mirror_direct: bool,
 }
 
 /// Describes what kind of operation and entry represents
@@ -119,6 +125,8 @@ pub struct Store {
     pub name: String,
     pub stream_name: String,
     pub prefix: String,
+    pub put_prefix: Option<String>,
+    pub use_jetstream_prefix: bool,
     pub stream: Stream,
 }
 
@@ -179,12 +187,18 @@ impl Store {
                 "invalid key",
             )));
         }
-
-        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
+        let mut subject = String::new();
+        if self.use_jetstream_prefix {
+            subject.push_str(&self.stream.context.prefix);
+            subject.push('.');
+        }
+        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
+        subject.push_str(key.as_ref());
 
         let publish_ack = self.stream.context.publish(subject, value).await?;
+        let ack = publish_ack.await?;
 
-        Ok(publish_ack.sequence)
+        Ok(ack.sequence)
     }
 
     /// Retrieves the last [Entry] for a given key from a bucket.
@@ -478,6 +492,7 @@ impl Store {
         self.stream
             .context
             .publish_with_headers(subject, headers, value)
+            .await?
             .await
             .map(|publish_ack| publish_ack.sequence)
     }
@@ -509,7 +524,13 @@ impl Store {
                 "invalid key",
             )));
         }
-        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
+        let mut subject = String::new();
+        if self.use_jetstream_prefix {
+            subject.push_str(&self.stream.context.prefix);
+            subject.push('.');
+        }
+        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
+        subject.push_str(key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         // TODO: figure out which headers k/v should be where.
@@ -522,7 +543,7 @@ impl Store {
         Ok(())
     }
 
-    /// Purges the given key, destructively removing everything from the bucket.
+    /// Purges all the revisions of a entry destructively, leaving behind a single purge entry in-place.
     ///
     /// # Examples
     ///

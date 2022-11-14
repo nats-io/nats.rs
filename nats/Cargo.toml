@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.23.0"
+version = "0.23.1"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
@@ -57,6 +57,7 @@ serde_repr = "0.1.7"
 memchr = "2.4.0"
 url = "2.2.2"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
+ring = "0.16"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.98"

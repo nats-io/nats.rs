@@ -1,3 +1,77 @@
+# 0.22.1
+## Overview
+A patch release, including early feedback to 0.22.0.
+
+## Breaking Changes
+
+Unfortunately, last release included a typo in `retry_on_initial_release`.
+This patch fixes it.
+We decided to make a normal patch release without yanking as we're pre 1.0.0 verison.
+To avoid similar situations in the future, spellecheck lint will be added before next release.
+
+## Changed
+* Flush on publish ack await by @Jarema in https://github.com/nats-io/nats.rs/pull/708
+## Fixed
+* Fix typo in retry_on_initial_connect by @Jarema in https://github.com/nats-io/nats.rs/pull/713
+## Added
+* Setup cargo deny to check licenses by @corbinu in https://github.com/nats-io/nats.rs/pull/703
+
+# 0.22.0
+## Overview
+This release introduces a number of changes and two breaking changes:
+
+### JetStream publish
+Used to return ack:
+```rust
+let ack = jetstream.publish().await.unwrap();
+```
+But while adding publish that does not wait for acknowledgment before returning,
+we realized that we can leverage [IntoFuture](https://doc.rust-lang.org/std/future/trait.IntoFuture.html), so the new API is:
+```rust
+// This publishes the message, but do not wait until ack is received.
+let future_ack = jetstream.publish().await.unwrap();
+// to receive the acknowledge, `await()` the returned value:
+let ack = future_ack.await().unwrap();
+```
+### Event logging
+After adding initial retry on connect option, `Event::Reconnect` didn't make much sense.
+Hence it was renamed to `Event::Connected`, which describes the current state without implications about the previous one.
+For consistency, `Event::Disconnect` was renamed to `Event::Disconnected`.
+
+## Breaking changes
+* Defer publish acknowledgements by @Jarema in https://github.com/nats-io/nats.rs/pull/644
+* Add retry on initial connect by @Jarema in https://github.com/nats-io/nats.rs/pull/662
+## Added
+* Add support for mirrors and sources in Key Value Store by @Jarema in https://github.com/nats-io/nats.rs/pull/676
+* Add sources and mirror to stream config by @Jarema in https://github.com/nats-io/nats.rs/pull/673
+* Add docs to client methods by @Jarema in https://github.com/nats-io/nats.rs/pull/664
+* Add license to nats-server wrapper by @Jarema in https://github.com/nats-io/nats.rs/pull/704
+## Fixed
+* Fix object store bucket names by @Jarema in https://github.com/nats-io/nats.rs/pull/697
+* Fix event connected display by @Jarema in https://github.com/nats-io/nats.rs/pull/669
+* Fix missing hearbeats future wakup by @Jarema in https://github.com/nats-io/nats.rs/pull/671
+* Fix pull consumer without hearbeats by @Jarema in https://github.com/nats-io/nats.rs/pull/667
+* Fix typos in async-nats docs by @jdon in https://github.com/nats-io/nats.rs/pull/663
+* Fix clippy errors by @caspervonb in https://github.com/nats-io/nats.rs/pull/690
+* Fix broken clippy pipeline and errors by @caspervonb in https://github.com/nats-io/nats.rs/pull/695
+## Changed
+* Improve event logging by @Jarema in https://github.com/nats-io/nats.rs/pull/672
+* Bump rustls-pemfile version by @paulgb in https://github.com/nats-io/nats.rs/pull/666
+* Use get direct in KV by @Jarema in https://github.com/nats-io/nats.rs/pull/651
+* Ordered consumer recreate & use mem_storage R1 by @Jarema in https://github.com/nats-io/nats.rs/pull/654
+* Change event logs to info level by @Jarema in https://github.com/nats-io/nats.rs/pull/677
+* Remove unused dependency on tokio-util by @caspervonb in https://github.com/nats-io/nats.rs/pull/679
+* Merge periodic ping into connection handler loop by @caspervonb in https://github.com/nats-io/nats.rs/pull/681
+* Update K/V purge documentation verbiage by @corbinu in https://github.com/nats-io/nats.rs/pull/688
+* Make pull consumer having exact pending numbers by @Jarema in https://github.com/nats-io/nats.rs/pull/668
+* Improve object get example by @Jarema in https://github.com/nats-io/nats.rs/pull/706
+
+## New Contributors
+* @jdon made their first contribution in https://github.com/nats-io/nats.rs/pull/663
+* @corbinu made their first contribution in https://github.com/nats-io/nats.rs/pull/688
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.21.0...async-nats/v0.22.0
+
 # 0.21.0
 ## Overview
 

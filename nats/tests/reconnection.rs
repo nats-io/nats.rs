@@ -47,7 +47,7 @@ fn reconnect_test() {
     let nc = loop {
         if let Ok(nc) = nats::Options::new()
             .max_reconnects(None)
-            .connect(&server.address().to_string())
+            .connect(server.address().to_string())
         {
             break Arc::new(nc);
         }

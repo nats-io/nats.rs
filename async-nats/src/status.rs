@@ -258,4 +258,6 @@ impl StatusCode {
     pub const NOT_FOUND: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(404) });
     pub const TIMEOUT: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(408) });
     pub const NO_RESPONDERS: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(503) });
+    pub const REQUEST_TERMINATED: StatusCode =
+        StatusCode(unsafe { NonZeroU16::new_unchecked(409) });
 }

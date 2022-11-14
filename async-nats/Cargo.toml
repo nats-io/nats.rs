@@ -1,9 +1,9 @@
 [package]
 name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
-version = "0.21.0"
+version = "0.22.1"
 edition = "2021"
-rust = "1.59.0"
+rust = "1.64.0"
 description = "A async Rust NATS client"
 license = "Apache-2.0"
 documentation = "https://docs.rs/async-nats"
@@ -26,11 +26,10 @@ serde_json = "1.0.79"
 serde_repr = "0.1.7"
 http = "0.2.7"
 tokio = { version = "1.16.1", features = ["full"] }
-tokio-util = { version = "0.7.0", features = ["codec"] }
 itoa = "1"
 url = "2"
 tokio-rustls = "0.23"
-rustls-pemfile = "0.3.0"
+rustls-pemfile = "1.0.1"
 nuid = "0.3.2"
 serde_nanos = "0.1.1"
 time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }

@@ -20,7 +20,7 @@ use nats::{jetstream, Connection};
 #[ignore]
 fn jetstream_not_enabled() {
     let s = nats_server::run_basic_server();
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
     let err = js.account_info().unwrap_err();
@@ -38,7 +38,7 @@ fn jetstream_not_enabled() {
 #[test]
 fn jetstream_account_not_enabled() {
     let s = nats_server::run_server("tests/configs/jetstream_account_not_enabled.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
     let err = js.account_info().unwrap_err();
@@ -71,7 +71,7 @@ fn jetstream_publish() {
     let msg = b"Hello JS";
 
     // Basic publish like NATS core.
-    let ack = js.publish("foo", &msg).unwrap();
+    let ack = js.publish("foo", msg).unwrap();
     assert_eq!(ack.stream, "TEST");
     assert_eq!(ack.sequence, 1);
     assert_eq!(js.stream_info("TEST").unwrap().state.messages, 1);
@@ -80,7 +80,7 @@ fn jetstream_publish() {
     let err = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 expected_stream: Some("ORDERS".to_string()),
                 ..Default::default()
@@ -102,7 +102,7 @@ fn jetstream_publish() {
     let err = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 expected_last_sequence: Some(10),
                 ..Default::default()
@@ -130,7 +130,7 @@ fn jetstream_publish() {
     let ack = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 id: Some("ZZZ".to_string()),
                 ..Default::default()
@@ -146,7 +146,7 @@ fn jetstream_publish() {
     let ack = js
         .publish_with_options(
             "foo",
-            &msg,
+            msg,
             &PublishOptions {
                 id: Some("ZZZ".to_string()),
                 ..Default::default()
@@ -247,7 +247,7 @@ fn jetstream_publish() {
 #[test]
 fn jetstream_subscribe() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc.clone());
 
     js.add_stream(&StreamConfig {
@@ -299,7 +299,7 @@ fn jetstream_subscribe() {
 #[test]
 fn jetstream_subscribe_durable() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
     js.add_stream(&StreamConfig {
@@ -361,7 +361,7 @@ fn jetstream_subscribe_durable() {
 #[test]
 fn jetstream_queue_subscribe() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
     js.add_stream(&StreamConfig {
@@ -498,7 +498,7 @@ fn jetstream_queue_subscribe_no_mismatch_handle() {
 #[test]
 fn jetstream_flow_control() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
     js.add_stream(&StreamConfig {
@@ -548,7 +548,7 @@ fn jetstream_flow_control() {
 #[test]
 fn jetstream_ordered() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = nats::jetstream::new(nc);
 
     js.add_stream(&StreamConfig {
@@ -587,7 +587,7 @@ fn jetstream_pull_subscribe_fetch() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -639,7 +639,7 @@ fn jetstream_pull_subscribe_timeout_fetch() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -697,7 +697,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc.clone());
 
@@ -749,7 +749,7 @@ fn jetstream_pull_subscribe_ephemeral() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -775,7 +775,7 @@ fn jetstream_pull_subscribe_bad_stream() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
         .error_callback(|err| println!("error!: {}", err))
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
 
@@ -786,7 +786,7 @@ fn jetstream_pull_subscribe_bad_stream() {
 // Helper function to return server and client.
 pub fn run_basic_jetstream() -> (nats_server::Server, Connection, JetStream) {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = JetStream::new(nc.clone(), JetStreamOptions::default());
 
     (s, nc, js)

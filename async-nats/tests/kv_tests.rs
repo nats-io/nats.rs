@@ -17,7 +17,7 @@ mod kv {
     use async_nats::{
         jetstream::{
             kv::Operation,
-            stream::{DiscardPolicy, Republish, StorageType},
+            stream::{DiscardPolicy, Republish, Source, StorageType},
         },
         ConnectOptions,
     };
@@ -524,5 +524,68 @@ mod kv {
 
         let message = subscribe.next().await.unwrap();
         assert_eq!("bar.$KV.test.key", message.subject);
+    }
+
+    #[tokio::test]
+    async fn cross_account_mirrors() {
+        let hub_server = nats_server::run_server("tests/configs/jetstream_hub.conf");
+        let leaf_server = nats_server::run_server("tests/configs/jetstream_leaf.conf");
+
+        let hub = async_nats::connect(hub_server.client_url()).await.unwrap();
+        let leaf = async_nats::connect(leaf_server.client_url()).await.unwrap();
+
+        let hub_js = async_nats::jetstream::new(hub);
+        // create the bucket on the HUB.
+        let hub_kv = hub_js
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "TEST".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        hub_kv.put("name", "derek".into()).await.unwrap();
+        hub_kv.put("age", "22".into()).await.unwrap();
+
+        let mirror_bucket = async_nats::jetstream::kv::Config {
+            bucket: "MIRROR".to_string(),
+            mirror: Some(Source {
+                name: "TEST".to_string(),
+                domain: Some("HUB".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let leaf_js = async_nats::jetstream::new(leaf.clone());
+        leaf_js.create_key_value(mirror_bucket).await.unwrap();
+
+        let mirror = leaf_js.get_stream("KV_MIRROR").await.unwrap();
+
+        // Make sure mirror direct set.
+        assert!(mirror.cached_info().config.mirror_direct);
+
+        // Make sure we sync.
+        tokio::time::sleep(Duration::from_secs(6)).await;
+
+        // Bind locally from leafnode and make sure both get and put work.
+        let local_kv = leaf_js.get_key_value("MIRROR").await.unwrap();
+
+        local_kv.put("name", "rip".into()).await.unwrap();
+
+        let name = local_kv.get("name").await.unwrap();
+        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip".to_string());
+
+        // Bind through leafnode connection but to origin KV.
+        let leaf_hub_js = async_nats::jetstream::with_domain(leaf, "HUB");
+
+        let test = leaf_hub_js.get_key_value("TEST").await.unwrap();
+
+        test.put("name", "ivan".into()).await.unwrap();
+        let name = test.get("name").await.unwrap();
+        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan".to_string());
+
+        // Shutdown HUB and test get still work.
+        drop(hub_server);
+
+        local_kv.get("name").await.unwrap();
     }
 }

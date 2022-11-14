@@ -119,15 +119,28 @@ jobs:
       - name: Set up rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
           components: clippy
           override: true
 
       - name: Check lint
-        uses: actions-rs/clippy-check@v1.0.7
+        uses: actions-rs/cargo@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           args: --tests --examples --all-features -- --deny clippy::all
+          command: clippy
+  
+  check_licenses:
+    name: check (licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Run cargo deny
+        uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check
+          command-arguments: licenses
 
   check_msrv:
     name: check (msrv)
@@ -150,8 +163,8 @@ jobs:
         run: |
           set -eo pipefail
           echo "msrv check"
-          rustup install 1.59.0
-          cargo +1.59.0 check
+          rustup install 1.64.0
+          cargo +1.64.0 check
 
   check_examples:
     name: check (examples)

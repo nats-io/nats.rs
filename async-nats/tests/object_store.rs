@@ -95,17 +95,15 @@ mod object_store {
                     .put("BAR", &mut io::Cursor::new(vec![2, 3, 4, 5]))
                     .await
                     .unwrap();
+                bucket.delete("BAR").await.unwrap();
             }
         });
 
-        assert_eq!(
-            watcher.next().await.unwrap().unwrap().name,
-            "FOO".to_string()
-        );
-        assert_eq!(
-            watcher.next().await.unwrap().unwrap().name,
-            "BAR".to_string()
-        );
+        let object = watcher.next().await.unwrap().unwrap();
+        assert_eq!(object.name, "BAR".to_string());
+        let object = watcher.next().await.unwrap().unwrap();
+        assert_eq!(object.name, "BAR".to_string());
+        assert!(object.deleted);
     }
 
     #[tokio::test]

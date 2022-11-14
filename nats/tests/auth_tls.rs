@@ -27,7 +27,7 @@ fn basic_tls() -> io::Result<()> {
             path.join("tests/configs/certs/client-cert.pem"),
             path.join("tests/configs/certs/client-key.pem"),
         )
-        .connect(&server.client_url())?;
+        .connect(server.client_url())?;
 
     // test scenario where rootCA, client certificate and client key are all in one .pem file
     nats::Options::with_user_pass("derek", "porkchop")
@@ -36,7 +36,7 @@ fn basic_tls() -> io::Result<()> {
             path.join("tests/configs/certs/client-all.pem"),
             path.join("tests/configs/certs/client-all.pem"),
         )
-        .connect(&server.client_url())?;
+        .connect(server.client_url())?;
 
     Ok(())
 }

@@ -101,7 +101,7 @@ use thiserror::Error;
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
-use tracing::debug;
+use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -113,6 +113,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
+use tokio::time::{interval, Duration};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -225,6 +226,7 @@ pub(crate) enum ServerOp {
         headers: Option<HeaderMap>,
         status: Option<StatusCode>,
         description: Option<String>,
+        length: usize,
     },
 }
 
@@ -314,14 +316,25 @@ impl ConnectionHandler {
 
     pub(crate) async fn process(
         &mut self,
+        ping_period: Duration,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
+        let mut ping_interval = interval(ping_period);
+
         loop {
             select! {
+                _ = ping_interval.tick().fuse() => {
+                    self.pending_pings += 1;
+                    if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
+                        self.handle_disconnect().await?;
+                    }
+
+                    self.connection.flush().await?;
+                },
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
-                            println!("error handling command {}", err);
+                            error!("error handling command {}", err);
                         }
                         None => {
                             break;
@@ -332,17 +345,16 @@ impl ConnectionHandler {
                 maybe_op_result = self.connection.read_op().fuse() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
-                            println!("error handling operation {}", err);
+                            error!("error handling operation {}", err);
                         }
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error handling operation {}", err);
-                            } else {
+                                error!("error handling operation {}", err);
                             }
                         }
                         Err(op_err) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error reconnecting {}. original error={}", err, op_err);
+                                error!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
                     }
@@ -379,6 +391,7 @@ impl ConnectionHandler {
                 headers,
                 status,
                 description,
+                length,
             } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message = Message {
@@ -388,6 +401,7 @@ impl ConnectionHandler {
                         headers,
                         status,
                         description,
+                        length,
                     };
 
                     // if the channel for subscription was dropped, remove the
@@ -461,7 +475,7 @@ impl ConnectionHandler {
                         .write_op(ClientOp::Unsubscribe { sid, max })
                         .await
                     {
-                        println!("Send failed with {:?}", err);
+                        error!("Send failed with {:?}", err);
                     }
                 }
             }
@@ -531,7 +545,7 @@ impl ConnectionHandler {
                     })
                     .await
                 {
-                    println!("Sending Subscribe failed with {:?}", err);
+                    error!("Sending Subscribe failed with {:?}", err);
                 }
             }
             Command::Publish {
@@ -551,7 +565,7 @@ impl ConnectionHandler {
                     .await
                 {
                     self.handle_disconnect().await?;
-                    println!("Sending Publish failed with {:?}", err);
+                    error!("Sending Publish failed with {:?}", err);
                 }
             }
             Command::Connect(connect_info) => {
@@ -624,7 +638,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, ConnectError> {
-    let ping_interval = options.ping_interval;
+    let ping_period = options.ping_interval;
     let flush_interval = options.flush_interval;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
@@ -657,8 +671,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-
-    // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(
@@ -669,18 +681,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.inbox_prefix,
         options.request_timeout,
     );
-    tokio::spawn({
-        let sender = sender.clone();
-        async move {
-            loop {
-                match sender.send(Command::Ping).await {
-                    Ok(()) => {}
-                    Err(_) => return,
-                }
-                tokio::time::sleep(ping_interval).await;
-            }
-        }
-    });
 
     tokio::spawn(async move {
         loop {
@@ -706,7 +706,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
         let connection = connection.unwrap();
         let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
-        connection_handler.process(receiver).await
+        connection_handler.process(ping_period, receiver).await
     });
 
     Ok(client)
@@ -725,7 +725,7 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Connected => write!(f, "reconnected"),
+            Event::Connected => write!(f, "connected"),
             Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
             Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
@@ -781,6 +781,7 @@ pub enum ConnectError {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
@@ -837,15 +838,15 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut sub = client.subscribe("test".into()).await?;
-    /// sub.unsubscribe_after(3).await?;
+    /// let mut subscriber = client.subscribe("test".into()).await?;
+    /// subscriber.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
     /// for _ in 0..3 {
     ///     client.publish("test".into(), "data".into()).await?;
     /// }
     ///
-    /// while let Some(message) = sub.next().await {
+    /// while let Some(message) = subscriber.next().await {
     ///     println!("message received: {:?}", message);
     /// }
     /// println!("no more messages, unsubscribed");

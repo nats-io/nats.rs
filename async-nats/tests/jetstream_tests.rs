@@ -24,9 +24,8 @@ pub struct AccountInfo {
 
 mod jetstream {
 
-    use std::io::ErrorKind;
     use std::str::from_utf8;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use super::*;
     use async_nats::connection::State;
@@ -40,7 +39,6 @@ mod jetstream {
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
-    use tokio::time::Instant;
     use tokio_retry::Retry;
 
     #[tokio::test]
@@ -77,10 +75,39 @@ mod jetstream {
         let ack = context
             .publish_with_headers("foo".into(), headers, payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
 
         assert_eq!(ack.stream, "TEST");
         assert_eq!(ack.sequence, 1);
+    }
+
+    #[tokio::test]
+    async fn publish_async() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let ack = context
+            .publish("foo".to_string(), "paylaod".into())
+            .await
+            .unwrap();
+        assert!(ack.await.is_ok());
+        let ack = context
+            .publish("not_stream".to_string(), "paylaod".into())
+            .await
+            .unwrap();
+        assert!(ack.await.is_err());
     }
 
     #[tokio::test]
@@ -103,6 +130,8 @@ mod jetstream {
         // Basic publish like NATS core.
         let ack = context
             .publish("foo".into(), payload.as_ref().into())
+            .await
+            .unwrap()
             .await
             .unwrap();
         assert_eq!(ack.stream, "TEST");
@@ -368,6 +397,8 @@ mod jetstream {
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
 
         let raw_message = stream.get_raw_message(publish_ack.sequence).await.unwrap();
@@ -407,7 +438,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(raw_message.sequence, publish_ack.sequence);
+        assert_eq!(raw_message.sequence, publish_ack.await.unwrap().sequence);
     }
 
     #[tokio::test]
@@ -454,7 +485,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -509,7 +543,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -573,7 +610,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -630,7 +670,10 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
+        assert_eq!(
+            sequence.parse::<u64>().unwrap(),
+            publish_ack.await.unwrap().sequence
+        );
         assert_eq!(payload, message.payload.as_ref());
 
         stream.direct_get(22).await.expect_err("should error");
@@ -668,7 +711,10 @@ mod jetstream {
             .unwrap();
 
         let mut messages = consumer.messages().await.unwrap();
-        stream.delete_message(publish_ack.sequence).await.unwrap();
+        stream
+            .delete_message(publish_ack.await.unwrap().sequence)
+            .await
+            .unwrap();
 
         assert_eq!(
             messages
@@ -924,7 +970,6 @@ mod jetstream {
                 .unwrap();
         }
 
-        println!("pubbed");
         let mut messages = consumer
             .stream()
             .max_messages_per_batch(1)
@@ -1085,13 +1130,7 @@ mod jetstream {
                 break;
             }
             let message = message.unwrap();
-            assert_eq!(
-                from_utf8(&message.payload)
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap(),
-                i
-            );
+            assert_eq!(i + 1, message.info().unwrap().stream_sequence as usize);
             assert_eq!(message.status, None);
         }
     }
@@ -1413,8 +1452,8 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         tokio::task::spawn(async move {
-            for i in 0..25 {
-                tokio::time::sleep(Duration::from_millis(200)).await;
+            for i in 0..10 {
+                tokio::time::sleep(Duration::from_millis(600)).await;
                 context
                     .publish(
                         "events".to_string(),
@@ -1427,15 +1466,14 @@ mod jetstream {
 
         let mut iter = consumer
             .stream()
-            .max_messages_per_batch(25)
-            .expires(Duration::from_millis(500))
-            .heartbeat(Duration::from_millis(150))
+            .max_messages_per_batch(10)
+            .expires(Duration::from_millis(1000))
+            .heartbeat(Duration::from_millis(500))
             .messages()
             .await
             .unwrap()
-            .take(25);
+            .take(10);
         while let Some(result) = iter.next().await {
-            println!("MESSAGE: {:?}", result);
             result.unwrap().ack().await.unwrap();
         }
     }
@@ -1590,6 +1628,55 @@ mod jetstream {
         }
     }
     #[tokio::test]
+    async fn pull_consumer_stream_without_heartbeat() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        context
+            .publish("events".to_string(), "dat".into())
+            .await
+            .unwrap();
+
+        let mut messages = consumer
+            .stream()
+            .max_messages_per_batch(3)
+            .messages()
+            .await
+            .unwrap();
+
+        messages.next().await.unwrap().unwrap().ack().await.unwrap();
+        let name = &consumer.cached_info().name;
+        stream.delete_consumer(name).await.unwrap();
+        let now = Instant::now();
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        println!("time elapsed {:?}", now.elapsed());
+    }
+    #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
@@ -1641,7 +1728,7 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
-        println!("time elapsed {:?}", now.elapsed());
+        assert!(now.elapsed().le(&Duration::from_secs(50)));
     }
 
     #[tokio::test]
@@ -1805,7 +1892,13 @@ mod jetstream {
                 .unwrap();
         }
 
-        let messages = consumer.messages().await.unwrap();
+        let messages = consumer
+            .stream()
+            .expires(Duration::from_secs(60))
+            .heartbeat(Duration::from_secs(30))
+            .messages()
+            .await
+            .unwrap();
 
         println!("starting interation");
         let mut messages = messages.enumerate();
@@ -1827,7 +1920,7 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn timeod_out_request() {
+    async fn timeout_out_request() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         tokio::time::sleep(Duration::from_secs(5)).await;
         let client = async_nats::ConnectOptions::new()
@@ -1849,14 +1942,23 @@ mod jetstream {
                 .unwrap();
         }
         drop(server);
-        let ack = jetstream.publish("events".into(), "fail".into()).await;
-        assert_eq!(
-            ack.unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            ErrorKind::TimedOut
-        )
+        let ack = jetstream
+            .publish("events".into(), "fail".into())
+            .await
+            .unwrap()
+            .await;
+        println!("ACK: {:?}", ack);
+        println!(
+            "DOWNCAST: {:?}",
+            ack.unwrap_err().downcast::<std::io::Error>()
+        );
+        // assert_eq!(
+        //     ack.unwrap_err()
+        //         .downcast::<std::io::Error>()
+        //         .unwrap()
+        //         .kind(),
+        //     ErrorKind::TimedOut
+        // )
     }
 
     #[tokio::test]
@@ -1938,14 +2040,234 @@ mod jetstream {
         jetstream
             .publish("events.1".to_string(), "data".into())
             .await
-            .unwrap();
-        jetstream
-            .publish("events.1".to_string(), "data".into())
+            .unwrap()
             .await
             .unwrap();
         jetstream
             .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        jetstream
+            .publish("events.1".to_string(), "data".into())
+            .await
+            .unwrap()
             .await
             .expect_err("should get 503 maximum messages per subject exceeded error");
+    }
+
+    #[tokio::test]
+    async fn mirrors() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .publish("events".to_string(), "skipped".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events".to_string(), "data".into())
+            .await
+            .unwrap();
+
+        let mut mirror = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "MIRROR".to_string(),
+                mirror: Some(async_nats::jetstream::stream::Source {
+                    name: stream.cached_info().config.name.clone(),
+                    start_sequence: Some(2),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mirror_info = mirror.info().await.unwrap();
+        assert_eq!(
+            mirror_info.config.mirror.as_ref().unwrap().name.as_str(),
+            "TEST"
+        );
+
+        let mut messages = mirror
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        )
+    }
+    #[tokio::test]
+    async fn sources() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let stream2 = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST2".to_string(),
+                subjects: vec!["events2".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .publish("events".to_string(), "skipped".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events2".to_string(), "data".into())
+            .await
+            .unwrap();
+        jetstream
+            .publish("events2".to_string(), "data".into())
+            .await
+            .unwrap();
+
+        let mut source = jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "SOURCE".to_string(),
+                sources: Some(vec![
+                    async_nats::jetstream::stream::Source {
+                        name: stream.cached_info().config.name.clone(),
+                        start_sequence: Some(2),
+                        ..Default::default()
+                    },
+                    async_nats::jetstream::stream::Source {
+                        name: stream2.cached_info().config.name.clone(),
+                        start_sequence: Some(1),
+                        ..Default::default()
+                    },
+                ]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let source_info = source.info().await.unwrap();
+        assert_eq!(
+            source_info.config.sources.as_ref().unwrap()[0]
+                .name
+                .as_str(),
+            "TEST"
+        );
+        assert_eq!(
+            source_info.config.sources.as_ref().unwrap()[1]
+                .name
+                .as_str(),
+            "TEST2"
+        );
+
+        let mut messages = source
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        );
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        );
+        assert_eq!(
+            from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
+            "data".to_string(),
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_by_bytes() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        tokio::task::spawn(async move {
+            for i in 0..1000 {
+                context
+                    .publish(
+                        "events".to_string(),
+                        format!("Some bytes to sent with sequence number included: {}", i).into(),
+                    )
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+
+        let mut iter = consumer
+            .stream()
+            .expires(Duration::from_secs(3))
+            .max_bytes_per_batch(1024)
+            .messages()
+            .await
+            .unwrap()
+            .take(1000);
+        while let Some(result) = iter.next().await {
+            result.unwrap().ack().await.unwrap();
+        }
+
+        let info = consumer.info().await.unwrap();
+        assert!(info.delivered.last_active.is_some());
     }
 }

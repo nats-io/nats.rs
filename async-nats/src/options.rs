@@ -97,9 +97,9 @@ impl Default for ConnectOptions {
             ping_interval: Duration::from_secs(60),
             sender_capacity: 128,
             subscription_capacity: 1024,
-            event_callback: CallbackArg1::<Event, ()>(Box::new(move |error| {
+            event_callback: CallbackArg1::<Event, ()>(Box::new(move |event| {
                 Box::pin(async move {
-                    println!("error : {}", error);
+                    tracing::info!("event: {}", event);
                 })
             })),
             inbox_prefix: "_INBOX".to_string(),
@@ -549,7 +549,7 @@ impl ConnectOptions {
         self
     }
 
-    pub fn retry_on_intial_connect(mut self) -> ConnectOptions {
+    pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
         self
     }

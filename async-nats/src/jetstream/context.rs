@@ -16,20 +16,22 @@
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{Client, Error};
+use crate::{Client, Command, Error};
 use bytes::Bytes;
-use futures::TryFutureExt;
+use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, json};
 use std::borrow::Borrow;
+use std::future::IntoFuture;
 use std::io::{self, ErrorKind};
+use std::pin::Pin;
 use std::time::Duration;
 use tracing::debug;
 
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
-use super::stream::{self, Config, DeleteStatus, DiscardPolicy, Info, Stream};
+use super::stream::{self, Config, DeleteStatus, DiscardPolicy, External, Info, Stream};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -68,12 +70,16 @@ impl Context {
         }
     }
 
-    /// Publish a message to a given subject associated with a stream and returns an acknowledgment from
-    /// the server that the message has been successfully delivered.
+    /// Publishes [Message] to the [crate::jetstream::stream::Stream] without waiting for
+    /// acknowledgment from the server that the message has been successfully delivered.
+    ///
+    /// Acknowledgment future that can be polled is returned instead.
     ///
     /// If the stream does not exist, `no responders` error will be returned.
     ///
     /// # Examples
+    ///
+    /// ## Publish, and after each publish, await for acknowledgment.
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -82,28 +88,51 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// ack.await?;
+    /// jetstream.publish("events".to_string(), "data".into())
+    ///     .await?
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<PublishAck, Error> {
-        let message = tokio::time::timeout(self.timeout, self.client.request(subject, payload))
-            .map_err(|_| {
-                std::io::Error::new(ErrorKind::TimedOut, "jetstream publish request timed out")
-            })
-            .await??;
-        let response = serde_json::from_slice(message.payload.as_ref())?;
+    ///
+    /// ## Publish and do not wait for the acknowledgment. Await can be deffered to when needed or
+    /// ignored entirely.
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let first_ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let second_ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// first_ack.await?;
+    /// second_ack.await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn publish(
+        &self,
+        subject: String,
+        payload: Bytes,
+    ) -> Result<PublishAckFuture, Error> {
+        let inbox = self.client.new_inbox();
+        let response = self.client.subscribe(inbox.clone()).await?;
+        tokio::time::timeout(
+            self.timeout,
+            self.client
+                .publish_with_reply(subject, inbox.clone(), payload),
+        )
+        .map_err(|_| {
+            std::io::Error::new(ErrorKind::TimedOut, "JetStream publish request timed out")
+        })
+        .await??;
 
-        match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while publishing message: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-
-            Response::Ok(publish_ack) => Ok(publish_ack),
-        }
+        Ok(PublishAckFuture {
+            timeout: self.timeout,
+            subscription: response,
+        })
     }
 
     /// Publish a message with headers to a given subject associated with a stream and returns an acknowledgment from
@@ -130,24 +159,23 @@ impl Context {
         subject: String,
         headers: crate::header::HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAck, Error> {
-        let message = self
-            .client
-            .request_with_headers(subject, headers, payload)
-            .await?;
-        let response = serde_json::from_slice(message.payload.as_ref())?;
+    ) -> Result<PublishAckFuture, Error> {
+        let inbox = self.client.new_inbox();
+        let response = self.client.subscribe(inbox.clone()).await?;
+        tokio::time::timeout(
+            self.timeout,
+            self.client
+                .publish_with_reply_and_headers(subject, inbox.clone(), headers, payload),
+        )
+        .map_err(|_| {
+            std::io::Error::new(ErrorKind::TimedOut, "JetStream publish request timed out")
+        })
+        .await??;
 
-        match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while publishing message: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-
-            Response::Ok(publish_ack) => Ok(publish_ack),
-        }
+        Ok(PublishAckFuture {
+            timeout: self.timeout,
+            subscription: response,
+        })
     }
 
     /// Query the server for account information
@@ -192,12 +220,43 @@ impl Context {
     where
         Config: From<S>,
     {
-        let config: Config = stream_config.into();
+        let mut config: Config = stream_config.into();
         if config.name.is_empty() {
             return Err(Box::new(io::Error::new(
                 ErrorKind::InvalidInput,
                 "the stream name must not be empty",
             )));
+        }
+        if let Some(ref mut mirror) = config.mirror {
+            if let Some(ref mut domain) = mirror.domain {
+                if mirror.external.is_some() {
+                    return Err(Box::new(io::Error::new(
+                        ErrorKind::Other,
+                        "domain and external are both set",
+                    )));
+                }
+                mirror.external = Some(External {
+                    api_prefix: format!("$JS.{}.API", domain),
+                    delivery_prefix: None,
+                })
+            }
+        }
+
+        if let Some(ref mut sources) = config.sources {
+            for source in sources {
+                if let Some(ref mut domain) = source.domain {
+                    if source.external.is_some() {
+                        return Err(Box::new(io::Error::new(
+                            ErrorKind::Other,
+                            "domain and external are both set",
+                        )));
+                    }
+                    source.external = Some(External {
+                        api_prefix: format!("$JS.{}.API", domain),
+                        delivery_prefix: None,
+                    })
+                }
+            }
         }
         let subject = format!("STREAM.CREATE.{}", config.name);
         let response: Response<Info> = self.request(subject, &config).await?;
@@ -410,13 +469,28 @@ impl Context {
                 "not a valid key-value store",
             )));
         }
-
-        Ok(Store {
+        let mut store = Store {
             prefix: format!("$KV.{}.", &bucket),
             name: bucket,
             stream_name,
-            stream,
-        })
+            stream: stream.clone(),
+            put_prefix: None,
+            use_jetstream_prefix: self.prefix != "$JS.API",
+        };
+        if let Some(ref mirror) = stream.info.config.mirror {
+            let bucket = mirror.name.trim_start_matches("KV_");
+            if let Some(ref external) = mirror.external {
+                if !external.api_prefix.is_empty() {
+                    store.use_jetstream_prefix = false;
+                    store.prefix = format!("$KV.{}.", bucket);
+                    store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
+                } else {
+                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                }
+            }
+        };
+
+        Ok(store)
     }
 
     /// Creates a new key-value bucket.
@@ -438,7 +512,7 @@ impl Context {
     /// ```
     pub async fn create_key_value(
         &self,
-        config: crate::jetstream::kv::Config,
+        mut config: crate::jetstream::kv::Config,
     ) -> Result<Store, Error> {
         if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
             return Err(Box::new(std::io::Error::new(
@@ -465,11 +539,27 @@ impl Context {
             config.num_replicas
         };
 
+        let mut subjects = Vec::new();
+        if let Some(ref mut mirror) = config.mirror {
+            if !mirror.name.starts_with("KV_") {
+                mirror.name = format!("KV_{}", mirror.name);
+            }
+            config.mirror_direct = true;
+        } else if let Some(ref mut sources) = config.sources {
+            for source in sources {
+                if !source.name.starts_with("KV_") {
+                    source.name = format!("KV_{}", source.name);
+                }
+            }
+        } else {
+            subjects = vec![format!("$KV.{}.>", config.bucket)];
+        }
+
         let stream = self
             .create_stream(stream::Config {
                 name: format!("KV_{}", config.bucket),
                 description: Some(config.description),
-                subjects: vec![format!("$KV.{}.>", config.bucket)],
+                subjects,
                 max_messages_per_subject: history,
                 max_bytes: config.max_bytes,
                 max_age: config.max_age,
@@ -480,18 +570,37 @@ impl Context {
                 deny_delete: true,
                 deny_purge: false,
                 allow_direct: true,
+                sources: config.sources,
+                mirror: config.mirror,
                 num_replicas,
                 discard: stream::DiscardPolicy::New,
+                mirror_direct: config.mirror_direct,
                 ..Default::default()
             })
             .await?;
 
-        Ok(Store {
-            name: config.bucket.clone(),
-            stream_name: stream.info.config.name.clone(),
-            prefix: format!("$KV.{}.", config.bucket),
-            stream,
-        })
+        let mut store = Store {
+            prefix: format!("$KV.{}.", &config.bucket),
+            name: config.bucket,
+            stream: stream.clone(),
+            stream_name: stream.info.config.name,
+            put_prefix: None,
+            use_jetstream_prefix: self.prefix != "$JS.API",
+        };
+        if let Some(ref mirror) = stream.info.config.mirror {
+            let bucket = mirror.name.trim_start_matches("KV_");
+            if let Some(ref external) = mirror.external {
+                if !external.api_prefix.is_empty() {
+                    store.use_jetstream_prefix = false;
+                    store.prefix = format!("$KV.{}.", bucket);
+                    store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
+                } else {
+                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                }
+            }
+        };
+
+        Ok(store)
     }
 
     /// Deletes given key-value bucket.
@@ -684,5 +793,52 @@ impl Context {
         let stream_name = format!("OBJ_{}", bucket_name.as_ref());
         self.delete_stream(stream_name).await?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct PublishAckFuture {
+    timeout: Duration,
+    subscription: crate::Subscriber,
+}
+
+impl PublishAckFuture {
+    async fn next_with_timeout(mut self) -> Result<PublishAck, Error> {
+        self.subscription.sender.send(Command::TryFlush).await.ok();
+        let next = tokio::time::timeout(self.timeout, self.subscription.next())
+            .await
+            .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "acknowledgment timed out"))?;
+        next.map_or_else(
+            || {
+                Err(Box::from(std::io::Error::new(
+                    ErrorKind::Other,
+                    "broken pipe",
+                )))
+            },
+            |m| {
+                let response = serde_json::from_slice(m.payload.as_ref())?;
+                match response {
+                    Response::Err { error } => Err(Box::from(std::io::Error::new(
+                        ErrorKind::Other,
+                        format!(
+                            "nats: error while publishing message: {}, {}, {}",
+                            error.code, error.status, error.description
+                        ),
+                    ))),
+                    Response::Ok(publish_ack) => Ok(publish_ack),
+                }
+            },
+        )
+    }
+}
+impl IntoFuture for PublishAckFuture {
+    type Output = Result<PublishAck, Error>;
+
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PublishAck, Error>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(std::future::IntoFuture::into_future(
+            self.next_with_timeout(),
+        ))
     }
 }
