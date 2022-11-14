@@ -14,8 +14,7 @@
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::{
-    future,
-    io,
+    future, io,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,
@@ -484,7 +483,7 @@ impl Stream {
                         .await
                         .map(|_| pending_reset)
                         .map_err(|err| Box::from(io::Error::new(io::ErrorKind::Other, err)));
-if let Err(err) = consumer.context.client.flush().await {
+                    if let Err(err) = consumer.context.client.flush().await {
                         debug!("flush failed: {}", err);
                     }
                     // TODO: add tracing instead of ignoring this.
