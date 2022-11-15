@@ -79,7 +79,7 @@ impl Stream {
 
     /// Returns cached [Info] for the [Stream].
     /// Cache is either from initial creation/retrival of the [Stream] or last call to
-    /// [Stream::Info].
+    /// [Stream::info].
     ///
     /// # Examples
     ///
@@ -103,7 +103,7 @@ impl Stream {
     /// Gets next message for a [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -178,7 +178,7 @@ impl Stream {
     /// Gets first message from [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -242,7 +242,7 @@ impl Stream {
     /// Gets message from [Stream] with given `sequence id`.
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -301,7 +301,7 @@ impl Stream {
     /// Gets last message for a given `subject`.
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///

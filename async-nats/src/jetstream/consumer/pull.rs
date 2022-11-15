@@ -917,7 +917,7 @@ impl<'a> StreamBuilder<'a> {
     }
 }
 
-/// Used for building configuration for a [`Fetch`]. Created by a [FetchBuilder] on a [Consumer].
+/// Used for building configuration for a [Batch] with `fetch()` semantics. Created by a [FetchBuilder] on a [Consumer].
 ///
 /// # Examples
 ///
@@ -1152,7 +1152,7 @@ impl<'a> FetchBuilder<'a> {
     }
 }
 
-/// Used for building configuration for a [Batch]. Created by a [Consumer::batch_builder] on a [Consumer].
+/// Used for building configuration for a [Batch]. Created by a [Consumer::batch] on a [Consumer].
 ///
 /// # Examples
 ///
