@@ -95,6 +95,8 @@
 //! ```
 
 #![deny(unreachable_pub)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
 
 use futures::future::FutureExt;
 use futures::select;
