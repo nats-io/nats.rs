@@ -84,7 +84,7 @@ pub struct ObjectStore {
 }
 
 impl ObjectStore {
-    /// Gets an [Object] from the [Store].
+    /// Gets an [Object] from the [ObjectStore].
     ///
     /// [Object] implements [tokio::io::AsyncRead] that allows
     /// to read the data from Object Store.
@@ -129,7 +129,7 @@ impl ObjectStore {
         Ok(Object::new(subscription, object_info))
     }
 
-    /// Gets an [Object] from the [Store].
+    /// Gets an [Object] from the [ObjectStore].
     ///
     /// [Object] implements [tokio::io::AsyncRead] that allows
     /// to read the data from Object Store.
@@ -173,7 +173,7 @@ impl ObjectStore {
         Ok(())
     }
 
-    /// Retrieves [Object] [Info].
+    /// Retrieves [Object] [ObjectInfo].
     ///
     /// # Examples
     ///

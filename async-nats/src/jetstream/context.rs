@@ -70,7 +70,7 @@ impl Context {
         }
     }
 
-    /// Publishes [Message] to the [crate::jetstream::stream::Stream] without waiting for
+    /// Publishes [jetstream::Message][super::message::Message] to the [Stream] without waiting for
     /// acknowledgment from the server that the message has been successfully delivered.
     ///
     /// Acknowledgment future that can be polled is returned instead.
@@ -79,7 +79,7 @@ impl Context {
     ///
     /// # Examples
     ///
-    /// ## Publish, and after each publish, await for acknowledgment.
+    /// Publish, and after each publish, await for acknowledgment.
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -96,7 +96,7 @@ impl Context {
     /// # }
     /// ```
     ///
-    /// ## Publish and do not wait for the acknowledgment. Await can be deffered to when needed or
+    /// Publish and do not wait for the acknowledgment. Await can be deffered to when needed or
     /// ignored entirely.
     ///
     /// ```no_run
