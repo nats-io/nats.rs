@@ -129,7 +129,7 @@ jobs:
           args: --tests --examples --all-features -- --deny clippy::all
           command: clippy
   
-  check_lint:
+  check_docs:
     name: check (docs)
     runs-on: ubuntu-latest
     steps:
