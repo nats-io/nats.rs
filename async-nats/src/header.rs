@@ -39,6 +39,8 @@ pub const NATS_MESSAGE_ID: &str = "Nats-Msg-Id";
 pub const NATS_EXPECTED_LAST_MESSAGE_ID: &str = "Nats-Expected-Last-Msg-Id";
 /// Last expected sequence for JetStream message publish
 pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
+/// Expect that given message will be ingested by specified stream.
+pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
 
 /// A struct for handling NATS headers.
 /// Has a similar API to [http::header], but properly serializes and desiaralizes
