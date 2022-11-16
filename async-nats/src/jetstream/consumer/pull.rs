@@ -488,7 +488,9 @@ impl Stream {
                     debug!("request published");
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
-                        .send(result.map(|_| pending_reset))
+                        .send(result.map(|_| pending_reset).map_err(|err| {
+                            Box::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+                        }))
                         .await
                         .unwrap();
                     trace!("result send over tx");

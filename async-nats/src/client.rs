@@ -186,7 +186,7 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -218,7 +218,7 @@ impl Client {
         subject: String,
         reply: String,
         payload: Bytes,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PublishError> {
         self.sender
             .send(Command::Publish {
                 subject,
