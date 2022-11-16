@@ -33,6 +33,12 @@ pub const NATS_LAST_SEQUENCE: &str = "Nats-Last-Sequence";
 
 /// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
+/// Message identifier used for deduplication window
+pub const NATS_MESSAGE_ID: &str = "Nats-Msg-Id";
+/// Last expected message ID for JetStream message publish
+pub const NATS_EXPECTED_LAST_MESSAGE_ID: &str = "Nats-Expected-Last-Msg-Id";
+/// Last expected sequence for JetStream message publish
+pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
 
 /// A struct for handling NATS headers.
 /// Has a similar API to [http::header], but properly serializes and desiaralizes
