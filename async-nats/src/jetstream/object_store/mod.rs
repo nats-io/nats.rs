@@ -259,11 +259,11 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
-        let mut buffer = [0; DEFAULT_CHUNK_SIZE];
+        let mut buffer = Box::new([0; DEFAULT_CHUNK_SIZE]);
         let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
-            let n = data.read(&mut buffer).await?;
+            let n = data.read(&mut *buffer).await?;
 
             if n == 0 {
                 break;

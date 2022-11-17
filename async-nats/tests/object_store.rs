@@ -266,4 +266,40 @@ mod object_store {
         assert_eq!(list.next().await.unwrap().unwrap().name, "1");
         assert_eq!(list.count().await, 8);
     }
+
+    #[tokio::test]
+    async fn stack_overflow() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        bucket
+            .put("DATA", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+        bucket
+            .put("DATA", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+        bucket
+            .put("DATA", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+        bucket
+            .put("DATA", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+        bucket
+            .put("DATA", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+    }
 }
