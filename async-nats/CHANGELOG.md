@@ -1,3 +1,34 @@
+# 0.23.0
+## Overview
+
+This release focuses on fixes around Object Store and customized JetStream Publish.
+
+It also introduces a breaking change, as not all `publish()` methods did return `PublishError`, using the generic `async_nats::Error` instead. This has been fixed.
+
+## Breaking changes
+* Make publish error types consistent by @Jarema in https://github.com/nats-io/nats.rs/pull/727
+
+## Fixed
+* Fix object store watch to retrieve only new/changed values by @Jarema in https://github.com/nats-io/nats.rs/pull/720
+* Fix stack overflow in object store by @Jarema in https://github.com/nats-io/nats.rs/pull/731
+
+## Added
+* Add customizable JetStream publish by @Jarema in https://github.com/nats-io/nats.rs/pull/728 request by @andrenth
+* Add object store list by @Jarema in https://github.com/nats-io/nats.rs/pull/721
+* Add docs lint by @Jarema in https://github.com/nats-io/nats.rs/pull/725
+
+# Changed
+* Use debug macro for logging instead of println by @c0d3x42 in https://github.com/nats-io/nats.rs/pull/716
+* Merge periodic flush into connection handler loop by @caspervonb in https://github.com/nats-io/nats.rs/pull/687
+* Improve docs formatting and fix links by @Jarema in https://github.com/nats-io/nats.rs/pull/723
+
+
+## New Contributors
+* @c0d3x42 made their first contribution in https://github.com/nats-io/nats.rs/pull/716
+* @piotrpio  made their first contribution in https://github.com/nats-io/nats.rs/pull/728
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.22.1...async-nats/v0.23.0
+
 # 0.22.1
 ## Overview
 A patch release, including early feedback to 0.22.0.
