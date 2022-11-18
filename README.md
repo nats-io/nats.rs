@@ -21,6 +21,27 @@ with the NATS philosophy of simple, secure, and fast!
 
 There are two clients available in two separate crates:
 
+### async-nats
+
+[![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Crates.io](https://img.shields.io/crates/v/async-nats.svg)](https://crates.io/crates/async-nats)
+[![Documentation](https://docs.rs/async-nats/badge.svg)](https://docs.rs/async-nats/)
+[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
+
+New async Tokio-based NATS client.
+
+Supports:
+
+* Core NATS
+* JetStream API
+* JetStream Management API
+* Key Value Store
+* Object Store
+
+Any feedback related to this client is welcomed.
+
+> **Note:** async client is still <1.0.0 version and will introduce breaking changes.
+
 ### nats
 
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -36,31 +57,7 @@ Legacy *synchronous* client that supports:
 * Key Value Storage
 * Object Store
 
-### async-nats
-
-[![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Crates.io](https://img.shields.io/crates/v/async-nats.svg)](https://crates.io/crates/async-nats)
-[![Documentation](https://docs.rs/async-nats/badge.svg)](https://docs.rs/async-nats/)
-[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
-
-
-New async Tokio-based NATS client.
-
-Currently supports:
-
-* Core NATS
-* JetStream API
-* JetStream Management API
-* Key Value Store
-* Object Store
-
-And should soon catch up with in terms of feature parity with synchronous client.
-When it reaches feature parity with `nats` crate, synchronous wrapper over `async-nats` will
-replace current `nats` codebase.
-
-Any feedback related to this client is welcomed.
-
-> **Note:** async client is still <1.0.0 version and will introduce breaking changes.
+This client will be deprecated soon, when `async-nats` reaches version 1.0, with a sync wrapper around it.
 
 ### Documentation
 
