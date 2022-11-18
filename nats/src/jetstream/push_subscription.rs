@@ -114,7 +114,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -150,7 +150,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -183,7 +183,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -285,7 +285,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -316,7 +316,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -363,7 +363,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -487,7 +487,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -510,7 +510,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -551,7 +551,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -581,7 +581,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
     /// # use std::thread;
     /// # use std::time::Duration;
@@ -657,7 +657,7 @@ impl Handler {
     /// Unsubscribe a subscription.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.subscribe("foo")?.with_handler(move |msg| {
