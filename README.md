@@ -54,7 +54,7 @@ Legacy *synchronous* client that supports:
 * Core NATS
 * JetStream API
 * JetStream Management API
-* Key Value Storage
+* Key Value Store
 * Object Store
 
 This client will be deprecated soon, when `async-nats` reaches version 1.0, with a sync wrapper around it.
