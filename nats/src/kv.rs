@@ -109,7 +109,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -169,7 +169,7 @@ impl JetStream {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -258,7 +258,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -338,7 +338,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -400,7 +400,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -436,7 +436,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -474,7 +474,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -512,7 +512,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -558,7 +558,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -602,7 +602,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -643,7 +643,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -689,7 +689,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;

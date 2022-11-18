@@ -76,7 +76,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -130,7 +130,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -172,7 +172,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -344,7 +344,7 @@ impl ObjectStore {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -402,7 +402,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -503,7 +503,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::io::Read;
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
@@ -543,7 +543,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::io::Read;
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {

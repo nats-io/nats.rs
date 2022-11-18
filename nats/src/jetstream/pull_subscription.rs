@@ -93,7 +93,7 @@ impl PullSubscription {
     /// in the Consumer.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -144,7 +144,7 @@ impl PullSubscription {
     /// in the Consumer.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use std::time::Duration;
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
@@ -193,7 +193,7 @@ impl PullSubscription {
     /// closure and acks them automatically according to `Consumer` `AckPolicy`.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -244,7 +244,7 @@ impl PullSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -296,7 +296,7 @@ impl PullSubscription {
     /// Keep in mind that this requires user to request for messages first.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use std::time::Duration;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -352,7 +352,7 @@ impl PullSubscription {
     /// to have more granular control of how many request and when are sent.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -400,7 +400,7 @@ impl PullSubscription {
     /// As Pull Consumers requires Client to fetch messages, this will yield nothing if explicit [`PullSubscription::request_batch`] was not sent.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
