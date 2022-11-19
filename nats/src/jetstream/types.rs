@@ -42,7 +42,7 @@ pub struct RawStreamMessage {
     #[serde(rename = "seq")]
     pub sequence: u64,
 
-    /// Data of the mssage.
+    /// Data of the message.
     #[serde(default, rename = "data")]
     pub data: String,
 
@@ -71,7 +71,7 @@ pub struct StreamMessage {
     pub subject: String,
     /// Sequence of the message
     pub sequence: u64,
-    /// HeaderMap that were sent with the mesage, if any.
+    /// HeaderMap that were sent with the message, if any.
     pub headers: Option<HeaderMap>,
     /// Payload of the message.
     pub data: Vec<u8>,
@@ -246,10 +246,10 @@ pub struct ConsumerConfig {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
 }
@@ -460,7 +460,7 @@ pub enum DeliverPolicy {
     /// parameter.
     #[serde(rename = "by_start_sequence")]
     ByStartSeq = 3,
-    /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
+    /// `ByStartTime` will select the first message with a timestamp >= to the consumer's
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime = 4,
@@ -550,7 +550,7 @@ pub struct PurgeResponse {
 #[repr(u8)]
 pub enum RetentionPolicy {
     /// `Limits` (default) means that messages are retained until any given limit is reached.
-    /// This could be one of mesages, bytes, or age.
+    /// This could be one of messages, bytes, or age.
     #[serde(rename = "limits")]
     Limits = 0,
     /// `Interest` specifies that when all known observables have acknowledged a message it can be removed.
@@ -693,7 +693,7 @@ pub struct ConsumerInfo {
     pub config: ConsumerConfig,
     /// Statistics for delivered messages
     pub delivered: SequencePair,
-    /// Statistics for acknowleged messages
+    /// Statistics for acknowledged messages
     pub ack_floor: SequencePair,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
@@ -731,7 +731,7 @@ pub struct ClusterInfo {
 pub struct PeerInfo {
     /// The server name of the peer.
     pub name: String,
-    /// Indicates if the server is up to date and synchronised.
+    /// Indicates if the server is up to date and synchronized.
     pub current: bool,
     /// Nanoseconds since this peer was last seen.
     #[serde(with = "serde_nanos")]
@@ -1051,7 +1051,7 @@ pub struct AccountInfo {
     pub consumers: i64,
     /// Aggregated API statistics
     pub api: ApiStats,
-    /// Limits placed on the accuont
+    /// Limits placed on the account
     pub limits: AccountLimits,
 }
 

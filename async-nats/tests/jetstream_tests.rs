@@ -100,12 +100,12 @@ mod jetstream {
             .unwrap();
 
         let ack = context
-            .publish("foo".to_string(), "paylaod".into())
+            .publish("foo".to_string(), "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_ok());
         let ack = context
-            .publish("not_stream".to_string(), "paylaod".into())
+            .publish("not_stream".to_string(), "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_err());
@@ -1363,7 +1363,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        // distrupt stream sequence continuity.
+        // disrupt stream sequence continuity.
         stream.delete_message(510).await.unwrap();
         stream.delete_message(600).await.unwrap();
         stream.delete_message(800).await.unwrap();
@@ -2049,7 +2049,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        println!("starting interation");
+        println!("starting iteration");
         let mut messages = messages.enumerate();
         while let Some((i, message)) = messages.next().await {
             if i % 700 == 0 {

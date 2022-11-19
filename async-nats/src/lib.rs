@@ -497,7 +497,7 @@ impl ConnectionHandler {
 
                 if self.pending_pings > self.max_pings {
                     debug!(
-                        "pendings pings {}, max pings {}. disconnecting",
+                        "pending pings {}, max pings {}. disconnecting",
                         self.pending_pings, self.max_pings
                     );
                     self.handle_disconnect().await?;
@@ -737,7 +737,7 @@ impl fmt::Display for Event {
 
 /// Connects to NATS with default config.
 ///
-/// Returns clonable [Client].
+/// Returns cloneable [Client].
 ///
 /// To have customized NATS connection, check [ConnectOptions].
 ///
@@ -1185,13 +1185,13 @@ mod tests {
     }
 
     #[test]
-    fn serverr_address_ipv4() {
+    fn server_address_ipv4() {
         let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
         assert_eq!(address.host(), "127.0.0.1")
     }
 
     #[test]
-    fn serverr_address_domain() {
+    fn server_address_domain() {
         let address = ServerAddr::from_str("nats://example.com").unwrap();
         assert_eq!(address.host(), "example.com")
     }

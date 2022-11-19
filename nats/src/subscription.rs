@@ -128,7 +128,7 @@ impl Subscription {
     }
 
     /// Get the next message, or a timeout error
-    /// if no messages are available for timout.
+    /// if no messages are available for timeout.
     ///
     /// # Example
     /// ```
@@ -283,7 +283,7 @@ impl Subscription {
     }
 
     /// Returns number of dropped messages for this Subscription.
-    /// Dropped messages occur when `set_message_limits` is set and threashold is reached,
+    /// Dropped messages occur when `set_message_limits` is set and threshold is reached,
     /// triggering `slow consumer` error.
     ///
     /// # Example:

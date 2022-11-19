@@ -43,7 +43,7 @@ pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
 pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
 
 /// A struct for handling NATS headers.
-/// Has a similar API to [http::header], but properly serializes and desiaralizes
+/// Has a similar API to [http::header], but properly serializes and deserializes
 /// according to NATS requirements.
 ///
 /// # Examples

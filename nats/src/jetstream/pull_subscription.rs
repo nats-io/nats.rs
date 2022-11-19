@@ -239,7 +239,7 @@ impl PullSubscription {
 
     /// A low level method that should be used only in specific cases.
     /// Pulls next message available for this `PullSubscription`.
-    /// This operation is blocking and will indefinately wait for new messages.
+    /// This operation is blocking and will indefinitely wait for new messages.
     /// Keep in mind that this requires user to request for messages first.
     ///
     /// # Example
@@ -422,7 +422,7 @@ impl PullSubscription {
     ///     batch: 10,
     /// })?;
     /// for (i, message) in consumer.iter().enumerate() {
-    ///     println!("recieved message: {:?}", message);
+    ///     println!("received message: {:?}", message);
     ///     message.ack()?;
     /// #   break;
     /// }
@@ -448,7 +448,7 @@ impl PullSubscription {
     }
 }
 
-/// Interator that will endlessly wait for messages, unless `no messages` or `request timeout` is encountered.
+/// Iterator that will endlessly wait for messages, unless `no messages` or `request timeout` is encountered.
 pub struct Iter<'a> {
     subscription: &'a PullSubscription,
 }

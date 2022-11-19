@@ -97,7 +97,7 @@ impl Context {
     /// # }
     /// ```
     ///
-    /// Publish and do not wait for the acknowledgment. Await can be deffered to when needed or
+    /// Publish and do not wait for the acknowledgment. Await can be deferred to when needed or
     /// ignored entirely.
     ///
     /// ```no_run

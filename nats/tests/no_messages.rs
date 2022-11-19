@@ -51,6 +51,6 @@ fn no_messages() {
         })
         .unwrap();
 
-    // every fetch method checks against `404` error, so desipte using blocking iterator we should still get `None`.
+    // every fetch method checks against `404` error, so despite using blocking iterator we should still get `None`.
     assert!(batch.next().is_none());
 }

@@ -451,7 +451,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Returns the status code assosciated with this error
+    /// Returns the status code associated with this error
     pub fn code(&self) -> usize {
         self.code
     }

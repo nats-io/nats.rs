@@ -73,7 +73,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
-            .entry(&"retry_on_initial_conenct", &self.retry_on_failed_connect)
+            .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
             .finish()
     }
 }
@@ -410,7 +410,7 @@ impl ConnectOptions {
     }
 
     /// Sets a timeout for the underlying TcpStream connection to avoid hangs and deadlocks.
-    /// Defualt is set to 5 seconds.
+    /// Default is set to 5 seconds.
     ///
     /// # Examples
     /// ```no_run

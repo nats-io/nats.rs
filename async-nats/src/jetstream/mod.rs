@@ -98,7 +98,7 @@ pub mod stream;
 pub use context::Context;
 pub use message::{AckKind, Message};
 
-/// Creates a new JetStream [Context] that provides JetStream API for managming and using [Streams][crate::jetstream::stream::Stream],
+/// Creates a new JetStream [Context] that provides JetStream API for managing and using [Streams][crate::jetstream::stream::Stream],
 /// [Consumers][crate::jetstream::consumer::Consumer], key value and object store.
 ///
 /// # Examples
