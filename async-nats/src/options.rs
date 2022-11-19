@@ -73,7 +73,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
-            .entry(&"retry_on_initial_conenct", &self.retry_on_failed_connect)
+            .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
             .finish()
     }
 }

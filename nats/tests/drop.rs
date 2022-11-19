@@ -89,7 +89,7 @@ fn async_subscription_drop() -> io::Result<()> {
 }
 
 #[test]
-fn shutdown_responsivness_regression_check() {
+fn shutdown_responsiveness_regression_check() {
     let s = nats_server::run_basic_server();
     let conn = nats::Options::new().connect(s.client_url()).unwrap();
     conn.rtt().unwrap();
@@ -103,7 +103,7 @@ fn shutdown_responsivness_regression_check() {
 }
 
 #[test]
-fn drop_responsivness_regression_check() {
+fn drop_responsiveness_regression_check() {
     let s = nats_server::run_basic_server();
     let now;
     {

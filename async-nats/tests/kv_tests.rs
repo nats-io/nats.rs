@@ -197,14 +197,14 @@ mod kv {
         let rev = kv.put("key", payload.clone()).await.unwrap();
         let value = kv.get("key").await.unwrap();
         assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
-        let updated_paylaod: Bytes = "updated".into();
+        let updated_payload: Bytes = "updated".into();
         let rev2 = kv
-            .update("key", updated_paylaod.clone(), rev)
+            .update("key", updated_payload.clone(), rev)
             .await
             .unwrap();
         let value = kv.get("key").await.unwrap();
         assert_eq!(rev2, rev + 1);
-        assert_eq!(from_utf8(&value.unwrap()).unwrap(), updated_paylaod);
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), updated_payload);
     }
 
     #[tokio::test]

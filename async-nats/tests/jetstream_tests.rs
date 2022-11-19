@@ -100,12 +100,12 @@ mod jetstream {
             .unwrap();
 
         let ack = context
-            .publish("foo".to_string(), "paylaod".into())
+            .publish("foo".to_string(), "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_ok());
         let ack = context
-            .publish("not_stream".to_string(), "paylaod".into())
+            .publish("not_stream".to_string(), "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_err());

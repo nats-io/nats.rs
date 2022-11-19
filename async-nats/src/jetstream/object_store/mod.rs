@@ -58,7 +58,7 @@ pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-pub(crate) fn enocde_object_name(object_name: &str) -> String {
+pub(crate) fn encode_object_name(object_name: &str) -> String {
     base64::encode_config(object_name, base64::URL_SAFE)
 }
 
@@ -160,7 +160,7 @@ impl ObjectStore {
         let mut headers = HeaderMap::default();
         headers.insert(NATS_ROLLUP, HeaderValue::from_str(ROLLUP_SUBJECT)?);
 
-        let subject = format!("$O.{}.M.{}", &self.name, enocde_object_name(object_name));
+        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name));
 
         self.stream
             .context
@@ -191,7 +191,7 @@ impl ObjectStore {
     /// ```
     pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
         let object_name = object_name.as_ref();
-        let object_name = enocde_object_name(object_name);
+        let object_name = encode_object_name(object_name);
         if !is_valid_object_name(&object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -206,9 +206,9 @@ impl ObjectStore {
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
             .await?;
-        let decoded_paylaod = base64::decode(message.payload)
+        let decoded_payload = base64::decode(message.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
-        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_paylaod)?;
+        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_payload)?;
 
         Ok(object_info)
     }
@@ -240,7 +240,7 @@ impl ObjectStore {
     {
         let object_meta: ObjectMeta = meta.into();
 
-        let encoded_object_name = enocde_object_name(&object_meta.name);
+        let encoded_object_name = encode_object_name(&object_meta.name);
         if !is_valid_object_name(&encoded_object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -274,11 +274,11 @@ impl ObjectStore {
             object_chunks += 1;
 
             // FIXME: this is ugly
-            let paylaod = bytes::Bytes::from(buffer[..n].to_vec());
+            let payload = bytes::Bytes::from(buffer[..n].to_vec());
 
             self.stream
                 .context
-                .publish(chunk_subject.clone(), paylaod)
+                .publish(chunk_subject.clone(), payload)
                 .await?;
         }
         let digest = context.finish();

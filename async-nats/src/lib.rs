@@ -1185,13 +1185,13 @@ mod tests {
     }
 
     #[test]
-    fn serverr_address_ipv4() {
+    fn server_address_ipv4() {
         let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
         assert_eq!(address.host(), "127.0.0.1")
     }
 
     #[test]
-    fn serverr_address_domain() {
+    fn server_address_domain() {
         let address = ServerAddr::from_str("nats://example.com").unwrap();
         assert_eq!(address.host(), "example.com")
     }

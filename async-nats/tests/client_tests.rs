@@ -658,7 +658,7 @@ mod client {
             async move {
                 let msg = subscription.next().await.unwrap();
                 client
-                    .publish(msg.reply.unwrap(), "prefix workes".into())
+                    .publish(msg.reply.unwrap(), "prefix workers".into())
                     .await
                     .unwrap();
             }
