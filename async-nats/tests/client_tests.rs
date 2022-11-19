@@ -442,7 +442,7 @@ mod client {
             .connect(server.client_url())
             .await
             .unwrap();
-        println!("conncted");
+        println!("connected");
         client.subscribe("test".to_string()).await.unwrap();
         client.flush().await.unwrap();
 

@@ -497,7 +497,7 @@ impl ConnectionHandler {
 
                 if self.pending_pings > self.max_pings {
                     debug!(
-                        "pendings pings {}, max pings {}. disconnecting",
+                        "pending pings {}, max pings {}. disconnecting",
                         self.pending_pings, self.max_pings
                     );
                     self.handle_disconnect().await?;

@@ -439,7 +439,7 @@ impl Stream for Watch<'_> {
                         .map_err(|err| {
                             Box::from(io::Error::new(
                                 ErrorKind::Other,
-                                format!("failed to deserialize the reponse: {:?}", err),
+                                format!("failed to deserialize the response: {:?}", err),
                             ))
                         })
                         .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),

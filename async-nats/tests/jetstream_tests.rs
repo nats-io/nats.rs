@@ -2049,7 +2049,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        println!("starting interation");
+        println!("starting iteration");
         let mut messages = messages.enumerate();
         while let Some((i, message)) = messages.next().await {
             if i % 700 == 0 {

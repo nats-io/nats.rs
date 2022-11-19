@@ -564,7 +564,7 @@ impl futures::Stream for Stream {
                 match self.heartbeats_missing.poll_recv(cx) {
                     Poll::Ready(resp) => match resp {
                         Some(()) => {
-                            trace!("received missing hearbeats notification");
+                            trace!("received missing heartbeats notification");
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::TimedOut,
                                 "did not receive idle heartbeat in time",
@@ -573,12 +573,12 @@ impl futures::Stream for Stream {
                         None => {
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                "unexpected termination of hearbeat checker",
+                                "unexpected termination of heartbeat checker",
                             )))))
                         }
                     },
                     Poll::Pending => {
-                        trace!("pending message from missing hearbeats notification channel");
+                        trace!("pending message from missing heartbeats notification channel");
                     }
                 }
             }
@@ -644,7 +644,7 @@ impl futures::Stream for Stream {
                         }
 
                         StatusCode::IDLE_HEARTBEAT => {
-                            debug!("received idle hearbeat");
+                            debug!("received idle heartbeat");
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
@@ -667,7 +667,7 @@ impl futures::Stream for Stream {
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 format!(
-                                    "eror while processing messages from the stream: {}, {:?}",
+                                    "error while processing messages from the stream: {}, {:?}",
                                     status, message.description
                                 ),
                             )))))
