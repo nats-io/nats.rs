@@ -434,7 +434,7 @@ impl ObjectStore {
             ));
         }
 
-        // Fetch any existing object info, if ther is any for later use.
+        // Fetch any existing object info, if there is any for later use.
         let maybe_existing_object_info = match self.info(&object_name) {
             Ok(object_info) => Some(object_info),
             Err(_) => None,

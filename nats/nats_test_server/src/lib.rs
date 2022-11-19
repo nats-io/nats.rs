@@ -192,7 +192,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
         }
     }
 
-    /// Set the denominator of the probablity of a bug
+    /// Set the denominator of the probability of a bug
     pub fn bugginess(self, bugginess: u32) -> Self {
         Self {
             bugginess: Some(bugginess),

@@ -737,7 +737,7 @@ impl fmt::Display for Event {
 
 /// Connects to NATS with default config.
 ///
-/// Returns clonable [Client].
+/// Returns cloneable [Client].
 ///
 /// To have customized NATS connection, check [ConnectOptions].
 ///

@@ -1363,7 +1363,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        // distrupt stream sequence continuity.
+        // disrupt stream sequence continuity.
         stream.delete_message(510).await.unwrap();
         stream.delete_message(600).await.unwrap();
         stream.delete_message(800).await.unwrap();

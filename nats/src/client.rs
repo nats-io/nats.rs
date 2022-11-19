@@ -211,7 +211,7 @@ impl Client {
 
                 // Wait until at least one message is buffered.
                 loop {
-                    // if client is shutting down, stop periodic flushses.
+                    // if client is shutting down, stop periodic flushes.
                     if client.check_shutdown().is_err() {
                         break;
                     }

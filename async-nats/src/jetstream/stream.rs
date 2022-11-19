@@ -78,7 +78,7 @@ impl Stream {
     }
 
     /// Returns cached [Info] for the [Stream].
-    /// Cache is either from initial creation/retrival of the [Stream] or last call to
+    /// Cache is either from initial creation/retrieval of the [Stream] or last call to
     /// [Stream::info].
     ///
     /// # Examples
@@ -356,7 +356,7 @@ impl Stream {
                             "message not found in stream",
                         )))
                     }
-                    // 408 is used in Direct Message for bad/empty paylaod.
+                    // 408 is used in Direct Message for bad/empty payload.
                     StatusCode::TIMEOUT => {
                         return Err(Box::from(std::io::Error::new(
                             ErrorKind::Other,
@@ -884,7 +884,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror: Option<Source>,
 
-    /// Sources configration.
+    /// Sources configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<Source>>,
 }
@@ -941,7 +941,7 @@ impl Default for DiscardPolicy {
 #[repr(u8)]
 pub enum RetentionPolicy {
     /// `Limits` (default) means that messages are retained until any given limit is reached.
-    /// This could be one of mesages, bytes, or age.
+    /// This could be one of messages, bytes, or age.
     #[serde(rename = "limits")]
     Limits = 0,
     /// `Interest` specifies that when all known observables have acknowledged a message it can be removed.

@@ -1,6 +1,6 @@
 # Test server
 
-A test NATS server for testing the NATS rust client and applications using it. Allows injection of bugsand useful for testing a number of things.
+A test NATS server for testing the NATS rust client and applications using it. Allows injection of bugs and useful for testing a number of things.
 
 ## Example usage
 
