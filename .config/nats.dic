@@ -63,11 +63,6 @@ get_raw_message
 max_bytes
 >
 =
-'*',
-'.',
-.',
-\*
-&
 +
 100ms
 1ms

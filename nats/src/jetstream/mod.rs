@@ -428,7 +428,7 @@ pub enum ErrorCode {
     ConsumerWQConsumerNotDeliverAll = 10101,
     /// Consumer name is too long, maximum allowed is {max}
     ConsumerNameTooLong = 10102,
-    /// Durable name can not contain '.', '*', '>'
+    /// Durable name can not contain `.`, `*`, `>`
     ConsumerBadDurableName = 10103,
     /// Error creating store for consumer: {err}
     ConsumerStoreFailed = 10104,

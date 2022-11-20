@@ -97,7 +97,7 @@ impl StatusCode {
             .ok_or_else(InvalidStatusCode::new)
     }
 
-    /// Converts a &[u8] to a status code
+    /// Converts a `&[u8]` to a status code
     pub fn from_bytes(src: &[u8]) -> Result<StatusCode, InvalidStatusCode> {
         if src.len() != 3 {
             return Err(InvalidStatusCode::new());
