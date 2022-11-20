@@ -70,7 +70,7 @@ Hence it was renamed to `Event::Connected`, which describes the current state wi
 For consistency, `Event::Disconnect` was renamed to `Event::Disconnected`.
 
 ## Breaking changes
-* Defer publish acknowledgements by @Jarema in https://github.com/nats-io/nats.rs/pull/644
+* Defer publish acknowledgments by @Jarema in https://github.com/nats-io/nats.rs/pull/644
 * Add retry on initial connect by @Jarema in https://github.com/nats-io/nats.rs/pull/662
 ## Added
 * Add support for mirrors and sources in Key Value Store by @Jarema in https://github.com/nats-io/nats.rs/pull/676
