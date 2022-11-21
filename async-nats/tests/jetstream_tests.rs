@@ -470,6 +470,34 @@ mod jetstream {
 
         assert_eq!(stream.info().await.unwrap().state.messages, 3);
     }
+    #[tokio::test]
+    async fn purge() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.*".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..100 {
+            context
+                .publish("events.two".to_string(), "data".into())
+                .await
+                .unwrap();
+        }
+        let mut stream = context.get_stream("events").await.unwrap();
+
+        stream.purge().sequence(90).await.unwrap();
+        assert_eq!(stream.info().await.unwrap().state.messages, 11);
+        stream.purge().keep(5).await.unwrap();
+        assert_eq!(stream.info().await.unwrap().state.messages, 5);
+    }
 
     #[tokio::test]
     async fn get_or_create_stream() {
