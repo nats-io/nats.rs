@@ -15,7 +15,9 @@
 
 use std::{
     fmt::Debug,
+    future::IntoFuture,
     io::{self, ErrorKind},
+    pin::Pin,
     str::FromStr,
     time::Duration,
 };
@@ -23,6 +25,7 @@ use std::{
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
+use futures::Future;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -515,20 +518,8 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge(&self) -> Result<PurgeResponse, Error> {
-        let subject = format!("STREAM.PURGE.{}", self.info.config.name);
-
-        let response: Response<PurgeResponse> = self.context.request(subject, &()).await?;
-        match response {
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "error while purging stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-            Response::Ok(response) => Ok(response),
-        }
+    pub fn purge(&self) -> Purge<No, No> {
+        Purge::build(self.clone())
     }
 
     /// Purge `Stream` messages for a matching subject.
@@ -550,28 +541,7 @@ impl Stream {
     where
         T: Into<String>,
     {
-        let request_subject = format!("STREAM.PURGE.{}", self.info.config.name);
-
-        let response: Response<PurgeResponse> = self
-            .context
-            .request(
-                request_subject,
-                &PurgeRequest {
-                    filter: Some(subject.into()),
-                    ..Default::default()
-                },
-            )
-            .await?;
-        match response {
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "error while purging stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-            Response::Ok(response) => Ok(response),
-        }
+        self.purge().filter(subject).await
     }
 
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
@@ -1261,4 +1231,120 @@ pub struct External {
     /// Optional configuration of delivery prefix.
     #[serde(rename = "deliver", skip_serializing_if = "is_default")]
     pub delivery_prefix: Option<String>,
+}
+
+use std::marker::PhantomData;
+
+#[derive(Debug, Default)]
+pub struct Yes;
+#[derive(Debug, Default)]
+pub struct No;
+
+pub trait ToAssign: Debug {}
+
+impl ToAssign for Yes {}
+impl ToAssign for No {}
+
+#[derive(Debug)]
+pub struct Purge<SEQUENCE, KEEP>
+where
+    SEQUENCE: ToAssign,
+    KEEP: ToAssign,
+{
+    stream: Stream,
+    inner: PurgeRequest,
+    sequence_set: PhantomData<SEQUENCE>,
+    keep_set: PhantomData<KEEP>,
+}
+
+impl<SEQUENCE, KEEP> Purge<SEQUENCE, KEEP>
+where
+    SEQUENCE: ToAssign,
+    KEEP: ToAssign,
+{
+    /// Adds subject filter to [PurgeRequest]
+    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<SEQUENCE, KEEP> {
+        self.inner.filter = Some(filter.into());
+        self
+    }
+}
+
+impl Purge<No, No> {
+    pub(crate) fn build(stream: Stream) -> Purge<No, No> {
+        Purge {
+            stream,
+            inner: Default::default(),
+            sequence_set: PhantomData {},
+            keep_set: PhantomData {},
+        }
+    }
+}
+
+impl<KEEP> Purge<No, KEEP>
+where
+    KEEP: ToAssign,
+{
+    /// Creates a new [PurgeRequest].
+    /// `keep` and `sequence` are exclusive, enforced compile time by generics.
+    pub fn keep(self, keep: u64) -> Purge<No, Yes> {
+        Purge {
+            stream: self.stream,
+            sequence_set: PhantomData {},
+            keep_set: PhantomData {},
+            inner: PurgeRequest {
+                keep: Some(keep),
+                ..self.inner
+            },
+        }
+    }
+}
+impl<SEQUENCE> Purge<SEQUENCE, No>
+where
+    SEQUENCE: ToAssign,
+{
+    /// Creates a new [PurgeRequest].
+    /// `keep` and `sequence` are exclusive, enforces compile time by generics.
+    pub fn sequence(self, sequence: u64) -> Purge<Yes, No> {
+        Purge {
+            stream: self.stream,
+            sequence_set: PhantomData {},
+            keep_set: PhantomData {},
+            inner: PurgeRequest {
+                sequence: Some(sequence),
+                ..self.inner
+            },
+        }
+    }
+}
+
+impl<S, K> IntoFuture for Purge<S, K>
+where
+    S: ToAssign + std::marker::Send,
+    K: ToAssign + std::marker::Send,
+{
+    type Output = Result<PurgeResponse, Error>;
+
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(std::future::IntoFuture::into_future(async move {
+            let request_subject = format!("STREAM.PURGE.{}", self.stream.info.config.name);
+
+            let response: Response<PurgeResponse> = self
+                .stream
+                .context
+                .request(request_subject, &self.inner)
+                .await?;
+            match response {
+                Response::Err { error } => Err(Box::from(io::Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "error while purging stream: {}, {}, {}",
+                        error.code, error.status, error.description
+                    ),
+                ))),
+                Response::Ok(response) => Ok(response),
+            }
+        }))
+    }
 }
