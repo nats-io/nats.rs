@@ -334,6 +334,7 @@ impl ConnectionHandler {
                     }
 
                     self.connection.flush().await?;
+                    flush_interval.reset();
                 },
                 _ = flush_interval.tick().fuse() => {
                     if let Err(_err) = self.connection.flush().await {
