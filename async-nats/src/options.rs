@@ -26,7 +26,7 @@ use tokio_rustls::rustls;
 /// let mut options =
 /// async_nats::ConnectOptions::new()
 ///     .require_tls(true)
-///     .ping_interval(std::time::Duration::from_secs(10))
+///     .ping_period(std::time::Duration::from_secs(10))
 ///     .connect("demo.nats.io").await?;
 /// # Ok(())
 /// # }
@@ -45,8 +45,8 @@ pub struct ConnectOptions {
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
-    pub(crate) flush_interval: Duration,
-    pub(crate) ping_interval: Duration,
+    pub(crate) flush_period: Duration,
+    pub(crate) ping_period: Duration,
     pub(crate) subscription_capacity: usize,
     pub(crate) sender_capacity: usize,
     pub(crate) event_callback: CallbackArg1<Event, ()>,
@@ -69,8 +69,8 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
-            .entry(&"flush_interval", &self.flush_interval)
-            .entry(&"ping_interval", &self.ping_interval)
+            .entry(&"flush_period", &self.flush_period)
+            .entry(&"ping_period", &self.ping_period)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
@@ -93,8 +93,8 @@ impl Default for ConnectOptions {
             client_cert: None,
             client_key: None,
             tls_client_config: None,
-            flush_interval: Duration::from_millis(100),
-            ping_interval: Duration::from_secs(60),
+            flush_period: Duration::from_millis(100),
+            ping_period: Duration::from_secs(60),
             sender_capacity: 128,
             subscription_capacity: 1024,
             event_callback: CallbackArg1::<Event, ()>(Box::new(move |event| {
@@ -119,7 +119,7 @@ impl ConnectOptions {
     /// let mut options =
     /// async_nats::ConnectOptions::new()
     ///     .require_tls(true)
-    ///     .ping_interval(std::time::Duration::from_secs(10))
+    ///     .ping_period(std::time::Duration::from_secs(10))
     ///     .connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
@@ -342,21 +342,21 @@ impl ConnectOptions {
         self
     }
 
-    /// Sets the interval for flushing. NATS connection will send buffered data to the NATS Server
+    /// Sets the period for flushing. NATS connection will send buffered data to the NATS Server
     /// whenever buffer limit is reached, but it is also necessary to flush once in a while if
-    /// client is sending rarely and small messages. Flush interval allows to modify that interval.
+    /// client is sending rarely and small messages. Flush period allows to modify that period.
     ///
     /// # Examples
     /// ```no_run
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().flush_period(Duration::from_millis(100)).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn flush_interval(mut self, flush_interval: Duration) -> ConnectOptions {
-        self.flush_interval = flush_interval;
+    pub fn flush_period(mut self, flush_period: Duration) -> ConnectOptions {
+        self.flush_period = flush_period;
         self
     }
 
@@ -367,12 +367,12 @@ impl ConnectOptions {
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().flush_period(Duration::from_millis(100)).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn ping_interval(mut self, ping_interval: Duration) -> ConnectOptions {
-        self.ping_interval = ping_interval;
+    pub fn ping_period(mut self, ping_period: Duration) -> ConnectOptions {
+        self.ping_period = ping_period;
         self
     }
 

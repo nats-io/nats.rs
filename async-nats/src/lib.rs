@@ -648,8 +648,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let ping_period = options.ping_interval;
-    let flush_period = options.flush_interval;
+    let ping_period = options.ping_period;
+    let flush_period = options.flush_period;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
