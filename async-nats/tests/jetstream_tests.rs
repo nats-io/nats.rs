@@ -834,7 +834,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let stream = context.get_or_create_stream("events").await.unwrap();
+        let mut stream = context.get_or_create_stream("events").await.unwrap();
         let payload = b"payload";
         context
             .publish("events".into(), payload.as_ref().into())
@@ -887,6 +887,19 @@ mod jetstream {
                 .stream_sequence,
             3
         );
+
+        stream.delete_message(3).await.unwrap();
+        let deleted = stream
+            .info_with_deleted()
+            .await
+            .unwrap()
+            .clone()
+            .state
+            .deleted
+            .unwrap();
+        assert!(deleted.contains(&2));
+        assert!(deleted.contains(&3));
+        assert_eq!(stream.cached_info().state.deleted_count, 2);
     }
 
     #[tokio::test]

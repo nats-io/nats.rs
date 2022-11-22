@@ -77,6 +77,46 @@ impl Stream {
         }
     }
 
+    /// Retrieves `info` about [Stream] from the server, updates the cached `info` inside
+    /// [Stream] and returns it. This method fills the `deleted` field with the list of
+    /// deleted message IDs.
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut stream = jetstream
+    ///     .get_stream("events").await?;
+    ///
+    /// let info = stream.info_with_deleted().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn info_with_deleted(&mut self) -> Result<&Info, Error> {
+        let subject = format!("STREAM.INFO.{}", self.info.config.name);
+
+        match self
+            .context
+            .request(subject, &json!({"deleted_details": true}))
+            .await?
+        {
+            Response::Ok::<Info>(info) => {
+                self.info = info;
+                Ok(&self.info)
+            }
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting stream info: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+        }
+    }
+
     /// Returns cached [Info] for the [Stream].
     /// Cache is either from initial creation/retrieval of the [Stream] or last call to
     /// [Stream::info].
@@ -998,7 +1038,7 @@ pub struct DeleteStatus {
 }
 
 /// information about the given stream.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -1018,6 +1058,11 @@ pub struct State {
     pub last_timestamp: time::OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
+    /// List of deleted messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<Vec<u64>>,
+    #[serde(default, rename = "num_deleted")]
+    pub deleted_count: usize,
 }
 
 /// A raw stream message in the representation it is stored.
