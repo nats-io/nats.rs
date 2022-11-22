@@ -80,6 +80,9 @@ impl Stream {
     /// Retrieves `info` about [Stream] from the server, updates the cached `info` inside
     /// [Stream] and returns it. This method fills the `deleted` field with the list of
     /// deleted message IDs.
+    /// Deleted messages list only contains messages deleted with sequence number greater 
+    /// than stream's lowest sequence number.
+    ///
     /// # Examples
     ///
     /// ```no_run
