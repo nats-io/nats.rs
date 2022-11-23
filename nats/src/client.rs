@@ -207,7 +207,7 @@ impl Client {
                 const PING_INTERVAL: Duration = Duration::from_secs(2 * 60);
                 const MAX_PINGS_OUT: u8 = 2;
 
-                let mut last = Instant::now() - MIN_FLUSH_BETWEEN;
+                let mut last = Instant::now().checked_sub(MIN_FLUSH_BETWEEN).unwrap();
 
                 // Wait until at least one message is buffered.
                 loop {
