@@ -466,7 +466,7 @@ mod jetstream {
         let mut stream = context.get_stream("events").await.unwrap();
         assert_eq!(stream.cached_info().state.messages, 7);
 
-        stream.purge_subject("events.two").await.unwrap();
+        stream.purge().filter("events.two").await.unwrap();
 
         assert_eq!(stream.info().await.unwrap().state.messages, 3);
     }

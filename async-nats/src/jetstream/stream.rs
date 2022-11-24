@@ -522,28 +522,6 @@ impl Stream {
         Purge::build(self.clone())
     }
 
-    /// Purge `Stream` messages for a matching subject.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let jetstream = async_nats::jetstream::new(client);
-    ///
-    /// let stream = jetstream.get_stream("events").await?;
-    /// stream.purge_subject("data").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
-    where
-        T: Into<String>,
-    {
-        self.purge().filter(subject).await
-    }
-
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
