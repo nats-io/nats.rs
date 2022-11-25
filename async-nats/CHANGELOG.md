@@ -1,3 +1,16 @@
+# 0.24.0
+## Overview
+This a minor release intended to release all changes before the long-awaited changes around concrete errors land.
+
+## What's Changed
+* Fix various spelling mistakes by @c0d3x42 in https://github.com/nats-io/nats.rs/pull/735
+* Add spellcheck by @Jarema in https://github.com/nats-io/nats.rs/pull/736
+* Reset flush interval after ping forces flush by @caspervonb in https://github.com/nats-io/nats.rs/pull/737
+* Add extended purge by @Jarema in https://github.com/nats-io/nats.rs/pull/739
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.23.0...async-nats/v0.24.0
+
 # 0.23.0
 ## Overview
 
