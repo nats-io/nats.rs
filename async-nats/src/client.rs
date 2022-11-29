@@ -22,6 +22,8 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::error;
 use std::fmt;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,6 +38,63 @@ lazy_static! {
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
 pub struct PublishError(mpsc::error::SendError<Command>);
+
+pub struct Publish {
+    sender: mpsc::Sender<Command>,
+    subject: String,
+    payload: Bytes,
+    headers: Option<HeaderMap>,
+    respond: Option<String>,
+}
+
+impl Publish {
+    pub fn new(sender: mpsc::Sender<Command>, subject: String, payload: Bytes) -> Publish {
+        Publish {
+            sender,
+            subject,
+            payload,
+            headers: None,
+            respond: None,
+        }
+    }
+
+    pub fn headers(mut self, headers: HeaderMap) -> Publish {
+        self.headers = Some(headers);
+        self
+    }
+
+    pub fn reply(mut self, subject: String) -> Publish {
+        self.respond = Some(subject);
+        self
+    }
+}
+
+impl IntoFuture for Publish {
+    type Output = Result<(), PublishError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let sender = self.sender.clone();
+        let subject = self.subject;
+        let payload = self.payload;
+        let respond = self.respond;
+        let headers = self.headers;
+
+        Box::pin(async move {
+            sender
+                .send(Command::Publish {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                })
+                .map_err(PublishError)
+                .await?;
+
+            Ok(())
+        })
+    }
+}
 
 impl fmt::Debug for PublishError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -154,17 +213,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: None,
-            })
-            .map_err(PublishError)
-            .await?;
-        Ok(())
+    pub fn publish(&self, subject: String, payload: Bytes) -> Publish {
+        Publish::new(self.sender.clone(), subject, payload)
     }
 
     /// Publish a [Message] with headers to a given subject.
@@ -187,15 +237,8 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: Some(headers),
-            })
-            .map_err(PublishError)
-            .await?;
+        self.publish(subject, payload).headers(headers).await?;
+
         Ok(())
     }
 
@@ -219,15 +262,8 @@ impl Client {
         reply: String,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: None,
-            })
-            .map_err(PublishError)
-            .await?;
+        self.publish(subject, payload).reply(reply).await?;
+
         Ok(())
     }
 
@@ -254,15 +290,11 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: Some(headers),
-            })
-            .map_err(PublishError)
+        self.publish(subject, payload)
+            .headers(headers)
+            .reply(reply)
             .await?;
+
         Ok(())
     }
 
