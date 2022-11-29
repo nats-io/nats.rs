@@ -152,6 +152,7 @@ pub use options::{AuthError, ConnectOptions};
 pub mod header;
 pub mod jetstream;
 pub mod message;
+pub mod service;
 pub mod status;
 mod tls;
 
