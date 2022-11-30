@@ -115,7 +115,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, Interval};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -298,6 +298,8 @@ pub(crate) struct ConnectionHandler {
     pending_pings: usize,
     max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
+    ping_interval: Interval,
+    flush_interval: Interval,
 }
 
 impl ConnectionHandler {
@@ -305,7 +307,12 @@ impl ConnectionHandler {
         connection: Connection,
         connector: Connector,
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
+        ping_period: Duration,
+        flush_period: Duration,
     ) -> ConnectionHandler {
+        let ping_interval = interval(ping_period);
+        let flush_interval = interval(flush_period);
+
         ConnectionHandler {
             connection,
             connector,
@@ -313,31 +320,28 @@ impl ConnectionHandler {
             pending_pings: 0,
             max_pings: 2,
             info_sender,
+            ping_interval,
+            flush_interval,
         }
     }
 
     pub(crate) async fn process(
         &mut self,
-        ping_period: Duration,
-        flush_period: Duration,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
-        let mut ping_interval = interval(ping_period);
-        let mut flush_interval = interval(flush_period);
-
         loop {
             select! {
-                _ = ping_interval.tick().fuse() => {
+                _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
                     if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
                         self.handle_disconnect().await?;
                     }
 
-                    self.connection.flush().await?;
-                    flush_interval.reset();
+                    self.handle_flush().await?;
+
                 },
-                _ = flush_interval.tick().fuse() => {
-                    if let Err(_err) = self.connection.flush().await {
+                _ = self.flush_interval.tick().fuse() => {
+                    if let Err(_err) = self.handle_flush().await {
                         self.handle_disconnect().await?;
                     }
                 },
@@ -372,7 +376,7 @@ impl ConnectionHandler {
             }
         }
 
-        self.connection.flush().await?;
+        self.handle_flush().await?;
 
         Ok(())
     }
@@ -381,7 +385,7 @@ impl ConnectionHandler {
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(ClientOp::Pong).await?;
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             ServerOp::Pong => {
                 debug!("received PONG");
@@ -440,7 +444,7 @@ impl ConnectionHandler {
                             self.connection
                                 .write_op(ClientOp::Unsubscribe { sid, max: None })
                                 .await?;
-                            self.connection.flush().await?;
+                            self.handle_flush().await?;
                         }
                     }
                 }
@@ -460,6 +464,13 @@ impl ConnectionHandler {
                 // TODO: don't ignore.
             }
         }
+
+        Ok(())
+    }
+
+    async fn handle_flush(&mut self) -> Result<(), io::Error> {
+        self.connection.flush().await?;
+        self.flush_interval.reset();
 
         Ok(())
     }
@@ -508,15 +519,15 @@ impl ConnectionHandler {
                     self.handle_disconnect().await?;
                 }
 
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             Command::Flush { result } => {
-                if let Err(_err) = self.connection.flush().await {
+                if let Err(_err) = self.handle_flush().await {
                     if let Err(err) = self.handle_disconnect().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
-                    } else if let Err(err) = self.connection.flush().await {
+                    } else if let Err(err) = self.handle_flush().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
@@ -528,7 +539,7 @@ impl ConnectionHandler {
                 }
             }
             Command::TryFlush => {
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             Command::Subscribe {
                 sid,
@@ -704,10 +715,14 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection = Some(connection_ok);
         }
         let connection = connection.unwrap();
-        let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
-        connection_handler
-            .process(ping_period, flush_period, receiver)
-            .await
+        let mut connection_handler = ConnectionHandler::new(
+            connection,
+            connector,
+            info_sender,
+            ping_period,
+            flush_period,
+        );
+        connection_handler.process(receiver).await
     });
 
     Ok(client)
