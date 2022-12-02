@@ -581,7 +581,6 @@ impl futures::Stream for Stream {
                             )))));
                         }
                         None => {
-                            println!("IS TERMINATED? {}", self.terminated);
                             self.terminated = true;
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
