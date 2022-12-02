@@ -1905,6 +1905,8 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
+        // after terminal error, consumer should always return none.
+        assert!(messages.next().await.is_none());
         assert!(now.elapsed().le(&Duration::from_secs(50)));
     }
 
