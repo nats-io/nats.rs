@@ -88,7 +88,7 @@ impl IntoFuture for Publish {
                     respond,
                     headers,
                 })
-            .map_err(PublishError)
+                .map_err(PublishError)
                 .await?;
 
             Ok(())
@@ -132,7 +132,7 @@ impl Client {
         capacity: usize,
         inbox_prefix: String,
         request_timeout: Option<Duration>,
-        ) -> Client {
+    ) -> Client {
         Client {
             info,
             state,
@@ -195,10 +195,10 @@ impl Client {
 
         if server_major < major
             || (server_major == major && server_minor < minor)
-                || (server_major == major && server_minor == minor && server_patch < patch)
-                {
-                    return false;
-                }
+            || (server_major == major && server_minor == minor && server_patch < patch)
+        {
+            return false;
+        }
         true
     }
 
@@ -236,7 +236,7 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-        ) -> Result<(), PublishError> {
+    ) -> Result<(), PublishError> {
         self.publish(subject, payload).headers(headers).await?;
 
         Ok(())
@@ -261,7 +261,7 @@ impl Client {
         subject: String,
         reply: String,
         payload: Bytes,
-        ) -> Result<(), PublishError> {
+    ) -> Result<(), PublishError> {
         self.publish(subject, payload).reply(reply).await?;
 
         Ok(())
@@ -289,7 +289,7 @@ impl Client {
         reply: String,
         headers: HeaderMap,
         payload: Bytes,
-        ) -> Result<(), PublishError> {
+    ) -> Result<(), PublishError> {
         self.publish(subject, payload)
             .headers(headers)
             .reply(reply)
@@ -333,8 +333,12 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-        ) -> Result<Message, Error> {
-        Request::new(self.clone(), subject, payload).headers(headers).await?;
+    ) -> Result<Message, Error> {
+        let message = Request::new(self.clone(), subject, payload)
+            .headers(headers)
+            .await?;
+
+        Ok(message)
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -381,7 +385,7 @@ impl Client {
                 queue_group: None,
                 sender,
             })
-        .await?;
+            .await?;
 
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
@@ -406,7 +410,7 @@ impl Client {
         &self,
         subject: String,
         queue_group: String,
-        ) -> Result<Subscriber, Error> {
+    ) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -417,7 +421,7 @@ impl Client {
                 queue_group: Some(queue_group),
                 sender,
             })
-        .await?;
+            .await?;
 
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
@@ -564,12 +568,15 @@ impl Request {
     async fn send(self) -> Result<Message, Error> {
         let inbox = self.inbox.unwrap_or_else(|| self.client.new_inbox());
         let mut subscriber = self.client.subscribe(inbox.clone()).await?;
-        let publish = self.client.publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
+        let mut publish = self
+            .client
+            .publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
         if let Some(headers) = self.headers {
-            publish.headers(headers);
+            publish = publish.headers(headers);
         }
 
         publish.await?;
+
         self.client.flush().await?;
 
         let period = self.timeout.unwrap_or(self.client.request_timeout);
@@ -586,23 +593,23 @@ impl Request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(Box::new(std::io::Error::new(
-                                ErrorKind::NotFound,
-                                "nats: no responders",
-                                )));
+                        ErrorKind::NotFound,
+                        "nats: no responders",
+                    )));
                 }
                 Ok(message)
             }
             None => Err(Box::new(io::Error::new(
-                        ErrorKind::BrokenPipe,
-                        "did not receive any message",
-                        ))),
+                ErrorKind::BrokenPipe,
+                "did not receive any message",
+            ))),
         }
     }
 }
 
 impl IntoFuture for Request {
     type Output = Result<Message, Error>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Message, Error>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(self.send())
