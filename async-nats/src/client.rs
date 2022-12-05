@@ -310,7 +310,7 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request(&self, subject: String, payload: Bytes) -> Request {
+    pub fn request(&self, subject: String, payload: Bytes) -> Request {
         Request::new(self.clone(), subject, payload)
     }
 
@@ -602,7 +602,7 @@ impl Request {
 
 impl IntoFuture for Request {
     type Output = Result<Message, Error>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(self.send())

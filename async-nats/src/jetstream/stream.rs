@@ -25,7 +25,7 @@ use std::{
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
-use futures::Future;
+use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -226,11 +226,11 @@ impl Stream {
                 request_subject,
                 serde_json::to_vec(&payload).map(Bytes::from)?,
             )
-            .await
+            .into_future()
             .map(|message| Message {
                 message,
                 context: self.context.clone(),
-            })?;
+            }).await?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
@@ -284,11 +284,11 @@ impl Stream {
             .context
             .client
             .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
-            .await
+            .into_future()
             .map(|message| Message {
                 context: self.context.clone(),
                 message,
-            })?;
+            }).await?;
 
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
