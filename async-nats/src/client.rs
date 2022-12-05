@@ -132,7 +132,7 @@ impl Client {
         capacity: usize,
         inbox_prefix: String,
         request_timeout: Option<Duration>,
-    ) -> Client {
+        ) -> Client {
         Client {
             info,
             state,
@@ -354,41 +354,6 @@ impl Client {
     /// # }
     /// ```
     pub async fn send_request(&self, subject: String, request: Request) -> Result<Message, Error> {
-        let inbox = request.inbox.unwrap_or_else(|| self.new_inbox());
-        let timeout = request.timeout.unwrap_or(self.request_timeout);
-        let mut sub = self.subscribe(inbox.clone()).await?;
-        let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
-        match request.headers {
-            Some(headers) => {
-                self.publish_with_reply_and_headers(subject, inbox, headers, payload)
-                    .await?
-            }
-            None => self.publish_with_reply(subject, inbox, payload).await?,
-        }
-        self.flush().await?;
-        let request = match timeout {
-            Some(timeout) => {
-                tokio::time::timeout(timeout, sub.next())
-                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
-                    .await?
-            }
-            None => sub.next().await,
-        };
-        match request {
-            Some(message) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
-                }
-                Ok(message)
-            }
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
-        }
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -435,7 +400,7 @@ impl Client {
                 queue_group: None,
                 sender,
             })
-            .await?;
+        .await?;
 
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
@@ -460,7 +425,7 @@ impl Client {
         &self,
         subject: String,
         queue_group: String,
-    ) -> Result<Subscriber, Error> {
+        ) -> Result<Subscriber, Error> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -471,7 +436,7 @@ impl Client {
                 queue_group: Some(queue_group),
                 sender,
             })
-            .await?;
+        .await?;
 
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
@@ -512,7 +477,7 @@ impl Client {
     }
 }
 
-/// Used for building customized requests.
+/// Used for building and sending requests.
 #[derive(Default)]
 pub struct Request {
     payload: Option<Bytes>,
@@ -604,5 +569,56 @@ impl Request {
     pub fn inbox(mut self, inbox: String) -> Request {
         self.inbox = Some(inbox);
         self
+    }
+
+    async fn send(mut self) -> Result<Message, Error> {
+        let inbox = self.inbox.unwrap_or_else(|| self.new_inbox());
+        let period = self.timeout.unwrap_or(self.request_timeout);
+        let mut subscriber = self.subscribe(inbox.clone()).await?;
+        let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
+
+        match request.headers {
+            Some(headers) => {
+                self.publish_with_reply_and_headers(subject, inbox, headers, payload)
+                    .await?
+            }
+            None => self.publish_with_reply(subject, inbox, payload).await?,
+        }
+
+        client.flush().await?;
+
+        let timeout = match period {
+            Some(period) => {
+                tokio::time::timeout(period, sub.next())
+                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
+                    .await?
+            }
+            None => sub.next().await,
+        };
+
+        match request {
+            Some(message) => {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
+                    return Err(Box::new(std::io::Error::new(
+                                ErrorKind::NotFound,
+                                "nats: no responders",
+                                )));
+                }
+                Ok(message)
+            }
+            None => Err(Box::new(io::Error::new(
+                        ErrorKind::BrokenPipe,
+                        "did not receive any message",
+                        ))),
+        }
+
+}
+
+impl IntoFuture for Request {
+    type Output = Result<(), Error>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.send())
     }
 }
