@@ -88,7 +88,7 @@ impl IntoFuture for Publish {
                     respond,
                     headers,
                 })
-                .map_err(PublishError)
+            .map_err(PublishError)
                 .await?;
 
             Ok(())
@@ -195,10 +195,10 @@ impl Client {
 
         if server_major < major
             || (server_major == major && server_minor < minor)
-            || (server_major == major && server_minor == minor && server_patch < patch)
-        {
-            return false;
-        }
+                || (server_major == major && server_minor == minor && server_patch < patch)
+                {
+                    return false;
+                }
         true
     }
 
@@ -236,7 +236,7 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<(), PublishError> {
+        ) -> Result<(), PublishError> {
         self.publish(subject, payload).headers(headers).await?;
 
         Ok(())
@@ -261,7 +261,7 @@ impl Client {
         subject: String,
         reply: String,
         payload: Bytes,
-    ) -> Result<(), PublishError> {
+        ) -> Result<(), PublishError> {
         self.publish(subject, payload).reply(reply).await?;
 
         Ok(())
@@ -289,7 +289,7 @@ impl Client {
         reply: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<(), PublishError> {
+        ) -> Result<(), PublishError> {
         self.publish(subject, payload)
             .headers(headers)
             .reply(reply)
@@ -310,10 +310,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
-        trace!("request sent to subject: {} ({})", subject, payload.len());
-        let request = Request::new().payload(payload);
-        self.send_request(subject, request).await
+    pub async fn request(&self, subject: String, payload: Bytes) -> Request {
+        Request::new(self.clone(), subject, payload)
     }
 
     /// Sends the request with headers.
@@ -335,25 +333,8 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<Message, Error> {
-        let request = Request::new().headers(headers).payload(payload);
-        self.send_request(subject, request).await
-    }
-
-    /// Sends the request created by the [Request].
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new().payload("data".into());
-    /// let response = client.send_request("service".into(), request).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send_request(&self, subject: String, request: Request) -> Result<Message, Error> {
+        ) -> Result<Message, Error> {
+        Request::new(self.clone(), subject, payload).headers(headers).await?;
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -478,8 +459,10 @@ impl Client {
 }
 
 /// Used for building and sending requests.
-#[derive(Default)]
+#[derive(Debug)]
 pub struct Request {
+    client: Client,
+    subject: String,
     payload: Option<Bytes>,
     headers: Option<HeaderMap>,
     timeout: Option<Option<Duration>>,
@@ -487,8 +470,15 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new() -> Request {
-        Default::default()
+    pub fn new(client: Client, subject: String, payload: Bytes) -> Request {
+        Request {
+            client,
+            subject,
+            payload: Some(payload),
+            headers: None,
+            timeout: None,
+            inbox: None,
+        }
     }
 
     /// Sets the payload of the request. If not used, empty payload will be sent.
@@ -571,32 +561,28 @@ impl Request {
         self
     }
 
-    async fn send(mut self) -> Result<Message, Error> {
-        let inbox = self.inbox.unwrap_or_else(|| self.new_inbox());
-        let period = self.timeout.unwrap_or(self.request_timeout);
-        let mut subscriber = self.subscribe(inbox.clone()).await?;
-        let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
-
-        match request.headers {
-            Some(headers) => {
-                self.publish_with_reply_and_headers(subject, inbox, headers, payload)
-                    .await?
-            }
-            None => self.publish_with_reply(subject, inbox, payload).await?,
+    async fn send(self) -> Result<Message, Error> {
+        let inbox = self.inbox.unwrap_or_else(|| self.client.new_inbox());
+        let mut subscriber = self.client.subscribe(inbox.clone()).await?;
+        let publish = self.client.publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
+        if let Some(headers) = self.headers {
+            publish.headers(headers);
         }
 
-        client.flush().await?;
+        publish.await?;
+        self.client.flush().await?;
 
-        let timeout = match period {
+        let period = self.timeout.unwrap_or(self.client.request_timeout);
+        let message = match period {
             Some(period) => {
-                tokio::time::timeout(period, sub.next())
+                tokio::time::timeout(period, subscriber.next())
                     .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
                     .await?
             }
-            None => sub.next().await,
+            None => subscriber.next().await,
         };
 
-        match request {
+        match message {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(Box::new(std::io::Error::new(
@@ -611,11 +597,11 @@ impl Request {
                         "did not receive any message",
                         ))),
         }
-
+    }
 }
 
 impl IntoFuture for Request {
-    type Output = Result<(), Error>;
+    type Output = Result<Message, Error>;
     type IntoFuture = Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
