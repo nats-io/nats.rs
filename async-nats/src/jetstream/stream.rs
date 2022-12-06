@@ -537,6 +537,10 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
+    #[deprecated(
+        since = "0.25.0",
+        note = "Overloads have been replaced with an into_future based builder. Use Stream::purge().filter(subject) instead."
+    )]
     pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
     where
         T: Into<String>,
