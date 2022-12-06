@@ -214,7 +214,7 @@ mod object_store {
             bucket.put(filename, &mut file.as_slice()).await.unwrap();
 
             let mut object = bucket.get(filename).await.unwrap();
-            assert_eq!(object.info.digest, format!("SHA-256={}", digest));
+            assert_eq!(object.info.digest, format!("SHA-256={digest}"));
 
             let mut result = Vec::new();
             object.read_to_end(&mut result).await.unwrap();
@@ -254,7 +254,7 @@ mod object_store {
         bucket.delete("DEL").await.unwrap();
         for i in 0..10 {
             bucket
-                .put(format!("{}", i).as_ref(), &mut "blalbalballba".as_bytes())
+                .put(format!("{i}").as_ref(), &mut "blalbalballba".as_bytes())
                 .await
                 .unwrap();
         }

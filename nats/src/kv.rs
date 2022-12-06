@@ -141,7 +141,7 @@ impl JetStream {
             ));
         }
 
-        let stream_name = format!("KV_{}", bucket);
+        let stream_name = format!("KV_{bucket}");
         let stream_info = self.stream_info(&stream_name)?;
 
         // Do some quick sanity checks that this is a correctly formed stream for KV.
@@ -156,7 +156,7 @@ impl JetStream {
         Ok(Store {
             name: bucket.to_string(),
             stream_name,
-            prefix: format!("$KV.{}.", bucket),
+            prefix: format!("$KV.{bucket}."),
             context: self.clone(),
             domain_prefix: self
                 .options
@@ -287,7 +287,7 @@ impl JetStream {
             return Err(io::Error::new(io::ErrorKind::Other, "invalid bucket name"));
         }
 
-        let stream_name = format!("KV_{}", bucket);
+        let stream_name = format!("KV_{bucket}");
         self.delete_stream(stream_name)?;
 
         Ok(())

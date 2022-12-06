@@ -263,7 +263,7 @@ impl Context {
                     )));
                 }
                 mirror.external = Some(External {
-                    api_prefix: format!("$JS.{}.API", domain),
+                    api_prefix: format!("$JS.{domain}.API"),
                     delivery_prefix: None,
                 })
             }
@@ -279,7 +279,7 @@ impl Context {
                         )));
                     }
                     source.external = Some(External {
-                        api_prefix: format!("$JS.{}.API", domain),
+                        api_prefix: format!("$JS.{domain}.API"),
                         delivery_prefix: None,
                     })
                 }
@@ -327,7 +327,7 @@ impl Context {
             )));
         }
 
-        let subject = format!("STREAM.INFO.{}", stream);
+        let subject = format!("STREAM.INFO.{stream}");
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -412,7 +412,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.DELETE.{}", stream);
+        let subject = format!("STREAM.DELETE.{stream}");
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -509,10 +509,10 @@ impl Context {
             if let Some(ref external) = mirror.external {
                 if !external.api_prefix.is_empty() {
                     store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{}.", bucket);
+                    store.prefix = format!("$KV.{bucket}.");
                     store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
                 } else {
-                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
                 }
             }
         };
@@ -619,10 +619,10 @@ impl Context {
             if let Some(ref external) = mirror.external {
                 if !external.api_prefix.is_empty() {
                     store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{}.", bucket);
+                    store.prefix = format!("$KV.{bucket}.");
                     store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
                 } else {
-                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
                 }
             }
         };
@@ -740,9 +740,9 @@ impl Context {
         }
 
         let bucket_name = config.bucket.clone();
-        let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
+        let chunk_subject = format!("$O.{bucket_name}.C.>");
+        let meta_subject = format!("$O.{bucket_name}.M.>");
 
         let stream = self
             .create_stream(super::stream::Config {
@@ -794,7 +794,7 @@ impl Context {
                 "invalid bucket name",
             )));
         }
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         let stream = self.get_stream(stream_name).await?;
 
         Ok(ObjectStore {

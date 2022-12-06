@@ -171,7 +171,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -235,7 +235,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -294,7 +294,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -369,7 +369,7 @@ impl Stream {
                     other => {
                         return Err(Box::from(std::io::Error::new(
                             ErrorKind::Other,
-                            format!("{}: {}", other, description),
+                            format!("{other}: {description}"),
                         )))
                     }
                 }

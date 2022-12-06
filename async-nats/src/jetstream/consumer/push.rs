@@ -540,7 +540,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                     .map_err(|err|
                                                            Box::new(io::Error::new(
                                                                    ErrorKind::Other,
-                                                                   format!("could not parse header into u64: {}", err))
+                                                                   format!("could not parse header into u64: {err}"))
                                                                ))?;
 
                                                 if sequence

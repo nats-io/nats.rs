@@ -125,8 +125,7 @@ fn main() -> std::io::Result<()> {
         let mbps = (args.message_size * messages) as u64 / millis / 1024;
 
         println!(
-            "duration: {:?} frequency: {} mbps: {}",
-            end, frequency, mbps
+            "duration: {end:?} frequency: {frequency} mbps: {mbps}"
         );
 
         Ok(())

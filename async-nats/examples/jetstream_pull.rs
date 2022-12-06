@@ -36,7 +36,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish a few messages for the example.
     for i in 0..10 {
         jetstream
-            .publish(format!("events.{}", i), "data".into())
+            .publish(format!("events.{i}"), "data".into())
             .await?;
     }
 
