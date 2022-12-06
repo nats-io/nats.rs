@@ -28,7 +28,7 @@ mod kv {
     async fn create() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -56,7 +56,7 @@ mod kv {
     async fn put() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -88,7 +88,7 @@ mod kv {
     async fn get() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -122,7 +122,7 @@ mod kv {
     async fn entry() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -175,7 +175,7 @@ mod kv {
     async fn update() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -211,7 +211,7 @@ mod kv {
     async fn delete() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             // .connect(server.client_url())
             .connect(server.client_url())
             .await
@@ -251,7 +251,7 @@ mod kv {
     async fn purge() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             // .connect(server.client_url())
             .connect(server.client_url())
             .await
@@ -292,7 +292,7 @@ mod kv {
     async fn history() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -311,7 +311,7 @@ mod kv {
             .await
             .unwrap();
         for i in 0..20 {
-            kv.put("key", format!("{}", i).into()).await.unwrap();
+            kv.put("key", format!("{i}").into()).await.unwrap();
         }
 
         let mut history = kv.history("key").await.unwrap().enumerate();
@@ -330,7 +330,7 @@ mod kv {
     async fn watch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -389,7 +389,7 @@ mod kv {
     async fn watch_all() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -442,7 +442,7 @@ mod kv {
     async fn keys() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -494,7 +494,7 @@ mod kv {
     async fn republish() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {:?}", event) })
+            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();

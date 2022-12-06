@@ -277,7 +277,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 drop(listener);
                 log::debug!("evicting all connected clients");
                 clients.clear();
-                let baddr = format!("{}:{}", host, port);
+                let baddr = format!("{host}:{port}");
                 log::debug!("nats test server restarted on {}:{}", host, port);
                 listener = TcpListener::bind(baddr).unwrap();
                 listener.set_nonblocking(true).unwrap();

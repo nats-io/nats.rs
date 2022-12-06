@@ -276,7 +276,7 @@ fn object_digest() {
         bucket.put(filename, &mut file.as_slice()).unwrap();
 
         let mut object = bucket.get(filename).unwrap();
-        assert_eq!(object.info.digest, format!("SHA-256={}", digest));
+        assert_eq!(object.info.digest, format!("SHA-256={digest}"));
 
         let mut result = Vec::new();
         object.read_to_end(&mut result).unwrap();

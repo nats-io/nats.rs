@@ -1292,7 +1292,7 @@ mod jetstream {
                     }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     context
-                        .publish(format!("events.{}", i), i.to_string().into())
+                        .publish(format!("events.{i}"), i.to_string().into())
                         .await
                         .ok();
                 }
@@ -1386,7 +1386,7 @@ mod jetstream {
 
         for i in 0..1000 {
             context
-                .publish("events".to_string(), format!("{}", i).into())
+                .publish("events".to_string(), format!("{i}").into())
                 .await
                 .unwrap();
         }
@@ -1407,7 +1407,7 @@ mod jetstream {
             }
             let message = message.unwrap();
             assert_eq!(message.status, None);
-            assert_eq!(message.payload, bytes::Bytes::from(format!("{}", i)));
+            assert_eq!(message.payload, bytes::Bytes::from(format!("{i}")));
             i += 1;
         }
     }
@@ -1531,7 +1531,7 @@ mod jetstream {
         tokio::task::spawn(async move {
             for i in 0..1000 {
                 context
-                    .publish("events".to_string(), format!("i: {}", i).into())
+                    .publish("events".to_string(), format!("i: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1580,11 +1580,11 @@ mod jetstream {
                 let ack = context
                     .publish(
                         "events".to_string(),
-                        format!("timeout test message: {}", i).into(),
+                        format!("timeout test message: {i}").into(),
                     )
                     .await
                     .unwrap();
-                println!("ack from publish {}: {:?}", i, ack);
+                println!("ack from publish {i}: {ack:?}");
             }
             println!("send all 100 messages to jetstream");
         });
@@ -1598,7 +1598,7 @@ mod jetstream {
             .unwrap()
             .take(100);
         while let Some(result) = iter.next().await {
-            println!("MESSAGE: {:?}", result);
+            println!("MESSAGE: {result:?}");
             result.unwrap().ack().await.unwrap();
         }
     }
@@ -1634,7 +1634,7 @@ mod jetstream {
                 context
                     .publish(
                         "events".to_string(),
-                        format!("heartbeat message: {}", i).into(),
+                        format!("heartbeat message: {i}").into(),
                     )
                     .await
                     .unwrap();
@@ -1686,7 +1686,7 @@ mod jetstream {
                 context
                     .publish(
                         "events".to_string(),
-                        format!("heartbeat message: {}", i).into(),
+                        format!("heartbeat message: {i}").into(),
                     )
                     .await
                     .unwrap();
@@ -1710,7 +1710,7 @@ mod jetstream {
     async fn pull_fetch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {err:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1755,7 +1755,7 @@ mod jetstream {
     async fn pull_batch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {err:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1808,7 +1808,7 @@ mod jetstream {
     async fn pull_consumer_stream_without_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {err:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1857,7 +1857,7 @@ mod jetstream {
     async fn pull_consumer_stream_with_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {err:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1914,7 +1914,7 @@ mod jetstream {
     async fn consumer_info() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {err:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -1950,7 +1950,7 @@ mod jetstream {
     async fn ack() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|err| async move { println!("error: {:?}", err) })
+            .event_callback(|err| async move { println!("error: {err:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -2033,7 +2033,7 @@ mod jetstream {
 
         let client = async_nats::ConnectOptions::new()
             .event_callback(|event| async move {
-                println!("EVENT: {}", event);
+                println!("EVENT: {event}");
             })
             // .connect(cluster.servers.get(0).unwrap().client_url())
             .connect(server.client_url())
@@ -2066,7 +2066,7 @@ mod jetstream {
 
         for i in 0..1000 {
             jetstream
-                .publish(format!("reconnect.{}", i), i.to_string().into())
+                .publish(format!("reconnect.{i}"), i.to_string().into())
                 .await
                 .unwrap();
         }
@@ -2104,7 +2104,7 @@ mod jetstream {
         tokio::time::sleep(Duration::from_secs(5)).await;
         let client = async_nats::ConnectOptions::new()
             .event_callback(|event| async move {
-                println!("EVENT: {}", event);
+                println!("EVENT: {event}");
             })
             .connect(server.client_url())
             .await
@@ -2116,7 +2116,7 @@ mod jetstream {
 
         for i in 0..500 {
             jetstream
-                .publish("events".into(), format!("{}", i).into())
+                .publish("events".into(), format!("{i}").into())
                 .await
                 .unwrap();
         }
@@ -2126,7 +2126,7 @@ mod jetstream {
             .await
             .unwrap()
             .await;
-        println!("ACK: {:?}", ack);
+        println!("ACK: {ack:?}");
         println!(
             "DOWNCAST: {:?}",
             ack.unwrap_err().downcast::<std::io::Error>()
@@ -2183,14 +2183,14 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(100).enumerate();
         for i in 0..100 {
             jetstream
-                .publish(format!("source.{}", i), format!("{}", i).into())
+                .publish(format!("source.{i}"), format!("{i}").into())
                 .await
                 .unwrap();
         }
 
         while let Some((i, message)) = messages.next().await {
             let message = message.unwrap();
-            assert_eq!(format!("dest.source.{}", i), message.subject);
+            assert_eq!(format!("dest.source.{i}"), message.subject);
             assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
             message.ack().await.unwrap();
         }
@@ -2426,7 +2426,7 @@ mod jetstream {
                 context
                     .publish(
                         "events".to_string(),
-                        format!("Some bytes to sent with sequence number included: {}", i).into(),
+                        format!("Some bytes to sent with sequence number included: {i}").into(),
                     )
                     .await
                     .unwrap();

@@ -254,7 +254,7 @@ mod client {
         client.flush().await.unwrap();
 
         let err = client.request("service".into(), "payload".into()).await;
-        println!("ERR: {:?}", err);
+        println!("ERR: {err:?}");
         assert_eq!(
             err.unwrap_err()
                 .downcast::<std::io::Error>()
@@ -732,7 +732,7 @@ mod client {
             .expect_err("should fail to connect");
         let client = ConnectOptions::new()
             .event_callback(|ev| async move {
-                println!("event: {}", ev);
+                println!("event: {ev}");
             })
             .retry_on_initial_connect()
             .connect("localhost:7777")

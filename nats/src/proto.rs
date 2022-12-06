@@ -406,18 +406,18 @@ pub(crate) fn encode(mut stream: impl Write, op: ClientOp<'_>) -> io::Result<()>
             sid,
         } => {
             let op = if let Some(queue_group) = queue_group {
-                format!("SUB {} {} {}\r\n", subject, queue_group, sid)
+                format!("SUB {subject} {queue_group} {sid}\r\n")
             } else {
-                format!("SUB {} {}\r\n", subject, sid)
+                format!("SUB {subject} {sid}\r\n")
             };
             stream.write_all(op.as_bytes())?;
         }
 
         ClientOp::Unsub { sid, max_msgs } => {
             let op = if let Some(max_msgs) = max_msgs {
-                format!("UNSUB {} {}\r\n", sid, max_msgs)
+                format!("UNSUB {sid} {max_msgs}\r\n")
             } else {
-                format!("UNSUB {}\r\n", sid)
+                format!("UNSUB {sid}\r\n")
             };
             stream.write_all(op.as_bytes())?;
         }

@@ -618,7 +618,7 @@ impl ConnectionHandler {
         self.info_sender.send(info).map_err(|err| {
             std::io::Error::new(
                 ErrorKind::Other,
-                format!("failed to send info update: {}", err),
+                format!("failed to send info update: {err}"),
             )
         })?;
 
@@ -744,9 +744,9 @@ impl fmt::Display for Event {
             Event::Connected => write!(f, "connected"),
             Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
-            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
-            Event::ServerError(err) => write!(f, "server error: {}", err),
-            Event::ClientError(err) => write!(f, "client error: {}", err),
+            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {sid}"),
+            Event::ServerError(err) => write!(f, "server error: {err}"),
+            Event::ClientError(err) => write!(f, "client error: {err}"),
         }
     }
 }
@@ -899,8 +899,8 @@ pub enum CallbackError {
 impl std::fmt::Display for CallbackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Client(error) => write!(f, "{}", error),
-            Self::Server(error) => write!(f, "{}", error),
+            Self::Client(error) => write!(f, "{error}"),
+            Self::Server(error) => write!(f, "{error}"),
         }
     }
 }
@@ -931,7 +931,7 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Other(error) => write!(f, "nats: {}", error),
+            Self::Other(error) => write!(f, "nats: {error}"),
         }
     }
 }
@@ -949,8 +949,8 @@ impl std::fmt::Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
-            Self::SlowConsumer(sid) => write!(f, "nats: subscription {} is a slow consumer", sid),
-            Self::Other(error) => write!(f, "nats: {}", error),
+            Self::SlowConsumer(sid) => write!(f, "nats: subscription {sid} is a slow consumer"),
+            Self::Other(error) => write!(f, "nats: {error}"),
         }
     }
 }
@@ -1040,12 +1040,12 @@ impl FromStr for ServerAddr {
         let url: Url = if input.contains("://") {
             input.parse()
         } else {
-            format!("nats://{}", input).parse()
+            format!("nats://{input}").parse()
         }
         .map_err(|e| {
             io::Error::new(
                 ErrorKind::InvalidInput,
-                format!("NATS server URL is invalid: {}", e),
+                format!("NATS server URL is invalid: {e}"),
             )
         })?;
 
