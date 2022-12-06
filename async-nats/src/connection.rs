@@ -409,9 +409,7 @@ impl Connection {
                 self.stream.write_all(b"UNSUB ").await?;
                 self.stream.write_all(format!("{sid}").as_bytes()).await?;
                 if let Some(max) = max {
-                    self.stream
-                        .write_all(format!(" {max}").as_bytes())
-                        .await?;
+                    self.stream.write_all(format!(" {max}").as_bytes()).await?;
                 }
                 self.stream.write_all(b"\r\n").await?;
             }
