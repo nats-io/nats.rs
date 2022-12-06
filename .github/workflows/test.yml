@@ -126,7 +126,7 @@ jobs:
       - name: Check lint
         uses: actions-rs/cargo@v1
         with:
-          args: --tests --examples --all-features -- --deny clippy::all
+          args: --benches --tests --examples --all-features -- --deny clippy::all
           command: clippy
   
   check_docs:
