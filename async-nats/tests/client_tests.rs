@@ -125,41 +125,6 @@ mod client {
     }
 
     #[tokio::test]
-    async fn publish_into_future_with_headers() {
-        let server = nats_server::run_basic_server();
-        let client = async_nats::connect(server.client_url()).await.unwrap();
-
-        let mut subscriber = client.subscribe("test".into()).await.unwrap();
-
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
-
-        client
-            .publish("test".into(), b"".as_ref().into())
-            .headers(headers.clone())
-            .await
-            .unwrap();
-
-        client.flush().await.unwrap();
-
-        let message = subscriber.next().await.unwrap();
-        assert_eq!(message.headers.unwrap(), headers);
-
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
-        headers.append("X-Test", "Second");
-
-        client
-            .publish("test".into(), b"".as_ref().into())
-            .headers(headers.clone())
-            .await
-            .unwrap();
-
-        let message = subscriber.next().await.unwrap();
-        assert_eq!(message.headers.unwrap(), headers);
-    }
-
-    #[tokio::test]
     async fn publish_with_headers() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
