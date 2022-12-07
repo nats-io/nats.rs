@@ -18,7 +18,6 @@ use crate::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
-use std::future::IntoFuture;
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -74,7 +73,6 @@ impl Message {
             self.context
                 .client
                 .publish(reply.to_string(), "".into())
-                .into_future()
                 .map_err(Error::from)
                 .await
         } else {
@@ -115,7 +113,6 @@ impl Message {
             self.context
                 .client
                 .publish(reply.to_string(), kind.into())
-                .into_future()
                 .map_err(Error::from)
                 .await
         } else {
