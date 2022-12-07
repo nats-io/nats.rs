@@ -77,15 +77,15 @@ pub struct ConnectInfo {
     #[serde(default)]
     pub tls_required: bool,
 
-    /// Connection username (if `auth_required` is set)
+    /// Connection username.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub user: Option<String>,
 
-    /// Connection password (if auth_required is set)
+    /// Connection password.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub pass: Option<String>,
 
-    /// Client authorization token (if auth_required is set)
+    /// Client authorization token.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub auth_token: Option<String>,
 }
