@@ -58,13 +58,13 @@ pub struct ConnectInfo {
     /// Indicates whether the client requires an SSL connection.
     pub tls_required: bool,
 
-    /// Connection username (if `auth_required` is set)
+    /// Connection username.
     pub user: Option<SecureString>,
 
-    /// Connection password (if auth_required is set)
+    /// Connection password.
     pub pass: Option<SecureString>,
 
-    /// Client authorization token (if auth_required is set)
+    /// Client authorization token.
     pub auth_token: Option<SecureString>,
 
     /// Whether the client supports the usage of headers.
