@@ -47,6 +47,12 @@ nats-server = { path = "../nats-server" }
 rand = "0.8"
 tokio-retry = "0.3.0"
 tracing-subscriber = "0.3"
+async-nats = {path = ".", features = ["experimental"]}
+
+
+[features]
+service = []
+experimental = ["service"]
 
 
 [[bench]]
