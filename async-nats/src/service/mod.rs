@@ -198,7 +198,7 @@ pub struct Service {
 /// # Ok(())
 /// # }
 /// ```
-pub async fn add(client: Client, config: Config) -> Result<Service, Error> {
+async fn add(client: Client, config: Config) -> Result<Service, Error> {
     let id = nuid::next();
     let started = time::OffsetDateTime::now_utc();
     let info = Info {
