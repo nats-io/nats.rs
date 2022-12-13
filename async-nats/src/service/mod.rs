@@ -147,8 +147,9 @@ impl ServiceExt for crate::Client {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
 /// use futures::StreamExt;
+/// use async_nats::service::ServiceExt;
 /// let client = async_nats::connect("demo.nats.io").await?;
-/// let mut service = async_nats::service::add(client, async_nats::service::Config {
+/// let mut service = client.add_service( async_nats::service::Config {
 ///     name: "generator".to_string(),
 ///     version: "1.0.0".to_string(),
 ///     endpoint: "events.>".to_string(),
@@ -182,8 +183,9 @@ pub struct Service {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
 /// use futures::StreamExt;
+/// use async_nats::service::ServiceExt;
 /// let client = async_nats::connect("demo.nats.io").await?;
-/// let mut service = async_nats::service::add(client, async_nats::service::Config {
+/// let mut service = client.add_service(async_nats::service::Config {
 ///     name: "generator".to_string(),
 ///     version: "1.0.0".to_string(),
 ///     endpoint: "events.>".to_string(),
@@ -395,8 +397,9 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
+    /// use async_nats::service::ServiceExt;
     /// # let client = async_nats::connect("demo.nats.io").await?;
-    /// # let mut service = async_nats::service::add(client, async_nats::service::Config {
+    /// # let mut service = client.add_service(async_nats::service::Config {
     /// #     name: "generator".to_string(),
     /// #     version: "1.0.0".to_string(),
     /// #     endpoint: "events.>".to_string(),
