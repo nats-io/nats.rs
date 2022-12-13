@@ -129,10 +129,7 @@ fn close_responsiveness_regression_jetstream() {
         js.publish("subject", b"foo").unwrap();
     }
     let sub = js.subscribe("subject").expect("failed to subscribe");
-    sub.with_process_handler(|_| {
-        println!("message");
-        Ok(())
-    });
+    sub.with_process_handler(|_| Ok(()));
 
     nc.close();
 }
