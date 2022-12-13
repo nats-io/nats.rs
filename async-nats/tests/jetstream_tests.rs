@@ -1156,7 +1156,6 @@ mod jetstream {
             .take(100);
 
         while let Some(Ok(message)) = messages.next().await {
-            println!("message");
             assert_eq!(message.status, None);
             assert_eq!(message.payload.as_ref(), b"dat");
         }
@@ -1598,7 +1597,6 @@ mod jetstream {
             .unwrap()
             .take(100);
         while let Some(result) = iter.next().await {
-            println!("MESSAGE: {result:?}");
             result.unwrap().ack().await.unwrap();
         }
     }
