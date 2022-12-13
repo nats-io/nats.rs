@@ -14,10 +14,7 @@
 //! NATS [Message][crate::Message] headers, leveraging [http::header] crate.
 // pub use http::header::{HeaderMap, HeaderName, HeaderValue};
 
-use std::{
-    collections::{self, HashMap, HashSet},
-    str::FromStr,
-};
+use std::{collections::HashMap, slice, str::FromStr};
 
 use serde::Serialize;
 
@@ -126,7 +123,7 @@ impl HeaderMap {
         let v = self.inner.get_mut(&key);
         match v {
             Some(v) => {
-                v.value.insert(value.to_string());
+                v.value.push(value.to_string());
             }
             None => {
                 self.insert(key, value.to_string().into_header_value());
@@ -184,7 +181,9 @@ impl HeaderMap {
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Default)]
 pub struct HeaderValue {
-    value: HashSet<String>,
+    value: Vec<String>,
+}
+
 }
 
 impl FromStr for HeaderValue {
@@ -192,7 +191,7 @@ impl FromStr for HeaderValue {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut set = HeaderValue::new();
-        set.value.insert(s.to_string());
+        set.value.push(s.to_string());
         Ok(set)
     }
 }
@@ -200,14 +199,14 @@ impl FromStr for HeaderValue {
 impl From<u64> for HeaderValue {
     fn from(v: u64) -> Self {
         let mut set = HeaderValue::new();
-        set.value.insert(v.to_string());
+        set.value.push(v.to_string());
         set
     }
 }
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
         let mut set = HeaderValue::new();
-        set.value.insert(v.to_string());
+        set.value.push(v.to_string());
         set
     }
 }
@@ -215,7 +214,7 @@ impl From<&str> for HeaderValue {
 impl IntoIterator for HeaderValue {
     type Item = String;
 
-    type IntoIter = collections::hash_set::IntoIter<String>;
+    type IntoIter = std::vec::IntoIter<String>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.value.into_iter()
@@ -227,7 +226,7 @@ impl HeaderValue {
         HeaderValue::default()
     }
 
-    pub fn iter(&self) -> collections::hash_set::Iter<String> {
+    pub fn iter(&self) -> slice::Iter<String> {
         self.value.iter()
     }
 }
@@ -255,7 +254,7 @@ pub trait IntoHeaderValue {
 impl IntoHeaderValue for &str {
     fn into_header_value(self) -> HeaderValue {
         let mut set = HeaderValue::new();
-        set.value.insert(self.to_string());
+        set.value.push(self.to_string());
         set
     }
 }
@@ -333,7 +332,7 @@ mod tests {
 
         assert_eq!(
             headers.get("Key").unwrap().value,
-            HashSet::from_iter(["Value".to_string()])
+            Vec::from_iter(["Value".to_string()])
         );
     }
 
