@@ -31,18 +31,16 @@ mod services {
             .await
             .unwrap();
 
-        async_nats::service::add(
-            client.clone(),
-            async_nats::service::Config {
+        client
+            .add_service(async_nats::service::Config {
                 name: "serviceB".to_string(),
-                version: "2.0.0".to_string(),
-                endpoint: "service_b".to_string(),
                 description: None,
+                version: "2.0.0".to_string(),
                 schema: None,
-            },
-        )
-        .await
-        .unwrap();
+                endpoint: "service_b".to_string(),
+            })
+            .await
+            .unwrap();
 
         let reply = client.new_inbox();
         let mut responses = client.subscribe(reply.clone()).await.unwrap();
@@ -60,18 +58,16 @@ mod services {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut service = async_nats::service::add(
-            client.clone(),
-            async_nats::service::Config {
+        let mut service = client
+            .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
                 endpoint: "service_a".to_string(),
                 schema: None,
                 description: None,
-            },
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
 
         let reply = client.new_inbox();
         let mut response = client.subscribe(reply.clone()).await.unwrap();
