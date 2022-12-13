@@ -184,6 +184,34 @@ pub struct HeaderValue {
     value: Vec<String>,
 }
 
+impl ToString for HeaderValue {
+    fn to_string(&self) -> String {
+        self.iter()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| String::from(""))
+    }
+}
+
+impl From<HeaderValue> for String {
+    fn from(header: HeaderValue) -> Self {
+        header.to_string()
+    }
+}
+impl From<&HeaderValue> for String {
+    fn from(header: &HeaderValue) -> Self {
+        header.to_string()
+    }
+}
+
+impl<'a> From<&'a HeaderValue> for &'a str {
+    fn from(header: &'a HeaderValue) -> Self {
+        header
+            .iter()
+            .next()
+            .map(|v| v.as_str())
+            .unwrap_or_else(|| "")
+    }
 }
 
 impl FromStr for HeaderValue {
@@ -228,6 +256,10 @@ impl HeaderValue {
 
     pub fn iter(&self) -> slice::Iter<String> {
         self.value.iter()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.into()
     }
 }
 
@@ -298,10 +330,7 @@ impl std::error::Error for ParseError {}
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashSet,
-        str::{from_utf8, FromStr},
-    };
+    use std::str::{from_utf8, FromStr};
 
     use crate::{HeaderMap, HeaderValue};
 
@@ -321,8 +350,25 @@ mod tests {
 
         assert_eq!(
             headers.get("Key").unwrap().value,
-            HashSet::from_iter(["value".to_string(), "second_value".to_string()])
+            Vec::from_iter(["value".to_string(), "second_value".to_string()])
         );
+    }
+
+    #[test]
+    fn get_string() {
+        let mut headers = HeaderMap::new();
+        headers.append("Key", "value");
+        headers.append("Key", "other");
+
+        assert_eq!(headers.get("Key").unwrap().to_string(), "value");
+
+        let key: String = headers.get("Key").unwrap().into();
+        assert_eq!(key, "value".to_string());
+
+        let key: String = headers.get("Key").unwrap().to_owned().into();
+        assert_eq!(key, "value".to_string());
+
+        assert_eq!(headers.get("Key").unwrap().as_str(), "value");
     }
 
     #[test]
