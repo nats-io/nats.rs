@@ -127,6 +127,31 @@ impl Display for Verb {
 pub trait ServiceExt {
     type Output: Future<Output = Result<Service, crate::Error>>;
 
+    /// Adds a Service instance.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.add_service( async_nats::service::Config {
+    ///     name: "generator".to_string(),
+    ///     version: "1.0.0".to_string(),
+    ///     endpoint: "events.>".to_string(),
+    ///     schema: None,
+    ///     description: None,
+    /// }).await?;
+    ///
+    /// if let Some(request) = service.next().await {
+    ///     request.respond(Ok("hello".into())).await?;
+    /// }
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
     fn add_service(&self, config: Config) -> Self::Output;
 }
 
@@ -135,7 +160,7 @@ impl ServiceExt for crate::Client {
 
     fn add_service(&self, config: Config) -> Self::Output {
         let client = self.clone();
-        Box::pin(async { add(client, config).await })
+        Box::pin(async { Service::add(client, config).await })
     }
 }
 
@@ -172,139 +197,112 @@ pub struct Service {
     requests: Subscriber,
     handle: JoinHandle<Result<(), Error>>,
 }
+impl Service {
+    async fn add(client: Client, config: Config) -> Result<Service, Error> {
+        let id = nuid::next();
+        let started = time::OffsetDateTime::now_utc();
+        let info = Info {
+            name: config.name.clone(),
+            id: id.clone(),
+            description: config.description.clone(),
+            version: config.version.clone(),
+            subject: config.endpoint.clone(),
+        };
+        let request_stats = EndpointStats {
+            // FIXME: what should be the name?
+            name: "requests".to_string(),
+            ..Default::default()
+        };
 
-/// Adds a new instance of the service.
-/// Every service with the same name scales horizontally.
-/// Services have their API for retrieving [StatsResponse], [Info], [Schema] and [Ping][Verb::Ping].
-///
-/// # Examples
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), async_nats::Error> {
-/// use futures::StreamExt;
-/// use async_nats::service::ServiceExt;
-/// let client = async_nats::connect("demo.nats.io").await?;
-/// let mut service = client.add_service(async_nats::service::Config {
-///     name: "generator".to_string(),
-///     version: "1.0.0".to_string(),
-///     endpoint: "events.>".to_string(),
-///     schema: None,
-///     description: None,
-/// }).await?;
-///
-/// if let Some(request) = service.next().await {
-///     request.respond(Ok("hello".into())).await?;
-/// }
-///
-/// # Ok(())
-/// # }
-/// ```
-async fn add(client: Client, config: Config) -> Result<Service, Error> {
-    let id = nuid::next();
-    let started = time::OffsetDateTime::now_utc();
-    let info = Info {
-        name: config.name.clone(),
-        id: id.clone(),
-        description: config.description.clone(),
-        version: config.version.clone(),
-        subject: config.endpoint.clone(),
-    };
-    let request_stats = EndpointStats {
-        // FIXME: what should be the name?
-        name: "requests".to_string(),
-        ..Default::default()
-    };
+        let mut endpoints = HashMap::new();
+        endpoints.insert("requests".to_string(), request_stats);
+        let endpoint_stats = Arc::new(Mutex::new(Stats { endpoints }));
+        let requests = client
+            .queue_subscribe(
+                format!("{SERVICE_API_PREFIX}.{}", config.endpoint.clone()),
+                QUEUE_GROUP.to_string(),
+            )
+            .await?;
+        debug!(
+            "crerated service for endpoint {}.{}",
+            SERVICE_API_PREFIX,
+            config.endpoint.clone()
+        );
 
-    let mut endpoints = HashMap::new();
-    endpoints.insert("requests".to_string(), request_stats);
-    let endpoint_stats = Arc::new(Mutex::new(Stats { endpoints }));
-    let requests = client
-        .queue_subscribe(
-            format!("{SERVICE_API_PREFIX}.{}", config.endpoint.clone()),
-            QUEUE_GROUP.to_string(),
+        // create subscriptions for all verbs.
+        let mut pings =
+            verb_subscription(client.clone(), Verb::Ping, config.name.clone(), id.clone()).await?;
+        let mut infos =
+            verb_subscription(client.clone(), Verb::Info, config.name.clone(), id.clone()).await?;
+        let mut schemas = verb_subscription(
+            client.clone(),
+            Verb::Schema,
+            config.name.clone(),
+            id.clone(),
         )
         .await?;
-    debug!(
-        "crerated service for endpoint {}.{}",
-        SERVICE_API_PREFIX,
-        config.endpoint.clone()
-    );
+        let mut stats =
+            verb_subscription(client.clone(), Verb::Stats, config.name.clone(), id.clone()).await?;
 
-    // create subscriptions for all verbs.
-    let mut pings =
-        verb_subscription(client.clone(), Verb::Ping, config.name.clone(), id.clone()).await?;
-    let mut infos =
-        verb_subscription(client.clone(), Verb::Info, config.name.clone(), id.clone()).await?;
-    let mut schemas = verb_subscription(
-        client.clone(),
-        Verb::Schema,
-        config.name.clone(),
-        id.clone(),
-    )
-    .await?;
-    let mut stats =
-        verb_subscription(client.clone(), Verb::Stats, config.name.clone(), id.clone()).await?;
+        // Start a task for handling verbs subscriptions.
+        let handle = tokio::task::spawn({
+            let info = info.clone();
+            let endpoint_stats = endpoint_stats.clone();
+            let client = client.clone();
+            let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
+            let schema_json = serde_json::to_vec(&json!({
+                "name": config.name.clone(),
+                "id": id.clone(),
+                "version": config.version.clone(),
+                "schema": config.schema,
+            }))
+            .map(Bytes::from)?;
+            async move {
+                loop {
+                    tokio::select! {
+                        Some(ping) = pings.next() => {
+                            let pong = serde_json::to_vec(&json!({
+                                "name": info.name,
+                                "id": info.id,
+                            }))?;
+                            client.publish(ping.reply.unwrap(), pong.into()).await?;
+                            endpoint_stats.lock().unwrap().endpoints.entry("ping".to_string()).and_modify(|stat| {
+                                stat.requests += 1;
+                            }).or_default();
 
-    // Start a task for handling verbs subscriptions.
-    let handle = tokio::task::spawn({
-        let info = info.clone();
-        let endpoint_stats = endpoint_stats.clone();
-        let client = client.clone();
-        let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
-        let schema_json = serde_json::to_vec(&json!({
-            "name": config.name.clone(),
-            "id": id.clone(),
-            "version": config.version.clone(),
-            "schema": config.schema,
-        }))
-        .map(Bytes::from)?;
-        async move {
-            loop {
-                tokio::select! {
-                    Some(ping) = pings.next() => {
-                        let pong = serde_json::to_vec(&json!({
-                            "name": info.name,
-                            "id": info.id,
-                        }))?;
-                        client.publish(ping.reply.unwrap(), pong.into()).await?;
-                        endpoint_stats.lock().unwrap().endpoints.entry("ping".to_string()).and_modify(|stat| {
-                            stat.requests += 1;
-                        }).or_default();
-
-                    },
-                    Some(info_request) = infos.next() => {
-                        client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
-                    },
-                    Some(schema_request) = schemas.next() => {
-                        client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
-                    },
-                    // FIXME: proper status handling
-                    Some(stats_request) = stats.next() => {
-                        let stats = serde_json::to_vec(&StatsResponse {
-                            name: info.name.clone(),
-                            id: info.id.clone(),
-                            version: info.version.clone(),
-                            started,
-                            stats: endpoint_stats.lock().unwrap().endpoints.values().cloned().collect(),
-                        })?;
-                        client.publish(stats_request.reply.unwrap(), stats.into()).await?;
-                    },
-                    else => break,
+                        },
+                        Some(info_request) = infos.next() => {
+                            client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
+                        },
+                        Some(schema_request) = schemas.next() => {
+                            client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
+                        },
+                        // FIXME: proper status handling
+                        Some(stats_request) = stats.next() => {
+                            let stats = serde_json::to_vec(&StatsResponse {
+                                name: info.name.clone(),
+                                id: info.id.clone(),
+                                version: info.version.clone(),
+                                started,
+                                stats: endpoint_stats.lock().unwrap().endpoints.values().cloned().collect(),
+                            })?;
+                            client.publish(stats_request.reply.unwrap(), stats.into()).await?;
+                        },
+                        else => break,
+                    }
                 }
+                Ok(())
             }
-            Ok(())
-        }
-    });
-    Ok(Service {
-        stats: endpoint_stats,
-        info,
-        client,
-        requests,
-        handle,
-    })
+        });
+        Ok(Service {
+            stats: endpoint_stats,
+            info,
+            client,
+            requests,
+            handle,
+        })
+    }
 }
-
 async fn verb_subscription(
     client: Client,
     verb: Verb,
