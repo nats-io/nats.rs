@@ -61,7 +61,6 @@
 //! # use bytes::Bytes;
 //! # use std::error::Error;
 //! # use std::time::Instant;
-//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
@@ -82,7 +81,6 @@
 //! # use futures::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
-//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
 //! let client = async_nats::connect("demo.nats.io").await?;
@@ -94,10 +92,18 @@
 //! }
 //! #     Ok(())
 //! # }
+//! ```
+
+#![deny(unreachable_pub)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
+#![deny(rustdoc::invalid_codeblock_attributes)]
+#![deny(rustdoc::invalid_rust_codeblocks)]
 
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
+use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -109,6 +115,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
+use tokio::time::{interval, Duration, Interval};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -130,7 +137,7 @@ pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
-pub use header::{HeaderMap, HeaderValue};
+pub use header::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) mod auth_utils;
 mod client;
@@ -139,12 +146,14 @@ mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
-pub use client::Client;
+pub use client::{Client, PublishError, Request};
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
 pub mod jetstream;
 pub mod message;
+#[cfg(feature = "service")]
+pub mod service;
 pub mod status;
 mod tls;
 
@@ -221,6 +230,7 @@ pub(crate) enum ServerOp {
         headers: Option<HeaderMap>,
         status: Option<StatusCode>,
         description: Option<String>,
+        length: usize,
     },
 }
 
@@ -290,6 +300,8 @@ pub(crate) struct ConnectionHandler {
     pending_pings: usize,
     max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
+    ping_interval: Interval,
+    flush_interval: Interval,
 }
 
 impl ConnectionHandler {
@@ -297,7 +309,12 @@ impl ConnectionHandler {
         connection: Connection,
         connector: Connector,
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
+        ping_period: Duration,
+        flush_period: Duration,
     ) -> ConnectionHandler {
+        let ping_interval = interval(ping_period);
+        let flush_interval = interval(flush_period);
+
         ConnectionHandler {
             connection,
             connector,
@@ -305,19 +322,35 @@ impl ConnectionHandler {
             pending_pings: 0,
             max_pings: 2,
             info_sender,
+            ping_interval,
+            flush_interval,
         }
     }
 
-    pub async fn process(
+    pub(crate) async fn process(
         &mut self,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
         loop {
             select! {
+                _ = self.ping_interval.tick().fuse() => {
+                    self.pending_pings += 1;
+                    if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
+                        self.handle_disconnect().await?;
+                    }
+
+                    self.handle_flush().await?;
+
+                },
+                _ = self.flush_interval.tick().fuse() => {
+                    if let Err(_err) = self.handle_flush().await {
+                        self.handle_disconnect().await?;
+                    }
+                },
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
-                            println!("error handling command {}", err);
+                            error!("error handling command {}", err);
                         }
                         None => {
                             break;
@@ -328,17 +361,16 @@ impl ConnectionHandler {
                 maybe_op_result = self.connection.read_op().fuse() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
-                            println!("error handling operation {}", err);
+                            error!("error handling operation {}", err);
                         }
                         Ok(None) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error handling operation {}", err);
-                            } else {
+                                error!("error handling operation {}", err);
                             }
                         }
                         Err(op_err) => {
                             if let Err(err) = self.handle_disconnect().await {
-                                println!("error reconnecting {}. original error={}", err, op_err);
+                                error!("error reconnecting {}. original error={}", err, op_err);
                             }
                         },
                     }
@@ -346,7 +378,7 @@ impl ConnectionHandler {
             }
         }
 
-        self.connection.flush().await?;
+        self.handle_flush().await?;
 
         Ok(())
     }
@@ -355,10 +387,11 @@ impl ConnectionHandler {
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(ClientOp::Pong).await?;
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             ServerOp::Pong => {
-                self.pending_pings -= 1;
+                debug!("received PONG");
+                self.pending_pings = self.pending_pings.saturating_sub(1);
             }
             ServerOp::Error(error) => {
                 self.connector
@@ -374,6 +407,7 @@ impl ConnectionHandler {
                 headers,
                 status,
                 description,
+                length,
             } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message = Message {
@@ -383,6 +417,7 @@ impl ConnectionHandler {
                         headers,
                         status,
                         description,
+                        length,
                     };
 
                     // if the channel for subscription was dropped, remove the
@@ -411,7 +446,7 @@ impl ConnectionHandler {
                             self.connection
                                 .write_op(ClientOp::Unsubscribe { sid, max: None })
                                 .await?;
-                            self.connection.flush().await?;
+                            self.handle_flush().await?;
                         }
                     }
                 }
@@ -431,6 +466,13 @@ impl ConnectionHandler {
                 // TODO: don't ignore.
             }
         }
+
+        Ok(())
+    }
+
+    async fn handle_flush(&mut self) -> Result<(), io::Error> {
+        self.connection.flush().await?;
+        self.flush_interval.reset();
 
         Ok(())
     }
@@ -456,14 +498,22 @@ impl ConnectionHandler {
                         .write_op(ClientOp::Unsubscribe { sid, max })
                         .await
                     {
-                        println!("Send failed with {:?}", err);
+                        error!("Send failed with {:?}", err);
                     }
                 }
             }
             Command::Ping => {
+                debug!(
+                    "PING command. Pending pings {}, max pings {}",
+                    self.pending_pings, self.max_pings
+                );
                 self.pending_pings += 1;
 
                 if self.pending_pings > self.max_pings {
+                    debug!(
+                        "pending pings {}, max pings {}. disconnecting",
+                        self.pending_pings, self.max_pings
+                    );
                     self.handle_disconnect().await?;
                 }
 
@@ -471,15 +521,15 @@ impl ConnectionHandler {
                     self.handle_disconnect().await?;
                 }
 
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             Command::Flush { result } => {
-                if let Err(_err) = self.connection.flush().await {
+                if let Err(_err) = self.handle_flush().await {
                     if let Err(err) = self.handle_disconnect().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
-                    } else if let Err(err) = self.connection.flush().await {
+                    } else if let Err(err) = self.handle_flush().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
@@ -491,7 +541,7 @@ impl ConnectionHandler {
                 }
             }
             Command::TryFlush => {
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             Command::Subscribe {
                 sid,
@@ -518,7 +568,7 @@ impl ConnectionHandler {
                     })
                     .await
                 {
-                    println!("Sending Subscribe failed with {:?}", err);
+                    error!("Sending Subscribe failed with {:?}", err);
                 }
             }
             Command::Publish {
@@ -538,7 +588,7 @@ impl ConnectionHandler {
                     .await
                 {
                     self.handle_disconnect().await?;
-                    println!("Sending Publish failed with {:?}", err);
+                    error!("Sending Publish failed with {:?}", err);
                 }
             }
             Command::Connect(connect_info) => {
@@ -556,7 +606,8 @@ impl ConnectionHandler {
     }
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
-        self.connector.events_tx.try_send(Event::Disconnect).ok();
+        self.pending_pings = 0;
+        self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
         self.handle_reconnect().await?;
 
@@ -569,7 +620,7 @@ impl ConnectionHandler {
         self.info_sender.send(info).map_err(|err| {
             std::io::Error::new(
                 ErrorKind::Other,
-                format!("failed to send info update: {}", err),
+                format!("failed to send info update: {err}"),
             )
         })?;
 
@@ -586,7 +637,7 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.connector.events_tx.try_send(Event::Reconnect).ok();
+        self.connector.events_tx.try_send(Event::Connected).ok();
 
         Ok(())
     }
@@ -610,8 +661,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let ping_interval = options.ping_interval;
-    let flush_interval = options.flush_interval;
+    let ping_period = options.ping_interval;
+    let flush_period = options.flush_interval;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
@@ -627,49 +678,31 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
+            name: options.name,
         },
         events_tx,
         state_tx,
     )?;
 
-    let (info, connection) = connector.try_connect().await?;
+    let mut info: ServerInfo = Default::default();
+    let mut connection = None;
+    if !options.retry_on_initial_connect {
+        let (info_ok, connection_ok) = connector.try_connect().await?;
+        connection = Some(connection_ok);
+        info = info_ok;
+    }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-
-    let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
-
-    // TODO make channel size configurable
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(
         info_watcher,
         state_rx,
-        sender.clone(),
+        sender,
         options.subscription_capacity,
         options.inbox_prefix,
+        options.request_timeout,
     );
-    tokio::spawn({
-        let sender = sender.clone();
-        async move {
-            loop {
-                match sender.send(Command::Ping).await {
-                    Ok(()) => {}
-                    Err(_) => return,
-                }
-                tokio::time::sleep(ping_interval).await;
-            }
-        }
-    });
-
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(flush_interval).await;
-            match sender.send(Command::TryFlush).await {
-                Ok(()) => {}
-                Err(_) => return,
-            }
-        }
-    });
 
     task::spawn(async move {
         while let Some(event) = events_rx.recv().await {
@@ -677,15 +710,30 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move { connection_handler.process(receiver).await });
+    task::spawn(async move {
+        if connection.is_none() && options.retry_on_initial_connect {
+            let (info, connection_ok) = connector.connect().await.unwrap();
+            info_sender.send(info).ok();
+            connection = Some(connection_ok);
+        }
+        let connection = connection.unwrap();
+        let mut connection_handler = ConnectionHandler::new(
+            connection,
+            connector,
+            info_sender,
+            ping_period,
+            flush_period,
+        );
+        connection_handler.process(receiver).await
+    });
 
     Ok(client)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Reconnect,
-    Disconnect,
+    Connected,
+    Disconnected,
     LameDuckMode,
     SlowConsumer(u64),
     ServerError(ServerError),
@@ -695,19 +743,19 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Reconnect => write!(f, "reconnected"),
-            Event::Disconnect => write!(f, "disconnected"),
+            Event::Connected => write!(f, "connected"),
+            Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
-            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
-            Event::ServerError(err) => write!(f, "server error: {}", err),
-            Event::ClientError(err) => write!(f, "client error: {}", err),
+            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {sid}"),
+            Event::ServerError(err) => write!(f, "server error: {err}"),
+            Event::ClientError(err) => write!(f, "client error: {err}"),
         }
     }
 }
 
 /// Connects to NATS with default config.
 ///
-/// Returns clonable [Client].
+/// Returns cloneable [Client].
 ///
 /// To have customized NATS connection, check [ConnectOptions].
 ///
@@ -737,6 +785,7 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
@@ -769,6 +818,7 @@ impl Subscriber {
     ///  subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn unsubscribe(&mut self) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
@@ -782,8 +832,8 @@ impl Subscriber {
     }
 
     /// Unsubscribes from subscription after reaching given number of messages.
-    /// This is the total number of messages received by this subcsription in it's whole
-    /// lifespan. If it already reeached or surpassed the passed value, it will immediately stop.
+    /// This is the total number of messages received by this subscription in it's whole
+    /// lifespan. If it already reached or surpassed the passed value, it will immediately stop.
     ///
     /// # Examples
     /// ```
@@ -792,20 +842,21 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut sub = client.subscribe("test".into()).await?;
-    /// sub.unsubscribe_after(3).await?;
+    /// let mut subscriber = client.subscribe("test".into()).await?;
+    /// subscriber.unsubscribe_after(3).await?;
     /// client.flush().await?;
     ///
     /// for _ in 0..3 {
     ///     client.publish("test".into(), "data".into()).await?;
     /// }
     ///
-    /// while let Some(message) = sub.next().await {
+    /// while let Some(message) = subscriber.next().await {
     ///     println!("message received: {:?}", message);
     /// }
     /// println!("no more messages, unsubscribed");
     /// # Ok(())
     /// # }
+    /// ```
     pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
@@ -850,8 +901,8 @@ pub enum CallbackError {
 impl std::fmt::Display for CallbackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Client(error) => write!(f, "{}", error),
-            Self::Server(error) => write!(f, "{}", error),
+            Self::Client(error) => write!(f, "{error}"),
+            Self::Server(error) => write!(f, "{error}"),
         }
     }
 }
@@ -882,7 +933,7 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Other(error) => write!(f, "nats: {}", error),
+            Self::Other(error) => write!(f, "nats: {error}"),
         }
     }
 }
@@ -900,8 +951,8 @@ impl std::fmt::Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
-            Self::SlowConsumer(sid) => write!(f, "nats: subscription {} is a slow consumer", sid),
-            Self::Other(error) => write!(f, "nats: {}", error),
+            Self::SlowConsumer(sid) => write!(f, "nats: subscription {sid} is a slow consumer"),
+            Self::Other(error) => write!(f, "nats: {error}"),
         }
     }
 }
@@ -909,7 +960,7 @@ impl std::fmt::Display for ServerError {
 /// Info to construct a CONNECT message.
 #[derive(Clone, Debug, Serialize)]
 pub struct ConnectInfo {
-    /// Turns on +OK protocol acknowledgements.
+    /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
 
     /// Turns on additional strict format checking, e.g. for properly formed
@@ -991,12 +1042,12 @@ impl FromStr for ServerAddr {
         let url: Url = if input.contains("://") {
             input.parse()
         } else {
-            format!("nats://{}", input).parse()
+            format!("nats://{input}").parse()
         }
         .map_err(|e| {
             io::Error::new(
                 ErrorKind::InvalidInput,
-                format!("NATS server URL is invalid: {}", e),
+                format!("NATS server URL is invalid: {e}"),
             )
         })?;
 
@@ -1102,7 +1153,7 @@ impl ToServerAddrs for str {
 impl ToServerAddrs for String {
     type Iter = option::IntoIter<ServerAddr>;
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
-        (&**self).to_server_addrs()
+        (**self).to_server_addrs()
     }
 }
 
@@ -1152,13 +1203,13 @@ mod tests {
     }
 
     #[test]
-    fn serverr_address_ipv4() {
+    fn server_address_ipv4() {
         let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
         assert_eq!(address.host(), "127.0.0.1")
     }
 
     #[test]
-    fn serverr_address_domain() {
+    fn server_address_domain() {
         let address = ServerAddr::from_str("nats://example.com").unwrap();
         assert_eq!(address.host(), "example.com")
     }

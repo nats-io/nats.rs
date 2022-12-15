@@ -40,6 +40,8 @@ pub(crate) struct Inner {
     /// Ack policy used in while processing messages.
     pub(crate) consumer_ack_policy: AckPolicy,
 
+    pub(crate) num_pending: u64,
+
     /// Indicates if we own the consumer and are responsible for deleting it or not.
     pub(crate) consumer_ownership: ConsumerOwnership,
 
@@ -84,6 +86,7 @@ impl PushSubscription {
             stream: consumer_info.stream_name,
             consumer: consumer_info.name,
             consumer_ack_policy: consumer_info.config.ack_policy,
+            num_pending: consumer_info.num_pending,
             consumer_ownership,
             messages,
             context,
@@ -111,7 +114,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -147,7 +150,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -176,11 +179,11 @@ impl PushSubscription {
     }
 
     /// Get the next message, or a timeout error
-    /// if no messages are available for timout.
+    /// if no messages are available for timeout.
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -282,7 +285,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -313,7 +316,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -360,7 +363,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -484,7 +487,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -507,7 +510,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -548,7 +551,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -578,7 +581,7 @@ impl PushSubscription {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use std::sync::{Arc, atomic::{AtomicBool, Ordering::SeqCst}};
     /// # use std::thread;
     /// # use std::time::Duration;
@@ -654,7 +657,7 @@ impl Handler {
     /// Unsubscribe a subscription.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.subscribe("foo")?.with_handler(move |msg| {

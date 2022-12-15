@@ -202,7 +202,7 @@ impl JetStreamOptions {
             self.api_prefix("".to_string())
         } else {
             self.has_domain = true;
-            self.api_prefix(format!("$JS.{}.API", domain))
+            self.api_prefix(format!("$JS.{domain}.API"))
         }
     }
 }
@@ -428,7 +428,7 @@ pub enum ErrorCode {
     ConsumerWQConsumerNotDeliverAll = 10101,
     /// Consumer name is too long, maximum allowed is {max}
     ConsumerNameTooLong = 10102,
-    /// Durable name can not contain '.', '*', '>'
+    /// Durable name can not contain `.`, `*`, `>`
     ConsumerBadDurableName = 10103,
     /// Error creating store for consumer: {err}
     ConsumerStoreFailed = 10104,
@@ -451,7 +451,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Returns the status code assosciated with this error
+    /// Returns the status code associated with this error
     pub fn code(&self) -> usize {
         self.code
     }
@@ -671,7 +671,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -690,7 +690,7 @@ impl JetStream {
     /// Creates a pull subscription.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -761,7 +761,7 @@ impl JetStream {
                     Err(err) => {
                         return Err(io::Error::new(
                             ErrorKind::NotFound,
-                            format!("provided durable consumer doesn't exist: {}", err),
+                            format!("provided durable consumer doesn't exist: {err}"),
                         ));
                     }
                 }
@@ -830,7 +830,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -965,8 +965,7 @@ impl JetStream {
                         return Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!(
-                                "cannot create a queue subscription {} for a consumer with a deliver group {}",
-                                queue, deliver_group
+                                "cannot create a queue subscription {queue} for a consumer with a deliver group {deliver_group}"
                             ),
                         ));
                     }
@@ -974,8 +973,7 @@ impl JetStream {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!(
-                            "cannot create a subscription for a consumer with a deliver group {}",
-                            deliver_group
+                            "cannot create a subscription for a consumer with a deliver group {deliver_group}"
                         ),
                     ));
                 }
@@ -1155,7 +1153,7 @@ impl JetStream {
         let bind_only = maybe_options.map_or(false, |options| options.bind_only);
         let maybe_consumer_info = if let Some(consumer_name) = maybe_consumer_name {
             let consumer_info_result = self
-                .consumer_info(&stream_name, &consumer_name)
+                .consumer_info(&stream_name, consumer_name)
                 .and_then(process_consumer_info);
 
             match consumer_info_result {
@@ -1415,7 +1413,7 @@ impl JetStream {
                         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "stream not found"))?;
 
                     let consumer_info = self
-                        .consumer_info(&stream_name, &consumer_name)
+                        .consumer_info(&stream_name, consumer_name)
                         .and_then(process_consumer_info)?;
 
                     let deliver_subject = consumer_info

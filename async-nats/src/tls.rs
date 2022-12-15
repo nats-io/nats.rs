@@ -67,7 +67,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
     for cert in rustls_native_certs::load_native_certs().map_err(|err| {
         io::Error::new(
             ErrorKind::Other,
-            format!("could not load platform certs: {}", err),
+            format!("could not load platform certs: {err}"),
         )
     })? {
         root_store
@@ -75,7 +75,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
             .map_err(|err| {
                 io::Error::new(
                     ErrorKind::Other,
-                    format!("failed to read root certificates: {}", err),
+                    format!("failed to read root certificates: {err}"),
                 )
             })?;
     }
@@ -94,7 +94,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
                         .map_err(|err| {
                             io::Error::new(
                                 ErrorKind::InvalidInput,
-                                format!("could not load certs: {}", err),
+                                format!("could not load certs: {err}"),
                             )
                         })
                         .unwrap();

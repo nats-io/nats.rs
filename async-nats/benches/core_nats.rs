@@ -4,7 +4,7 @@ use futures::stream::StreamExt;
 pub fn publish(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
     let mut throughput_group = c.benchmark_group("async-nats: publish throughput");
-    throughput_group.sample_size(10);
+    throughput_group.sample_size(30);
     throughput_group.warm_up_time(std::time::Duration::from_secs(1));
 
     let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
@@ -29,7 +29,7 @@ pub fn publish(c: &mut Criterion) {
     throughput_group.finish();
 
     let mut messages_group = c.benchmark_group("async-nats: publish messages amount");
-    messages_group.sample_size(10);
+    messages_group.sample_size(30);
     messages_group.warm_up_time(std::time::Duration::from_secs(1));
 
     let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
@@ -62,7 +62,7 @@ pub fn subscribe(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
 
     let mut subscribe_amount_group = c.benchmark_group("subscribe amount");
-    subscribe_amount_group.sample_size(10);
+    subscribe_amount_group.sample_size(30);
     subscribe_amount_group.warm_up_time(std::time::Duration::from_secs(1));
 
     for size in [32, 1024, 8192].iter() {

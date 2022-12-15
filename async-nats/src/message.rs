@@ -26,10 +26,12 @@ pub struct Message {
     pub reply: Option<String>,
     /// Payload of the message. Can be any arbitrary data format.
     pub payload: Bytes,
-    /// Optional headers. Rust client uses [http::header].
+    /// Optional headers.
     pub headers: Option<HeaderMap>,
     /// Optional Status of the message. Used mostly for internal handling.
     pub status: Option<StatusCode>,
     /// Optional [status][crate::Message::status] description.
     pub description: Option<String>,
+
+    pub length: usize,
 }

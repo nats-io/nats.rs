@@ -27,7 +27,7 @@ fn pub_perms() {
         .disconnect_callback(move || {
             let _ = dtx.send(true);
         })
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .expect("could not connect");
 
     nc.publish("foo", "NOT ALLOWED").unwrap();
@@ -55,7 +55,7 @@ fn sub_perms() {
         .disconnect_callback(move || {
             let _ = dtx.send(true);
         })
-        .connect(&s.client_url())
+        .connect(s.client_url())
         .expect("could not connect");
 
     let _sub = nc.subscribe("foo").unwrap();

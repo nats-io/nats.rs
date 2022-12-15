@@ -38,7 +38,7 @@ use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tokio_rustls::rustls::{self};
+use tokio_rustls::rustls;
 
 pub(crate) struct ConnectorOptions {
     pub(crate) tls_required: bool,
@@ -49,6 +49,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) auth: Authorization,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
+    pub(crate) name: Option<String>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -132,7 +133,7 @@ impl Connector {
                         let mut connect_info = ConnectInfo {
                             tls_required,
                             // FIXME(tp): have optional name
-                            name: Some("beta-rust-client".to_string()),
+                            name: self.options.name.clone(),
                             pedantic: false,
                             verbose: false,
                             lang: LANG.to_string(),
@@ -153,6 +154,7 @@ impl Connector {
                             Authorization::None => {
                                 connection.write_op(ClientOp::Connect(connect_info)).await?;
 
+                                self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
@@ -177,8 +179,7 @@ impl Connector {
                                                 return Err(std::io::Error::new(
                                                     ErrorKind::Other,
                                                     format!(
-                                                        "NKey auth: failed signing the nonce: {}",
-                                                        e
+                                                        "NKey auth: failed signing the nonce: {e}"
                                                     ),
                                                 ));
                                             }
@@ -187,7 +188,7 @@ impl Connector {
                                     Err(e) => {
                                         return Err(std::io::Error::new(
                                             ErrorKind::Other,
-                                            format!("NKey auth: failed signing the nonce: {}", e),
+                                            format!("NKey auth: failed signing the nonce: {e}"),
                                         ));
                                     }
                                 }
@@ -201,7 +202,7 @@ impl Connector {
                                     Err(e) => {
                                         return Err(std::io::Error::new(
                                             ErrorKind::Other,
-                                            format!("JWT auth: failed signing the nonce: {}", e),
+                                            format!("JWT auth: failed signing the nonce: {e}"),
                                         ));
                                     }
                                 }
@@ -220,6 +221,7 @@ impl Connector {
                                 ));
                             }
                             Some(_) => {
+                                self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
@@ -273,7 +275,7 @@ impl Connector {
             Some(op) => {
                 return Err(io::Error::new(
                     ErrorKind::Other,
-                    format!("expected INFO, got {:?}", op),
+                    format!("expected INFO, got {op:?}"),
                 ))
             }
             None => {
@@ -290,7 +292,7 @@ impl Connector {
                 tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
                     io::Error::new(
                         ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {}", err),
+                        format!("failed to create TLS connector from TLS config: {err}"),
                     )
                 })?;
 

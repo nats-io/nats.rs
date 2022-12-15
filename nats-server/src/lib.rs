@@ -24,6 +24,13 @@ use rand::Rng;
 use regex::Regex;
 
 pub struct Server {
+    inner: Inner,
+}
+
+struct Inner {
+    cfg: String,
+    id: String,
+    port: Option<String>,
     child: Child,
     logfile: PathBuf,
     pidfile: PathBuf,
@@ -36,22 +43,33 @@ lazy_static! {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        self.child.kill().unwrap();
-        self.child.wait().unwrap();
-        // Remove log if present.
-        if let Ok(log) = fs::read_to_string(self.logfile.as_os_str()) {
+        self.inner.child.kill().unwrap();
+        self.inner.child.wait().unwrap();
+        if let Ok(log) = fs::read_to_string(self.inner.logfile.as_os_str()) {
             // Check if we had JetStream running and if so cleanup the storage directory.
             if let Some(caps) = SD_RE.captures(&log) {
                 let sd = caps.get(1).map_or("", |m| m.as_str());
                 fs::remove_dir_all(sd).ok();
             }
             // Remove Logfile.
-            fs::remove_file(self.logfile.as_os_str()).ok();
+            fs::remove_file(self.inner.logfile.as_os_str()).ok();
         }
     }
 }
 
 impl Server {
+    pub fn restart(&mut self) {
+        let port = self
+            .inner
+            .port
+            .clone()
+            .expect("can't restart server with dynamic port");
+        self.inner.child.kill().unwrap();
+        self.inner.child.wait().unwrap();
+        let inner = do_run(&self.inner.cfg, Some(&port), Some(self.inner.id.clone()));
+        self.inner = inner;
+    }
+
     // Grab client url.
     // Helpful when dynamically allocating ports with -1.
     pub fn client_url(&self) -> String {
@@ -65,7 +83,7 @@ impl Server {
         if si["tls_required"].as_bool().unwrap_or(false) {
             scheme = "tls://";
         }
-        format!("{}127.0.0.1:{}", scheme, port)
+        format!("{scheme}127.0.0.1:{port}")
     }
 
     pub fn client_port(&self) -> u16 {
@@ -99,7 +117,7 @@ impl Server {
         // We may need to wait for log to be present.
         // Wait up to 10s. (100 * 100ms)
         for _ in 0..100 {
-            match fs::read_to_string(self.logfile.as_os_str()) {
+            match fs::read_to_string(self.inner.logfile.as_os_str()) {
                 Ok(l) => {
                     if let Some(cre) = CLIENT_RE.captures(&l) {
                         return cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1");
@@ -114,7 +132,7 @@ impl Server {
     }
 
     pub fn client_pid(&self) -> usize {
-        String::from_utf8(fs::read(self.pidfile.clone()).unwrap())
+        String::from_utf8(fs::read(self.inner.pidfile.clone()).unwrap())
             .unwrap()
             .parse()
             .unwrap()
@@ -216,10 +234,16 @@ impl Cluster {
 
 /// Starts a local NATS server with the given config that gets stopped and cleaned up on drop.
 pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
-    let id = nuid::next();
-    let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
-    let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
+    Server {
+        inner: do_run(cfg, port, None),
+    }
+}
+
+fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
+    let id = id.unwrap_or_else(nuid::next);
+    let logfile = env::temp_dir().join(format!("nats-server-{id}.log"));
+    let pidfile = env::temp_dir().join(format!("nats-server-{id}.pid"));
+    let store_dir = env::temp_dir().join(format!("store-dir-{id}"));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
@@ -241,8 +265,10 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
     }
 
     let child = cmd.spawn().unwrap();
-
-    Server {
+    Inner {
+        port: port.map(ToString::to_string),
+        cfg: cfg.to_string(),
+        id,
         child,
         logfile,
         pidfile,
@@ -258,9 +284,9 @@ fn run_cluster_node_with_port(
     cluster: usize,
 ) -> Server {
     let id = nuid::next();
-    let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
-    let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
+    let logfile = env::temp_dir().join(format!("nats-server-{id}.log"));
+    let store_dir = env::temp_dir().join(format!("store-dir-{id}"));
+    let pidfile = env::temp_dir().join(format!("nats-server-{id}.pid"));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
@@ -280,12 +306,12 @@ fn run_cluster_node_with_port(
         .arg(
             routes
                 .iter()
-                .map(|r| format!("nats://127.0.0.1:{}", r))
+                .map(|r| format!("nats://127.0.0.1:{r}"))
                 .collect::<Vec<String>>()
                 .join(","),
         )
         .arg("--cluster")
-        .arg(format!("nats://127.0.0.1:{}", cluster))
+        .arg(format!("nats://127.0.0.1:{cluster}"))
         .arg("--cluster_name")
         .arg(cluster_name)
         .arg("-n")
@@ -298,9 +324,14 @@ fn run_cluster_node_with_port(
     let child = cmd.spawn().unwrap();
 
     Server {
-        child,
-        logfile,
-        pidfile,
+        inner: Inner {
+            port: port.map(ToString::to_string),
+            cfg: cfg.to_string(),
+            id,
+            child,
+            logfile,
+            pidfile,
+        },
     }
 }
 

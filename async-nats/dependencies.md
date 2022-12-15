@@ -18,7 +18,6 @@ This file lists the dependencies used in this repository.
 | rand 0.8.5                | Apache-2.0 OR MIT        |
 | regex 1.5.5               | Apache-2.0 OR MIT        |
 | rustls-native-certs 0.6.2 | Apache-2.0 OR ISC OR MIT |
-| rustls-pemfile 0.3.0      | Apache-2.0 OR ISC OR MIT |
 | rustls-pemfile 1.0.0      | Apache-2.0 OR ISC OR MIT |
 | serde 1.0.136             | Apache-2.0 OR MIT        |
 | serde_json 1.0.79         | Apache-2.0 OR MIT        |

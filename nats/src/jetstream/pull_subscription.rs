@@ -93,7 +93,7 @@ impl PullSubscription {
     /// in the Consumer.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -144,7 +144,7 @@ impl PullSubscription {
     /// in the Consumer.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use std::time::Duration;
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
@@ -193,7 +193,7 @@ impl PullSubscription {
     /// closure and acks them automatically according to `Consumer` `AckPolicy`.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -239,12 +239,12 @@ impl PullSubscription {
 
     /// A low level method that should be used only in specific cases.
     /// Pulls next message available for this `PullSubscription`.
-    /// This operation is blocking and will indefinately wait for new messages.
+    /// This operation is blocking and will indefinitely wait for new messages.
     /// Keep in mind that this requires user to request for messages first.
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
@@ -296,7 +296,7 @@ impl PullSubscription {
     /// Keep in mind that this requires user to request for messages first.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use std::time::Duration;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -352,7 +352,7 @@ impl PullSubscription {
     /// to have more granular control of how many request and when are sent.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -400,7 +400,7 @@ impl PullSubscription {
     /// As Pull Consumers requires Client to fetch messages, this will yield nothing if explicit [`PullSubscription::request_batch`] was not sent.
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use nats::jetstream::BatchOptions;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -422,7 +422,7 @@ impl PullSubscription {
     ///     batch: 10,
     /// })?;
     /// for (i, message) in consumer.iter().enumerate() {
-    ///     println!("recieved message: {:?}", message);
+    ///     println!("received message: {:?}", message);
     ///     message.ack()?;
     /// #   break;
     /// }
@@ -448,7 +448,7 @@ impl PullSubscription {
     }
 }
 
-/// Interator that will endlessly wait for messages, unless `no messages` or `request timeout` is encountered.
+/// Iterator that will endlessly wait for messages, unless `no messages` or `request timeout` is encountered.
 pub struct Iter<'a> {
     subscription: &'a PullSubscription,
 }

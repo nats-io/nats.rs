@@ -21,7 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncWrite};
 use bytes::{Buf, BytesMut};
 use tokio::io;
 
-use crate::header::{HeaderMap, HeaderName, HeaderValue};
+use crate::header::{HeaderMap, HeaderName};
 use crate::status::StatusCode;
 use crate::{ClientOp, ServerError, ServerOp};
 
@@ -55,7 +55,7 @@ pub(crate) struct Connection {
 }
 
 /// Internal representation of the connection.
-/// Helds connection with NATS Server and communicates with `Client` via channels.
+/// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         let maybe_len = self.buffer.find(b"\r\n");
@@ -142,6 +142,9 @@ impl Connection {
 
             return Ok(Some(ServerOp::Message {
                 sid,
+                length: payload_len
+                    + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                    + subject.len(),
                 reply: reply_to,
                 headers: None,
                 subject,
@@ -278,13 +281,13 @@ impl Connection {
                     value.push_str(v);
                 }
 
-                headers.append(
-                    HeaderName::from_str(key).unwrap(),
-                    HeaderValue::from_str(value.trim()).unwrap(),
-                );
+                headers.append(HeaderName::from_str(key).unwrap(), value.trim().to_string());
             }
 
             return Ok(Some(ServerOp::Message {
+                length: reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                    + subject.len()
+                    + num_bytes,
                 sid,
                 reply: reply_to,
                 subject,
@@ -302,7 +305,7 @@ impl Connection {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("invalid server operation: '{}'", line),
+            format!("invalid server operation: '{line}'"),
         ))
     }
 
@@ -353,20 +356,11 @@ impl Connection {
                 }
 
                 if let Some(headers) = headers {
-                    let mut header = Vec::new();
-                    header.extend_from_slice(b"NATS/1.0\r\n");
-                    for (key, value) in headers.iter() {
-                        header.extend_from_slice(key.as_ref());
-                        header.push(b':');
-                        header.extend_from_slice(value.as_ref());
-                        header.extend_from_slice(b"\r\n");
-                    }
-
-                    header.extend_from_slice(b"\r\n");
+                    let headers = headers.to_bytes();
 
                     let mut header_len_buf = itoa::Buffer::new();
                     self.stream
-                        .write_all(header_len_buf.format(header.len()).as_bytes())
+                        .write_all(header_len_buf.format(headers.len()).as_bytes())
                         .await?;
 
                     self.stream.write_all(b" ").await?;
@@ -375,13 +369,13 @@ impl Connection {
                     self.stream
                         .write_all(
                             total_len_buf
-                                .format(header.len() + payload.len())
+                                .format(headers.len() + payload.len())
                                 .as_bytes(),
                         )
                         .await?;
 
                     self.stream.write_all(b"\r\n").await?;
-                    self.stream.write_all(&header).await?;
+                    self.stream.write_all(&headers).await?;
                 } else {
                     let mut len_buf = itoa::Buffer::new();
                     self.stream
@@ -403,21 +397,19 @@ impl Connection {
                 self.stream.write_all(subject.as_bytes()).await?;
                 if let Some(queue_group) = queue_group {
                     self.stream
-                        .write_all(format!(" {}", queue_group).as_bytes())
+                        .write_all(format!(" {queue_group}").as_bytes())
                         .await?;
                 }
                 self.stream
-                    .write_all(format!(" {}\r\n", sid).as_bytes())
+                    .write_all(format!(" {sid}\r\n").as_bytes())
                     .await?;
             }
 
             ClientOp::Unsubscribe { sid, max } => {
                 self.stream.write_all(b"UNSUB ").await?;
-                self.stream.write_all(format!("{}", sid).as_bytes()).await?;
+                self.stream.write_all(format!("{sid}").as_bytes()).await?;
                 if let Some(max) = max {
-                    self.stream
-                        .write_all(format!(" {}", max).as_bytes())
-                        .await?;
+                    self.stream.write_all(format!(" {max}").as_bytes()).await?;
                 }
                 self.stream.write_all(b"\r\n").await?;
             }
@@ -496,10 +488,7 @@ mod read_op {
         server.flush().await.unwrap();
 
         let result = connection.read_op().await.unwrap();
-        assert_eq!(
-            result,
-            Some(ServerOp::Info(Box::new(ServerInfo::default())))
-        );
+        assert_eq!(result, Some(ServerOp::Info(Box::default())));
 
         server
             .write_all(b"INFO { \"version\": \"1.0.0\" }\r\n")
@@ -527,10 +516,7 @@ mod read_op {
 
         server.write_all(b"INFO {}\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
-        assert_eq!(
-            result,
-            Some(ServerOp::Info(Box::new(ServerInfo::default())))
-        );
+        assert_eq!(result, Some(ServerOp::Info(Box::default())));
 
         server
             .write_all(b"-ERR something went wrong\r\n")
@@ -569,6 +555,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 11,
             })
         );
 
@@ -588,6 +575,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 8 + 11,
             })
         );
 
@@ -601,6 +589,7 @@ mod read_op {
         server.write_all(b"Hello World\r\n").await.unwrap();
 
         let result = connection.read_op().await.unwrap();
+
         assert_eq!(
             result,
             Some(ServerOp::Message {
@@ -614,6 +603,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 8 + 34
             })
         );
 
@@ -640,6 +630,7 @@ mod read_op {
                 payload: "Hello World".into(),
                 status: None,
                 description: None,
+                length: 7 + 8 + 34,
             })
         );
 
@@ -665,6 +656,7 @@ mod read_op {
                 payload: "".into(),
                 status: Some(StatusCode::NOT_FOUND),
                 description: Some("No Messages".to_string()),
+                length: 7 + 8 + 28,
             })
         );
 
@@ -684,6 +676,7 @@ mod read_op {
                 payload: "Hello Again".into(),
                 status: None,
                 description: None,
+                length: 7 + 11,
             })
         );
     }
@@ -730,6 +723,7 @@ mod read_op {
                 payload: "".into(),
                 status: Some(StatusCode::NOT_FOUND),
                 description: Some("No Messages".to_string()),
+                length: 7 + 8 + 28,
             })
         );
 
@@ -810,7 +804,7 @@ mod write_op {
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
             buffer,
-            "HPUB FOO.BAR INBOX.67 22 33\r\nNATS/1.0\r\nheader:X\r\n\r\n"
+            "HPUB FOO.BAR INBOX.67 23 34\r\nNATS/1.0\r\nHeader: X\r\n\r\n"
         );
     }
 

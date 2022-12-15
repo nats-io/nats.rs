@@ -41,7 +41,7 @@ fn is_empty_or_none(field: &Option<String>) -> bool {
 #[doc(hidden)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
-    /// Turns on +OK protocol acknowledgements.
+    /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
 
     /// Turns on additional strict format checking, e.g. for properly formed
@@ -77,15 +77,15 @@ pub struct ConnectInfo {
     #[serde(default)]
     pub tls_required: bool,
 
-    /// Connection username (if `auth_required` is set)
+    /// Connection username.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub user: Option<String>,
 
-    /// Connection password (if auth_required is set)
+    /// Connection password.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub pass: Option<String>,
 
-    /// Client authorization token (if auth_required is set)
+    /// Client authorization token.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub auth_token: Option<String>,
 }
@@ -192,7 +192,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
         }
     }
 
-    /// Set the denominator of the probablity of a bug
+    /// Set the denominator of the probability of a bug
     pub fn bugginess(self, bugginess: u32) -> Self {
         Self {
             bugginess: Some(bugginess),
@@ -277,7 +277,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 drop(listener);
                 log::debug!("evicting all connected clients");
                 clients.clear();
-                let baddr = format!("{}:{}", host, port);
+                let baddr = format!("{host}:{port}");
                 log::debug!("nats test server restarted on {}:{}", host, port);
                 listener = TcpListener::bind(baddr).unwrap();
                 listener.set_nonblocking(true).unwrap();
@@ -554,8 +554,8 @@ fn test_pub_sub_2_clients() {
     env_logger::init();
     let server = NatsTestServer::build().spawn();
 
-    let conn1 = nats::connect(&server.address().to_string()).unwrap();
-    let conn2 = nats::connect(&server.address().to_string()).unwrap();
+    let conn1 = nats::connect(server.address().to_string()).unwrap();
+    let conn2 = nats::connect(server.address().to_string()).unwrap();
 
     let sub = conn1.subscribe("*").unwrap();
     // This test was sometimes failing due to some issues in `nats_test_server`.

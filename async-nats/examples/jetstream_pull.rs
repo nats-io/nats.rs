@@ -36,12 +36,12 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish a few messages for the example.
     for i in 0..10 {
         jetstream
-            .publish(format!("events.{}", i), "data".into())
+            .publish(format!("events.{i}"), "data".into())
             .await?;
     }
 
     // Attach to the messages iterator for the Consumer.
-    // The iterator does its best to optimize retrival of messages from the server.
+    // The iterator does its best to optimize retrieval of messages from the server.
     let mut messages = consumer.messages().await?.take(10);
 
     // Iterate over messages.

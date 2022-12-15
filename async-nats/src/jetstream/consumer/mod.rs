@@ -33,7 +33,7 @@ pub trait IntoConsumerConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
@@ -88,9 +88,24 @@ impl<T: IntoConsumerConfig> Consumer<T> {
         }
     }
 
+    async fn fetch_info(&self) -> Result<consumer::Info, Error> {
+        let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok::<Info>(info) => Ok(info),
+            Response::Err { error } => Err(Box::new(std::io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "nats: error while getting consumer info: {}, {}, {}",
+                    error.code, error.status, error.description
+                ),
+            ))),
+        }
+    }
+
     /// Returns cached [Info] for the [Consumer].
-    /// Cache is either from initial creation/retrival of the [Consumer] or last call to
-    /// [Consumer::info].
+    /// Cache is either from initial creation/retrieval of the [Consumer] or last call to
+    /// [Info].
     ///
     /// # Examples
     ///
@@ -141,12 +156,12 @@ pub struct Info {
     /// The consumer's configuration
     pub config: Config,
     /// Statistics for delivered messages
-    pub delivered: SequencePair,
-    /// Statistics for acknowleged messages
-    pub ack_floor: SequencePair,
+    pub delivered: SequenceInfo,
+    /// Statistics for acknowledged messages
+    pub ack_floor: SequenceInfo,
     /// The difference between delivered and acknowledged messages
     pub num_ack_pending: usize,
-    /// The number of messages re-sent after acknowledgement was not received within the configured
+    /// The number of messages re-sent after acknowledgment was not received within the configured
     /// time threshold
     pub num_redelivered: usize,
     /// The number of waiting
@@ -161,14 +176,17 @@ pub struct Info {
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct SequencePair {
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceInfo {
     /// How far along the consumer has progressed
     #[serde(rename = "consumer_seq")]
     pub consumer_sequence: u64,
     /// The aggregate for all stream consumers
     #[serde(rename = "stream_seq")]
     pub stream_sequence: u64,
+    // Last activity for the sequence
+    #[serde(default, with = "rfc3339::option")]
+    pub last_active: Option<time::OffsetDateTime>,
 }
 
 /// Configuration for consumers. From a high level, the
@@ -180,7 +198,7 @@ pub struct Config {
     /// to be "push-based". This is analogous in some ways to a normal
     /// NATS subscription (rather than a queue subscriber) in that the
     /// consumer will receive all messages published to the stream that
-    /// the consumer is interested in. Acknowledgement policies such as
+    /// the consumer is interested in. Acknowledgment policies such as
     /// `AckPolicy::None` and `AckPolicy::All` may be enabled for such
     /// push-based consumers, which reduce the amount of effort spent
     /// tracking delivery. Combining `AckPolicy::All` with
@@ -188,7 +206,7 @@ pub struct Config {
     /// optimizations.
     ///
     /// Setting `deliver_subject` to `None` will cause this consumer to
-    /// be "pull-based", and will require explicit acknowledgement of
+    /// be "pull-based", and will require explicit acknowledgment of
     /// each message. This is analogous in some ways to a normal NATS
     /// queue subscriber, where a message will be delivered to a single
     /// subscriber. Pull-based consumers are intended to be used for
@@ -226,6 +244,10 @@ pub struct Config {
     /// to recover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_name: Option<String>,
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -251,7 +273,7 @@ pub struct Config {
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
+    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.
@@ -274,16 +296,18 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
-    /// Maximum value for request exiration
+    /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer intactivity
+    /// Threshold for ephemeral consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
-
-    /// Number of consumer replucas
+    /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
     pub num_replicas: usize,
+    /// Force consumer to use memory storage.
+    #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
+    pub memory_storage: bool,
 }
 
 impl From<&Config> for Config {
@@ -344,7 +368,7 @@ pub enum DeliverPolicy {
         #[serde(rename = "opt_start_seq")]
         start_sequence: u64,
     },
-    /// `ByStartTime` will select the first messsage with a timestamp >= to the consumer's
+    /// `ByStartTime` will select the first message with a timestamp >= to the consumer's
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime {
@@ -375,7 +399,7 @@ pub enum AckPolicy {
     #[serde(rename = "none")]
     None = 0,
     /// Acknowledges all messages with lower sequence numbers when a later
-    /// message is acknowledged. Useful for "batching" acknowledgement.
+    /// message is acknowledged. Useful for "batching" acknowledgment.
     #[serde(rename = "all")]
     All = 1,
 }

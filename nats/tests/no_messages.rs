@@ -17,7 +17,7 @@ pub use nats_server::*;
 #[test]
 fn no_messages() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).expect("could not connect");
+    let nc = nats::connect(s.client_url()).expect("could not connect");
     let js = nats::jetstream::new(nc);
 
     js.add_stream(&StreamConfig {
@@ -51,6 +51,6 @@ fn no_messages() {
         })
         .unwrap();
 
-    // every fetch method checks against `404` error, so desipte using blocking iterator we should still get `None`.
+    // every fetch method checks against `404` error, so despite using blocking iterator we should still get `None`.
     assert!(batch.next().is_none());
 }

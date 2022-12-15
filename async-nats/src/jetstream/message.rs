@@ -46,7 +46,7 @@ impl Message {
     /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
     /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
     ///
-    /// Examples
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -83,9 +83,9 @@ impl Message {
         }
     }
 
-    /// Acknowledges a message delivery by sending a choosen [AckKind] variant to the server.
+    /// Acknowledges a message delivery by sending a chosen [AckKind] variant to the server.
     ///
-    /// Examples
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -130,7 +130,7 @@ impl Message {
     /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
     /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
     ///
-    /// Examples
+    /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -159,7 +159,14 @@ impl Message {
                 .client
                 .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
                 .await?;
-            match subscription.next().await {
+            match tokio::time::timeout(self.context.timeout, subscription.next())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "double ack response timed out",
+                    )
+                })? {
                 Some(_) => Ok(()),
                 None => Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,

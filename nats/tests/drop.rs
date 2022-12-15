@@ -22,8 +22,8 @@ use std::{
 fn drop_flushes() -> io::Result<()> {
     let s = nats_server::run_basic_server();
 
-    let nc1 = nats::connect(&s.client_url())?;
-    let nc2 = nats::connect(&s.client_url())?;
+    let nc1 = nats::connect(s.client_url())?;
+    let nc2 = nats::connect(s.client_url())?;
 
     let inbox = nc1.new_inbox();
     let sub = nc2.subscribe(&inbox)?;
@@ -41,7 +41,7 @@ fn drop_flushes() -> io::Result<()> {
 fn two_connections() -> io::Result<()> {
     let s = nats_server::run_basic_server();
 
-    let nc1 = nats::connect(&s.client_url())?;
+    let nc1 = nats::connect(s.client_url())?;
     let nc2 = nc1.clone();
 
     nc1.publish("foo", b"bar")?;
@@ -89,7 +89,7 @@ fn async_subscription_drop() -> io::Result<()> {
 }
 
 #[test]
-fn shutdown_responsivness_regression_check() {
+fn shutdown_responsiveness_regression_check() {
     let s = nats_server::run_basic_server();
     let conn = nats::Options::new().connect(s.client_url()).unwrap();
     conn.rtt().unwrap();
@@ -103,7 +103,7 @@ fn shutdown_responsivness_regression_check() {
 }
 
 #[test]
-fn drop_responsivness_regression_check() {
+fn drop_responsiveness_regression_check() {
     let s = nats_server::run_basic_server();
     let now;
     {
@@ -129,10 +129,7 @@ fn close_responsiveness_regression_jetstream() {
         js.publish("subject", b"foo").unwrap();
     }
     let sub = js.subscribe("subject").expect("failed to subscribe");
-    sub.with_process_handler(|_| {
-        println!("message");
-        Ok(())
-    });
+    sub.with_process_handler(|_| Ok(()));
 
     nc.close();
 }
@@ -196,7 +193,7 @@ fn close_responsiveness_regression_jetstream_complex() {
 // Helper function to return server and client.
 pub fn run_basic_jetstream() -> (nats_server::Server, Connection, JetStream) {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
-    let nc = nats::connect(&s.client_url()).unwrap();
+    let nc = nats::connect(s.client_url()).unwrap();
     let js = JetStream::new(nc.clone(), JetStreamOptions::default());
 
     (s, nc, js)

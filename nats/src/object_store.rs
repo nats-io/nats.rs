@@ -20,11 +20,13 @@ use crate::jetstream::{
     SubscribeOptions,
 };
 use crate::Message;
+use base64::URL_SAFE;
 use lazy_static::lazy_static;
 use regex::Regex;
+use ring::digest::SHA256;
 use serde::{Deserialize, Serialize};
 use std::cmp;
-use std::io;
+use std::io::{self, ErrorKind};
 use std::time::Duration;
 use time::serde::rfc3339;
 use time::OffsetDateTime;
@@ -50,8 +52,8 @@ fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-fn sanitize_object_name(object_name: &str) -> String {
-    object_name.replace('.', "_").replace(' ', "_")
+fn encode_object_name(object_name: &str) -> String {
+    base64::encode_config(object_name, URL_SAFE)
 }
 
 /// Configuration values for object store buckets.
@@ -74,7 +76,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -105,9 +107,9 @@ impl JetStream {
         }
 
         let bucket_name = config.bucket.clone();
-        let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
+        let chunk_subject = format!("$O.{bucket_name}.C.>");
+        let meta_subject = format!("$O.{bucket_name}.M.>");
 
         self.add_stream(&StreamConfig {
             name: stream_name,
@@ -128,7 +130,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -160,7 +162,7 @@ impl JetStream {
             ));
         }
 
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         self.stream_info(stream_name)?;
 
         Ok(ObjectStore::new(bucket_name.to_string(), self.clone()))
@@ -170,7 +172,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -188,7 +190,7 @@ impl JetStream {
     /// ```
     ///
     pub fn delete_object_store(&self, bucket_name: &str) -> io::Result<()> {
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         self.delete_stream(stream_name)?;
 
         Ok(())
@@ -258,10 +260,12 @@ pub struct ObjectStore {
 
 /// Represents an object stored in a bucket.
 pub struct Object {
-    info: ObjectInfo,
+    /// Information about given object.
+    pub info: ObjectInfo,
     subscription: PushSubscription,
     remaining_bytes: Vec<u8>,
     has_pending_messages: bool,
+    digest: Option<ring::digest::Context>,
 }
 
 impl Object {
@@ -271,6 +275,7 @@ impl Object {
             info,
             remaining_bytes: Vec::new(),
             has_pending_messages: true,
+            digest: Some(ring::digest::Context::new(&SHA256)),
         }
     }
 
@@ -298,10 +303,26 @@ impl io::Read for Object {
             if let Some(message) = maybe_message {
                 let len = cmp::min(buffer.len(), message.data.len());
                 buffer[..len].copy_from_slice(&message.data[..len]);
+                if let Some(context) = &mut self.digest {
+                    context.update(&message.data);
+                }
                 self.remaining_bytes.extend_from_slice(&message.data[len..]);
 
                 if let Some(message_info) = message.jetstream_message_info() {
                     if message_info.pending == 0 {
+                        let digest = self.digest.take().map(|context| context.finish());
+                        if let Some(digest) = digest {
+                            if format!("SHA-256={}", base64::encode_config(digest, URL_SAFE))
+                                != self.info.digest
+                            {
+                                return Err(io::Error::new(ErrorKind::InvalidData, "wrong digest"));
+                            }
+                        } else {
+                            return Err(io::Error::new(
+                                ErrorKind::InvalidData,
+                                "digest should be Some",
+                            ));
+                        }
                         self.has_pending_messages = false;
                     }
                 }
@@ -323,7 +344,7 @@ impl ObjectStore {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -345,7 +366,7 @@ impl ObjectStore {
     /// ```
     pub fn info(&self, object_name: &str) -> io::Result<ObjectInfo> {
         // LoOkup the stream to get the bound subject.
-        let object_name = sanitize_object_name(object_name);
+        let object_name = encode_object_name(object_name);
         if !is_valid_object_name(&object_name) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -357,7 +378,7 @@ impl ObjectStore {
         let stream_name = format!("OBJ_{}", &self.name);
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
 
-        let message = self.context.get_last_message(&stream_name, &subject)?;
+        let message = self.context.get_last_message(stream_name, &subject)?;
         let object_info = serde_json::from_slice::<ObjectInfo>(&message.data)?;
 
         Ok(object_info)
@@ -381,7 +402,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -405,7 +426,7 @@ impl ObjectStore {
         ObjectMeta: From<T>,
     {
         let object_meta: ObjectMeta = meta.into();
-        let object_name = sanitize_object_name(&object_meta.name);
+        let object_name = encode_object_name(&object_meta.name);
         if !is_valid_object_name(&object_name) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -413,7 +434,7 @@ impl ObjectStore {
             ));
         }
 
-        // Fetch any existing object info, if ther is any for later use.
+        // Fetch any existing object info, if there is any for later use.
         let maybe_existing_object_info = match self.info(&object_name) {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
@@ -425,6 +446,7 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
+        let mut context = ring::digest::Context::new(&SHA256);
         let mut buffer = [0; DEFAULT_CHUNK_SIZE];
 
         loop {
@@ -432,6 +454,7 @@ impl ObjectStore {
             if n == 0 {
                 break;
             }
+            context.update(&buffer[..n]);
 
             object_size += n;
             object_chunks += 1;
@@ -439,17 +462,18 @@ impl ObjectStore {
             self.context.publish(&chunk_subject, &buffer[..n])?;
         }
 
+        let digest = context.finish();
         // Create a random subject prefixed with the object stream name.
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
         let object_info = ObjectInfo {
-            name: object_name,
+            name: object_meta.name,
             description: object_meta.description,
             link: object_meta.link,
             bucket: self.name.clone(),
             nuid: object_nuid,
             chunks: object_chunks,
             size: object_size,
-            digest: "".to_string(),
+            digest: format!("SHA-256={}", base64::encode_config(digest, URL_SAFE)),
             modified: OffsetDateTime::now_utc(),
             deleted: false,
         };
@@ -469,7 +493,7 @@ impl ObjectStore {
             let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
 
             self.context
-                .purge_stream_subject(&stream_name, &chunk_subject)?;
+                .purge_stream_subject(stream_name, &chunk_subject)?;
         }
 
         Ok(object_info)
@@ -479,7 +503,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::io::Read;
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
@@ -519,7 +543,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::io::Read;
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
@@ -556,7 +580,7 @@ impl ObjectStore {
         let mut headers = HeaderMap::default();
         headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT.to_string());
 
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = format!("$O.{}.M.{}", &self.name, &encode_object_name(object_name));
         let message = Message::new(&subject, None, data, Some(headers));
 
         self.context.publish_message(&message)?;
@@ -565,7 +589,7 @@ impl ObjectStore {
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
 
         self.context
-            .purge_stream_subject(&stream_name, &chunk_subject)?;
+            .purge_stream_subject(stream_name, &chunk_subject)?;
 
         Ok(())
     }

@@ -78,7 +78,7 @@ pub struct Tier {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Account {
-    /// Memory stoage being used for Stream Message storage
+    /// Memory storage being used for Stream Message storage
     pub memory: u64,
     /// File Storage being used for Stream Message storage
     pub storage: u64,

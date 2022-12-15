@@ -1,3 +1,12 @@
+# 0.23.1
+## Overview
+This is a minor sync client release with fixes to Object Store API
+
+## Fixed
+* Fix sync object store encoding by @Jarema in https://github.com/nats-io/nats.rs/pull/700
+## Added
+* Add digest to sync object store by @Jarema in https://github.com/nats-io/nats.rs/pull/709
+
 # 0.23.0
 ## Overview
 This is a minor release with one small addition.
