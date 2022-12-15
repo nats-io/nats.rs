@@ -1785,9 +1785,8 @@ impl JetStream {
     where
         Res: DeserializeOwned,
     {
-        let res_msg = 
-            self.connection
-                .request_timeout(subject, req, Duration::from_nanos(3_000_000_000))?;
+        let req_timeout = Duration::from_nanos(3_000_000_000);
+        let res_msg = self.connection.request_timeout(subject, req, req_timeout)?;
         let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
