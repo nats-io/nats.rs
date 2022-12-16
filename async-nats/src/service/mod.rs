@@ -46,6 +46,8 @@ lazy_static! {
     // uses recommended semver validation expression from
     // https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
     static ref SEMVER: Regex = Regex::new(r#"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#).unwrap();
+    // From ADR-33: Name can only have A-Z, a-z, 0-9, dash, underscore.
+    static ref NAME: Regex = Regex::new(r#"^[A-Za-z0-9\-_]+$"#).unwrap();
 }
 
 /// Represents stats for all endpoints.
@@ -207,10 +209,18 @@ pub struct Service {
 }
 impl Service {
     async fn add(client: Client, config: Config) -> Result<Service, Error> {
+        // validate service version semver string.
         if !SEMVER.is_match(config.version.as_str()) {
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "service version is not a valid semver string",
+            )));
+        }
+        // validate service name.
+        if !NAME.is_match(config.name.as_str()) {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "service name is not a valid string (only A-Z, a-z, 0-9, _, - are allowed)",
             )));
         }
         let id = nuid::next();
