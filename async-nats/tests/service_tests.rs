@@ -20,6 +20,7 @@ mod service {
     async fn service_config_validations() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
+        // not semver compatible version string.
         let err_kind = client
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
@@ -35,11 +36,44 @@ mod service {
             .kind();
         assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
 
+        // not semver compatible version string.
         let err_kind = client
             .add_service(async_nats::service::Config {
                 name: "serviceB".to_string(),
                 description: None,
                 version: "beta-1.0.0".to_string(),
+                schema: None,
+                endpoint: "service_b".to_string(),
+            })
+            .await
+            .unwrap_err()
+            .downcast::<std::io::Error>()
+            .unwrap()
+            .kind();
+        assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
+
+        // bad service name name.
+        let err_kind = client
+            .add_service(async_nats::service::Config {
+                name: "service.B".to_string(),
+                description: None,
+                version: "1.0.0".to_string(),
+                schema: None,
+                endpoint: "service_b".to_string(),
+            })
+            .await
+            .unwrap_err()
+            .downcast::<std::io::Error>()
+            .unwrap()
+            .kind();
+        assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
+
+        // bad service name name.
+        let err_kind = client
+            .add_service(async_nats::service::Config {
+                name: "service B".to_string(),
+                description: None,
+                version: "1.0.0".to_string(),
                 schema: None,
                 endpoint: "service_b".to_string(),
             })
