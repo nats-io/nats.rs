@@ -94,7 +94,9 @@ pub struct Info {
 /// Currently, it does not do anything except providing information.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Schema {
+    /// A string/url describing the format of the request payload can be JSON schema etc.
     pub request: String,
+    /// A string/url describing the format of the request payload can be JSON schema etc.
     pub response: String,
 }
 
@@ -108,10 +110,16 @@ pub struct Endpoint {
 /// Configuration of the [Service].
 #[derive(Debug)]
 pub struct Config {
+    /// Really the kind of the service. Shared by all the services that have the same name.
+    /// This name can only have A-Z, a-z, 0-9, dash, underscore
     pub name: String,
+    /// a human-readable description about the service
     pub description: Option<String>,
+    /// A SemVer valid service version.
     pub version: String,
+    // Request / Response schemas
     pub schema: Option<Schema>,
+    /// A subject to which service will subscribe.
     pub endpoint: String,
 }
 
