@@ -30,7 +30,6 @@ use std::time::Duration;
 use tokio::io::{self, ErrorKind};
 use tokio::sync::mpsc;
 
-
 lazy_static! {
     static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
 }
