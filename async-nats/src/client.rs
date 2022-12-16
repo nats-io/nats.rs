@@ -492,8 +492,7 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new().payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.request("data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -575,7 +574,8 @@ impl Request {
             publish = publish.headers(headers);
         }
 
-        publish.await?;
+        publish = publish.reply(inbox);
+        publish.into_future().await?;
 
         self.client.flush().await?;
 
