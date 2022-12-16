@@ -12,7 +12,7 @@
 // limitations under the License.
 
 #[cfg(feature = "service")]
-mod services {
+mod service {
     use async_nats::service::{Info, ServiceExt, StatsResponse};
     use futures::StreamExt;
 
