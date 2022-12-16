@@ -17,6 +17,41 @@ mod service {
     use futures::StreamExt;
 
     #[tokio::test]
+    async fn service_config_validations() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let err_kind = client
+            .add_service(async_nats::service::Config {
+                name: "serviceA".to_string(),
+                description: None,
+                version: "1.0.0.1".to_string(),
+                schema: None,
+                endpoint: "service_a".to_string(),
+            })
+            .await
+            .unwrap_err()
+            .downcast::<std::io::Error>()
+            .unwrap()
+            .kind();
+        assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
+
+        let err_kind = client
+            .add_service(async_nats::service::Config {
+                name: "serviceB".to_string(),
+                description: None,
+                version: "beta-1.0.0".to_string(),
+                schema: None,
+                endpoint: "service_b".to_string(),
+            })
+            .await
+            .unwrap_err()
+            .downcast::<std::io::Error>()
+            .unwrap()
+            .kind();
+        assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
+    }
+
+    #[tokio::test]
     async fn ping() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();

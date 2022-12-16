@@ -26,6 +26,8 @@ use futures::{
     stream::{self, SelectAll},
     Future, Stream, StreamExt, TryFutureExt,
 };
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
@@ -39,6 +41,12 @@ const SERVICE_API_PREFIX: &str = "$SRV";
 const QUEUE_GROUP: &str = "q";
 pub const NATS_SERVICE_ERROR: &str = "Nats-Service-Error";
 pub const NATS_SERVICE_ERROR_CODE: &str = "Nats-Service-Error-Code";
+
+lazy_static! {
+    // uses recommended semver validation expression from
+    // https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+    static ref SEMVER: Regex = Regex::new(r#"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#).unwrap();
+}
 
 /// Represents stats for all endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +207,12 @@ pub struct Service {
 }
 impl Service {
     async fn add(client: Client, config: Config) -> Result<Service, Error> {
+        if !SEMVER.is_match(config.version.as_str()) {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "service version is not a valid semver string",
+            )));
+        }
         let id = nuid::next();
         let started = time::OffsetDateTime::now_utc();
         let info = Info {
