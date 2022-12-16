@@ -76,7 +76,7 @@ pub struct EndpointStats {
     pub requests: usize,
     #[serde(rename = "num_errors")]
     pub errors: usize,
-    pub total_processing_time: std::time::Duration,
+    pub processing_time: std::time::Duration,
     pub average_processing_time: std::time::Duration,
 }
 
@@ -393,7 +393,7 @@ impl Service {
     pub async fn reset(&mut self) {
         for value in self.stats.lock().unwrap().endpoints.values_mut() {
             value.errors = 0;
-            value.total_processing_time = Duration::default();
+            value.processing_time = Duration::default();
             value.requests = 0;
             value.average_processing_time = Duration::default();
         }
@@ -467,8 +467,8 @@ impl Request {
         let mut stats = self.stats.lock().unwrap();
         let mut stats = stats.endpoints.get_mut("requests").unwrap();
         stats.requests += 1;
-        stats.total_processing_time += elapsed;
-        stats.average_processing_time = stats.total_processing_time.checked_div(2).unwrap();
+        stats.processing_time += elapsed;
+        stats.average_processing_time = stats.processing_time.checked_div(2).unwrap();
         result
     }
 }
