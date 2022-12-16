@@ -296,6 +296,7 @@ impl Service {
                             let pong = serde_json::to_vec(&json!({
                                 "name": info.name,
                                 "id": info.id,
+                                "version": info.version,
                             }))?;
                             client.publish(ping.reply.unwrap(), pong.into()).await?;
                             endpoint_stats.lock().unwrap().endpoints.entry("ping".to_string()).and_modify(|stat| {
