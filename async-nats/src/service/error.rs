@@ -13,7 +13,9 @@
 
 use std::fmt::Display;
 
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Error(pub usize, pub String);
 
 impl Display for Error {
