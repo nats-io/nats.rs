@@ -200,6 +200,16 @@ mod service {
         assert_eq!(requests.errors, 1);
 
         // stopping the service.
+
+        assert!(service
+            .stats()
+            .await
+            .endpoints
+            .get("requests")
+            .unwrap()
+            .last_error
+            .is_some());
+
         service.stop().await.unwrap();
 
         assert!(response.next().await.is_some());

@@ -53,7 +53,7 @@ lazy_static! {
 /// Represents stats for all endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
-    endpoints: HashMap<String, EndpointStats>,
+    pub endpoints: HashMap<String, EndpointStats>,
 }
 
 /// Response for `STATS` requests.
@@ -78,6 +78,7 @@ pub struct EndpointStats {
     pub errors: usize,
     pub processing_time: std::time::Duration,
     pub average_processing_time: std::time::Duration,
+    pub last_error: Option<error::Error>,
 }
 
 /// Information about service instance.
@@ -345,7 +346,6 @@ async fn verb_subscription(
     let verb_all = client
         .subscribe(format!("{SERVICE_API_PREFIX}.{verb}"))
         .await?;
-    println!("CRERATING SUB: {SERVICE_API_PREFIX}.{verb}.{name}");
     let verb_name = client
         .subscribe(format!("{SERVICE_API_PREFIX}.{verb}.{name}"))
         .await?;
@@ -453,7 +453,10 @@ impl Request {
                     .unwrap()
                     .endpoints
                     .entry("requests".to_string())
-                    .and_modify(|stats| stats.errors += 1)
+                    .and_modify(|stats| {
+                        stats.last_error = Some(err.clone());
+                        stats.errors += 1
+                    })
                     .or_default();
                 let mut headers = HeaderMap::new();
                 headers.insert(NATS_SERVICE_ERROR, err.1.as_str());
