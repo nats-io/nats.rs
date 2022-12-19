@@ -491,7 +491,7 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.request("data".into()).await?;
+    /// client.request("subject".into(), "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -510,10 +510,11 @@ impl Request {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("X-Example", async_nats::HeaderValue::from_str("Value").unwrap());
-    /// let request = async_nats::Request::new()
+    ///
+    /// client.request("subject".into(), "payload".into())
     ///     .headers(headers)
-    ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    ///     .await?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
@@ -531,10 +532,10 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new()
+    /// client.request("service".into(), "data".into())
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
-    ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    ///     .await?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
@@ -551,10 +552,9 @@ impl Request {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new()
+    /// client.request("subject".into(), "payload".into())
     ///     .inbox("custom_inbox".into())
-    ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
