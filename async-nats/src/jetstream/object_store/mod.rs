@@ -169,7 +169,7 @@ impl ObjectStore {
 
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
 
-        self.stream.purge_subject(&chunk_subject).await?;
+        self.stream.purge().filter(&chunk_subject).await?;
 
         Ok(())
     }
@@ -313,7 +313,7 @@ impl ObjectStore {
         if let Some(existing_object_info) = maybe_existing_object_info {
             let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
 
-            self.stream.purge_subject(&chunk_subject).await?;
+            self.stream.purge().filter(&chunk_subject).await?;
         }
 
         Ok(object_info)

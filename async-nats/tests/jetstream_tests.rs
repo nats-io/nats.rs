@@ -437,7 +437,7 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn purge_stream_subject() {
+    async fn purge_filter() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
@@ -466,7 +466,7 @@ mod jetstream {
         let mut stream = context.get_stream("events").await.unwrap();
         assert_eq!(stream.cached_info().state.messages, 7);
 
-        stream.purge_subject("events.two").await.unwrap();
+        stream.purge().filter("events.two").await.unwrap();
 
         assert_eq!(stream.info().await.unwrap().state.messages, 3);
     }
