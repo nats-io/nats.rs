@@ -25,7 +25,7 @@ use std::{
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
-use futures::{Future, FutureExt};
+use futures::Future;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
