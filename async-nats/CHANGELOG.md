@@ -1,3 +1,19 @@
+# 0.25.0
+## Overview
+
+This release focuses on `service` module, which leverages NATS primitives to provide API for creating and running horizontaly scalable microservices.
+
+## Added
+* Add Service API by @Jarema in https://github.com/nats-io/nats.rs/pull/748
+* Ordered and convenient HeaderValue reported by @cortopy, implemented by @Jarema in https://github.com/nats-io/nats.rs/pull/767
+## Changed
+* Always reset periodic flush interval after manual flush by @caspervonb in https://github.com/nats-io/nats.rs/pull/747
+* Fuse the pull consumer Stream after terminal error by @Jarema in https://github.com/nats-io/nats.rs/pull/751
+* Remove auth_required comment by @Jarema in https://github.com/nats-io/nats.rs/pull/763
+* Change JetStream request timeout to 5 seconds by @Jarema in https://github.com/nats-io/nats.rs/pull/772
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.24.0...async-nats/v0.25.0
+
 # 0.24.0
 ## Overview
 This a minor release intended to release all changes before the long-awaited changes around concrete errors land.
