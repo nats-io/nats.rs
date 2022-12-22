@@ -169,6 +169,7 @@ pub struct Info {
     /// The number of pending
     pub num_pending: u64,
     /// Information about the consumer's cluster
+    #[serde(default)]
     pub cluster: ClusterInfo,
     /// Indicates if any client is connected and receiving messages from a push consumer
     #[serde(default)]
