@@ -1,3 +1,14 @@
+# 0.25.1
+## Overview
+
+A hotfix release, changing `consumer::Info.cluster` to not break serde when `cluster` is not present (single server mode).
+
+## Fixed
+* Fix cluster field deserialization for consumer info by @Jarema in https://github.com/nats-io/nats.rs/pull/779
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.25.0...async-nats/v0.25.1
+
 # 0.25.0
 ## Overview
 
