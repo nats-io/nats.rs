@@ -88,7 +88,7 @@ impl Connector {
                     .map_err(|err| {
                         io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!("invalid client certificate and key pair: {}", err),
+                            format!("invalid client certificate and key pair: {err}"),
                         )
                     })?;
             }
@@ -231,7 +231,7 @@ impl Connector {
             Some(op) => {
                 return Err(Error::new(
                     ErrorKind::Other,
-                    format!("expected INFO, received: {:?}", op),
+                    format!("expected INFO, received: {op:?}"),
                 ));
             }
             None => {
@@ -341,7 +341,7 @@ impl Connector {
                 Some(op) => {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
-                        format!("unexpected line while connecting: {:?}", op),
+                        format!("unexpected line while connecting: {op:?}"),
                     ));
                 }
 
@@ -470,7 +470,7 @@ fn tls_op<T: std::fmt::Debug>(
                 Ok(0) => eof = true,
                 Ok(_) => session
                     .process_new_packets()
-                    .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {}", err)))?,
+                    .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {err}")))?,
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {}
                 Err(err) => return Err(err),
             }
@@ -569,12 +569,12 @@ impl FromStr for ServerAddress {
         let url: Url = if input.contains("://") {
             input.parse()
         } else {
-            format!("nats://{}", input).parse()
+            format!("nats://{input}").parse()
         }
         .map_err(|e| {
             Error::new(
                 ErrorKind::InvalidInput,
-                format!("NATS server URL is invalid: {}", e),
+                format!("NATS server URL is invalid: {e}"),
             )
         })?;
 

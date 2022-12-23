@@ -406,6 +406,7 @@ pub struct Stream {
     heartbeat_handle: Option<JoinHandle<()>>,
     last_seen: Arc<Mutex<Instant>>,
     heartbeats_missing: tokio::sync::mpsc::Receiver<()>,
+    terminated: bool,
 }
 
 impl Drop for Stream {
@@ -469,7 +470,11 @@ impl Stream {
                                         pending_reset = true;
                                     }
                                 }
-                                Err(err) => request_result_tx.send(Err(err)).await.unwrap(),
+                                Err(err) => {
+                                     if let Err(err) = request_result_tx.send(Err(err)).await {
+                                        debug!("failed to sent request result: {}", err);
+                                    }
+                                },
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
@@ -487,7 +492,12 @@ impl Stream {
                         debug!("flush failed: {}", err);
                     }
                     // TODO: add tracing instead of ignoring this.
-                    request_result_tx.send(result).await.unwrap();
+                    request_result_tx
+                        .send(result.map(|_| pending_reset).map_err(|err| {
+                            Box::from(std::io::Error::new(std::io::ErrorKind::Other, err))
+                        }))
+                        .await
+                        .unwrap();
                     trace!("result send over tx");
                 }
                 // }
@@ -533,6 +543,7 @@ impl Stream {
             pending_request: false,
             last_seen,
             heartbeats_missing: missed_heartbeat_rx,
+            terminated: false,
         })
     }
 }
@@ -544,6 +555,9 @@ impl futures::Stream for Stream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        if self.terminated {
+            return Poll::Ready(None);
+        }
         loop {
             trace!("pending messages: {}", self.pending_messages);
             if (self.pending_messages <= self.batch_config.batch / 2
@@ -559,21 +573,23 @@ impl futures::Stream for Stream {
                 match self.heartbeats_missing.poll_recv(cx) {
                     Poll::Ready(resp) => match resp {
                         Some(()) => {
-                            trace!("received missing hearbeats notification");
+                            self.terminated = true;
+                            trace!("received missing heartbeats notification");
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::TimedOut,
                                 "did not receive idle heartbeat in time",
                             )))));
                         }
                         None => {
+                            self.terminated = true;
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                "unexpected termination of hearbeat checker",
-                            )))))
+                                "unexpected termination of heartbeat checker",
+                            )))));
                         }
                     },
                     Poll::Pending => {
-                        trace!("pending message from missing hearbeats notification channel");
+                        trace!("pending message from missing heartbeats notification channel");
                     }
                 }
             }
@@ -639,7 +655,7 @@ impl futures::Stream for Stream {
                         }
 
                         StatusCode::IDLE_HEARTBEAT => {
-                            debug!("received idle hearbeat");
+                            debug!("received idle heartbeat");
                             if !self.batch_config.idle_heartbeat.is_zero() {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                             }
@@ -662,7 +678,7 @@ impl futures::Stream for Stream {
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 format!(
-                                    "eror while processing messages from the stream: {}, {:?}",
+                                    "error while processing messages from the stream: {}, {:?}",
                                     status, message.description
                                 ),
                             )))))
@@ -914,7 +930,7 @@ impl<'a> StreamBuilder<'a> {
     }
 }
 
-/// Used for building configuration for a [`Fetch`]. Created by a [FetchBuilder] on a [Consumer].
+/// Used for building configuration for a [Batch] with `fetch()` semantics. Created by a [FetchBuilder] on a [Consumer].
 ///
 /// # Examples
 ///
@@ -1149,7 +1165,7 @@ impl<'a> FetchBuilder<'a> {
     }
 }
 
-/// Used for building configuration for a [Batch]. Created by a [Consumer::batch_builder] on a [Consumer].
+/// Used for building configuration for a [Batch]. Created by a [Consumer::batch] on a [Consumer].
 ///
 /// # Examples
 ///
@@ -1460,7 +1476,7 @@ pub struct Config {
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
+    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.

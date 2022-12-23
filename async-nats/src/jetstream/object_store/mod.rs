@@ -30,6 +30,7 @@ use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
 
 use crate::Error;
 
@@ -57,7 +58,7 @@ pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
     OBJECT_NAME_RE.is_match(object_name)
 }
 
-pub(crate) fn enocde_object_name(object_name: &str) -> String {
+pub(crate) fn encode_object_name(object_name: &str) -> String {
     base64::encode_config(object_name, base64::URL_SAFE)
 }
 
@@ -84,7 +85,7 @@ pub struct ObjectStore {
 }
 
 impl ObjectStore {
-    /// Gets an [Object] from the [Store].
+    /// Gets an [Object] from the [ObjectStore].
     ///
     /// [Object] implements [tokio::io::AsyncRead] that allows
     /// to read the data from Object Store.
@@ -129,7 +130,7 @@ impl ObjectStore {
         Ok(Object::new(subscription, object_info))
     }
 
-    /// Gets an [Object] from the [Store].
+    /// Gets an [Object] from the [ObjectStore].
     ///
     /// [Object] implements [tokio::io::AsyncRead] that allows
     /// to read the data from Object Store.
@@ -159,7 +160,7 @@ impl ObjectStore {
         let mut headers = HeaderMap::default();
         headers.insert(NATS_ROLLUP, HeaderValue::from_str(ROLLUP_SUBJECT)?);
 
-        let subject = format!("$O.{}.M.{}", &self.name, enocde_object_name(object_name));
+        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name));
 
         self.stream
             .context
@@ -168,12 +169,12 @@ impl ObjectStore {
 
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
 
-        self.stream.purge_subject(&chunk_subject).await?;
+        self.stream.purge().filter(&chunk_subject).await?;
 
         Ok(())
     }
 
-    /// Retrieves [Object] [Info].
+    /// Retrieves [Object] [ObjectInfo].
     ///
     /// # Examples
     ///
@@ -190,7 +191,7 @@ impl ObjectStore {
     /// ```
     pub async fn info<T: AsRef<str>>(&self, object_name: T) -> Result<ObjectInfo, Error> {
         let object_name = object_name.as_ref();
-        let object_name = enocde_object_name(object_name);
+        let object_name = encode_object_name(object_name);
         if !is_valid_object_name(&object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -205,9 +206,9 @@ impl ObjectStore {
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
             .await?;
-        let decoded_paylaod = base64::decode(message.payload)
+        let decoded_payload = base64::decode(message.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
-        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_paylaod)?;
+        let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_payload)?;
 
         Ok(object_info)
     }
@@ -239,7 +240,7 @@ impl ObjectStore {
     {
         let object_meta: ObjectMeta = meta.into();
 
-        let encoded_object_name = enocde_object_name(&object_meta.name);
+        let encoded_object_name = encode_object_name(&object_meta.name);
         if !is_valid_object_name(&encoded_object_name) {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -258,11 +259,11 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
-        let mut buffer = [0; DEFAULT_CHUNK_SIZE];
+        let mut buffer = Box::new([0; DEFAULT_CHUNK_SIZE]);
         let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
-            let n = data.read(&mut buffer).await?;
+            let n = data.read(&mut *buffer).await?;
 
             if n == 0 {
                 break;
@@ -273,11 +274,11 @@ impl ObjectStore {
             object_chunks += 1;
 
             // FIXME: this is ugly
-            let paylaod = bytes::Bytes::from(buffer[..n].to_vec());
+            let payload = bytes::Bytes::from(buffer[..n].to_vec());
 
             self.stream
                 .context
-                .publish(chunk_subject.clone(), paylaod)
+                .publish(chunk_subject.clone(), payload)
                 .await?;
         }
         let digest = context.finish();
@@ -312,7 +313,7 @@ impl ObjectStore {
         if let Some(existing_object_info) = maybe_existing_object_info {
             let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
 
-            self.stream.purge_subject(&chunk_subject).await?;
+            self.stream.purge().filter(&chunk_subject).await?;
         }
 
         Ok(object_info)
@@ -350,6 +351,44 @@ impl ObjectStore {
             })
             .await?;
         Ok(Watch {
+            subscription: ordered.messages().await?,
+        })
+    }
+
+    /// Returns a [List] stream with all not deleted [Objects][Object] in the [ObjectStore].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let bucket = jetstream.get_object_store("store").await?;
+    /// let mut list = bucket.list().await.unwrap();
+    /// while let Some(object) = list.next().await {
+    ///     println!("object {:?}", object?);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn list(&self) -> Result<List<'_>, Error> {
+        trace!("starting Object List");
+        let subject = format!("$O.{}.M.>", self.name);
+        let ordered = self
+            .stream
+            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                deliver_policy: super::consumer::DeliverPolicy::All,
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("object store list".to_string()),
+                filter_subject: subject,
+                ..Default::default()
+            })
+            .await?;
+        Ok(List {
+            done: ordered.info.num_pending == 0,
             subscription: ordered.messages().await?,
         })
     }
@@ -400,7 +439,7 @@ impl Stream for Watch<'_> {
                         .map_err(|err| {
                             Box::from(io::Error::new(
                                 ErrorKind::Other,
-                                format!("failed to deserialize the reponse: {:?}", err),
+                                format!("failed to deserialize the response: {err:?}"),
                             ))
                         })
                         .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
@@ -408,6 +447,54 @@ impl Stream for Watch<'_> {
                 None => Poll::Ready(None),
             },
             Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub struct List<'a> {
+    subscription: crate::jetstream::consumer::push::Ordered<'a>,
+    done: bool,
+}
+
+impl Stream for List<'_> {
+    type Item = Result<ObjectInfo, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        loop {
+            if self.done {
+                debug!("Object Store list done");
+                return Poll::Ready(None);
+            }
+
+            match self.subscription.poll_next_unpin(cx) {
+                Poll::Ready(message) => match message {
+                    None => return Poll::Ready(None),
+                    Some(message) => {
+                        let message = message?;
+                        let info = message.info()?;
+                        trace!("num pending: {}", info.pending);
+                        if info.pending == 0 {
+                            self.done = true;
+                        }
+                        let response: ObjectInfo = serde_json::from_slice(&message.payload)?;
+                        if response.deleted {
+                            continue;
+                        }
+                        return Poll::Ready(Some(
+                            serde_json::from_slice(&message.payload).map_err(|err| {
+                                Box::from(std::io::Error::new(
+                                    ErrorKind::Other,
+                                    format!("failed to serialize object info: {err}"),
+                                ))
+                            }),
+                        ));
+                    }
+                },
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }
@@ -458,7 +545,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         let message = message.map_err(|err| {
                             std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                format!("error from JetStream subscription: {}", err),
+                                format!("error from JetStream subscription: {err}"),
                             )
                         })?;
                         let len = cmp::min(buf.remaining(), message.payload.len());
@@ -472,7 +559,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         let info = message.info().map_err(|err| {
                             std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                format!("error from JetStream subscription: {}", err),
+                                format!("error from JetStream subscription: {err}"),
                             )
                         })?;
                         if info.pending == 0 {

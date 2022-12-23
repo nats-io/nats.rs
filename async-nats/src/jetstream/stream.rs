@@ -15,7 +15,9 @@
 
 use std::{
     fmt::Debug,
+    future::IntoFuture,
     io::{self, ErrorKind},
+    pin::Pin,
     str::FromStr,
     time::Duration,
 };
@@ -23,6 +25,7 @@ use std::{
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
+use futures::Future;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -78,8 +81,8 @@ impl Stream {
     }
 
     /// Returns cached [Info] for the [Stream].
-    /// Cache is either from initial creation/retrival of the [Stream] or last call to
-    /// [Stream::Info].
+    /// Cache is either from initial creation/retrieval of the [Stream] or last call to
+    /// [Stream::info].
     ///
     /// # Examples
     ///
@@ -103,7 +106,7 @@ impl Stream {
     /// Gets next message for a [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -168,7 +171,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -178,7 +181,7 @@ impl Stream {
     /// Gets first message from [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -232,7 +235,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -242,7 +245,7 @@ impl Stream {
     /// Gets message from [Stream] with given `sequence id`.
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -291,7 +294,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -301,7 +304,7 @@ impl Stream {
     /// Gets last message for a given `subject`.
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -356,7 +359,7 @@ impl Stream {
                             "message not found in stream",
                         )))
                     }
-                    // 408 is used in Direct Message for bad/empty paylaod.
+                    // 408 is used in Direct Message for bad/empty payload.
                     StatusCode::TIMEOUT => {
                         return Err(Box::from(std::io::Error::new(
                             ErrorKind::Other,
@@ -366,7 +369,7 @@ impl Stream {
                     other => {
                         return Err(Box::from(std::io::Error::new(
                             ErrorKind::Other,
-                            format!("{}: {}", other, description),
+                            format!("{other}: {description}"),
                         )))
                     }
                 }
@@ -515,20 +518,8 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge(&self) -> Result<PurgeResponse, Error> {
-        let subject = format!("STREAM.PURGE.{}", self.info.config.name);
-
-        let response: Response<PurgeResponse> = self.context.request(subject, &()).await?;
-        match response {
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "error while purging stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-            Response::Ok(response) => Ok(response),
-        }
+    pub fn purge(&self) -> Purge<No, No> {
+        Purge::build(self.clone())
     }
 
     /// Purge `Stream` messages for a matching subject.
@@ -546,32 +537,15 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
+    #[deprecated(
+        since = "0.25.0",
+        note = "Overloads have been replaced with an into_future based builder. Use Stream::purge().filter(subject) instead."
+    )]
     pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
     where
         T: Into<String>,
     {
-        let request_subject = format!("STREAM.PURGE.{}", self.info.config.name);
-
-        let response: Response<PurgeResponse> = self
-            .context
-            .request(
-                request_subject,
-                &PurgeRequest {
-                    filter: Some(subject.into()),
-                    ..Default::default()
-                },
-            )
-            .await?;
-        match response {
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "error while purging stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-            Response::Ok(response) => Ok(response),
-        }
+        self.purge().filter(subject).await
     }
 
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
@@ -884,7 +858,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror: Option<Source>,
 
-    /// Sources configration.
+    /// Sources configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<Source>>,
 }
@@ -941,7 +915,7 @@ impl Default for DiscardPolicy {
 #[repr(u8)]
 pub enum RetentionPolicy {
     /// `Limits` (default) means that messages are retained until any given limit is reached.
-    /// This could be one of mesages, bytes, or age.
+    /// This could be one of messages, bytes, or age.
     #[serde(rename = "limits")]
     Limits = 0,
     /// `Interest` specifies that when all known observables have acknowledged a message it can be removed.
@@ -1048,7 +1022,7 @@ impl TryFrom<RawMessage> for crate::Message {
     type Error = Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
-        let decoded_paylaod = base64::decode(value.payload)
+        let decoded_payload = base64::decode(value.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
         let decoded_headers = value
             .headers
@@ -1058,7 +1032,7 @@ impl TryFrom<RawMessage> for crate::Message {
         let length = decoded_headers
             .as_ref()
             .map_or_else(|| 0, |headers| headers.len())
-            + decoded_paylaod.len()
+            + decoded_payload.len()
             + value.subject.len();
 
         let (headers, status, description) =
@@ -1067,7 +1041,7 @@ impl TryFrom<RawMessage> for crate::Message {
         Ok(crate::Message {
             subject: value.subject,
             reply: None,
-            payload: decoded_paylaod.into(),
+            payload: decoded_payload.into(),
             headers,
             status,
             description,
@@ -1191,7 +1165,7 @@ pub struct ClusterInfo {
 pub struct PeerInfo {
     /// The server name of the peer.
     pub name: String,
-    /// Indicates if the server is up to date and synchronised.
+    /// Indicates if the server is up to date and synchronized.
     pub current: bool,
     /// Nanoseconds since this peer was last seen.
     #[serde(with = "serde_nanos")]
@@ -1203,7 +1177,7 @@ pub struct PeerInfo {
     pub lag: Option<u64>,
 }
 
-/// The response generated by trying ot purge a stream.
+/// The response generated by trying to purge a stream.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct PurgeResponse {
     /// Whether the purge request was successful.
@@ -1261,4 +1235,120 @@ pub struct External {
     /// Optional configuration of delivery prefix.
     #[serde(rename = "deliver", skip_serializing_if = "is_default")]
     pub delivery_prefix: Option<String>,
+}
+
+use std::marker::PhantomData;
+
+#[derive(Debug, Default)]
+pub struct Yes;
+#[derive(Debug, Default)]
+pub struct No;
+
+pub trait ToAssign: Debug {}
+
+impl ToAssign for Yes {}
+impl ToAssign for No {}
+
+#[derive(Debug)]
+pub struct Purge<SEQUENCE, KEEP>
+where
+    SEQUENCE: ToAssign,
+    KEEP: ToAssign,
+{
+    stream: Stream,
+    inner: PurgeRequest,
+    sequence_set: PhantomData<SEQUENCE>,
+    keep_set: PhantomData<KEEP>,
+}
+
+impl<SEQUENCE, KEEP> Purge<SEQUENCE, KEEP>
+where
+    SEQUENCE: ToAssign,
+    KEEP: ToAssign,
+{
+    /// Adds subject filter to [PurgeRequest]
+    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<SEQUENCE, KEEP> {
+        self.inner.filter = Some(filter.into());
+        self
+    }
+}
+
+impl Purge<No, No> {
+    pub(crate) fn build(stream: Stream) -> Purge<No, No> {
+        Purge {
+            stream,
+            inner: Default::default(),
+            sequence_set: PhantomData {},
+            keep_set: PhantomData {},
+        }
+    }
+}
+
+impl<KEEP> Purge<No, KEEP>
+where
+    KEEP: ToAssign,
+{
+    /// Creates a new [PurgeRequest].
+    /// `keep` and `sequence` are exclusive, enforced compile time by generics.
+    pub fn keep(self, keep: u64) -> Purge<No, Yes> {
+        Purge {
+            stream: self.stream,
+            sequence_set: PhantomData {},
+            keep_set: PhantomData {},
+            inner: PurgeRequest {
+                keep: Some(keep),
+                ..self.inner
+            },
+        }
+    }
+}
+impl<SEQUENCE> Purge<SEQUENCE, No>
+where
+    SEQUENCE: ToAssign,
+{
+    /// Creates a new [PurgeRequest].
+    /// `keep` and `sequence` are exclusive, enforces compile time by generics.
+    pub fn sequence(self, sequence: u64) -> Purge<Yes, No> {
+        Purge {
+            stream: self.stream,
+            sequence_set: PhantomData {},
+            keep_set: PhantomData {},
+            inner: PurgeRequest {
+                sequence: Some(sequence),
+                ..self.inner
+            },
+        }
+    }
+}
+
+impl<S, K> IntoFuture for Purge<S, K>
+where
+    S: ToAssign + std::marker::Send,
+    K: ToAssign + std::marker::Send,
+{
+    type Output = Result<PurgeResponse, Error>;
+
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(std::future::IntoFuture::into_future(async move {
+            let request_subject = format!("STREAM.PURGE.{}", self.stream.info.config.name);
+
+            let response: Response<PurgeResponse> = self
+                .stream
+                .context
+                .request(request_subject, &self.inner)
+                .await?;
+            match response {
+                Response::Err { error } => Err(Box::from(io::Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "error while purging stream: {}, {}, {}",
+                        error.code, error.status, error.description
+                    ),
+                ))),
+                Response::Ok(response) => Ok(response),
+            }
+        }))
+    }
 }

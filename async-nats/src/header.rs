@@ -14,10 +14,7 @@
 //! NATS [Message][crate::Message] headers, leveraging [http::header] crate.
 // pub use http::header::{HeaderMap, HeaderName, HeaderValue};
 
-use std::{
-    collections::{self, HashMap, HashSet},
-    str::FromStr,
-};
+use std::{collections::HashMap, slice, str::FromStr};
 
 use serde::Serialize;
 
@@ -33,9 +30,17 @@ pub const NATS_LAST_SEQUENCE: &str = "Nats-Last-Sequence";
 
 /// Nats-Expected-Last-Subject-Sequence
 pub const NATS_EXPECTED_LAST_SUBJECT_SEQUENCE: &str = "Nats-Expected-Last-Subject-Sequence";
+/// Message identifier used for deduplication window
+pub const NATS_MESSAGE_ID: &str = "Nats-Msg-Id";
+/// Last expected message ID for JetStream message publish
+pub const NATS_EXPECTED_LAST_MESSAGE_ID: &str = "Nats-Expected-Last-Msg-Id";
+/// Last expected sequence for JetStream message publish
+pub const NATS_EXPECTED_LAST_SEQUENCE: &str = "Nats-Expected-Last-Sequence";
+/// Expect that given message will be ingested by specified stream.
+pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
 
 /// A struct for handling NATS headers.
-/// Has a similar API to [http::header], but properly serializes and desiaralizes
+/// Has a similar API to [http::header], but properly serializes and deserializes
 /// according to NATS requirements.
 ///
 /// # Examples
@@ -118,7 +123,7 @@ impl HeaderMap {
         let v = self.inner.get_mut(&key);
         match v {
             Some(v) => {
-                v.value.insert(value.to_string());
+                v.value.push(value.to_string());
             }
             None => {
                 self.insert(key, value.to_string().into_header_value());
@@ -176,7 +181,37 @@ impl HeaderMap {
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Default)]
 pub struct HeaderValue {
-    value: HashSet<String>,
+    value: Vec<String>,
+}
+
+impl ToString for HeaderValue {
+    fn to_string(&self) -> String {
+        self.iter()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| String::from(""))
+    }
+}
+
+impl From<HeaderValue> for String {
+    fn from(header: HeaderValue) -> Self {
+        header.to_string()
+    }
+}
+impl From<&HeaderValue> for String {
+    fn from(header: &HeaderValue) -> Self {
+        header.to_string()
+    }
+}
+
+impl<'a> From<&'a HeaderValue> for &'a str {
+    fn from(header: &'a HeaderValue) -> Self {
+        header
+            .iter()
+            .next()
+            .map(|v| v.as_str())
+            .unwrap_or_else(|| "")
+    }
 }
 
 impl FromStr for HeaderValue {
@@ -184,7 +219,7 @@ impl FromStr for HeaderValue {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut set = HeaderValue::new();
-        set.value.insert(s.to_string());
+        set.value.push(s.to_string());
         Ok(set)
     }
 }
@@ -192,14 +227,14 @@ impl FromStr for HeaderValue {
 impl From<u64> for HeaderValue {
     fn from(v: u64) -> Self {
         let mut set = HeaderValue::new();
-        set.value.insert(v.to_string());
+        set.value.push(v.to_string());
         set
     }
 }
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
         let mut set = HeaderValue::new();
-        set.value.insert(v.to_string());
+        set.value.push(v.to_string());
         set
     }
 }
@@ -207,7 +242,7 @@ impl From<&str> for HeaderValue {
 impl IntoIterator for HeaderValue {
     type Item = String;
 
-    type IntoIter = collections::hash_set::IntoIter<String>;
+    type IntoIter = std::vec::IntoIter<String>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.value.into_iter()
@@ -219,8 +254,12 @@ impl HeaderValue {
         HeaderValue::default()
     }
 
-    pub fn iter(&self) -> collections::hash_set::Iter<String> {
+    pub fn iter(&self) -> slice::Iter<String> {
         self.value.iter()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.into()
     }
 }
 
@@ -247,7 +286,7 @@ pub trait IntoHeaderValue {
 impl IntoHeaderValue for &str {
     fn into_header_value(self) -> HeaderValue {
         let mut set = HeaderValue::new();
-        set.value.insert(self.to_string());
+        set.value.push(self.to_string());
         set
     }
 }
@@ -291,10 +330,7 @@ impl std::error::Error for ParseError {}
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashSet,
-        str::{from_utf8, FromStr},
-    };
+    use std::str::{from_utf8, FromStr};
 
     use crate::{HeaderMap, HeaderValue};
 
@@ -314,8 +350,25 @@ mod tests {
 
         assert_eq!(
             headers.get("Key").unwrap().value,
-            HashSet::from_iter(["value".to_string(), "second_value".to_string()])
+            Vec::from_iter(["value".to_string(), "second_value".to_string()])
         );
+    }
+
+    #[test]
+    fn get_string() {
+        let mut headers = HeaderMap::new();
+        headers.append("Key", "value");
+        headers.append("Key", "other");
+
+        assert_eq!(headers.get("Key").unwrap().to_string(), "value");
+
+        let key: String = headers.get("Key").unwrap().into();
+        assert_eq!(key, "value".to_string());
+
+        let key: String = headers.get("Key").unwrap().to_owned().into();
+        assert_eq!(key, "value".to_string());
+
+        assert_eq!(headers.get("Key").unwrap().as_str(), "value");
     }
 
     #[test]
@@ -325,7 +378,7 @@ mod tests {
 
         assert_eq!(
             headers.get("Key").unwrap().value,
-            HashSet::from_iter(["Value".to_string()])
+            Vec::from_iter(["Value".to_string()])
         );
     }
 

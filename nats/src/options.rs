@@ -420,7 +420,7 @@ impl Options {
     /// If no servers remain that are under this threshold,
     /// then no further reconnect shall be attempted.
     /// The reconnect attempt for a server is reset upon
-    /// successfull connection.
+    /// successful connection.
     /// If None then there is no maximum number of attempts.
     ///
     /// # Example

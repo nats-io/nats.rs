@@ -183,7 +183,7 @@ pub struct Config {
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
+    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.
@@ -305,7 +305,7 @@ pub struct OrderedConfig {
     /// The rate of message delivery in bits per second
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
-    /// What percentage of acknowledgements should be samples for observability, 0-100
+    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(default, skip_serializing_if = "is_default")]
     pub sample_frequency: u8,
     /// Only deliver headers without payloads.
@@ -406,7 +406,7 @@ impl Consumer<OrderedConfig> {
                             debug!("reconnected. trigger consumer recreation");
                         },
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                            debug!("hearbeat check");
+                            debug!("heartbeat check");
 
                             if !last_seen
                                 .lock()
@@ -420,7 +420,7 @@ impl Consumer<OrderedConfig> {
                         }
                     }
                     debug!(
-                        "idle hearbeats expired. recreating consumer s: {},  {:?}",
+                        "idle heartbeats expired. recreating consumer s: {},  {:?}",
                         stream_name, config
                     );
                     let retry_strategy = ExponentialBackoff::from_millis(500).take(5);
@@ -438,7 +438,7 @@ impl Consumer<OrderedConfig> {
                         break;
                     }
                     *last_seen.lock().unwrap() = Instant::now();
-                    debug!("resseting consume sequence to 0");
+                    debug!("resetting consume sequence to 0");
                     consumer_sequence.store(0, Ordering::Relaxed);
                 }
             }
@@ -529,7 +529,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 *self.last_seen.lock().unwrap() = Instant::now();
                                 match message.status {
                                     Some(StatusCode::IDLE_HEARTBEAT) => {
-                                        debug!("received idle hearbeats");
+                                        debug!("received idle heartbeats");
                                         if let Some(headers) = message.headers.as_ref() {
                                             if let Some(sequence) =
                                                 headers.get(crate::header::NATS_LAST_STREAM)
@@ -540,7 +540,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                     .map_err(|err|
                                                            Box::new(io::Error::new(
                                                                    ErrorKind::Other,
-                                                                   format!("could not parse header into u64: {}", err))
+                                                                   format!("could not parse header into u64: {err}"))
                                                                ))?;
 
                                                 if sequence

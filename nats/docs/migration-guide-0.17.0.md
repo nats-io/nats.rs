@@ -8,7 +8,7 @@ Lot of changes were also made to keep Rust NATS Client better aligned with Refer
 
 # Introduction of JetStream context
 
-To make setting `Domain` and `API Prefix` more convinient by setting it once, not for every `JetStream` related operation, `JetStream` struct was introduced.
+To make setting `Domain` and `API Prefix` more convenient by setting it once, not for every `JetStream` related operation, `JetStream` struct was introduced.
 
 This change resulted in having all `JetStream` API being called as `JetStream` methods. That applies to both `JetStream management` and `JetStream API`.
 
@@ -75,7 +75,7 @@ Ok(())
 }
 ```
 
-As you can see one more thing changed in `JetStream Management` - `create_stream` was renamed to `add_stream` to keep better aligment with reference client.
+As you can see one more thing changed in `JetStream Management` - `create_stream` was renamed to `add_stream` to keep better alignment with reference client.
 
 # JetStream API
 

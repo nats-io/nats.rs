@@ -119,16 +119,45 @@ jobs:
       - name: Set up rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: stable
           components: clippy
           override: true
 
       - name: Check lint
         uses: actions-rs/cargo@v1
         with:
-          args: --tests --examples --all-features -- --deny clippy::all
+          args: --benches --tests --examples --all-features -- --deny clippy::all
           command: clippy
   
+  check_docs:
+    name: check (docs)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache rust
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-rust
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-
+
+      - name: Check out repository
+        uses: actions/checkout@v2
+
+      - name: Set up rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          override: true
+
+      - name: Check docs
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+
   check_licenses:
     name: check (licenses)
     runs-on: ubuntu-latest
@@ -196,3 +225,39 @@ jobs:
         run: |
           rustup update
           cargo check --examples
+  check_spelling:
+      name: check (spelling)
+      runs-on: ubuntu-latest
+      steps:
+        - name: Cache rust
+          uses: actions/cache@v3
+          env:
+            cache-name: cache-rust
+          with:
+            path: target
+            key: ${{ runner.os }}-${{ env.cache-name }}
+            restore-keys: |
+              ${{ runner.os }}-
+        - name: Check out repository
+          uses: actions/checkout@v2
+
+        - name: Set up rust
+          uses: actions-rs/toolchain@v1
+          with:
+            toolchain: nightly
+            override: true
+
+        - name: Install llvm-config
+          run: sudo apt-get install -y libclang-dev
+
+        - name: Install cargo spellcheck
+          uses: actions-rs/cargo@v1
+          with:
+            args: cargo-spellcheck
+            command: install
+
+        - name: Check spelling
+          uses: actions-rs/cargo@v1
+          with:
+            command: spellcheck
+            args: --code 1

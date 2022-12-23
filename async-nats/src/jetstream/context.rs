@@ -13,10 +13,11 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
+use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{Client, Command, Error};
+use crate::{header, Client, Command, Error, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
@@ -70,7 +71,7 @@ impl Context {
         }
     }
 
-    /// Publishes [Message] to the [crate::jetstream::stream::Stream] without waiting for
+    /// Publishes [jetstream::Message][super::message::Message] to the [Stream] without waiting for
     /// acknowledgment from the server that the message has been successfully delivered.
     ///
     /// Acknowledgment future that can be polled is returned instead.
@@ -79,7 +80,7 @@ impl Context {
     ///
     /// # Examples
     ///
-    /// ## Publish, and after each publish, await for acknowledgment.
+    /// Publish, and after each publish, await for acknowledgment.
     ///
     /// ```no_run
     /// # #[tokio::main]
@@ -96,7 +97,7 @@ impl Context {
     /// # }
     /// ```
     ///
-    /// ## Publish and do not wait for the acknowledgment. Await can be deffered to when needed or
+    /// Publish and do not wait for the acknowledgment. Await can be deferred to when needed or
     /// ignored entirely.
     ///
     /// ```no_run
@@ -117,22 +118,8 @@ impl Context {
         subject: String,
         payload: Bytes,
     ) -> Result<PublishAckFuture, Error> {
-        let inbox = self.client.new_inbox();
-        let response = self.client.subscribe(inbox.clone()).await?;
-        tokio::time::timeout(
-            self.timeout,
-            self.client
-                .publish_with_reply(subject, inbox.clone(), payload),
-        )
-        .map_err(|_| {
-            std::io::Error::new(ErrorKind::TimedOut, "JetStream publish request timed out")
-        })
-        .await??;
-
-        Ok(PublishAckFuture {
-            timeout: self.timeout,
-            subscription: response,
-        })
+        self.send_publish(subject, Publish::build().payload(payload))
+            .await
     }
 
     /// Publish a message with headers to a given subject associated with a stream and returns an acknowledgment from
@@ -160,13 +147,53 @@ impl Context {
         headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAckFuture, Error> {
+        self.send_publish(subject, Publish::build().payload(payload).headers(headers))
+            .await
+    }
+
+    /// Publish a message built by [Publish] and returns an acknowledgment future.
+    ///
+    /// If the stream does not exist, `no responders` error will be returned.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use async_nats::jetstream::context::Publish;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let ack =
+    /// jetstream.send_publish("events".to_string(),
+    ///     Publish::build().payload("data".into()).message_id("uuid")
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn send_publish(
+        &self,
+        subject: String,
+        publish: Publish,
+    ) -> Result<PublishAckFuture, Error> {
         let inbox = self.client.new_inbox();
         let response = self.client.subscribe(inbox.clone()).await?;
-        tokio::time::timeout(
-            self.timeout,
-            self.client
-                .publish_with_reply_and_headers(subject, inbox.clone(), headers, payload),
-        )
+        tokio::time::timeout(self.timeout, async {
+            if let Some(headers) = publish.headers {
+                self.client
+                    .publish_with_reply_and_headers(
+                        subject,
+                        inbox.clone(),
+                        headers,
+                        publish.payload,
+                    )
+                    .await
+            } else {
+                self.client
+                    .publish_with_reply(subject, inbox.clone(), publish.payload)
+                    .await
+            }
+        })
         .map_err(|_| {
             std::io::Error::new(ErrorKind::TimedOut, "JetStream publish request timed out")
         })
@@ -236,7 +263,7 @@ impl Context {
                     )));
                 }
                 mirror.external = Some(External {
-                    api_prefix: format!("$JS.{}.API", domain),
+                    api_prefix: format!("$JS.{domain}.API"),
                     delivery_prefix: None,
                 })
             }
@@ -252,7 +279,7 @@ impl Context {
                         )));
                     }
                     source.external = Some(External {
-                        api_prefix: format!("$JS.{}.API", domain),
+                        api_prefix: format!("$JS.{domain}.API"),
                         delivery_prefix: None,
                     })
                 }
@@ -300,7 +327,7 @@ impl Context {
             )));
         }
 
-        let subject = format!("STREAM.INFO.{}", stream);
+        let subject = format!("STREAM.INFO.{stream}");
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -385,7 +412,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.DELETE.{}", stream);
+        let subject = format!("STREAM.DELETE.{stream}");
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -482,10 +509,10 @@ impl Context {
             if let Some(ref external) = mirror.external {
                 if !external.api_prefix.is_empty() {
                     store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{}.", bucket);
+                    store.prefix = format!("$KV.{bucket}.");
                     store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
                 } else {
-                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
                 }
             }
         };
@@ -592,10 +619,10 @@ impl Context {
             if let Some(ref external) = mirror.external {
                 if !external.api_prefix.is_empty() {
                     store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{}.", bucket);
+                    store.prefix = format!("$KV.{bucket}.");
                     store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
                 } else {
-                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
                 }
             }
         };
@@ -713,9 +740,9 @@ impl Context {
         }
 
         let bucket_name = config.bucket.clone();
-        let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
+        let chunk_subject = format!("$O.{bucket_name}.C.>");
+        let meta_subject = format!("$O.{bucket_name}.M.>");
 
         let stream = self
             .create_stream(super::stream::Config {
@@ -767,7 +794,7 @@ impl Context {
                 "invalid bucket name",
             )));
         }
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         let stream = self.get_stream(stream_name).await?;
 
         Ok(ObjectStore {
@@ -840,5 +867,72 @@ impl IntoFuture for PublishAckFuture {
         Box::pin(std::future::IntoFuture::into_future(
             self.next_with_timeout(),
         ))
+    }
+}
+
+/// Used for building customized `publish` message.
+#[derive(Default, Clone, Debug)]
+pub struct Publish {
+    payload: Bytes,
+    headers: Option<header::HeaderMap>,
+}
+impl Publish {
+    /// Creates a new custom Publish struct to be used with.
+    pub fn build() -> Self {
+        Default::default()
+    }
+
+    /// Sets the payload for the message.
+    pub fn payload(mut self, payload: Bytes) -> Self {
+        self.payload = payload;
+        self
+    }
+    /// Adds headers to the message.
+    pub fn headers(mut self, headers: HeaderMap) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+    /// A shorthand to add a single header.
+    pub fn header<N: IntoHeaderName, V: IntoHeaderValue>(mut self, name: N, value: V) -> Self {
+        self.headers
+            .get_or_insert(header::HeaderMap::new())
+            .insert(name, value);
+        self
+    }
+    /// Sets the `Nats-Msg-Id` header, that is used by stream deduplicate window.
+    pub fn message_id<T: AsRef<str>>(self, id: T) -> Self {
+        self.header(header::NATS_MESSAGE_ID, id.as_ref())
+    }
+    /// Sets expected last message ID.
+    /// It sets the `Nats-Expected-Last-Msg-Id` header with provided value.
+    pub fn expected_last_message_id<T: AsRef<str>>(self, last_message_id: T) -> Self {
+        self.header(
+            header::NATS_EXPECTED_LAST_MESSAGE_ID,
+            last_message_id.as_ref(),
+        )
+    }
+    /// Sets the last expected stream sequence.
+    /// It sets the `Nats-Expected-Last-Sequence` header with provided value.
+    pub fn expected_last_sequence(self, last_sequence: u64) -> Self {
+        self.header(
+            header::NATS_EXPECTED_LAST_SEQUENCE,
+            HeaderValue::from(last_sequence),
+        )
+    }
+    /// Sets the last expected stream sequence for a subject this message will be published to.
+    /// It sets the `Nats-Expected-Last-Subject-Sequence` header with provided value.
+    pub fn expected_last_subject_sequence(self, subject_sequence: u64) -> Self {
+        self.header(
+            header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+            HeaderValue::from(subject_sequence),
+        )
+    }
+    /// Sets the expected stream name.
+    /// It sets the `Nats-Expected-Stream` header with provided value.
+    pub fn expected_stream<T: AsRef<str>>(self, stream: T) -> Self {
+        self.header(
+            header::NATS_EXPECTED_STREAM,
+            HeaderValue::from(stream.as_ref()),
+        )
     }
 }

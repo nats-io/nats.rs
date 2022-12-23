@@ -129,10 +129,7 @@ fn main() -> std::io::Result<()> {
     let frequency = 1000 * messages as u64 / millis;
     let mbps = (args.message_size * messages) as u64 / millis / 1024;
 
-    println!(
-        "duration: {:?} frequency: {} mbps: {}",
-        end, frequency, mbps
-    );
+    println!("duration: {end:?} frequency: {frequency} mbps: {mbps}");
 
     println!("publish latency breakdown in nanoseconds:");
     println!("                min: {:10.0} ns", HISTOGRAM.percentile(0.0));

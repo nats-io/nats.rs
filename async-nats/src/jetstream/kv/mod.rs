@@ -295,7 +295,7 @@ impl Store {
                                 OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
                                     std::io::Error::new(
                                         io::ErrorKind::Other,
-                                        format!("failed to parse Nats-Time-Stamp: {}", err),
+                                        format!("failed to parse Nats-Time-Stamp: {err}"),
                                     )
                                 })
                             })?;

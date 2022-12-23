@@ -11,22 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::stream::StreamExt;
-use std::time::Instant;
+use std::fmt::Display;
 
-#[tokio::main]
-async fn main() -> Result<(), async_nats::Error> {
-    let client = async_nats::connect("nats://localhost:4222").await?;
+use serde::{Deserialize, Serialize};
 
-    let now = Instant::now();
-    let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Error(pub usize, pub String);
 
-    println!("Awaiting messages");
-    while let Some(message) = subscriber.next().await {
-        println!("Received message {message:?}");
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "service request error code: {}, status: {}",
+            self.0, self.1
+        )
     }
-
-    println!("subscriber received in {:?}", now.elapsed());
-
-    Ok(())
 }
+impl std::error::Error for Error {}

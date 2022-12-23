@@ -438,7 +438,7 @@ mod client {
             .connect(server.client_url())
             .await
             .unwrap();
-        println!("conncted");
+        println!("connected");
         client.subscribe("test".to_string()).await.unwrap();
         client.flush().await.unwrap();
 
@@ -655,7 +655,7 @@ mod client {
             async move {
                 let msg = subscription.next().await.unwrap();
                 client
-                    .publish(msg.reply.unwrap(), "prefix workes".into())
+                    .publish(msg.reply.unwrap(), "prefix workers".into())
                     .await
                     .unwrap();
             }
@@ -694,7 +694,7 @@ mod client {
             .expect_err("should fail to connect");
         let client = ConnectOptions::new()
             .event_callback(|ev| async move {
-                println!("event: {}", ev);
+                println!("event: {ev}");
             })
             .retry_on_initial_connect()
             .connect("localhost:7777")

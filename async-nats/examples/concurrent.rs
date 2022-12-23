@@ -31,7 +31,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish set of messages, each with order identifier.
     for i in 0..50 {
         client
-            .publish("greet.joe".to_string(), format!("hello {}", i).into())
+            .publish("greet.joe".to_string(), format!("hello {i}").into())
             .await?;
     }
 

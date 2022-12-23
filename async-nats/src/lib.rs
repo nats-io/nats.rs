@@ -95,6 +95,10 @@
 //! ```
 
 #![deny(unreachable_pub)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
+#![deny(rustdoc::invalid_codeblock_attributes)]
+#![deny(rustdoc::invalid_rust_codeblocks)]
 
 use thiserror::Error;
 
@@ -113,7 +117,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, Interval};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -150,6 +154,8 @@ pub use options::{AuthError, ConnectOptions};
 pub mod header;
 pub mod jetstream;
 pub mod message;
+#[cfg(feature = "service")]
+pub mod service;
 pub mod status;
 mod tls;
 
@@ -296,6 +302,8 @@ pub(crate) struct ConnectionHandler {
     pending_pings: usize,
     max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
+    ping_interval: Interval,
+    flush_interval: Interval,
 }
 
 impl ConnectionHandler {
@@ -303,7 +311,12 @@ impl ConnectionHandler {
         connection: Connection,
         connector: Connector,
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
+        ping_period: Duration,
+        flush_period: Duration,
     ) -> ConnectionHandler {
+        let ping_interval = interval(ping_period);
+        let flush_interval = interval(flush_period);
+
         ConnectionHandler {
             connection,
             connector,
@@ -311,25 +324,30 @@ impl ConnectionHandler {
             pending_pings: 0,
             max_pings: 2,
             info_sender,
+            ping_interval,
+            flush_interval,
         }
     }
 
     pub(crate) async fn process(
         &mut self,
-        ping_period: Duration,
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
-        let mut ping_interval = interval(ping_period);
-
         loop {
             select! {
-                _ = ping_interval.tick().fuse() => {
+                _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
                     if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
                         self.handle_disconnect().await?;
                     }
 
-                    self.connection.flush().await?;
+                    self.handle_flush().await?;
+
+                },
+                _ = self.flush_interval.tick().fuse() => {
+                    if let Err(_err) = self.handle_flush().await {
+                        self.handle_disconnect().await?;
+                    }
                 },
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
@@ -362,7 +380,7 @@ impl ConnectionHandler {
             }
         }
 
-        self.connection.flush().await?;
+        self.handle_flush().await?;
 
         Ok(())
     }
@@ -371,7 +389,7 @@ impl ConnectionHandler {
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(ClientOp::Pong).await?;
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             ServerOp::Pong => {
                 debug!("received PONG");
@@ -430,7 +448,7 @@ impl ConnectionHandler {
                             self.connection
                                 .write_op(ClientOp::Unsubscribe { sid, max: None })
                                 .await?;
-                            self.connection.flush().await?;
+                            self.handle_flush().await?;
                         }
                     }
                 }
@@ -450,6 +468,13 @@ impl ConnectionHandler {
                 // TODO: don't ignore.
             }
         }
+
+        Ok(())
+    }
+
+    async fn handle_flush(&mut self) -> Result<(), io::Error> {
+        self.connection.flush().await?;
+        self.flush_interval.reset();
 
         Ok(())
     }
@@ -488,7 +513,7 @@ impl ConnectionHandler {
 
                 if self.pending_pings > self.max_pings {
                     debug!(
-                        "pendings pings {}, max pings {}. disconnecting",
+                        "pending pings {}, max pings {}. disconnecting",
                         self.pending_pings, self.max_pings
                     );
                     self.handle_disconnect().await?;
@@ -498,15 +523,15 @@ impl ConnectionHandler {
                     self.handle_disconnect().await?;
                 }
 
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             Command::Flush { result } => {
-                if let Err(_err) = self.connection.flush().await {
+                if let Err(_err) = self.handle_flush().await {
                     if let Err(err) = self.handle_disconnect().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
-                    } else if let Err(err) = self.connection.flush().await {
+                    } else if let Err(err) = self.handle_flush().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
@@ -518,7 +543,7 @@ impl ConnectionHandler {
                 }
             }
             Command::TryFlush => {
-                self.connection.flush().await?;
+                self.handle_flush().await?;
             }
             Command::Subscribe {
                 sid,
@@ -597,7 +622,7 @@ impl ConnectionHandler {
         self.info_sender.send(info).map_err(|err| {
             std::io::Error::new(
                 ErrorKind::Other,
-                format!("failed to send info update: {}", err),
+                format!("failed to send info update: {err}"),
             )
         })?;
 
@@ -639,7 +664,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     options: ConnectOptions,
 ) -> Result<Client, ConnectError> {
     let ping_period = options.ping_interval;
-    let flush_interval = options.flush_interval;
+    let flush_period = options.flush_interval;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
@@ -676,21 +701,11 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let client = Client::new(
         info_watcher,
         state_rx,
-        sender.clone(),
+        sender,
         options.subscription_capacity,
         options.inbox_prefix,
         options.request_timeout,
     );
-
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(flush_interval).await;
-            match sender.send(Command::TryFlush).await {
-                Ok(()) => {}
-                Err(_) => return,
-            }
-        }
-    });
 
     task::spawn(async move {
         while let Some(event) = events_rx.recv().await {
@@ -705,8 +720,14 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection = Some(connection_ok);
         }
         let connection = connection.unwrap();
-        let mut connection_handler = ConnectionHandler::new(connection, connector, info_sender);
-        connection_handler.process(ping_period, receiver).await
+        let mut connection_handler = ConnectionHandler::new(
+            connection,
+            connector,
+            info_sender,
+            ping_period,
+            flush_period,
+        );
+        connection_handler.process(receiver).await
     });
 
     Ok(client)
@@ -728,16 +749,16 @@ impl fmt::Display for Event {
             Event::Connected => write!(f, "connected"),
             Event::Disconnected => write!(f, "disconnected"),
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
-            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {}", sid),
-            Event::ServerError(err) => write!(f, "server error: {}", err),
-            Event::ClientError(err) => write!(f, "client error: {}", err),
+            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {sid}"),
+            Event::ServerError(err) => write!(f, "server error: {err}"),
+            Event::ClientError(err) => write!(f, "client error: {err}"),
         }
     }
 }
 
 /// Connects to NATS with default config.
 ///
-/// Returns clonable [Client].
+/// Returns cloneable [Client].
 ///
 /// To have customized NATS connection, check [ConnectOptions].
 ///
@@ -899,8 +920,8 @@ pub enum CallbackError {
 impl std::fmt::Display for CallbackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Client(error) => write!(f, "{}", error),
-            Self::Server(error) => write!(f, "{}", error),
+            Self::Client(error) => write!(f, "{error}"),
+            Self::Server(error) => write!(f, "{error}"),
         }
     }
 }
@@ -931,7 +952,7 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Other(error) => write!(f, "nats: {}", error),
+            Self::Other(error) => write!(f, "nats: {error}"),
         }
     }
 }
@@ -949,8 +970,8 @@ impl std::fmt::Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
-            Self::SlowConsumer(sid) => write!(f, "nats: subscription {} is a slow consumer", sid),
-            Self::Other(error) => write!(f, "nats: {}", error),
+            Self::SlowConsumer(sid) => write!(f, "nats: subscription {sid} is a slow consumer"),
+            Self::Other(error) => write!(f, "nats: {error}"),
         }
     }
 }
@@ -958,7 +979,7 @@ impl std::fmt::Display for ServerError {
 /// Info to construct a CONNECT message.
 #[derive(Clone, Debug, Serialize)]
 pub struct ConnectInfo {
-    /// Turns on +OK protocol acknowledgements.
+    /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
 
     /// Turns on additional strict format checking, e.g. for properly formed
@@ -1040,12 +1061,12 @@ impl FromStr for ServerAddr {
         let url: Url = if input.contains("://") {
             input.parse()
         } else {
-            format!("nats://{}", input).parse()
+            format!("nats://{input}").parse()
         }
         .map_err(|e| {
             io::Error::new(
                 ErrorKind::InvalidInput,
-                format!("NATS server URL is invalid: {}", e),
+                format!("NATS server URL is invalid: {e}"),
             )
         })?;
 
@@ -1201,13 +1222,13 @@ mod tests {
     }
 
     #[test]
-    fn serverr_address_ipv4() {
+    fn server_address_ipv4() {
         let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
         assert_eq!(address.host(), "127.0.0.1")
     }
 
     #[test]
-    fn serverr_address_domain() {
+    fn server_address_domain() {
         let address = ServerAddr::from_str("nats://example.com").unwrap();
         assert_eq!(address.host(), "example.com")
     }

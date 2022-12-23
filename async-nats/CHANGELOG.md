@@ -1,3 +1,74 @@
+# 0.25.1
+## Overview
+
+A hotfix release, changing `consumer::Info.cluster` to not break serde when `cluster` is not present (single server mode).
+
+## Fixed
+* Fix cluster field deserialization for consumer info by @Jarema in https://github.com/nats-io/nats.rs/pull/779
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.25.0...async-nats/v0.25.1
+
+# 0.25.0
+## Overview
+
+This release focuses on `service` module, which leverages NATS primitives to provide API for creating and running horizontaly scalable microservices.
+
+## Added
+* Add Service API by @Jarema in https://github.com/nats-io/nats.rs/pull/748
+* Ordered and convenient HeaderValue reported by @cortopy, implemented by @Jarema in https://github.com/nats-io/nats.rs/pull/767
+## Changed
+* Always reset periodic flush interval after manual flush by @caspervonb in https://github.com/nats-io/nats.rs/pull/747
+* Fuse the pull consumer Stream after terminal error by @Jarema in https://github.com/nats-io/nats.rs/pull/751
+* Remove auth_required comment by @Jarema in https://github.com/nats-io/nats.rs/pull/763
+* Change JetStream request timeout to 5 seconds by @Jarema in https://github.com/nats-io/nats.rs/pull/772
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.24.0...async-nats/v0.25.0
+
+# 0.24.0
+## Overview
+This a minor release intended to release all changes before the long-awaited changes around concrete errors land.
+
+## What's Changed
+* Fix various spelling mistakes by @c0d3x42 in https://github.com/nats-io/nats.rs/pull/735
+* Add spellcheck by @Jarema in https://github.com/nats-io/nats.rs/pull/736
+* Reset flush interval after ping forces flush by @caspervonb in https://github.com/nats-io/nats.rs/pull/737
+* Add extended purge by @Jarema in https://github.com/nats-io/nats.rs/pull/739
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.23.0...async-nats/v0.24.0
+
+# 0.23.0
+## Overview
+
+This release focuses on fixes around Object Store and customized JetStream Publish.
+
+It also introduces a breaking change, as not all `publish()` methods did return `PublishError`, using the generic `async_nats::Error` instead. This has been fixed.
+
+## Breaking changes
+* Make publish error types consistent by @Jarema in https://github.com/nats-io/nats.rs/pull/727
+
+## Fixed
+* Fix object store watch to retrieve only new/changed values by @Jarema in https://github.com/nats-io/nats.rs/pull/720
+* Fix stack overflow in object store by @Jarema in https://github.com/nats-io/nats.rs/pull/731
+
+## Added
+* Add customizable JetStream publish by @Jarema in https://github.com/nats-io/nats.rs/pull/728 request by @andrenth
+* Add object store list by @Jarema in https://github.com/nats-io/nats.rs/pull/721
+* Add docs lint by @Jarema in https://github.com/nats-io/nats.rs/pull/725
+
+# Changed
+* Use debug macro for logging instead of println by @c0d3x42 in https://github.com/nats-io/nats.rs/pull/716
+* Merge periodic flush into connection handler loop by @caspervonb in https://github.com/nats-io/nats.rs/pull/687
+* Improve docs formatting and fix links by @Jarema in https://github.com/nats-io/nats.rs/pull/723
+
+
+## New Contributors
+* @c0d3x42 made their first contribution in https://github.com/nats-io/nats.rs/pull/716
+* @piotrpio  made their first contribution in https://github.com/nats-io/nats.rs/pull/728
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.22.1...async-nats/v0.23.0
+
 # 0.22.1
 ## Overview
 A patch release, including early feedback to 0.22.0.
@@ -39,7 +110,7 @@ Hence it was renamed to `Event::Connected`, which describes the current state wi
 For consistency, `Event::Disconnect` was renamed to `Event::Disconnected`.
 
 ## Breaking changes
-* Defer publish acknowledgements by @Jarema in https://github.com/nats-io/nats.rs/pull/644
+* Defer publish acknowledgments by @Jarema in https://github.com/nats-io/nats.rs/pull/644
 * Add retry on initial connect by @Jarema in https://github.com/nats-io/nats.rs/pull/662
 ## Added
 * Add support for mirrors and sources in Key Value Store by @Jarema in https://github.com/nats-io/nats.rs/pull/676

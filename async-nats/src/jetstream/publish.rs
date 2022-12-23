@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use std::ops::Not;
 
-/// `PublishAck` is an acknowledgement received after successfully publishing a message.
+/// `PublishAck` is an acknowledgment received after successfully publishing a message.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PublishAck {
     /// Name of stream the message was published to.

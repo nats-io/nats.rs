@@ -109,7 +109,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -141,7 +141,7 @@ impl JetStream {
             ));
         }
 
-        let stream_name = format!("KV_{}", bucket);
+        let stream_name = format!("KV_{bucket}");
         let stream_info = self.stream_info(&stream_name)?;
 
         // Do some quick sanity checks that this is a correctly formed stream for KV.
@@ -156,7 +156,7 @@ impl JetStream {
         Ok(Store {
             name: bucket.to_string(),
             stream_name,
-            prefix: format!("$KV.{}.", bucket),
+            prefix: format!("$KV.{bucket}."),
             context: self.clone(),
             domain_prefix: self
                 .options
@@ -169,7 +169,7 @@ impl JetStream {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -258,7 +258,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -287,7 +287,7 @@ impl JetStream {
             return Err(io::Error::new(io::ErrorKind::Other, "invalid bucket name"));
         }
 
-        let stream_name = format!("KV_{}", bucket);
+        let stream_name = format!("KV_{bucket}");
         self.delete_stream(stream_name)?;
 
         Ok(())
@@ -301,7 +301,7 @@ pub struct Entry {
     pub bucket: String,
     /// The key that was retrieved.
     pub key: String,
-    /// The value that was retreived.
+    /// The value that was retrieved.
     pub value: Vec<u8>,
     /// A unique sequence for this value.
     pub revision: u64,
@@ -338,7 +338,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -400,7 +400,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -436,7 +436,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -474,7 +474,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -512,7 +512,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -558,7 +558,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -602,7 +602,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -643,7 +643,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -689,7 +689,7 @@ impl Store {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::kv::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;

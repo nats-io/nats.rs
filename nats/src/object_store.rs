@@ -76,7 +76,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -107,9 +107,9 @@ impl JetStream {
         }
 
         let bucket_name = config.bucket.clone();
-        let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
+        let chunk_subject = format!("$O.{bucket_name}.C.>");
+        let meta_subject = format!("$O.{bucket_name}.M.>");
 
         self.add_stream(&StreamConfig {
             name: stream_name,
@@ -130,7 +130,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -162,7 +162,7 @@ impl JetStream {
             ));
         }
 
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         self.stream_info(stream_name)?;
 
         Ok(ObjectStore::new(bucket_name.to_string(), self.clone()))
@@ -172,7 +172,7 @@ impl JetStream {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -190,7 +190,7 @@ impl JetStream {
     /// ```
     ///
     pub fn delete_object_store(&self, bucket_name: &str) -> io::Result<()> {
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         self.delete_stream(stream_name)?;
 
         Ok(())
@@ -344,7 +344,7 @@ impl ObjectStore {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -402,7 +402,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
     /// # let client = nats::connect("demo.nats.io")?;
@@ -434,7 +434,7 @@ impl ObjectStore {
             ));
         }
 
-        // Fetch any existing object info, if ther is any for later use.
+        // Fetch any existing object info, if there is any for later use.
         let maybe_existing_object_info = match self.info(&object_name) {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
@@ -503,7 +503,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::io::Read;
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {
@@ -543,7 +543,7 @@ impl ObjectStore {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::io::Read;
     /// # use nats::object_store::Config;
     /// # fn main() -> std::io::Result<()> {

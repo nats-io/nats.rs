@@ -18,7 +18,7 @@ use crate::SecureString;
 #[doc(hidden)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ConnectInfo {
-    /// Turns on +OK protocol acknowledgements.
+    /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
 
     /// Turns on additional strict format checking, e.g. for properly formed
@@ -58,13 +58,13 @@ pub struct ConnectInfo {
     /// Indicates whether the client requires an SSL connection.
     pub tls_required: bool,
 
-    /// Connection username (if `auth_required` is set)
+    /// Connection username.
     pub user: Option<SecureString>,
 
-    /// Connection password (if auth_required is set)
+    /// Connection password.
     pub pass: Option<SecureString>,
 
-    /// Client authorization token (if auth_required is set)
+    /// Client authorization token.
     pub auth_token: Option<SecureString>,
 
     /// Whether the client supports the usage of headers.

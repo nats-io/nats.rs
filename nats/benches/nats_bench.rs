@@ -17,7 +17,7 @@ pub fn pub_benchmark(c: &mut Criterion) {
             b.iter_custom(|n| {
                 let start = Instant::now();
                 for _i in 0..n {
-                    nc.publish("bench", &msg).unwrap();
+                    nc.publish("bench", msg).unwrap();
                 }
                 nc.flush().unwrap();
                 start.elapsed()

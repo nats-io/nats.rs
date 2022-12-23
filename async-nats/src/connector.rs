@@ -260,7 +260,7 @@ impl Connector {
             Some(op) => {
                 return Err(ConnectError::Io(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("expected info, got {:?}", op),
+                    format!("expected info, got {op:?}"),
                 )))
             }
             None => {
@@ -277,7 +277,7 @@ impl Connector {
                 .map_err(|err| {
                     io::Error::new(
                         ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {}", err),
+                        format!("failed to create TLS connector from TLS config: {err}"),
                     )
                 })
                 .map_err(ConnectError::Tls)?;
