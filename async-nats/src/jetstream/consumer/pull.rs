@@ -493,9 +493,7 @@ impl Stream {
                     }
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
-                        .send(result.map(|_| pending_reset).map_err(|err| {
-                            Box::from(std::io::Error::new(std::io::ErrorKind::Other, err))
-                        }))
+                        .send(result.map(|_| pending_reset))
                         .await
                         .unwrap();
                     trace!("result send over tx");
