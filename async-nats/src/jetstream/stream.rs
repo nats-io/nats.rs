@@ -167,6 +167,7 @@ impl Stream {
                 message,
                 context: self.context.clone(),
             })?;
+
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
@@ -226,11 +227,13 @@ impl Stream {
                 request_subject,
                 serde_json::to_vec(&payload).map(Bytes::from)?,
             )
+            .into_future()
             .await
             .map(|message| Message {
                 message,
                 context: self.context.clone(),
             })?;
+
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
@@ -284,6 +287,7 @@ impl Stream {
             .context
             .client
             .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
+            .into_future()
             .await
             .map(|message| Message {
                 context: self.context.clone(),
