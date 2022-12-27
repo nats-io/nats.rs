@@ -938,11 +938,12 @@ impl futures::Stream for StreamNamesList {
                             self.done = true;
                         }
                         match self.streams.pop() {
-                            Some(stream) => return Poll::Ready(Some(Ok(stream))),
-                            None => return Poll::Ready(None),
-                        };
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
                     }
-                    Poll::Ready(None)
                 }
                 std::task::Poll::Pending => std::task::Poll::Pending,
             },
