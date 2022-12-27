@@ -2465,6 +2465,6 @@ mod jetstream {
                 .unwrap();
         }
 
-        assert_eq!(context.list_streams().count().await, 1200);
+        assert_eq!(context.list_stream_names().count().await, 1200);
     }
 }

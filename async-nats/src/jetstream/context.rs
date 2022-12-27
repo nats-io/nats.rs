@@ -467,8 +467,25 @@ impl Context {
         }
     }
 
-    pub fn list_streams(&self) -> StreamsNamesList {
-        StreamsNamesList {
+    /// Lists names of all streams for current context.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let mut names = jetstream.list_stream_names();
+    /// while let Some(stream) = names.try_next().await? {
+    ///     println!("stream: {}", stream);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn list_stream_names(&self) -> StreamNamesList {
+        StreamNamesList {
             context: self.clone(),
             offset: 0,
             page_request: None,
@@ -894,7 +911,7 @@ struct StreamPage {
 
 type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
 
-pub struct StreamsNamesList {
+pub struct StreamNamesList {
     context: Context,
     offset: usize,
     page_request: Option<PageRequest>,
@@ -902,7 +919,7 @@ pub struct StreamsNamesList {
     done: bool,
 }
 
-impl futures::Stream for StreamsNamesList {
+impl futures::Stream for StreamNamesList {
     type Item = Result<String, Error>;
 
     fn poll_next(
