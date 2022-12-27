@@ -30,7 +30,7 @@ use std::pin::Pin;
 use std::str::from_utf8;
 use std::task::Poll;
 use std::time::Duration;
-use tracing::{debug, trace};
+use tracing::debug;
 
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
