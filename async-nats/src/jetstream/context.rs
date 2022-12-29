@@ -477,15 +477,15 @@ impl Context {
     /// use futures::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let mut names = jetstream.list_stream_names();
+    /// let mut names = jetstream.stream_names();
     /// while let Some(stream) = names.try_next().await? {
     ///     println!("stream: {}", stream);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub fn list_stream_names(&self) -> StreamNamesList {
-        StreamNamesList {
+    pub fn stream_names(&self) -> StreamNames {
+        StreamNames {
             context: self.clone(),
             offset: 0,
             page_request: None,
@@ -911,7 +911,7 @@ struct StreamPage {
 
 type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
 
-pub struct StreamNamesList {
+pub struct StreamNames {
     context: Context,
     offset: usize,
     page_request: Option<PageRequest>,
@@ -919,7 +919,7 @@ pub struct StreamNamesList {
     done: bool,
 }
 
-impl futures::Stream for StreamNamesList {
+impl futures::Stream for StreamNames {
     type Item = Result<String, Error>;
 
     fn poll_next(
