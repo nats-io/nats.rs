@@ -21,12 +21,14 @@ use crate::{header, Client, Command, Error, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::future::IntoFuture;
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
+use std::str::from_utf8;
+use std::task::Poll;
 use std::time::Duration;
 use tracing::debug;
 
@@ -465,6 +467,33 @@ impl Context {
         }
     }
 
+    /// Lists names of all streams for current context.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let mut names = jetstream.stream_names();
+    /// while let Some(stream) = names.try_next().await? {
+    ///     println!("stream: {}", stream);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn stream_names(&self) -> StreamNames {
+        StreamNames {
+            context: self.clone(),
+            offset: 0,
+            page_request: None,
+            streams: Vec::new(),
+            done: false,
+        }
+    }
+
     /// Returns an existing key-value bucket.
     ///
     /// # Examples
@@ -707,6 +736,10 @@ impl Context {
             .client
             .request(format!("{}.{}", self.prefix, subject), request)
             .await?;
+        debug!(
+            "JetStream request response: {:?}",
+            from_utf8(&message.payload)
+        );
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
@@ -867,6 +900,82 @@ impl IntoFuture for PublishAckFuture {
         Box::pin(std::future::IntoFuture::into_future(
             self.next_with_timeout(),
         ))
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct StreamPage {
+    total: usize,
+    streams: Option<Vec<String>>,
+}
+
+type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
+
+pub struct StreamNames {
+    context: Context,
+    offset: usize,
+    page_request: Option<PageRequest>,
+    streams: Vec<String>,
+    done: bool,
+}
+
+impl futures::Stream for StreamNames {
+    type Item = Result<String, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(streams) = page.streams {
+                        self.offset += streams.len();
+                        self.streams = streams;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.streams.pop() {
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.streams.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                "STREAM.NAMES".to_string(),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
     }
 }
 

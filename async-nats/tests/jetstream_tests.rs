@@ -2447,4 +2447,24 @@ mod jetstream {
         let info = consumer.info().await.unwrap();
         assert!(info.delivered.last_active.is_some());
     }
+
+    #[tokio::test]
+    async fn stream_names_list() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        for i in 0..1200 {
+            context
+                .create_stream(async_nats::jetstream::stream::Config {
+                    name: i.to_string(),
+                    subjects: vec![i.to_string()],
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(context.stream_names().count().await, 1200);
+    }
 }
