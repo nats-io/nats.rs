@@ -2467,4 +2467,24 @@ mod jetstream {
 
         assert_eq!(context.stream_names().count().await, 1200);
     }
+
+    #[tokio::test]
+    async fn streams_list() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        for i in 0..1200 {
+            context
+                .create_stream(async_nats::jetstream::stream::Config {
+                    name: i.to_string(),
+                    subjects: vec![i.to_string()],
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(context.streams().count().await, 1200);
+    }
 }
