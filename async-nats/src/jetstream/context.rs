@@ -484,8 +484,8 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn stream_names(&self) -> StreamNames {
-        StreamNames {
+    pub fn stream_names(&self) -> Streams<String> {
+        Streams {
             context: self.clone(),
             offset: 0,
             page_request: None,
@@ -511,7 +511,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn streams(&self) -> Streams {
+    pub fn streams(&self) -> Streams<Info> {
         Streams {
             context: self.clone(),
             offset: 0,
@@ -930,29 +930,41 @@ impl IntoFuture for PublishAckFuture {
 }
 
 #[derive(Deserialize, Debug)]
-struct StreamPage {
+struct StreamPage<T> {
     total: usize,
-    streams: Option<Vec<String>>,
+    streams: Option<Vec<T>>,
 }
 
-#[derive(Deserialize, Debug)]
-struct StreamInfoPage {
-    total: usize,
-    streams: Option<Vec<super::stream::Info>>,
+impl InfoSubject for String {
+    fn subject() -> String {
+        "STREAM.NAMES".to_string()
+    }
 }
 
-type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
+impl InfoSubject for Info {
+    fn subject() -> String {
+        "STREAM.LIST".to_string()
+    }
+}
 
-pub struct StreamNames {
+trait InfoSubject {
+    fn subject() -> String;
+}
+type PageRequest<T> = Option<Pin<Box<dyn Future<Output = Result<StreamPage<T>, Error>>>>>;
+
+pub struct Streams<T> {
     context: Context,
     offset: usize,
-    page_request: Option<PageRequest>,
-    streams: Vec<String>,
+    page_request: PageRequest<T>,
+    streams: Vec<T>,
     done: bool,
 }
 
-impl futures::Stream for StreamNames {
-    type Item = Result<String, Error>;
+impl<T> futures::Stream for Streams<T>
+where
+    T: InfoSubject + DeserializeOwned + Unpin,
+{
+    type Item = Result<T, Error>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -991,7 +1003,7 @@ impl futures::Stream for StreamNames {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.NAMES".to_string(),
+                                T::subject(),
                                 &json!({
                                     "offset": offset,
                                 }),
@@ -1011,75 +1023,6 @@ impl futures::Stream for StreamNames {
     }
 }
 
-type PageInfoRequest = Pin<Box<dyn Future<Output = Result<StreamInfoPage, Error>>>>;
-
-pub struct Streams {
-    context: Context,
-    offset: usize,
-    page_request: Option<PageInfoRequest>,
-    streams: Vec<super::stream::Info>,
-    done: bool,
-}
-
-impl futures::Stream for Streams {
-    type Item = Result<super::stream::Info, Error>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.page_request.as_mut() {
-            Some(page) => match page.try_poll_unpin(cx) {
-                std::task::Poll::Ready(page) => {
-                    self.page_request = None;
-                    let page = page?;
-                    if let Some(streams) = page.streams {
-                        self.offset += streams.len();
-                        self.streams = streams;
-                        if self.offset >= page.total {
-                            self.done = true;
-                        }
-                        match self.streams.pop() {
-                            Some(stream) => Poll::Ready(Some(Ok(stream))),
-                            None => Poll::Ready(None),
-                        }
-                    } else {
-                        Poll::Ready(None)
-                    }
-                }
-                std::task::Poll::Pending => std::task::Poll::Pending,
-            },
-            None => {
-                if let Some(stream) = self.streams.pop() {
-                    Poll::Ready(Some(Ok(stream)))
-                } else {
-                    if self.done {
-                        return Poll::Ready(None);
-                    }
-                    let context = self.context.clone();
-                    let offset = self.offset;
-                    self.page_request = Some(Box::pin(async move {
-                        match context
-                            .request(
-                                "STREAM.LIST".to_string(),
-                                &json!({
-                                    "offset": offset,
-                                }),
-                            )
-                            .await?
-                        {
-                            Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
-                            }
-                            Response::Ok(page) => Ok(page),
-                        }
-                    }));
-                    self.poll_next(cx)
-                }
-            }
-        }
-    }
-}
 /// Used for building customized `publish` message.
 #[derive(Default, Clone, Debug)]
 pub struct Publish {
