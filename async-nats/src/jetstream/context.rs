@@ -494,7 +494,7 @@ impl Context {
         }
     }
 
-    /// Lists all streams infos for current context.
+    /// Lists all streams info for current context.
     ///
     /// # Examples
     ///
