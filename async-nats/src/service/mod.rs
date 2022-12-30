@@ -59,6 +59,8 @@ pub struct Stats {
 /// Response for `STATS` requests.
 #[derive(Serialize, Deserialize)]
 pub struct StatsResponse {
+    #[serde(rename = "type")]
+    pub response_type: String,
     pub name: String,
     pub id: String,
     pub version: String,
@@ -71,6 +73,8 @@ pub struct StatsResponse {
 /// Right now, there is only one business endpoint, all other are internals.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct EndpointStats {
+    #[serde(rename = "type")]
+    pub response_type: String,
     pub name: String,
     #[serde(rename = "num_requests")]
     pub requests: usize,
@@ -84,6 +88,8 @@ pub struct EndpointStats {
 /// Information about service instance.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Info {
+    #[serde(rename = "type")]
+    pub response_type: String,
     pub name: String,
     pub id: String,
     pub description: Option<String>,
@@ -235,6 +241,7 @@ impl Service {
         let id = nuid::next();
         let started = time::OffsetDateTime::now_utc();
         let info = Info {
+            response_type: "io.nats.micro.v1.info_response".to_string(),
             name: config.name.clone(),
             id: id.clone(),
             description: config.description.clone(),
@@ -284,6 +291,7 @@ impl Service {
             let client = client.clone();
             let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
             let schema_json = serde_json::to_vec(&json!({
+                "type": "io.nats.micro.v1.schema_response",
                 "name": config.name.clone(),
                 "id": id.clone(),
                 "version": config.version.clone(),
@@ -295,6 +303,7 @@ impl Service {
                     tokio::select! {
                         Some(ping) = pings.next() => {
                             let pong = serde_json::to_vec(&json!({
+                                "type": "io.nats.micro.v1.ping_response",
                                 "name": info.name,
                                 "id": info.id,
                                 "version": info.version,
@@ -314,6 +323,7 @@ impl Service {
                         // FIXME: proper status handling
                         Some(stats_request) = stats.next() => {
                             let stats = serde_json::to_vec(&StatsResponse {
+                                response_type: "io.nats.micro.v1.stats_response".to_string(),
                                 name: info.name.clone(),
                                 id: info.id.clone(),
                                 version: info.version.clone(),
