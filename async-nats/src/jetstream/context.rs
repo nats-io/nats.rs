@@ -504,7 +504,7 @@ impl Context {
     /// use futures::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let mut names = jetstream.streams();
+    /// let mut streams = jetstream.streams();
     /// while let Some(stream) = names.try_next().await? {
     ///     println!("stream: {:?}", stream);
     /// }
