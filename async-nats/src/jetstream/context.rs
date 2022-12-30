@@ -494,6 +494,32 @@ impl Context {
         }
     }
 
+    /// Lists all streams info for current context.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let mut streams = jetstream.streams();
+    /// while let Some(stream) = streams.try_next().await? {
+    ///     println!("stream: {:?}", stream);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn streams(&self) -> Streams {
+        Streams {
+            context: self.clone(),
+            offset: 0,
+            page_request: None,
+            streams: Vec::new(),
+            done: false,
+        }
+    }
     /// Returns an existing key-value bucket.
     ///
     /// # Examples
@@ -909,6 +935,12 @@ struct StreamPage {
     streams: Option<Vec<String>>,
 }
 
+#[derive(Deserialize, Debug)]
+struct StreamInfoPage {
+    total: usize,
+    streams: Option<Vec<super::stream::Info>>,
+}
+
 type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
 
 pub struct StreamNames {
@@ -979,6 +1011,75 @@ impl futures::Stream for StreamNames {
     }
 }
 
+type PageInfoRequest = Pin<Box<dyn Future<Output = Result<StreamInfoPage, Error>>>>;
+
+pub struct Streams {
+    context: Context,
+    offset: usize,
+    page_request: Option<PageInfoRequest>,
+    streams: Vec<super::stream::Info>,
+    done: bool,
+}
+
+impl futures::Stream for Streams {
+    type Item = Result<super::stream::Info, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(streams) = page.streams {
+                        self.offset += streams.len();
+                        self.streams = streams;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.streams.pop() {
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.streams.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                "STREAM.LIST".to_string(),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
+    }
+}
 /// Used for building customized `publish` message.
 #[derive(Default, Clone, Debug)]
 pub struct Publish {
