@@ -248,8 +248,6 @@ impl Connector {
         tls_required: bool,
         tls_host: &str,
     ) -> Result<(ServerInfo, Connection), io::Error> {
-        let tls_config = tls::config_tls(&self.options).await?;
-
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
@@ -287,7 +285,7 @@ impl Connector {
         };
 
         if self.options.tls_required || info.tls_required || tls_required {
-            let tls_config = Arc::new(tls_config);
+            let tls_config = Arc::new(tls::config_tls(&self.options).await?);
             let tls_connector =
                 tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
                     io::Error::new(
