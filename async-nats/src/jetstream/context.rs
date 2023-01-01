@@ -935,19 +935,19 @@ struct StreamPage<T> {
     streams: Option<Vec<T>>,
 }
 
-impl InfoSubject for String {
+impl RequestSubject for String {
     fn subject() -> String {
         "STREAM.NAMES".to_string()
     }
 }
 
-impl InfoSubject for Info {
+impl RequestSubject for Info {
     fn subject() -> String {
         "STREAM.LIST".to_string()
     }
 }
 
-trait InfoSubject {
+trait RequestSubject {
     fn subject() -> String;
 }
 type PageRequest<T> = Option<Pin<Box<dyn Future<Output = Result<StreamPage<T>, Error>>>>>;
@@ -962,7 +962,7 @@ pub struct Streams<T> {
 
 impl<T> futures::Stream for Streams<T>
 where
-    T: InfoSubject + DeserializeOwned + Unpin,
+    T: RequestSubject + DeserializeOwned + Unpin,
 {
     type Item = Result<T, Error>;
 
