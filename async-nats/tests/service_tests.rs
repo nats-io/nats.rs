@@ -15,6 +15,7 @@
 mod service {
     use async_nats::service::{Info, ServiceExt, StatsResponse};
     use futures::StreamExt;
+    use tracing::debug;
 
     #[tokio::test]
     async fn service_config_validations() {
@@ -27,7 +28,7 @@ mod service {
                 description: None,
                 version: "1.0.0.1".to_string(),
                 schema: None,
-                endpoint: "service_a".to_string(),
+                root_subject: "service_a".to_string(),
             })
             .await
             .unwrap_err()
@@ -43,7 +44,7 @@ mod service {
                 description: None,
                 version: "beta-1.0.0".to_string(),
                 schema: None,
-                endpoint: "service_b".to_string(),
+                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap_err()
@@ -59,7 +60,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
-                endpoint: "service_b".to_string(),
+                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap_err()
@@ -75,7 +76,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
-                endpoint: "service_b".to_string(),
+                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap_err()
@@ -95,7 +96,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
-                endpoint: "service_a".to_string(),
+                root_subject: "service_a".to_string(),
             })
             .await
             .unwrap();
@@ -106,7 +107,7 @@ mod service {
                 description: None,
                 version: "2.0.0".to_string(),
                 schema: None,
-                endpoint: "service_b".to_string(),
+                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap();
@@ -127,45 +128,62 @@ mod service {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut service = client
+        let service = client
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                endpoint: "service_a".to_string(),
+                root_subject: "service_a".to_string(),
                 schema: None,
                 description: None,
             })
             .await
             .unwrap();
 
+        let mut endpoint = service.endpoint("products").await.unwrap().take(3);
         let reply = client.new_inbox();
         let mut response = client.subscribe(reply.clone()).await.unwrap();
         client
-            .publish_with_reply("$SRV.service_a".to_string(), reply.clone(), "data".into())
+            .publish_with_reply(
+                "$SRV.service_a.products".to_string(),
+                reply.clone(),
+                "data".into(),
+            )
             .await
             .unwrap();
         client
-            .publish_with_reply("$SRV.service_a".to_string(), reply.clone(), "data".into())
+            .publish_with_reply(
+                "$SRV.service_a.products".to_string(),
+                reply.clone(),
+                "data".into(),
+            )
             .await
             .unwrap();
         client
-            .publish_with_reply("$SRV.service_a".to_string(), reply.clone(), "data".into())
+            .publish_with_reply(
+                "$SRV.service_a.products".to_string(),
+                reply.clone(),
+                "data".into(),
+            )
             .await
             .unwrap();
         client
-            .publish_with_reply("$SRV.service_a".to_string(), reply.clone(), "data".into())
+            .publish_with_reply(
+                "$SRV.service_a.products".to_string(),
+                reply.clone(),
+                "data".into(),
+            )
             .await
             .unwrap();
         client.flush().await.unwrap();
 
-        let mut requests = service.take(3);
         // respond with 3 Oks.
-        while let Some(request) = requests.next().await {
+        while let Some(request) = endpoint.next().await {
             request.respond(Ok("data".into())).await.unwrap();
         }
-        service = requests.into_inner();
+        let mut endpoint = endpoint.into_inner();
         // 4 respond is an error.
-        if let Some(request) = service.next().await {
+        if let Some(request) = endpoint.next().await {
+            debug!("respond with error");
             request
                 .respond(Err(async_nats::service::error::Error(
                     503,
@@ -194,7 +212,7 @@ mod service {
         let requests = stats
             .stats
             .iter()
-            .find(|endpoint| endpoint.name == "requests")
+            .find(|endpoint| endpoint.name == "products")
             .unwrap();
         assert_eq!(requests.requests, 4);
         assert_eq!(requests.errors, 1);
@@ -205,7 +223,7 @@ mod service {
             .stats()
             .await
             .endpoints
-            .get("requests")
+            .get("products")
             .unwrap()
             .last_error
             .is_some());

@@ -18,13 +18,14 @@ use std::{
     fmt::Display,
     pin::Pin,
     sync::{Arc, Mutex},
+    task::Poll,
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
 use futures::{
     stream::{self, SelectAll},
-    Future, Stream, StreamExt, TryFutureExt,
+    Future, FutureExt, Stream, StreamExt,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -33,7 +34,7 @@ use serde_json::json;
 use time::serde::rfc3339;
 use time::OffsetDateTime;
 use tokio::task::JoinHandle;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{Client, Error, HeaderMap, Message, PublishError, Subscriber};
 
@@ -91,6 +92,7 @@ pub struct Info {
     #[serde(rename = "type")]
     pub response_type: String,
     pub name: String,
+    pub root_subject: String,
     pub id: String,
     pub description: Option<String>,
     pub version: String,
@@ -107,13 +109,6 @@ pub struct Schema {
     pub response: String,
 }
 
-/// Endpoint definition.
-/// In this iteration, it's just a subject.
-#[derive(Clone, Debug)]
-pub struct Endpoint {
-    pub subject: String,
-}
-
 /// Configuration of the [Service].
 #[derive(Debug)]
 pub struct Config {
@@ -126,8 +121,8 @@ pub struct Config {
     pub version: String,
     // Request / Response schemas
     pub schema: Option<Schema>,
-    /// A subject to which service will subscribe.
-    pub endpoint: String,
+    /// A subject which will become a root subject, identifying the service.
+    pub root_subject: String,
 }
 
 /// Verbs that can be used to acquire information from the services.
@@ -219,8 +214,8 @@ pub struct Service {
     stats: Arc<Mutex<Stats>>,
     info: Info,
     client: Client,
-    requests: Subscriber,
     handle: JoinHandle<Result<(), Error>>,
+    shutdown_tx: tokio::sync::broadcast::Sender<()>,
 }
 impl Service {
     async fn add(client: Client, config: Config) -> Result<Service, Error> {
@@ -241,33 +236,19 @@ impl Service {
         let id = nuid::next();
         let started = time::OffsetDateTime::now_utc();
         let info = Info {
+            root_subject: config.root_subject.clone(),
             response_type: "io.nats.micro.v1.info_response".to_string(),
             name: config.name.clone(),
             id: id.clone(),
             description: config.description.clone(),
             version: config.version.clone(),
-            subject: config.endpoint.clone(),
-        };
-        let request_stats = EndpointStats {
-            // FIXME: what should be the name?
-            name: "requests".to_string(),
-            ..Default::default()
+            subject: config.root_subject.clone(),
         };
 
-        let mut endpoints = HashMap::new();
-        endpoints.insert("requests".to_string(), request_stats);
+        let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
+
+        let endpoints = HashMap::new();
         let endpoint_stats = Arc::new(Mutex::new(Stats { endpoints }));
-        let requests = client
-            .queue_subscribe(
-                format!("{SERVICE_API_PREFIX}.{}", config.endpoint.clone()),
-                QUEUE_GROUP.to_string(),
-            )
-            .await?;
-        debug!(
-            "crerated service for endpoint {}.{}",
-            SERVICE_API_PREFIX,
-            config.endpoint.clone()
-        );
 
         // create subscriptions for all verbs.
         let mut pings =
@@ -342,8 +323,8 @@ impl Service {
             stats: endpoint_stats,
             info,
             client,
-            requests,
             handle,
+            shutdown_tx,
         })
     }
 }
@@ -365,26 +346,68 @@ async fn verb_subscription(
     Ok(stream::select_all([verb_all, verb_id, verb_name]).fuse())
 }
 
-impl Stream for Service {
+pub struct Endpoint {
+    requests: Subscriber,
+    stats: Arc<Mutex<Stats>>,
+    client: Client,
+    endpoint: String,
+    shutdown: Pin<Box<dyn Future<Output = Result<(), tokio::sync::broadcast::error::RecvError>>>>,
+}
+
+impl Stream for Endpoint {
     type Item = Request;
 
-    // FIXME: how we implement stats (durations) if it's a stream?
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        match self.requests.poll_next_unpin(cx) {
-            std::task::Poll::Ready(message) => match message {
-                Some(message) => std::task::Poll::Ready(Some(Request {
-                    issued: Instant::now(),
-                    stats: self.stats.clone(),
-                    client: self.client.clone(),
-                    message,
-                })),
-                None => std::task::Poll::Ready(None),
-            },
-            std::task::Poll::Pending => std::task::Poll::Pending,
+        trace!("polling for next request");
+        match self.shutdown.as_mut().poll(cx) {
+            Poll::Ready(_result) => {
+                debug!("got stop broadcast");
+                self.requests
+                    .sender
+                    .try_send(crate::Command::Unsubscribe {
+                        sid: self.requests.sid,
+                        max: None,
+                    })
+                    .ok();
+            }
+            Poll::Pending => {
+                trace!("stop broadcast still pending");
+            }
         }
+        trace!("checking for new messages");
+        match self.requests.poll_next_unpin(cx) {
+            Poll::Ready(message) => {
+                debug!("got next message");
+                match message {
+                    Some(message) => Poll::Ready(Some(Request {
+                        issued: Instant::now(),
+                        stats: self.stats.clone(),
+                        client: self.client.clone(),
+                        message,
+                        endpoint: self.endpoint.clone(),
+                    })),
+                    None => Poll::Ready(None),
+                }
+            }
+
+            Poll::Pending => {
+                trace!("still pending for messages");
+                Poll::Pending
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
+impl Endpoint {
+    pub async fn stop(&mut self) -> Result<(), std::io::Error> {
+        self.requests.unsubscribe().await
     }
 }
 
@@ -393,8 +416,8 @@ impl Service {
     /// If there are more instances of [Services][Service] with the same name, the [Service] will
     /// be scaled down by one instance. If it was the only running instance, it will effectively
     /// remove the service entirely.
-    pub async fn stop(mut self) -> Result<(), Error> {
-        self.requests.unsubscribe().map_err(Box::new).await?;
+    pub async fn stop(self) -> Result<(), Error> {
+        self.shutdown_tx.send(())?;
         self.handle.abort();
         Ok(())
     }
@@ -418,6 +441,39 @@ impl Service {
     pub async fn info(&self) -> Info {
         self.info.clone()
     }
+
+    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
+        let subject = subject.to_string();
+        let requests = self
+            .client
+            .queue_subscribe(
+                format!("{SERVICE_API_PREFIX}.{}.{subject}", self.info.root_subject),
+                QUEUE_GROUP.to_string(),
+            )
+            .await?;
+        debug!(
+            "created service for endpoint {SERVICE_API_PREFIX}.{}.{subject}",
+            self.info.root_subject,
+        );
+
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+
+        let mut stats = self.stats.lock().unwrap();
+        stats
+            .endpoints
+            .entry(subject.clone())
+            .or_insert(EndpointStats {
+                name: subject.clone(),
+                ..Default::default()
+            });
+        Ok(Endpoint {
+            requests,
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            endpoint: subject,
+            shutdown: Box::pin(async move { shutdown_rx.recv().fuse().await }),
+        })
+    }
 }
 
 /// Request returned by [Service] [Stream][futures::Stream].
@@ -426,6 +482,7 @@ pub struct Request {
     issued: Instant,
     client: Client,
     pub message: Message,
+    endpoint: String,
     stats: Arc<Mutex<Stats>>,
 }
 
@@ -462,7 +519,7 @@ impl Request {
                     .lock()
                     .unwrap()
                     .endpoints
-                    .entry("requests".to_string())
+                    .entry(self.endpoint.clone())
                     .and_modify(|stats| {
                         stats.last_error = Some(err.clone());
                         stats.errors += 1
@@ -478,7 +535,8 @@ impl Request {
         };
         let elapsed = self.issued.elapsed();
         let mut stats = self.stats.lock().unwrap();
-        let mut stats = stats.endpoints.get_mut("requests").unwrap();
+        // let mut stats = stats.endpoints.entry(key)
+        let mut stats = stats.endpoints.get_mut(self.endpoint.as_str()).unwrap();
         stats.requests += 1;
         stats.processing_time += elapsed;
         stats.average_processing_time = stats.processing_time.checked_div(2).unwrap();
