@@ -14,7 +14,7 @@
 pub mod bucket;
 
 use std::{
-    collections::{self, HashSet},
+    collections::HashSet,
     io::{self, ErrorKind},
     task::Poll,
 };
@@ -636,14 +636,16 @@ impl Store {
         })
     }
 
-    /// Returns an iterator of `String` over all keys in the bucket.
+    /// Returns a [futures::Stream] that allows iterating over all keys in the bucket.
     ///
     /// # Examples
+    ///
+    /// Iterating over each each key individually
     ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures::{StreamExt, TryStreamExt};
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
@@ -651,14 +653,33 @@ impl Store {
     ///     history: 10,
     ///     ..Default::default()
     /// }).await?;
-    /// let mut keys = kv.keys().await?;
-    /// for key in keys {
+    /// let mut keys = kv.keys().await?.boxed();
+    /// while let Some(key) = keys.try_next().await? {
     ///     println!("key: {:?}", key);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn keys(&self) -> Result<collections::hash_set::IntoIter<String>, Error> {
+    ///
+    /// Collecting it into a vector of keys
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let keys = kv.keys().await?.try_collect::<Vec<String>>().await?;
+    /// println!("Keys: {:?}", keys);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn keys(&self) -> Result<impl futures::Stream<Item = Result<String, Error>>, Error> {
         let subject = format!("{}>", self.prefix.as_str());
 
         let consumer = self
