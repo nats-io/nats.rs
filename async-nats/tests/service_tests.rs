@@ -123,8 +123,26 @@ mod service {
     }
 
     #[tokio::test]
+    async fn multiple_endpoints() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .add_service(async_nats::service::Config {
+                name: "serviceA".to_string(),
+                version: "1.0.0".to_string(),
+                root_subject: "service_a".to_string(),
+                schema: None,
+                description: None,
+            })
+            .await
+            .unwrap();
+
+        let mut products = service.endpoint("products").await.unwrap();
+    }
+
+    #[tokio::test]
     async fn requests() {
-        tracing_subscriber::fmt::init();
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 

@@ -160,12 +160,14 @@ pub trait ServiceExt {
     /// let mut service = client.add_service( async_nats::service::Config {
     ///     name: "generator".to_string(),
     ///     version: "1.0.0".to_string(),
-    ///     endpoint: "events.>".to_string(),
+    ///     root_subject: "events.>".to_string(),
     ///     schema: None,
     ///     description: None,
     /// }).await?;
     ///
-    /// if let Some(request) = service.next().await {
+    /// let mut endpoint = service.endpoint("get").await?;
+    ///
+    /// if let Some(request) = endpoint.next().await {
     ///     request.respond(Ok("hello".into())).await?;
     /// }
     ///
@@ -197,12 +199,14 @@ impl ServiceExt for crate::Client {
 /// let mut service = client.add_service( async_nats::service::Config {
 ///     name: "generator".to_string(),
 ///     version: "1.0.0".to_string(),
-///     endpoint: "events.>".to_string(),
+///     root_subject: "events.>".to_string(),
 ///     schema: None,
 ///     description: None,
 /// }).await?;
 ///
-/// if let Some(request) = service.next().await {
+/// let mut endpoint = service.endpoint("get").await?;
+///
+/// if let Some(request) = endpoint.next().await {
 ///     request.respond(Ok("hello".into())).await?;
 /// }
 ///
@@ -499,13 +503,14 @@ impl Request {
     /// # let client = async_nats::connect("demo.nats.io").await?;
     /// # let mut service = client.add_service(async_nats::service::Config {
     /// #     name: "generator".to_string(),
+    /// #     root_subject: "generator".to_string(),
     /// #     version: "1.0.0".to_string(),
-    /// #     endpoint: "events.>".to_string(),
     /// #     schema: None,
     /// #     description: None,
     /// # }).await?;
     ///
-    /// let request = service.next().await.unwrap();
+    /// let mut endpoint = service.endpoint("endpoint").await?;
+    /// let request = endpoint.next().await.unwrap();
     /// request.respond(Ok("hello".into())).await?;
     /// # Ok(())
     /// # }
