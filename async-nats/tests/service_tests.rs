@@ -138,7 +138,7 @@ mod service {
             .await
             .unwrap();
 
-        let mut products = service.endpoint("products").await.unwrap();
+        let _products = service.endpoint("products").await.unwrap();
     }
 
     #[tokio::test]
