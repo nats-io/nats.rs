@@ -636,7 +636,7 @@ impl Store {
         })
     }
 
-    /// Returns a [futures::Stream] that allows iterating over all keys in the bucket.
+    /// Returns an iterator of `String` over all keys in the bucket.
     ///
     /// # Examples
     ///
@@ -651,8 +651,8 @@ impl Store {
     ///     history: 10,
     ///     ..Default::default()
     /// }).await?;
-    /// let mut entries = kv.keys().await?;
-    /// while let Some(key) = entries.next() {
+    /// let mut keys = kv.keys().await?;
+    /// for key in keys {
     ///     println!("key: {:?}", key);
     /// }
     /// # Ok(())
@@ -669,6 +669,8 @@ impl Store {
                 filter_subject: subject,
                 headers_only: true,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
+                // We only need to know the latest state for each key, not the whole history
+                deliver_policy: DeliverPolicy::LastPerSubject,
                 ..Default::default()
             })
             .await?;
@@ -682,7 +684,10 @@ impl Store {
 
         let mut keys = HashSet::new();
         while let Some(entry) = entries.try_next().await? {
-            keys.insert(entry.key);
+            // Filter out deleted keys
+            if !matches!(entry.operation, Operation::Purge | Operation::Delete) {
+                keys.insert(entry.key);
+            }
         }
         Ok(keys.into_iter())
     }
