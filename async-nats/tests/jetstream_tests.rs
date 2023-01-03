@@ -2487,4 +2487,54 @@ mod jetstream {
 
         assert_eq!(context.streams().count().await, 1200);
     }
+
+    #[tokio::test]
+    async fn queue_push_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                subjects: vec!["filter".to_string()],
+                name: "filter".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..50 {
+            context
+                .publish("filter".to_string(), format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::push::Config {
+                deliver_group: Some("group".to_string()),
+                durable_name: Some("group".to_string()),
+                deliver_subject: client.new_inbox(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer2: PushConsumer = stream.get_consumer("group").await.unwrap();
+
+        let mut messages = consumer.messages().await.unwrap().take(5);
+        let mut messages2 = consumer2.messages().await.unwrap().take(5);
+
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            message.ack().await.unwrap();
+        }
+
+        while let Some(message) = messages2.next().await {
+            let message = message.unwrap();
+            message.ack().await.unwrap();
+        }
+    }
 }
