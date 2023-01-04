@@ -54,4 +54,18 @@ mod client {
         .unwrap()
         .unwrap();
     }
+
+    #[tokio::test]
+    async fn tls_with_native_certs() {
+        let client = async_nats::ConnectOptions::new()
+            .require_tls(true)
+            .connect("tls://demo.nats.io")
+            .await
+            .unwrap();
+
+        client
+            .publish("subject".into(), "data".into())
+            .await
+            .unwrap();
+    }
 }
