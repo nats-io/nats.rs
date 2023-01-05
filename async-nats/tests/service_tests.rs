@@ -30,7 +30,6 @@ mod service {
                 description: None,
                 version: "1.0.0.1".to_string(),
                 schema: None,
-                root_subject: "service_a".to_string(),
             })
             .await
             .unwrap_err()
@@ -46,7 +45,6 @@ mod service {
                 description: None,
                 version: "beta-1.0.0".to_string(),
                 schema: None,
-                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap_err()
@@ -62,7 +60,6 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
-                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap_err()
@@ -78,7 +75,6 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
-                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap_err()
@@ -98,7 +94,6 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
-                root_subject: "service_a".to_string(),
             })
             .await
             .unwrap();
@@ -109,7 +104,6 @@ mod service {
                 description: None,
                 version: "2.0.0".to_string(),
                 schema: None,
-                root_subject: "service_b".to_string(),
             })
             .await
             .unwrap();
@@ -133,7 +127,6 @@ mod service {
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                root_subject: "service_a".to_string(),
                 schema: None,
                 description: None,
             })
@@ -172,7 +165,6 @@ mod service {
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                root_subject: "service_a".to_string(),
                 schema: None,
                 description: None,
             })
@@ -225,7 +217,6 @@ mod service {
             .unwrap();
         assert_eq!(info.version, "1.0.0".to_string());
         assert_eq!(info.name, "serviceA".to_string());
-        assert_eq!(info.subject, "service_a".to_string());
 
         let stats = client
             .request("$SRV.STATS".into(), "".into())

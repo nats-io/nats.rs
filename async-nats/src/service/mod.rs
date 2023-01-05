@@ -92,11 +92,9 @@ pub struct Info {
     #[serde(rename = "type")]
     pub response_type: String,
     pub name: String,
-    pub root_subject: String,
     pub id: String,
     pub description: Option<String>,
     pub version: String,
-    pub subject: String,
 }
 
 /// Schema of requests and responses.
@@ -121,8 +119,6 @@ pub struct Config {
     pub version: String,
     // Request / Response schemas
     pub schema: Option<Schema>,
-    /// A subject which will become a root subject, identifying the service.
-    pub root_subject: String,
 }
 
 /// Verbs that can be used to acquire information from the services.
@@ -288,13 +284,11 @@ impl Service {
         let id = nuid::next();
         let started = time::OffsetDateTime::now_utc();
         let info = Info {
-            root_subject: config.root_subject.clone(),
             response_type: "io.nats.micro.v1.info_response".to_string(),
             name: config.name.clone(),
             id: id.clone(),
             description: config.description.clone(),
             version: config.version.clone(),
-            subject: config.root_subject.clone(),
         };
 
         let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
