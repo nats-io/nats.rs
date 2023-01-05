@@ -451,12 +451,12 @@ impl Service {
         let requests = self
             .client
             .queue_subscribe(
-                format!("{SERVICE_API_PREFIX}.{}.{subject}", self.info.root_subject),
+                format!("{}.{subject}", self.info.root_subject),
                 QUEUE_GROUP.to_string(),
             )
             .await?;
         debug!(
-            "created service for endpoint {SERVICE_API_PREFIX}.{}.{subject}",
+            "created service for endpoint {}.{subject}",
             self.info.root_subject,
         );
 

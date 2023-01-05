@@ -162,7 +162,7 @@ mod service {
         let mut response = client.subscribe(reply.clone()).await.unwrap();
         client
             .publish_with_reply(
-                "$SRV.service_a.products".to_string(),
+                "service_a.products".to_string(),
                 reply.clone(),
                 "data".into(),
             )
@@ -170,7 +170,7 @@ mod service {
             .unwrap();
         client
             .publish_with_reply(
-                "$SRV.service_a.products".to_string(),
+                "service_a.products".to_string(),
                 reply.clone(),
                 "data".into(),
             )
@@ -178,7 +178,7 @@ mod service {
             .unwrap();
         client
             .publish_with_reply(
-                "$SRV.service_a.products".to_string(),
+                "service_a.products".to_string(),
                 reply.clone(),
                 "data".into(),
             )
@@ -186,7 +186,7 @@ mod service {
             .unwrap();
         client
             .publish_with_reply(
-                "$SRV.service_a.products".to_string(),
+                "service_a.products".to_string(),
                 reply.clone(),
                 "data".into(),
             )
