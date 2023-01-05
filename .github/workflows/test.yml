@@ -63,15 +63,6 @@ jobs:
       - name: Install nats-server
         run: go install github.com/nats-io/nats-server/v2@latest
 
-      - name: Configure nats hosts
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            echo "127.0.0.1 demo.nats.io" >> "C:\\Windows\\System32\\drivers\\etc\\hosts"
-            cmd "/c ipconfig /flushdns"
-          else
-            echo "127.0.0.1 demo.nats.io" | sudo tee -a /etc/hosts
-          fi
-
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
