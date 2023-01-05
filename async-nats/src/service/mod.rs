@@ -67,7 +67,7 @@ pub struct StatsResponse {
     pub version: String,
     #[serde(with = "rfc3339")]
     pub started: OffsetDateTime,
-    pub stats: Vec<EndpointStats>,
+    pub endpoints: Vec<EndpointStats>,
 }
 
 /// Stats of a single endpoint.
@@ -313,7 +313,7 @@ impl Service {
                                 id: info.id.clone(),
                                 version: info.version.clone(),
                                 started,
-                                stats: endpoint_stats.lock().unwrap().endpoints.values().cloned().collect(),
+                                endpoints: endpoint_stats.lock().unwrap().endpoints.values().cloned().collect(),
                             })?;
                             client.publish(stats_request.reply.unwrap(), stats.into()).await?;
                         },

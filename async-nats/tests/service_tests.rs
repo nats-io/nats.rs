@@ -228,7 +228,7 @@ mod service {
             .unwrap()
             .unwrap();
         let requests = stats
-            .stats
+            .endpoints
             .iter()
             .find(|endpoint| endpoint.name == "products")
             .unwrap();
