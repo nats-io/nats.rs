@@ -13,6 +13,8 @@
 
 #[cfg(feature = "service")]
 mod service {
+    use std::str::from_utf8;
+
     use async_nats::service::{Info, ServiceExt, StatsResponse};
     use futures::StreamExt;
     use tracing::debug;
@@ -123,7 +125,7 @@ mod service {
     }
 
     #[tokio::test]
-    async fn multiple_endpoints() {
+    async fn groups() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
@@ -138,7 +140,27 @@ mod service {
             .await
             .unwrap();
 
-        let _products = service.endpoint("products").await.unwrap();
+        let mut products = service.endpoint("products").await.unwrap();
+        let reply = client.new_inbox();
+        let mut responses = client.subscribe(reply.clone()).await.unwrap();
+        client
+            .publish_with_reply("products".to_string(), reply.clone(), "data".into())
+            .await
+            .unwrap();
+        let request = products.next().await.unwrap();
+        request.respond(Ok("response".into())).await.unwrap();
+        responses.next().await.unwrap();
+
+        let v2 = service.group("v2");
+        let mut v2product = v2.endpoint("products").await.unwrap();
+        client
+            .publish_with_reply("v2.products".to_string(), reply.clone(), "data".into())
+            .await
+            .unwrap();
+        let request = v2product.next().await.unwrap();
+        request.respond(Ok("v2".into())).await.unwrap();
+        let message = responses.next().await.unwrap();
+        assert_eq!(from_utf8(&message.payload).unwrap(), "v2".to_string());
     }
 
     #[tokio::test]
@@ -161,35 +183,19 @@ mod service {
         let reply = client.new_inbox();
         let mut response = client.subscribe(reply.clone()).await.unwrap();
         client
-            .publish_with_reply(
-                "service_a.products".to_string(),
-                reply.clone(),
-                "data".into(),
-            )
+            .publish_with_reply("products".to_string(), reply.clone(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply(
-                "service_a.products".to_string(),
-                reply.clone(),
-                "data".into(),
-            )
+            .publish_with_reply("products".to_string(), reply.clone(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply(
-                "service_a.products".to_string(),
-                reply.clone(),
-                "data".into(),
-            )
+            .publish_with_reply("products".to_string(), reply.clone(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply(
-                "service_a.products".to_string(),
-                reply.clone(),
-                "data".into(),
-            )
+            .publish_with_reply("products".to_string(), reply.clone(), "data".into())
             .await
             .unwrap();
         client.flush().await.unwrap();

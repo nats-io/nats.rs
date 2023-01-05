@@ -221,6 +221,54 @@ pub struct Service {
     handle: JoinHandle<Result<(), Error>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
 }
+
+pub struct Group {
+    prefix: String,
+    stats: Arc<Mutex<Stats>>,
+    client: Client,
+    shutdown_tx: tokio::sync::broadcast::Sender<()>,
+}
+
+impl Group {
+    pub fn group<S: ToString>(&self, prefix: S) -> Group {
+        Group {
+            prefix: prefix.to_string(),
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+        }
+    }
+    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
+        let subject = subject.to_string();
+        let requests = self
+            .client
+            .queue_subscribe(
+                format!("{}.{subject}", self.prefix),
+                QUEUE_GROUP.to_string(),
+            )
+            .await?;
+        debug!("created service for endpoint {}.{subject}", self.prefix);
+
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+
+        let mut stats = self.stats.lock().unwrap();
+        stats
+            .endpoints
+            .entry(subject.clone())
+            .or_insert(EndpointStats {
+                name: subject.clone(),
+                ..Default::default()
+            });
+        Ok(Endpoint {
+            requests,
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            endpoint: subject,
+            shutdown: Box::pin(async move { shutdown_rx.recv().fuse().await }),
+        })
+    }
+}
+
 impl Service {
     async fn add(client: Client, config: Config) -> Result<Service, Error> {
         // validate service version semver string.
@@ -332,6 +380,7 @@ impl Service {
         })
     }
 }
+
 async fn verb_subscription(
     client: Client,
     verb: Verb,
@@ -446,19 +495,21 @@ impl Service {
         self.info.clone()
     }
 
+    pub fn group<S: ToString>(&self, prefix: S) -> Group {
+        Group {
+            prefix: prefix.to_string(),
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+        }
+    }
     pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
         let subject = subject.to_string();
         let requests = self
             .client
-            .queue_subscribe(
-                format!("{}.{subject}", self.info.root_subject),
-                QUEUE_GROUP.to_string(),
-            )
+            .queue_subscribe(subject.clone(), QUEUE_GROUP.to_string())
             .await?;
-        debug!(
-            "created service for endpoint {}.{subject}",
-            self.info.root_subject,
-        );
+        debug!("created service for endpoint {subject}");
 
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
