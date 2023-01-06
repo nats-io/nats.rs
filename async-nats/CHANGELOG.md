@@ -1,3 +1,26 @@
+# 0.26.0
+## Overview
+This release introduces improvements around TLS handling which could cause issues with Windows systems, plus some other fixes and improvements.
+
+## Added
+* Add streams list by @Jarema in https://github.com/nats-io/nats.rs/pull/785
+* Add stream names list by @Jarema in https://github.com/nats-io/nats.rs/pull/783
+* Add type to service responses by @Jarema in https://github.com/nats-io/nats.rs/pull/786
+* Add kv example by @Jarema in https://github.com/nats-io/nats.rs/pull/784
+
+# Fixed
+* Fix queue push consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/793
+* Change TLS to conditionally load native certs (reported by @ronz-sensible) by @Jarema in https://github.com/nats-io/nats.rs/pull/794
+* Setup tls only if required (repored by @ronz-sensible) by @Jarema in https://github.com/nats-io/nats.rs/pull/788
+
+## Changed
+* Deprecate `Stream::purge_filter` by @caspervonb in https://github.com/nats-io/nats.rs/pull/755
+* Improve defaults for connection by @Jarema in https://github.com/nats-io/nats.rs/pull/790
+
+Thank you @ronz-sensible for helping with TLS on Windows!
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.25.1...async-nats/v0.26.0
+
 # 0.25.1
 ## Overview
 
