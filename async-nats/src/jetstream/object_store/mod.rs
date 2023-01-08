@@ -313,7 +313,7 @@ impl ObjectStore {
         if let Some(existing_object_info) = maybe_existing_object_info {
             let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
 
-            self.stream.purge().filter(chunk_subject).await?;
+            self.stream.purge().filter(&chunk_subject).await?;
         }
 
         Ok(object_info)
@@ -439,7 +439,7 @@ impl Stream for Watch<'_> {
                         .map_err(|err| {
                             Box::from(io::Error::new(
                                 ErrorKind::Other,
-                                format!("failed to deserialize the response: {:?}", err),
+                                format!("failed to deserialize the response: {err:?}"),
                             ))
                         })
                         .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
@@ -487,7 +487,7 @@ impl Stream for List<'_> {
                             serde_json::from_slice(&message.payload).map_err(|err| {
                                 Box::from(std::io::Error::new(
                                     ErrorKind::Other,
-                                    format!("failed to serialize object info: {}", err),
+                                    format!("failed to serialize object info: {err}"),
                                 ))
                             }),
                         ));
@@ -545,7 +545,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         let message = message.map_err(|err| {
                             std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                format!("error from JetStream subscription: {}", err),
+                                format!("error from JetStream subscription: {err}"),
                             )
                         })?;
                         let len = cmp::min(buf.remaining(), message.payload.len());
@@ -559,7 +559,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         let info = message.info().map_err(|err| {
                             std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                format!("error from JetStream subscription: {}", err),
+                                format!("error from JetStream subscription: {err}"),
                             )
                         })?;
                         if info.pending == 0 {

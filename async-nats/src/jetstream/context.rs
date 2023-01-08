@@ -21,12 +21,14 @@ use crate::{header, Client, Command, Error, HeaderMap, HeaderValue};
 use bytes::Bytes;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::future::IntoFuture;
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
+use std::str::from_utf8;
+use std::task::Poll;
 use std::time::Duration;
 use tracing::debug;
 
@@ -263,7 +265,7 @@ impl Context {
                     )));
                 }
                 mirror.external = Some(External {
-                    api_prefix: format!("$JS.{}.API", domain),
+                    api_prefix: format!("$JS.{domain}.API"),
                     delivery_prefix: None,
                 })
             }
@@ -279,7 +281,7 @@ impl Context {
                         )));
                     }
                     source.external = Some(External {
-                        api_prefix: format!("$JS.{}.API", domain),
+                        api_prefix: format!("$JS.{domain}.API"),
                         delivery_prefix: None,
                     })
                 }
@@ -327,7 +329,7 @@ impl Context {
             )));
         }
 
-        let subject = format!("STREAM.INFO.{}", stream);
+        let subject = format!("STREAM.INFO.{stream}");
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
@@ -412,7 +414,7 @@ impl Context {
                 "the stream name must not be empty",
             )));
         }
-        let subject = format!("STREAM.DELETE.{}", stream);
+        let subject = format!("STREAM.DELETE.{stream}");
         match self.request(subject, &json!({})).await? {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -465,6 +467,59 @@ impl Context {
         }
     }
 
+    /// Lists names of all streams for current context.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let mut names = jetstream.stream_names();
+    /// while let Some(stream) = names.try_next().await? {
+    ///     println!("stream: {}", stream);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn stream_names(&self) -> StreamNames {
+        StreamNames {
+            context: self.clone(),
+            offset: 0,
+            page_request: None,
+            streams: Vec::new(),
+            done: false,
+        }
+    }
+
+    /// Lists all streams info for current context.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let mut streams = jetstream.streams();
+    /// while let Some(stream) = streams.try_next().await? {
+    ///     println!("stream: {:?}", stream);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn streams(&self) -> Streams {
+        Streams {
+            context: self.clone(),
+            offset: 0,
+            page_request: None,
+            streams: Vec::new(),
+            done: false,
+        }
+    }
     /// Returns an existing key-value bucket.
     ///
     /// # Examples
@@ -509,10 +564,10 @@ impl Context {
             if let Some(ref external) = mirror.external {
                 if !external.api_prefix.is_empty() {
                     store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{}.", bucket);
+                    store.prefix = format!("$KV.{bucket}.");
                     store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
                 } else {
-                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
                 }
             }
         };
@@ -619,10 +674,10 @@ impl Context {
             if let Some(ref external) = mirror.external {
                 if !external.api_prefix.is_empty() {
                     store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{}.", bucket);
+                    store.prefix = format!("$KV.{bucket}.");
                     store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
                 } else {
-                    store.put_prefix = Some(format!("$KV.{}.", bucket));
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
                 }
             }
         };
@@ -707,6 +762,10 @@ impl Context {
             .client
             .request(format!("{}.{}", self.prefix, subject), request)
             .await?;
+        debug!(
+            "JetStream request response: {:?}",
+            from_utf8(&message.payload)
+        );
         let response = serde_json::from_slice(message.payload.as_ref())?;
 
         Ok(response)
@@ -740,9 +799,9 @@ impl Context {
         }
 
         let bucket_name = config.bucket.clone();
-        let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
+        let chunk_subject = format!("$O.{bucket_name}.C.>");
+        let meta_subject = format!("$O.{bucket_name}.M.>");
 
         let stream = self
             .create_stream(super::stream::Config {
@@ -794,7 +853,7 @@ impl Context {
                 "invalid bucket name",
             )));
         }
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         let stream = self.get_stream(stream_name).await?;
 
         Ok(ObjectStore {
@@ -870,6 +929,157 @@ impl IntoFuture for PublishAckFuture {
     }
 }
 
+#[derive(Deserialize, Debug)]
+struct StreamPage {
+    total: usize,
+    streams: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct StreamInfoPage {
+    total: usize,
+    streams: Option<Vec<super::stream::Info>>,
+}
+
+type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
+
+pub struct StreamNames {
+    context: Context,
+    offset: usize,
+    page_request: Option<PageRequest>,
+    streams: Vec<String>,
+    done: bool,
+}
+
+impl futures::Stream for StreamNames {
+    type Item = Result<String, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(streams) = page.streams {
+                        self.offset += streams.len();
+                        self.streams = streams;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.streams.pop() {
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.streams.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                "STREAM.NAMES".to_string(),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
+    }
+}
+
+type PageInfoRequest = Pin<Box<dyn Future<Output = Result<StreamInfoPage, Error>>>>;
+
+pub struct Streams {
+    context: Context,
+    offset: usize,
+    page_request: Option<PageInfoRequest>,
+    streams: Vec<super::stream::Info>,
+    done: bool,
+}
+
+impl futures::Stream for Streams {
+    type Item = Result<super::stream::Info, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(streams) = page.streams {
+                        self.offset += streams.len();
+                        self.streams = streams;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.streams.pop() {
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.streams.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                "STREAM.LIST".to_string(),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
+    }
+}
 /// Used for building customized `publish` message.
 #[derive(Default, Clone, Debug)]
 pub struct Publish {

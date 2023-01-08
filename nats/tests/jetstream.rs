@@ -586,7 +586,7 @@ fn jetstream_ordered() {
 fn jetstream_pull_subscribe_fetch() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
-        .error_callback(|err| println!("error!: {}", err))
+        .error_callback(|err| println!("error!: {err}"))
         .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
@@ -638,7 +638,7 @@ fn jetstream_pull_subscribe_fetch() {
 fn jetstream_pull_subscribe_timeout_fetch() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
-        .error_callback(|err| println!("error!: {}", err))
+        .error_callback(|err| println!("error!: {err}"))
         .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
@@ -696,7 +696,7 @@ fn jetstream_pull_subscribe_timeout_fetch() {
 fn jetstream_pull_subscribe_fetch_with_handler() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
-        .error_callback(|err| println!("error!: {}", err))
+        .error_callback(|err| println!("error!: {err}"))
         .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc.clone());
@@ -748,7 +748,7 @@ fn jetstream_pull_subscribe_fetch_with_handler() {
 fn jetstream_pull_subscribe_ephemeral() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
-        .error_callback(|err| println!("error!: {}", err))
+        .error_callback(|err| println!("error!: {err}"))
         .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);
@@ -774,7 +774,7 @@ fn jetstream_pull_subscribe_ephemeral() {
 fn jetstream_pull_subscribe_bad_stream() {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
     let nc = nats::Options::new()
-        .error_callback(|err| println!("error!: {}", err))
+        .error_callback(|err| println!("error!: {err}"))
         .connect(s.client_url())
         .unwrap();
     let js = nats::jetstream::new(nc);

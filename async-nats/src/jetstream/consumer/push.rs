@@ -75,7 +75,14 @@ impl Consumer<Config> {
     /// ```
     pub async fn messages(&self) -> Result<Messages, Error> {
         let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
-        let subscriber = self.context.client.subscribe(deliver_subject).await?;
+        let subscriber = if let Some(ref group) = self.info.config.deliver_group {
+            self.context
+                .client
+                .queue_subscribe(deliver_subject, group.to_owned())
+                .await?
+        } else {
+            self.context.client.subscribe(deliver_subject).await?
+        };
 
         Ok(Messages {
             context: self.context.clone(),
@@ -540,7 +547,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                     .map_err(|err|
                                                            Box::new(io::Error::new(
                                                                    ErrorKind::Other,
-                                                                   format!("could not parse header into u64: {}", err))
+                                                                   format!("could not parse header into u64: {err}"))
                                                                ))?;
 
                                                 if sequence

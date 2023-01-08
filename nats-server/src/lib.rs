@@ -83,7 +83,7 @@ impl Server {
         if si["tls_required"].as_bool().unwrap_or(false) {
             scheme = "tls://";
         }
-        format!("{}127.0.0.1:{}", scheme, port)
+        format!("{scheme}127.0.0.1:{port}")
     }
 
     pub fn client_port(&self) -> u16 {
@@ -241,9 +241,9 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
 
 fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
     let id = id.unwrap_or_else(nuid::next);
-    let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
-    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
+    let logfile = env::temp_dir().join(format!("nats-server-{id}.log"));
+    let pidfile = env::temp_dir().join(format!("nats-server-{id}.pid"));
+    let store_dir = env::temp_dir().join(format!("store-dir-{id}"));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
@@ -284,9 +284,9 @@ fn run_cluster_node_with_port(
     cluster: usize,
 ) -> Server {
     let id = nuid::next();
-    let logfile = env::temp_dir().join(format!("nats-server-{}.log", id));
-    let store_dir = env::temp_dir().join(format!("store-dir-{}", id));
-    let pidfile = env::temp_dir().join(format!("nats-server-{}.pid", id));
+    let logfile = env::temp_dir().join(format!("nats-server-{id}.log"));
+    let store_dir = env::temp_dir().join(format!("store-dir-{id}"));
+    let pidfile = env::temp_dir().join(format!("nats-server-{id}.pid"));
 
     // Always use dynamic ports so tests can run in parallel.
     // Create env for a storage directory for jetstream.
@@ -306,12 +306,12 @@ fn run_cluster_node_with_port(
         .arg(
             routes
                 .iter()
-                .map(|r| format!("nats://127.0.0.1:{}", r))
+                .map(|r| format!("nats://127.0.0.1:{r}"))
                 .collect::<Vec<String>>()
                 .join(","),
         )
         .arg("--cluster")
-        .arg(format!("nats://127.0.0.1:{}", cluster))
+        .arg(format!("nats://127.0.0.1:{cluster}"))
         .arg("--cluster_name")
         .arg(cluster_name)
         .arg("-n")

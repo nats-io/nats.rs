@@ -406,6 +406,7 @@ pub struct Stream {
     heartbeat_handle: Option<JoinHandle<()>>,
     last_seen: Arc<Mutex<Instant>>,
     heartbeats_missing: tokio::sync::mpsc::Receiver<()>,
+    terminated: bool,
 }
 
 impl Drop for Stream {
@@ -469,7 +470,11 @@ impl Stream {
                                         pending_reset = true;
                                     }
                                 }
-                                Err(err) => request_result_tx.send(Err(err)).await.unwrap(),
+                                Err(err) => {
+                                     if let Err(err) = request_result_tx.send(Err(err)).await {
+                                        debug!("failed to sent request result: {}", err);
+                                    }
+                                },
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
@@ -538,6 +543,7 @@ impl Stream {
             pending_request: false,
             last_seen,
             heartbeats_missing: missed_heartbeat_rx,
+            terminated: false,
         })
     }
 }
@@ -549,6 +555,9 @@ impl futures::Stream for Stream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        if self.terminated {
+            return Poll::Ready(None);
+        }
         loop {
             trace!("pending messages: {}", self.pending_messages);
             if (self.pending_messages <= self.batch_config.batch / 2
@@ -564,6 +573,7 @@ impl futures::Stream for Stream {
                 match self.heartbeats_missing.poll_recv(cx) {
                     Poll::Ready(resp) => match resp {
                         Some(()) => {
+                            self.terminated = true;
                             trace!("received missing heartbeats notification");
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::TimedOut,
@@ -571,10 +581,11 @@ impl futures::Stream for Stream {
                             )))));
                         }
                         None => {
+                            self.terminated = true;
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 "unexpected termination of heartbeat checker",
-                            )))))
+                            )))));
                         }
                     },
                     Poll::Pending => {

@@ -64,20 +64,23 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
 
 pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
-    for cert in rustls_native_certs::load_native_certs().map_err(|err| {
-        io::Error::new(
-            ErrorKind::Other,
-            format!("could not load platform certs: {}", err),
-        )
-    })? {
-        root_store
-            .add(&rustls::Certificate(cert.0))
-            .map_err(|err| {
-                io::Error::new(
-                    ErrorKind::Other,
-                    format!("failed to read root certificates: {}", err),
-                )
-            })?;
+    // load native system certs only if user did not specify them.
+    if options.tls_client_config.is_some() || options.certificates.is_empty() {
+        for cert in rustls_native_certs::load_native_certs().map_err(|err| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("could not load platform certs: {err}"),
+            )
+        })? {
+            root_store
+                .add(&rustls::Certificate(cert.0))
+                .map_err(|err| {
+                    io::Error::new(
+                        ErrorKind::Other,
+                        format!("failed to read root certificates: {err}"),
+                    )
+                })?;
+        }
     }
 
     // use provided ClientConfig or built it from options.
@@ -94,7 +97,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
                         .map_err(|err| {
                             io::Error::new(
                                 ErrorKind::InvalidInput,
-                                format!("could not load certs: {}", err),
+                                format!("could not load certs: {err}"),
                             )
                         })
                         .unwrap();

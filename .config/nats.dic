@@ -117,3 +117,5 @@ deduplicate
 deduplication
 cloneable
 PurgeRequest
+StatsResponse
+SemVer

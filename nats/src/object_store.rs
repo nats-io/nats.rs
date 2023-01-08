@@ -107,9 +107,9 @@ impl JetStream {
         }
 
         let bucket_name = config.bucket.clone();
-        let stream_name = format!("OBJ_{}", bucket_name);
-        let chunk_subject = format!("$O.{}.C.>", bucket_name);
-        let meta_subject = format!("$O.{}.M.>", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
+        let chunk_subject = format!("$O.{bucket_name}.C.>");
+        let meta_subject = format!("$O.{bucket_name}.M.>");
 
         self.add_stream(&StreamConfig {
             name: stream_name,
@@ -162,7 +162,7 @@ impl JetStream {
             ));
         }
 
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         self.stream_info(stream_name)?;
 
         Ok(ObjectStore::new(bucket_name.to_string(), self.clone()))
@@ -190,7 +190,7 @@ impl JetStream {
     /// ```
     ///
     pub fn delete_object_store(&self, bucket_name: &str) -> io::Result<()> {
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
         self.delete_stream(stream_name)?;
 
         Ok(())

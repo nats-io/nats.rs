@@ -171,7 +171,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -235,7 +235,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -294,7 +294,7 @@ impl Stream {
             if let Some(ref description) = response.description {
                 return Err(Box::from(std::io::Error::new(
                     ErrorKind::Other,
-                    format!("{} {}", status, description),
+                    format!("{status} {description}"),
                 )));
             }
         }
@@ -369,7 +369,7 @@ impl Stream {
                     other => {
                         return Err(Box::from(std::io::Error::new(
                             ErrorKind::Other,
-                            format!("{}: {}", other, description),
+                            format!("{other}: {description}"),
                         )))
                     }
                 }
@@ -520,6 +520,32 @@ impl Stream {
     /// ```
     pub fn purge(&self) -> Purge<No, No> {
         Purge::build(self.clone())
+    }
+
+    /// Purge `Stream` messages for a matching subject.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// stream.purge_subject("data").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[deprecated(
+        since = "0.25.0",
+        note = "Overloads have been replaced with an into_future based builder. Use Stream::purge().filter(subject) instead."
+    )]
+    pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
+    where
+        T: Into<String>,
+    {
+        self.purge().filter(subject).await
     }
 
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and

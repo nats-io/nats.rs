@@ -179,8 +179,7 @@ impl Connector {
                                                 return Err(std::io::Error::new(
                                                     ErrorKind::Other,
                                                     format!(
-                                                        "NKey auth: failed signing the nonce: {}",
-                                                        e
+                                                        "NKey auth: failed signing the nonce: {e}"
                                                     ),
                                                 ));
                                             }
@@ -189,7 +188,7 @@ impl Connector {
                                     Err(e) => {
                                         return Err(std::io::Error::new(
                                             ErrorKind::Other,
-                                            format!("NKey auth: failed signing the nonce: {}", e),
+                                            format!("NKey auth: failed signing the nonce: {e}"),
                                         ));
                                     }
                                 }
@@ -203,7 +202,7 @@ impl Connector {
                                     Err(e) => {
                                         return Err(std::io::Error::new(
                                             ErrorKind::Other,
-                                            format!("JWT auth: failed signing the nonce: {}", e),
+                                            format!("JWT auth: failed signing the nonce: {e}"),
                                         ));
                                     }
                                 }
@@ -249,8 +248,6 @@ impl Connector {
         tls_required: bool,
         tls_host: &str,
     ) -> Result<(ServerInfo, Connection), io::Error> {
-        let tls_config = tls::config_tls(&self.options).await?;
-
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
@@ -276,7 +273,7 @@ impl Connector {
             Some(op) => {
                 return Err(io::Error::new(
                     ErrorKind::Other,
-                    format!("expected INFO, got {:?}", op),
+                    format!("expected INFO, got {op:?}"),
                 ))
             }
             None => {
@@ -288,12 +285,12 @@ impl Connector {
         };
 
         if self.options.tls_required || info.tls_required || tls_required {
-            let tls_config = Arc::new(tls_config);
+            let tls_config = Arc::new(tls::config_tls(&self.options).await?);
             let tls_connector =
                 tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
                     io::Error::new(
                         ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {}", err),
+                        format!("failed to create TLS connector from TLS config: {err}"),
                     )
                 })?;
 

@@ -1,3 +1,66 @@
+# 0.26.0
+## Overview
+This release introduces improvements around TLS handling which could cause issues with Windows systems, plus some other fixes and improvements.
+
+## Added
+* Add streams list by @Jarema in https://github.com/nats-io/nats.rs/pull/785
+* Add stream names list by @Jarema in https://github.com/nats-io/nats.rs/pull/783
+* Add type to service responses by @Jarema in https://github.com/nats-io/nats.rs/pull/786
+* Add kv example by @Jarema in https://github.com/nats-io/nats.rs/pull/784
+
+# Fixed
+* Fix queue push consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/793
+* Change TLS to conditionally load native certs (reported by @ronz-sensible) by @Jarema in https://github.com/nats-io/nats.rs/pull/794
+* Setup tls only if required (repored by @ronz-sensible) by @Jarema in https://github.com/nats-io/nats.rs/pull/788
+
+## Changed
+* Deprecate `Stream::purge_filter` by @caspervonb in https://github.com/nats-io/nats.rs/pull/755
+* Improve defaults for connection by @Jarema in https://github.com/nats-io/nats.rs/pull/790
+
+Thank you @ronz-sensible for helping with TLS on Windows!
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.25.1...async-nats/v0.26.0
+
+# 0.25.1
+## Overview
+
+A hotfix release, changing `consumer::Info.cluster` to not break serde when `cluster` is not present (single server mode).
+
+## Fixed
+* Fix cluster field deserialization for consumer info by @Jarema in https://github.com/nats-io/nats.rs/pull/779
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.25.0...async-nats/v0.25.1
+
+# 0.25.0
+## Overview
+
+This release focuses on `service` module, which leverages NATS primitives to provide API for creating and running horizontaly scalable microservices.
+
+## Added
+* Add Service API by @Jarema in https://github.com/nats-io/nats.rs/pull/748
+* Ordered and convenient HeaderValue reported by @cortopy, implemented by @Jarema in https://github.com/nats-io/nats.rs/pull/767
+## Changed
+* Always reset periodic flush interval after manual flush by @caspervonb in https://github.com/nats-io/nats.rs/pull/747
+* Fuse the pull consumer Stream after terminal error by @Jarema in https://github.com/nats-io/nats.rs/pull/751
+* Remove auth_required comment by @Jarema in https://github.com/nats-io/nats.rs/pull/763
+* Change JetStream request timeout to 5 seconds by @Jarema in https://github.com/nats-io/nats.rs/pull/772
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.24.0...async-nats/v0.25.0
+
+# 0.24.0
+## Overview
+This a minor release intended to release all changes before the long-awaited changes around concrete errors land.
+
+## What's Changed
+* Fix various spelling mistakes by @c0d3x42 in https://github.com/nats-io/nats.rs/pull/735
+* Add spellcheck by @Jarema in https://github.com/nats-io/nats.rs/pull/736
+* Reset flush interval after ping forces flush by @caspervonb in https://github.com/nats-io/nats.rs/pull/737
+* Add extended purge by @Jarema in https://github.com/nats-io/nats.rs/pull/739
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.23.0...async-nats/v0.24.0
+
 # 0.23.0
 ## Overview
 

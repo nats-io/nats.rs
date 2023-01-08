@@ -77,15 +77,15 @@ pub struct ConnectInfo {
     #[serde(default)]
     pub tls_required: bool,
 
-    /// Connection username (if `auth_required` is set)
+    /// Connection username.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub user: Option<String>,
 
-    /// Connection password (if auth_required is set)
+    /// Connection password.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub pass: Option<String>,
 
-    /// Client authorization token (if auth_required is set)
+    /// Client authorization token.
     #[serde(skip_serializing_if = "is_empty_or_none")]
     pub auth_token: Option<String>,
 }
@@ -277,7 +277,7 @@ impl<A: ToSocketAddrs + Display + Send + 'static> NatsTestServerBuilder<A> {
                 drop(listener);
                 log::debug!("evicting all connected clients");
                 clients.clear();
-                let baddr = format!("{}:{}", host, port);
+                let baddr = format!("{host}:{port}");
                 log::debug!("nats test server restarted on {}:{}", host, port);
                 listener = TcpListener::bind(baddr).unwrap();
                 listener.set_nonblocking(true).unwrap();

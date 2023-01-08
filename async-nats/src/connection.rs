@@ -305,7 +305,7 @@ impl Connection {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("invalid server operation: '{}'", line),
+            format!("invalid server operation: '{line}'"),
         ))
     }
 
@@ -397,21 +397,19 @@ impl Connection {
                 self.stream.write_all(subject.as_bytes()).await?;
                 if let Some(queue_group) = queue_group {
                     self.stream
-                        .write_all(format!(" {}", queue_group).as_bytes())
+                        .write_all(format!(" {queue_group}").as_bytes())
                         .await?;
                 }
                 self.stream
-                    .write_all(format!(" {}\r\n", sid).as_bytes())
+                    .write_all(format!(" {sid}\r\n").as_bytes())
                     .await?;
             }
 
             ClientOp::Unsubscribe { sid, max } => {
                 self.stream.write_all(b"UNSUB ").await?;
-                self.stream.write_all(format!("{}", sid).as_bytes()).await?;
+                self.stream.write_all(format!("{sid}").as_bytes()).await?;
                 if let Some(max) = max {
-                    self.stream
-                        .write_all(format!(" {}", max).as_bytes())
-                        .await?;
+                    self.stream.write_all(format!(" {max}").as_bytes()).await?;
                 }
                 self.stream.write_all(b"\r\n").await?;
             }

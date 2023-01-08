@@ -202,7 +202,7 @@ impl JetStreamOptions {
             self.api_prefix("".to_string())
         } else {
             self.has_domain = true;
-            self.api_prefix(format!("$JS.{}.API", domain))
+            self.api_prefix(format!("$JS.{domain}.API"))
         }
     }
 }
@@ -761,7 +761,7 @@ impl JetStream {
                     Err(err) => {
                         return Err(io::Error::new(
                             ErrorKind::NotFound,
-                            format!("provided durable consumer doesn't exist: {}", err),
+                            format!("provided durable consumer doesn't exist: {err}"),
                         ));
                     }
                 }
@@ -965,8 +965,7 @@ impl JetStream {
                         return Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!(
-                                "cannot create a queue subscription {} for a consumer with a deliver group {}",
-                                queue, deliver_group
+                                "cannot create a queue subscription {queue} for a consumer with a deliver group {deliver_group}"
                             ),
                         ));
                     }
@@ -974,8 +973,7 @@ impl JetStream {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!(
-                            "cannot create a subscription for a consumer with a deliver group {}",
-                            deliver_group
+                            "cannot create a subscription for a consumer with a deliver group {deliver_group}"
                         ),
                     ));
                 }
@@ -1787,7 +1785,9 @@ impl JetStream {
     where
         Res: DeserializeOwned,
     {
-        let res_msg = self.connection.request(subject, req)?;
+        let res_msg = self
+            .connection
+            .request_timeout(subject, req, Duration::from_secs(5))?;
         let res: ApiResponse<Res> = serde_json::de::from_slice(&res_msg.data)?;
         match res {
             ApiResponse::Ok(stream_info) => Ok(stream_info),
