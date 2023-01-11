@@ -156,7 +156,6 @@ pub trait ServiceExt {
     /// let mut service = client.add_service( async_nats::service::Config {
     ///     name: "generator".to_string(),
     ///     version: "1.0.0".to_string(),
-    ///     root_subject: "events.>".to_string(),
     ///     schema: None,
     ///     description: None,
     /// }).await?;
@@ -195,7 +194,6 @@ impl ServiceExt for crate::Client {
 /// let mut service = client.add_service( async_nats::service::Config {
 ///     name: "generator".to_string(),
 ///     version: "1.0.0".to_string(),
-///     root_subject: "events.>".to_string(),
 ///     schema: None,
 ///     description: None,
 /// }).await?;
@@ -548,7 +546,6 @@ impl Request {
     /// # let client = async_nats::connect("demo.nats.io").await?;
     /// # let mut service = client.add_service(async_nats::service::Config {
     /// #     name: "generator".to_string(),
-    /// #     root_subject: "generator".to_string(),
     /// #     version: "1.0.0".to_string(),
     /// #     schema: None,
     /// #     description: None,
