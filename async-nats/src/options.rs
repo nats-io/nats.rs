@@ -138,6 +138,21 @@ impl ConnectOptions {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// ## Pass multiple URLs.
+    /// ```no_run
+    ///#[tokio::main]
+    ///# async fn main() -> Result<(), async_nats::Error> {
+    ///use async_nats::ServerAddr;
+    ///let client = async_nats::connect(vec![
+    ///    "demo.nats.io".parse::<ServerAddr>()?,
+    ///    "other.nats.io".parse::<ServerAddr>()?,
+    ///])
+    ///.await
+    ///.unwrap();
+    ///# Ok(())
+    ///# }
+    /// ```
     pub async fn connect<A: ToServerAddrs>(self, addrs: A) -> io::Result<Client> {
         crate::connect_with_options(addrs, self).await
     }
