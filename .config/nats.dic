@@ -119,3 +119,5 @@ cloneable
 PurgeRequest
 StatsResponse
 SemVer
+ServerAddr
+Vec
