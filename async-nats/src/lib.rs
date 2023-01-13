@@ -1165,6 +1165,14 @@ impl<'a> ToServerAddrs for &'a [ServerAddr] {
     }
 }
 
+impl ToServerAddrs for Vec<ServerAddr> {
+    type Iter = std::vec::IntoIter<ServerAddr>;
+
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        Ok(self.clone().into_iter())
+    }
+}
+
 impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     type Iter = T::Iter;
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
