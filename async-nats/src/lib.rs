@@ -760,6 +760,8 @@ impl fmt::Display for Event {
 /// To have customized NATS connection, check [ConnectOptions].
 ///
 /// # Examples
+///
+/// ## Single URL
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
@@ -768,6 +770,56 @@ impl fmt::Display for Event {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// ## Connect with [Vec] of [ServerAddr].
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let client = async_nats::connect(vec![
+///    "demo.nats.io".parse::<ServerAddr>()?,
+///    "other.nats.io".parse::<ServerAddr>()?,
+///])
+///.await
+///.unwrap();
+///# Ok(())
+///# }
+/// ```
+///
+/// ## with [Vec], but parse URLs inside [crate::connect()]
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let servers = vec!["demo.nats.io", "other.nats.io"];
+///let client = async_nats::connect(
+///    servers
+///        .iter()
+///        .map(|url| url.parse())
+///        .collect::<Result<Vec<ServerAddr>, _>>()?
+///)
+///.await?;
+///# Ok(())
+///# }
+///```
+///
+///
+/// ## with slice.
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let client = async_nats::connect(
+///    [
+///        "demo.nats.io".parse::<ServerAddr>()?,
+///        "other.nats.io".parse::<ServerAddr>()?,
+///    ]
+///    .as_slice(),
+///)
+///.await?;
+///# Ok(())
+///# }
+///
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
