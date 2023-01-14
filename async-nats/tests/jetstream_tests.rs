@@ -55,6 +55,37 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn publish_headers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let _stream = context
+            .create_stream(stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let headers = HeaderMap::new();
+        let payload = b"Hello JetStream";
+
+        let ack = context
+            .publish("foo".into(), payload.as_ref().into())
+            .headers(headers)
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(ack.stream, "TEST");
+        assert_eq!(ack.sequence, 1);
+    }
+
+
+    #[tokio::test]
     async fn publish_with_headers() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
