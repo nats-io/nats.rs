@@ -29,7 +29,7 @@ mod jetstream {
 
     use super::*;
     use async_nats::connection::State;
-    use async_nats::header::{HeaderMap};
+    use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::{
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
@@ -83,7 +83,6 @@ mod jetstream {
         assert_eq!(ack.stream, "TEST");
         assert_eq!(ack.sequence, 1);
     }
-
 
     #[tokio::test]
     async fn publish_with_headers() {
