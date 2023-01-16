@@ -1106,11 +1106,16 @@ impl IntoFuture for Publish {
         Box::pin(std::future::IntoFuture::into_future(async move {
             let inbox = self.context.client.new_inbox();
             let subscription = self.context.client.subscribe(inbox.clone()).await?;
-            let publish = self
+            let mut publish = self
                 .context
                 .client
                 .publish(self.subject, self.payload)
                 .reply(inbox);
+
+            if let Some(headers) = self.headers {
+                publish = publish.headers(headers);
+            }
+
             let timeout = self.context.timeout;
 
             tokio::time::timeout(timeout, publish.into_future())
