@@ -53,6 +53,7 @@ pub struct ConnectOptions {
     pub(crate) inbox_prefix: String,
     pub(crate) request_timeout: Option<Duration>,
     pub(crate) retry_on_initial_connect: bool,
+    pub(crate) ignore_discovered_servers: bool,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -105,6 +106,7 @@ impl Default for ConnectOptions {
             inbox_prefix: "_INBOX".to_string(),
             request_timeout: Some(Duration::from_secs(10)),
             retry_on_initial_connect: false,
+            ignore_discovered_servers: false,
         }
     }
 }
@@ -566,6 +568,11 @@ impl ConnectOptions {
 
     pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
+        self
+    }
+
+    pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
+        self.ignore_discovered_servers = true;
         self
     }
 }

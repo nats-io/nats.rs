@@ -50,6 +50,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
     pub(crate) name: Option<String>,
+    pub(crate) ignore_discovered_servers: bool,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -121,9 +122,11 @@ impl Connector {
                     .await
                 {
                     Ok((server_info, mut connection)) => {
-                        for url in &server_info.connect_urls {
-                            let server_addr = url.parse::<ServerAddr>()?;
-                            self.servers.entry(server_addr).or_insert(0);
+                        if !self.options.ignore_discovered_servers {
+                            for url in &server_info.connect_urls {
+                                let server_addr = url.parse::<ServerAddr>()?;
+                                self.servers.entry(server_addr).or_insert(0);
+                            }
                         }
 
                         let server_attempts = self.servers.get_mut(&server_addr).unwrap();
