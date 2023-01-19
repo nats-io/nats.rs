@@ -2632,4 +2632,65 @@ mod jetstream {
             std::io::ErrorKind::NotFound
         );
     }
+    #[tokio::test]
+    async fn multiple_filters_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                subjects: vec![
+                    "events".to_string(),
+                    "data".to_string(),
+                    "other".to_string(),
+                ],
+                name: "filter".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("events".to_string(), "0".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        context
+            .publish("other".to_string(), "100".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        context
+            .publish("data".to_string(), "1".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        context
+            .publish("events".to_string(), "2".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::push::Config {
+                filter_subjects: vec!["events".to_string(), "data".to_string()],
+                durable_name: Some("group".to_string()),
+                deliver_subject: client.new_inbox(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut stream = consumer.messages().await.unwrap().take(3).enumerate();
+
+        while let Some((i, message)) = stream.next().await {
+            let message = message.unwrap();
+            assert_eq!(from_utf8(&message.payload).unwrap(), i.to_string());
+        }
+    }
 }
