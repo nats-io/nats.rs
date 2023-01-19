@@ -1473,6 +1473,9 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -1528,6 +1531,7 @@ impl IntoConsumerConfig for Config {
             ack_wait: self.ack_wait,
             max_deliver: self.max_deliver,
             filter_subject: self.filter_subject,
+            filter_subjects: self.filter_subjects,
             replay_policy: self.replay_policy,
             rate_limit: self.rate_limit,
             sample_frequency: self.sample_frequency,
@@ -1561,6 +1565,7 @@ impl FromConsumer for Config {
             ack_wait: config.ack_wait,
             max_deliver: config.max_deliver,
             filter_subject: config.filter_subject,
+            filter_subjects: config.filter_subjects,
             replay_policy: config.replay_policy,
             rate_limit: config.rate_limit,
             sample_frequency: config.sample_frequency,
