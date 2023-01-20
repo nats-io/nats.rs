@@ -472,6 +472,19 @@ mod kv {
         keys.sort();
         assert_eq!(vec!["bar", "foo"], keys);
 
+        // Delete a key and make sure it doesn't show up in the keys list
+        kv.delete("bar").await.unwrap();
+        let keys = kv.keys().await.unwrap().collect::<Vec<String>>();
+        assert_eq!(vec!["foo"], keys, "Deleted key shouldn't appear in list");
+
+        // Put the key back, and then purge and make sure the key doesn't show up
+        for i in 0..10 {
+            kv.put("bar", i.to_string().into()).await.unwrap();
+        }
+        kv.purge("foo").await.unwrap();
+        let keys = kv.keys().await.unwrap().collect::<Vec<String>>();
+        assert_eq!(vec!["bar"], keys, "Purged key shouldn't appear in the list");
+
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
                 bucket: "history2".to_string(),
