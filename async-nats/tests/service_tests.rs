@@ -281,4 +281,41 @@ mod service {
             .await
             .unwrap_err();
     }
+
+    #[tokio::test]
+    async fn cross_clients_tests() {
+        let client = async_nats::connect("localhost:4222").await.unwrap();
+
+        let service = client
+            .add_service(async_nats::service::Config {
+                name: "cross".to_string(),
+                version: "1.0.0".to_string(),
+                schema: None,
+                description: Some("a cross service".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let mut endpoint = service.endpoint("cross").await.unwrap();
+
+        while let Some(request) = endpoint.next().await {
+            println!("REQUEST RECEIVED");
+            if request.message.payload.is_empty()
+                || from_utf8(&request.message.payload).unwrap() == "error"
+            {
+                println!("ERROR SHOULD BE SENT");
+                request
+                    .respond(Err(async_nats::service::error::Error(
+                        503,
+                        "empty payload".to_string(),
+                    )))
+                    .await
+                    .unwrap();
+            } else {
+                println!("NON ERROR RESPONSE ");
+                let echo = request.message.payload.clone();
+                request.respond(Ok(echo)).await.unwrap();
+            }
+        }
+    }
 }

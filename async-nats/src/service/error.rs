@@ -15,7 +15,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Error(pub usize, pub String);
 
 impl Display for Error {
@@ -27,4 +27,30 @@ impl Display for Error {
         )
     }
 }
+
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde_json::to_string(&ErrorDT::from(self.clone()))
+            .unwrap()
+            .serialize(serializer)
+    }
+}
 impl std::error::Error for Error {}
+
+#[derive(Serialize, Deserialize)]
+struct ErrorDT {
+    status: String,
+    code: usize,
+}
+
+impl From<Error> for ErrorDT {
+    fn from(value: Error) -> Self {
+        ErrorDT {
+            code: value.0,
+            status: value.1,
+        }
+    }
+}

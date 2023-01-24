@@ -17,6 +17,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     pin::Pin,
+    str::from_utf8,
     sync::{Arc, Mutex},
     task::Poll,
     time::{Duration, Instant},
@@ -81,9 +82,12 @@ pub struct EndpointStats {
     pub requests: usize,
     #[serde(rename = "num_errors")]
     pub errors: usize,
+    #[serde(default, with = "serde_nanos")]
     pub processing_time: std::time::Duration,
+    #[serde(default, with = "serde_nanos")]
     pub average_processing_time: std::time::Duration,
     pub last_error: Option<error::Error>,
+    pub data: String,
 }
 
 /// Information about service instance.
@@ -95,6 +99,7 @@ pub struct Info {
     pub id: String,
     pub description: Option<String>,
     pub version: String,
+    pub subjects: Vec<String>,
 }
 
 /// Schema of requests and responses.
@@ -214,6 +219,7 @@ pub struct Service {
     client: Client,
     handle: JoinHandle<Result<(), Error>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    subjects: Arc<Mutex<Vec<String>>>,
 }
 
 pub struct Group {
@@ -281,12 +287,14 @@ impl Service {
         }
         let id = nuid::next();
         let started = time::OffsetDateTime::now_utc();
+        let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
             response_type: "io.nats.micro.v1.info_response".to_string(),
             name: config.name.clone(),
             id: id.clone(),
             description: config.description.clone(),
             version: config.version.clone(),
+            subjects: Vec::default(),
         };
 
         let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
@@ -312,15 +320,15 @@ impl Service {
         // Start a task for handling verbs subscriptions.
         let handle = tokio::task::spawn({
             let info = info.clone();
+            let subjects = subjects.clone();
             let endpoint_stats = endpoint_stats.clone();
             let client = client.clone();
-            let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
             let schema_json = serde_json::to_vec(&json!({
                 "type": "io.nats.micro.v1.schema_response",
                 "name": config.name.clone(),
                 "id": id.clone(),
                 "version": config.version.clone(),
-                "schema": config.schema,
+                // "schema": config.schema,
             }))
             .map(Bytes::from)?;
             async move {
@@ -334,12 +342,15 @@ impl Service {
                                 "version": info.version,
                             }))?;
                             client.publish(ping.reply.unwrap(), pong.into()).await?;
-                            endpoint_stats.lock().unwrap().endpoints.entry("ping".to_string()).and_modify(|stat| {
-                                stat.requests += 1;
-                            }).or_default();
-
                         },
                         Some(info_request) = infos.next() => {
+                            let subjects = subjects.clone();
+                            let info = info.clone();
+                            let info = Info {
+                                subjects: subjects.lock().unwrap().to_vec(),
+                                ..info
+                            };
+                            let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
                             client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
                         },
                         Some(schema_request) = schemas.next() => {
@@ -369,6 +380,7 @@ impl Service {
             client,
             handle,
             shutdown_tx,
+            subjects,
         })
     }
 }
@@ -513,6 +525,7 @@ impl Service {
                 name: subject.clone(),
                 ..Default::default()
             });
+        self.subjects.lock().unwrap().push(subject.clone());
         Ok(Endpoint {
             requests,
             stats: self.stats.clone(),
@@ -569,7 +582,8 @@ impl Request {
                     .entry(self.endpoint.clone())
                     .and_modify(|stats| {
                         stats.last_error = Some(err.clone());
-                        stats.errors += 1
+                        stats.errors += 1;
+                        stats.data = "bla".to_string();
                     })
                     .or_default();
                 let mut headers = HeaderMap::new();
