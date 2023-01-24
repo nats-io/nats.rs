@@ -304,7 +304,7 @@ impl<'a> Batch {
 
         let sleep = batch.expires.map(|e| {
             Box::pin(tokio::time::sleep(
-                Duration::from_nanos(e as u64).saturating_add(Duration::from_secs(5)),
+                Duration::from_nanos(e).saturating_add(Duration::from_secs(5)),
             ))
         });
 
@@ -500,8 +500,7 @@ impl Stream {
                         .map(|expires| match expires {
                             0 => futures::future::Either::Left(future::pending()),
                             t => futures::future::Either::Right(tokio::time::sleep(
-                                Duration::from_nanos(t as u64)
-                                    .saturating_add(Duration::from_secs(5)),
+                                Duration::from_nanos(t).saturating_add(Duration::from_secs(5)),
                             )),
                         })
                         .unwrap_or_else(|| futures::future::Either::Left(future::pending()));
@@ -811,7 +810,7 @@ pub struct StreamBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: usize,
+    expires: u64,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1047,7 +1046,7 @@ pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: Option<usize>,
+    expires: Option<u64>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1282,7 +1281,7 @@ pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: usize,
+    expires: u64,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1493,7 +1492,7 @@ pub struct BatchConfig {
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires: Option<usize>,
+    pub expires: Option<u64>,
     /// This optionally causes the server not to store this pending request at all, but when there are no
     /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
     /// can know when you reached the end of the stream for example. A 409 is returned if the
