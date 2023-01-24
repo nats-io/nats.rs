@@ -675,6 +675,8 @@ impl Store {
             })
             .await?;
 
+        let consumer_name = consumer.info.name.clone();
+
         let mut entries = History {
             done: consumer.info.num_pending == 0,
             subscription: consumer.messages().await?,
@@ -689,6 +691,7 @@ impl Store {
                 keys.insert(entry.key);
             }
         }
+        self.stream.delete_consumer(&consumer_name).await?;
         Ok(keys.into_iter())
     }
 }
