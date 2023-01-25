@@ -15,7 +15,7 @@
 mod service {
     use std::{process::Command, str::from_utf8};
 
-    use async_nats::service::{Info, ServiceExt, StatsHandler, StatsResponse};
+    use async_nats::service::{Info, ServiceExt, StatsResponse};
     use futures::StreamExt;
     use tracing::debug;
 
@@ -293,6 +293,7 @@ mod service {
     #[tokio::test]
     #[cfg(not(target_os = "windows"))]
     async fn cross_clients_tests() {
+        use async_nats::service::StatsHandler;
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
