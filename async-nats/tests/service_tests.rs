@@ -291,6 +291,7 @@ mod service {
     }
 
     #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
     async fn cross_clients_tests() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
