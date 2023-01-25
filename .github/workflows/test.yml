@@ -63,6 +63,10 @@ jobs:
       - name: Install nats-server
         run: go install github.com/nats-io/nats-server/v2@latest
 
+      - name: Instsall deno
+      - if: ${{ matrix.os }} != windows-latest
+        run: curl -fsSL https://deno.land/x/install/install.sh | sh
+
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
