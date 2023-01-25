@@ -13,7 +13,7 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::{process::Command, str::from_utf8};
+    use std::str::from_utf8;
 
     use async_nats::service::{Info, ServiceExt, StatsResponse};
     use futures::StreamExt;
@@ -294,6 +294,8 @@ mod service {
     #[cfg(not(target_os = "windows"))]
     async fn cross_clients_tests() {
         use async_nats::service::StatsHandler;
+        use std::process::Command;
+
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
