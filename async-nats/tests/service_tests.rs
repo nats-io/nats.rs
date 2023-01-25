@@ -13,7 +13,7 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::str::from_utf8;
+    use std::{process::Command, str::from_utf8};
 
     use async_nats::service::{Info, ServiceExt, StatsHandler, StatsResponse};
     use futures::StreamExt;
@@ -292,7 +292,8 @@ mod service {
 
     #[tokio::test]
     async fn cross_clients_tests() {
-        let client = async_nats::connect("localhost:4222").await.unwrap();
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let service = client
             .add_service(async_nats::service::Config {
@@ -308,22 +309,25 @@ mod service {
             .unwrap();
 
         let mut endpoint = service.endpoint("cross").await.unwrap();
-
-        while let Some(request) = endpoint.next().await {
-            if request.message.payload.is_empty()
-                || from_utf8(&request.message.payload).unwrap() == "error"
-            {
-                request
-                    .respond(Err(async_nats::service::error::Error(
-                        503,
-                        "empty payload".to_string(),
-                    )))
-                    .await
-                    .unwrap();
-            } else {
-                let echo = request.message.payload.clone();
-                request.respond(Ok(echo)).await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                if request.message.payload.is_empty()
+                    || from_utf8(&request.message.payload).unwrap() == "error"
+                {
+                    request
+                        .respond(Err(async_nats::service::error::Error(
+                            503,
+                            "empty payload".to_string(),
+                        )))
+                        .await
+                        .unwrap();
+                } else {
+                    let echo = request.message.payload.clone();
+                    request.respond(Ok(echo)).await.unwrap();
+                }
             }
-        }
+        });
+
+        Command::new("deno").args(["run", "-A", "--unstable", "https://raw.githubusercontent.com/nats-io/nats.deno/main/tests/helpers/service-check.ts", "--server", &server.client_url(), "--name", "cross"]).output().unwrap();
     }
 }

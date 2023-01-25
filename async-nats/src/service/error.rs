@@ -15,7 +15,8 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "ErrorDT", into = "ErrorDT")]
 pub struct Error(pub usize, pub String);
 
 impl Display for Error {
@@ -28,16 +29,24 @@ impl Display for Error {
     }
 }
 
-impl Serialize for Error {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serde_json::to_string(&ErrorDT::from(self.clone()))
-            .unwrap()
-            .serialize(serializer)
-    }
-}
+// impl Deserialize for Error {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: serde::Deserializer<'de> {
+//         let schema = ErrorDT {}
+//     }
+// }
+
+// impl Serialize for Error {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: serde::Serializer,
+//     {
+//         serde_json::to_string(&ErrorDT::from(self.clone()))
+//             .unwrap()
+//             .serialize(serializer)
+//     }
+// }
 impl std::error::Error for Error {}
 
 #[derive(Serialize, Deserialize)]
@@ -52,5 +61,11 @@ impl From<Error> for ErrorDT {
             code: value.0,
             status: value.1,
         }
+    }
+}
+
+impl From<ErrorDT> for Error {
+    fn from(value: ErrorDT) -> Self {
+        Error(value.code, value.status)
     }
 }

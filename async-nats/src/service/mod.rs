@@ -25,7 +25,7 @@ use std::{
 use bytes::Bytes;
 use futures::{
     stream::{self, SelectAll},
-    Future, FutureExt, Stream, StreamExt,
+    Future, Stream, StreamExt,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -258,7 +258,7 @@ impl Group {
             .await?;
         debug!("created service for endpoint {}.{subject}", self.prefix);
 
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let shutdown_rx = self.shutdown_tx.subscribe();
 
         let mut stats = self.stats.lock().unwrap();
         stats
@@ -273,7 +273,8 @@ impl Group {
             stats: self.stats.clone(),
             client: self.client.clone(),
             endpoint: subject,
-            shutdown: Box::pin(async move { shutdown_rx.recv().fuse().await }),
+            shutdown_rx: Some(shutdown_rx),
+            shutdown: None,
         })
     }
 }
@@ -420,12 +421,17 @@ async fn verb_subscription(
     Ok(stream::select_all([verb_all, verb_id, verb_name]).fuse())
 }
 
+type ShutdownReceiverFuture = Pin<
+    Box<dyn Future<Output = Result<(), tokio::sync::broadcast::error::RecvError>> + Send + Sync>,
+>;
+
 pub struct Endpoint {
     requests: Subscriber,
     stats: Arc<Mutex<Stats>>,
     client: Client,
     endpoint: String,
-    shutdown: Pin<Box<dyn Future<Output = Result<(), tokio::sync::broadcast::error::RecvError>>>>,
+    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+    shutdown: Option<ShutdownReceiverFuture>,
 }
 
 impl Stream for Endpoint {
@@ -436,19 +442,25 @@ impl Stream for Endpoint {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         trace!("polling for next request");
-        match self.shutdown.as_mut().poll(cx) {
-            Poll::Ready(_result) => {
-                debug!("got stop broadcast");
-                self.requests
-                    .sender
-                    .try_send(crate::Command::Unsubscribe {
-                        sid: self.requests.sid,
-                        max: None,
-                    })
-                    .ok();
-            }
-            Poll::Pending => {
-                trace!("stop broadcast still pending");
+        match self.shutdown.as_mut() {
+            Some(shutdown) => match shutdown.as_mut().poll(cx) {
+                Poll::Ready(_result) => {
+                    debug!("got stop broadcast");
+                    self.requests
+                        .sender
+                        .try_send(crate::Command::Unsubscribe {
+                            sid: self.requests.sid,
+                            max: None,
+                        })
+                        .ok();
+                }
+                Poll::Pending => {
+                    trace!("stop broadcast still pending");
+                }
+            },
+            None => {
+                let mut receiver = self.shutdown_rx.take().unwrap();
+                self.shutdown = Some(Box::pin(async move { receiver.recv().await }));
             }
         }
         trace!("checking for new messages");
@@ -532,7 +544,7 @@ impl Service {
             .await?;
         debug!("created service for endpoint {subject}");
 
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let shutdown_rx = self.shutdown_tx.subscribe();
 
         let mut stats = self.stats.lock().unwrap();
         stats
@@ -548,7 +560,8 @@ impl Service {
             stats: self.stats.clone(),
             client: self.client.clone(),
             endpoint: subject,
-            shutdown: Box::pin(async move { shutdown_rx.recv().fuse().await }),
+            shutdown_rx: Some(shutdown_rx),
+            shutdown: None,
         })
     }
 }
