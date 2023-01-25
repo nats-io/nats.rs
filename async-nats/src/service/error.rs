@@ -29,24 +29,6 @@ impl Display for Error {
     }
 }
 
-// impl Deserialize for Error {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//     where
-//         D: serde::Deserializer<'de> {
-//         let schema = ErrorDT {}
-//     }
-// }
-
-// impl Serialize for Error {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: serde::Serializer,
-//     {
-//         serde_json::to_string(&ErrorDT::from(self.clone()))
-//             .unwrap()
-//             .serialize(serializer)
-//     }
-// }
 impl std::error::Error for Error {}
 
 #[derive(Serialize, Deserialize)]
