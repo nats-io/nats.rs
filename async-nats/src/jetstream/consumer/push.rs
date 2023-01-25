@@ -375,7 +375,7 @@ impl IntoConsumerConfig for OrderedConfig {
             idle_heartbeat: Duration::from_secs(5),
             max_batch: 0,
             max_expires: Duration::default(),
-            inactive_threshold: Duration::from_secs(30),
+            inactive_threshold: Duration::from_secs(5),
             num_replicas: 1,
             memory_storage: true,
         }

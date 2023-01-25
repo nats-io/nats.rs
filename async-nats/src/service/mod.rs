@@ -17,7 +17,6 @@ use std::{
     collections::HashMap,
     fmt::Display,
     pin::Pin,
-    str::from_utf8,
     sync::{Arc, Mutex},
     task::Poll,
     time::{Duration, Instant},
@@ -122,8 +121,10 @@ pub struct Config {
     pub description: Option<String>,
     /// A SemVer valid service version.
     pub version: String,
-    // Request / Response schemas
+    /// Request / Response schemas
     pub schema: Option<Schema>,
+    /// Custom handler for providing the `EndpointStats.data` value.
+    pub stats_handler: Option<StatsHandler>,
 }
 
 /// Verbs that can be used to acquire information from the services.
@@ -220,6 +221,14 @@ pub struct Service {
     handle: JoinHandle<Result<(), Error>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     subjects: Arc<Mutex<Vec<String>>>,
+}
+
+pub struct StatsHandler(pub Box<dyn FnMut(String, EndpointStats) -> String + Send>);
+
+impl std::fmt::Debug for StatsHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Stats handler")
+    }
 }
 
 pub struct Group {
@@ -319,6 +328,7 @@ impl Service {
 
         // Start a task for handling verbs subscriptions.
         let handle = tokio::task::spawn({
+            let mut stats_callback = config.stats_handler;
             let info = info.clone();
             let subjects = subjects.clone();
             let endpoint_stats = endpoint_stats.clone();
@@ -328,7 +338,6 @@ impl Service {
                 "name": config.name.clone(),
                 "id": id.clone(),
                 "version": config.version.clone(),
-                // "schema": config.schema,
             }))
             .map(Bytes::from)?;
             async move {
@@ -356,8 +365,16 @@ impl Service {
                         Some(schema_request) = schemas.next() => {
                             client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
                         },
-                        // FIXME: proper status handling
                         Some(stats_request) = stats.next() => {
+                            if let Some(stats_callback) = stats_callback.as_mut() {
+
+                                let mut endpoint_stats_locked = endpoint_stats.lock().unwrap();
+                                for (key, value) in &mut endpoint_stats_locked.endpoints {
+                                    let data = stats_callback.0(key.to_string(), value.clone());
+                                    value.data = data;
+                                }
+                            }
+
                             let stats = serde_json::to_vec(&StatsResponse {
                                 response_type: "io.nats.micro.v1.stats_response".to_string(),
                                 name: info.name.clone(),
@@ -583,7 +600,6 @@ impl Request {
                     .and_modify(|stats| {
                         stats.last_error = Some(err.clone());
                         stats.errors += 1;
-                        stats.data = "bla".to_string();
                     })
                     .or_default();
                 let mut headers = HeaderMap::new();

@@ -15,7 +15,7 @@
 mod service {
     use std::str::from_utf8;
 
-    use async_nats::service::{Info, ServiceExt, StatsResponse};
+    use async_nats::service::{Info, ServiceExt, StatsHandler, StatsResponse};
     use futures::StreamExt;
     use tracing::debug;
 
@@ -30,6 +30,7 @@ mod service {
                 description: None,
                 version: "1.0.0.1".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -45,6 +46,7 @@ mod service {
                 description: None,
                 version: "beta-1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -60,6 +62,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -75,6 +78,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -94,6 +98,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -104,6 +109,7 @@ mod service {
                 description: None,
                 version: "2.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -129,6 +135,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 description: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -167,6 +174,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 description: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -292,6 +300,9 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 description: Some("a cross service".to_string()),
+                stats_handler: Some(StatsHandler(Box::new(|endpoint, _| {
+                    format!("custom data for {}", endpoint)
+                }))),
             })
             .await
             .unwrap();
@@ -299,11 +310,9 @@ mod service {
         let mut endpoint = service.endpoint("cross").await.unwrap();
 
         while let Some(request) = endpoint.next().await {
-            println!("REQUEST RECEIVED");
             if request.message.payload.is_empty()
                 || from_utf8(&request.message.payload).unwrap() == "error"
             {
-                println!("ERROR SHOULD BE SENT");
                 request
                     .respond(Err(async_nats::service::error::Error(
                         503,
@@ -312,7 +321,6 @@ mod service {
                     .await
                     .unwrap();
             } else {
-                println!("NON ERROR RESPONSE ");
                 let echo = request.message.payload.clone();
                 request.respond(Ok(echo)).await.unwrap();
             }
