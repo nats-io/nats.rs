@@ -127,6 +127,60 @@ pub struct Config {
     pub stats_handler: Option<StatsHandler>,
 }
 
+pub struct ServiceBuilder {
+    client: Client,
+    description: Option<String>,
+    schema: Option<Schema>,
+    stats_handler: Option<StatsHandler>,
+}
+
+impl ServiceBuilder {
+    fn new(client: Client) -> Self {
+        Self {
+            client,
+            description: None,
+            schema: None,
+            stats_handler: None,
+        }
+    }
+
+    /// Adds description for the service.
+    pub fn description<S: ToString>(mut self, description: S) -> Self {
+        self.description = Some(description.to_string());
+        self
+    }
+
+    /// Adds schema to the service.
+    pub fn schema(mut self, schema: Schema) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+
+    /// Adds hander for custom service statistics.
+    pub fn stats_handler<F>(mut self, handler: F) -> Self
+    where
+        F: FnMut(String, EndpointStats) -> String + Send + Sync + 'static,
+    {
+        self.stats_handler = Some(StatsHandler(Box::new(handler)));
+        self
+    }
+
+    /// Stats the service with configured options.
+    pub async fn start<S: ToString>(self, name: S, version: S) -> Result<Service, Error> {
+        Service::add(
+            self.client,
+            Config {
+                name: name.to_string(),
+                version: version.to_string(),
+                description: self.description,
+                schema: self.schema,
+                stats_handler: self.stats_handler,
+            },
+        )
+        .await
+    }
+}
+
 /// Verbs that can be used to acquire information from the services.
 pub enum Verb {
     Ping,
@@ -177,6 +231,31 @@ pub trait ServiceExt {
     /// # }
     /// ```
     fn add_service(&self, config: Config) -> Self::Output;
+
+    /// Returns Service instance builder.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder()
+    ///     .description("some service")
+    ///     .stats_handler(|endpoint, stats| format!("customstats"))
+    ///     .start("products","1.0.0").await?;
+    ///
+    /// let mut endpoint = service.endpoint("get").await?;
+    ///
+    /// if let Some(request) = endpoint.next().await {
+    ///     request.respond(Ok("hello".into())).await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn service_builder(&self) -> ServiceBuilder;
 }
 
 impl ServiceExt for crate::Client {
@@ -185,6 +264,10 @@ impl ServiceExt for crate::Client {
     fn add_service(&self, config: Config) -> Self::Output {
         let client = self.clone();
         Box::pin(async { Service::add(client, config).await })
+    }
+
+    fn service_builder(&self) -> ServiceBuilder {
+        ServiceBuilder::new(self.clone())
     }
 }
 
