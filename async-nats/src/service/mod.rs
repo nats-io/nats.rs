@@ -164,6 +164,7 @@ pub trait ServiceExt {
     ///     version: "1.0.0".to_string(),
     ///     schema: None,
     ///     description: None,
+    ///     stats_handler: None,
     /// }).await?;
     ///
     /// let mut endpoint = service.endpoint("get").await?;
@@ -202,6 +203,7 @@ impl ServiceExt for crate::Client {
 ///     version: "1.0.0".to_string(),
 ///     schema: None,
 ///     description: None,
+///     stats_handler: None,
 /// }).await?;
 ///
 /// let mut endpoint = service.endpoint("get").await?;
@@ -592,6 +594,7 @@ impl Request {
     /// #     version: "1.0.0".to_string(),
     /// #     schema: None,
     /// #     description: None,
+    ///     stats_handler: None,
     /// # }).await?;
     ///
     /// let mut endpoint = service.endpoint("endpoint").await?;
