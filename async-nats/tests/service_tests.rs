@@ -293,22 +293,16 @@ mod service {
     #[tokio::test]
     #[cfg(not(target_os = "windows"))]
     async fn cross_clients_tests() {
-        use async_nats::service::StatsHandler;
         use std::process::Command;
 
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let service = client
-            .add_service(async_nats::service::Config {
-                name: "cross".to_string(),
-                version: "1.0.0".to_string(),
-                schema: None,
-                description: Some("a cross service".to_string()),
-                stats_handler: Some(StatsHandler(Box::new(|endpoint, _| {
-                    format!("custom data for {}", endpoint)
-                }))),
-            })
+            .service_builder()
+            .stats_handler(|endpoint, _| format!("custom data for {}", endpoint))
+            .description("a cross service")
+            .start("cross", "1.0.0")
             .await
             .unwrap();
 
