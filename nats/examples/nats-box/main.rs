@@ -68,7 +68,7 @@ fn main() -> CliResult {
                 println!("Received a {msg:?}");
                 if json {
                     match serde_json::from_slice::<serde_json::Value>(&msg.data) {
-                        Ok(parsed_msg) => println!("{}", parsed_msg),
+                        Ok(parsed_msg) => println!("{parsed_msg}"),
                         Err(e) => eprintln!("failed to parse as json: {e:?}"),
                     }
                 }
