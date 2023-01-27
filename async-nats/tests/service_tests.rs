@@ -30,6 +30,7 @@ mod service {
                 description: None,
                 version: "1.0.0.1".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -45,6 +46,7 @@ mod service {
                 description: None,
                 version: "beta-1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -60,6 +62,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -75,6 +78,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap_err()
@@ -94,6 +98,7 @@ mod service {
                 description: None,
                 version: "1.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -104,6 +109,7 @@ mod service {
                 description: None,
                 version: "2.0.0".to_string(),
                 schema: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -129,6 +135,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 description: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -167,6 +174,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 description: None,
+                stats_handler: None,
             })
             .await
             .unwrap();
@@ -201,10 +209,10 @@ mod service {
         if let Some(request) = endpoint.next().await {
             debug!("respond with error");
             request
-                .respond(Err(async_nats::service::error::Error(
-                    503,
-                    "error".to_string(),
-                )))
+                .respond(Err(async_nats::service::error::Error {
+                    code: 503,
+                    status: "error".to_string(),
+                }))
                 .await
                 .unwrap();
         }
@@ -280,5 +288,44 @@ mod service {
             .request("$SRV.PING".to_string(), "".into())
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
+    async fn cross_clients_tests() {
+        use std::process::Command;
+
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .stats_handler(|endpoint, _| format!("custom data for {endpoint}"))
+            .description("a cross service")
+            .start("cross", "1.0.0")
+            .await
+            .unwrap();
+
+        let mut endpoint = service.endpoint("cross").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                if request.message.payload.is_empty()
+                    || from_utf8(&request.message.payload).unwrap() == "error"
+                {
+                    request
+                        .respond(Err(async_nats::service::error::Error {
+                            code: 503,
+                            status: "empty payload".to_string(),
+                        }))
+                        .await
+                        .unwrap();
+                } else {
+                    let echo = request.message.payload.clone();
+                    request.respond(Ok(echo)).await.unwrap();
+                }
+            }
+        });
+
+        Command::new("deno").args(["run", "-A", "--unstable", "https://raw.githubusercontent.com/nats-io/nats.deno/main/tests/helpers/service-check.ts", "--server", &server.client_url(), "--name", "cross"]).output().unwrap();
     }
 }

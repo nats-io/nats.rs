@@ -122,3 +122,5 @@ SemVer
 ServerAddr
 Vec
 const
+stats_handler
+schemas

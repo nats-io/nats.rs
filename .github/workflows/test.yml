@@ -63,6 +63,12 @@ jobs:
       - name: Install nats-server
         run: go install github.com/nats-io/nats-server/v2@latest
 
+      - name: Setup deno for service tests
+        if: ${{ matrix.os }} != windows-latest
+        uses: "denoland/setup-deno@v1"
+        with:
+          deno-version: v1.x
+
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
