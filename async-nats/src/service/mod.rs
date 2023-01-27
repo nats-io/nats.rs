@@ -86,7 +86,7 @@ pub struct EndpointStats {
     /// Number of requests handled.
     #[serde(rename = "num_requests")]
     pub requests: usize,
-    /// Number of errors occured.
+    /// Number of errors occurred.
     #[serde(rename = "num_errors")]
     pub errors: usize,
     /// Total processing time for all requests.
@@ -95,7 +95,7 @@ pub struct EndpointStats {
     /// Average processing time for request.
     #[serde(default, with = "serde_nanos")]
     pub average_processing_time: std::time::Duration,
-    /// Last error that occured.
+    /// Last error that occurred.
     pub last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
     pub data: String,
@@ -140,7 +140,7 @@ pub struct Config {
     pub description: Option<String>,
     /// A SemVer valid service version.
     pub version: String,
-    /// Request / Response schemas
+    /// Request / Response schemas.
     pub schema: Option<Schema>,
     /// Custom handler for providing the `EndpointStats.data` value.
     pub stats_handler: Option<StatsHandler>,
