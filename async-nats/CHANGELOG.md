@@ -1,3 +1,27 @@
+# 0.27.0
+## Overview
+
+The main focus of this release is Service API with support for multiple endpoints.
+
+## Added
+* Add multiple endpoints service by @Jarema in https://github.com/nats-io/nats.rs/pull/791
+* Add `Vec` to `ToServerAddrs` impl and improve docs examples by @Jarema in https://github.com/nats-io/nats.rs/pull/802
+* Add `ignore_discovered_servers` connect option by @caspervonb in https://github.com/nats-io/nats.rs/pull/809
+
+## Changed
+* Remove unsafe usages in async-nats by @zaynetro in https://github.com/nats-io/nats.rs/pull/813
+* Explicitly delete consumer after iterating over kv keys by @Jarema in https://github.com/nats-io/nats.rs/pull/818
+
+## Fixed
+* Fix key listing for async client to match Go client  by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/792
+
+
+## New Contributors
+* @thomastaylor312 made their first contribution in https://github.com/nats-io/nats.rs/pull/792
+* @zaynetro made their first contribution in https://github.com/nats-io/nats.rs/pull/813
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.26.0...async-nats/v0.27.0
+
 # 0.26.0
 ## Overview
 This release introduces improvements around TLS handling which could cause issues with Windows systems, plus some other fixes and improvements.
