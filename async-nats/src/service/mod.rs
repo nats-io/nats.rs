@@ -358,8 +358,8 @@ impl Group {
             stats: self.stats.clone(),
             client: self.client.clone(),
             endpoint: subject,
-            shutdown_rx: Some(shutdown_rx),
-            shutdown: None,
+            shutdown: Some(shutdown_rx),
+            shutdown_future: None,
         })
     }
 }
@@ -515,8 +515,8 @@ pub struct Endpoint {
     stats: Arc<Mutex<Stats>>,
     client: Client,
     endpoint: String,
-    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
-    shutdown: Option<ShutdownReceiverFuture>,
+    shutdown: Option<tokio::sync::broadcast::Receiver<()>>,
+    shutdown_future: Option<ShutdownReceiverFuture>,
 }
 
 impl Stream for Endpoint {
@@ -527,7 +527,7 @@ impl Stream for Endpoint {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         trace!("polling for next request");
-        match self.shutdown.as_mut() {
+        match self.shutdown_future.as_mut() {
             Some(shutdown) => match shutdown.as_mut().poll(cx) {
                 Poll::Ready(_result) => {
                     debug!("got stop broadcast");
@@ -544,8 +544,8 @@ impl Stream for Endpoint {
                 }
             },
             None => {
-                let mut receiver = self.shutdown_rx.take().unwrap();
-                self.shutdown = Some(Box::pin(async move { receiver.recv().await }));
+                let mut receiver = self.shutdown.take().unwrap();
+                self.shutdown_future = Some(Box::pin(async move { receiver.recv().await }));
             }
         }
         trace!("checking for new messages");
@@ -645,8 +645,8 @@ impl Service {
             stats: self.stats.clone(),
             client: self.client.clone(),
             endpoint: subject,
-            shutdown_rx: Some(shutdown_rx),
-            shutdown: None,
+            shutdown: Some(shutdown_rx),
+            shutdown_future: None,
         })
     }
 }

@@ -16,7 +16,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(from = "ErrorDT", into = "ErrorDT")]
+#[serde(from = "ErrorDTO", into = "ErrorDTO")]
 pub struct Error(pub usize, pub String);
 
 impl Display for Error {
@@ -32,22 +32,22 @@ impl Display for Error {
 impl std::error::Error for Error {}
 
 #[derive(Serialize, Deserialize)]
-struct ErrorDT {
+struct ErrorDTO {
     status: String,
     code: usize,
 }
 
-impl From<Error> for ErrorDT {
+impl From<Error> for ErrorDTO {
     fn from(value: Error) -> Self {
-        ErrorDT {
+        ErrorDTO {
             code: value.0,
             status: value.1,
         }
     }
 }
 
-impl From<ErrorDT> for Error {
-    fn from(value: ErrorDT) -> Self {
+impl From<ErrorDTO> for Error {
+    fn from(value: ErrorDTO) -> Self {
         Error(value.code, value.status)
     }
 }
