@@ -209,10 +209,10 @@ mod service {
         if let Some(request) = endpoint.next().await {
             debug!("respond with error");
             request
-                .respond(Err(async_nats::service::error::Error(
-                    503,
-                    "error".to_string(),
-                )))
+                .respond(Err(async_nats::service::error::Error {
+                    code: 503,
+                    status: "error".to_string(),
+                }))
                 .await
                 .unwrap();
         }
@@ -313,10 +313,10 @@ mod service {
                     || from_utf8(&request.message.payload).unwrap() == "error"
                 {
                     request
-                        .respond(Err(async_nats::service::error::Error(
-                            503,
-                            "empty payload".to_string(),
-                        )))
+                        .respond(Err(async_nats::service::error::Error {
+                            code: 503,
+                            status: "empty payload".to_string(),
+                        }))
                         .await
                         .unwrap();
                 } else {

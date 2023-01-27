@@ -15,39 +15,20 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(from = "ErrorDTO", into = "ErrorDTO")]
-pub struct Error(pub usize, pub String);
+impl std::error::Error for Error {}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Error {
+    pub status: String,
+    pub code: usize,
+}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "service request error code: {}, status: {}",
-            self.0, self.1
+            self.status, self.code
         )
-    }
-}
-
-impl std::error::Error for Error {}
-
-#[derive(Serialize, Deserialize)]
-struct ErrorDTO {
-    status: String,
-    code: usize,
-}
-
-impl From<Error> for ErrorDTO {
-    fn from(value: Error) -> Self {
-        ErrorDTO {
-            code: value.0,
-            status: value.1,
-        }
-    }
-}
-
-impl From<ErrorDTO> for Error {
-    fn from(value: ErrorDTO) -> Self {
-        Error(value.code, value.status)
     }
 }

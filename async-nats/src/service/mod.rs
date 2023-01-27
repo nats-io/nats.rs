@@ -60,10 +60,14 @@ pub struct Stats {
 /// Response for `STATS` requests.
 #[derive(Serialize, Deserialize)]
 pub struct StatsResponse {
+    /// Response type.
     #[serde(rename = "type")]
     pub response_type: String,
+    /// Service name.
     pub name: String,
+    /// Service id.
     pub id: String,
+    // Service version.
     pub version: String,
     #[serde(with = "rfc3339")]
     pub started: OffsetDateTime,
@@ -74,30 +78,45 @@ pub struct StatsResponse {
 /// Right now, there is only one business endpoint, all other are internals.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct EndpointStats {
+    // Response type.
     #[serde(rename = "type")]
     pub response_type: String,
+    /// Service name.
     pub name: String,
+    /// Number of requests handled.
     #[serde(rename = "num_requests")]
     pub requests: usize,
+    /// Number of errors occured.
     #[serde(rename = "num_errors")]
     pub errors: usize,
+    /// Total processing time for all requests.
     #[serde(default, with = "serde_nanos")]
     pub processing_time: std::time::Duration,
+    /// Average processing time for request.
     #[serde(default, with = "serde_nanos")]
     pub average_processing_time: std::time::Duration,
+    /// Last error that occured.
     pub last_error: Option<error::Error>,
+    /// Custom data added by [Service::stats_handler]
     pub data: String,
 }
 
 /// Information about service instance.
+/// Service name.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Info {
+    /// Response type.
     #[serde(rename = "type")]
     pub response_type: String,
+    /// Service name.
     pub name: String,
+    /// Service id.
     pub id: String,
+    /// Service description.
     pub description: Option<String>,
+    /// Service version.
     pub version: String,
+    /// All service endpoints.
     pub subjects: Vec<String>,
 }
 
@@ -702,8 +721,8 @@ impl Request {
                     })
                     .or_default();
                 let mut headers = HeaderMap::new();
-                headers.insert(NATS_SERVICE_ERROR, err.1.as_str());
-                headers.insert(NATS_SERVICE_ERROR_CODE, err.0.to_string().as_str());
+                headers.insert(NATS_SERVICE_ERROR, err.status.as_str());
+                headers.insert(NATS_SERVICE_ERROR_CODE, err.code.to_string().as_str());
                 self.client
                     .publish_with_headers(reply, headers, "".into())
                     .await
