@@ -97,7 +97,7 @@ pub struct EndpointStats {
     pub average_processing_time: std::time::Duration,
     /// Last error that occured.
     pub last_error: Option<error::Error>,
-    /// Custom data added by [Service::stats_handler]
+    /// Custom data added by [Config::stats_handler]
     pub data: String,
 }
 
@@ -175,7 +175,7 @@ impl ServiceBuilder {
         self
     }
 
-    /// Adds hander for custom service statistics.
+    /// Adds handler for custom service statistics.
     pub fn stats_handler<F>(mut self, handler: F) -> Self
     where
         F: FnMut(String, EndpointStats) -> String + Send + Sync + 'static,
