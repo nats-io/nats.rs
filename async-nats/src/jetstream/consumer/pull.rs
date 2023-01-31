@@ -478,7 +478,9 @@ impl Stream {
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
-                        _ = expires => debug!("expired pull request"),
+                        _ = expires => {
+                            pending_reset = true;
+                            debug!("expired pull request")},
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
@@ -488,7 +490,7 @@ impl Stream {
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
                         .await;
                     if let Err(err) = consumer.context.client.flush().await {
-                        debug!("flush failed: {}", err);
+                        debug!("flush failed: {err:?}");
                     }
                     debug!("request published");
                     // TODO: add tracing instead of ignoring this.
