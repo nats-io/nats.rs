@@ -31,7 +31,7 @@ mod jetstream {
     use async_nats::connection::State;
     use async_nats::header::{HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
-        self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
+        self, AckPolicy, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
@@ -2033,7 +2033,6 @@ mod jetstream {
             .event_callback(|event| async move {
                 println!("EVENT: {event}");
             })
-            // .connect(cluster.servers.get(0).unwrap().client_url())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -2056,6 +2055,8 @@ mod jetstream {
         let consumer = stream
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("durable_reconnect".to_string()),
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(5),
                 ..Default::default()
             })
             .await
@@ -2066,32 +2067,29 @@ mod jetstream {
             jetstream
                 .publish(format!("reconnect.{i}"), i.to_string().into())
                 .await
+                .unwrap()
+                .await
                 .unwrap();
         }
 
         let messages = consumer
             .stream()
-            .expires(Duration::from_secs(60))
-            .heartbeat(Duration::from_secs(30))
+            .expires(Duration::from_secs(30))
+            .heartbeat(Duration::from_secs(15))
             .messages()
             .await
             .unwrap();
 
-        println!("starting iteration");
         let mut messages = messages.enumerate();
         while let Some((i, message)) = messages.next().await {
-            if i % 700 == 0 {
-                server.restart();
-            }
             let message = message.unwrap();
+            let payload = from_utf8(&message.payload).unwrap();
             message.ack().await.unwrap();
-            if from_utf8(&message.payload)
-                .unwrap()
-                .parse::<usize>()
-                .unwrap()
-                == 999
-            {
+            if payload.parse::<usize>().unwrap() == 999 {
                 break;
+            }
+            if i == 200 {
+                server.restart();
             }
         }
     }
