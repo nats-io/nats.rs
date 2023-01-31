@@ -688,6 +688,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let mut info: ServerInfo = Default::default();
     let mut connection = None;
     if !options.retry_on_initial_connect {
+        debug!("retry on initial connect failure is disabled");
         let (info_ok, connection_ok) = connector.try_connect().await?;
         connection = Some(connection_ok);
         info = info_ok;

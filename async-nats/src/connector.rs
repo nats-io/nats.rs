@@ -135,7 +135,6 @@ impl Connector {
                         let tls_required = self.options.tls_required || server_addr.tls_required();
                         let mut connect_info = ConnectInfo {
                             tls_required,
-                            // FIXME(tp): have optional name
                             name: self.options.name.clone(),
                             pedantic: false,
                             verbose: false,
@@ -154,13 +153,9 @@ impl Connector {
                         };
 
                         match &self.options.auth {
-                            Authorization::None => {
-                                connection.write_op(ClientOp::Connect(connect_info)).await?;
-
-                                self.events_tx.send(Event::Connected).await.ok();
-                                self.state_tx.send(State::Connected).ok();
-                                return Ok((server_info, connection));
-                            }
+                            // We don't want to early return here,
+                            // as server might require auth that we did not provide.
+                            Authorization::None => {}
                             Authorization::Token(token) => {
                                 connect_info.auth_token = Some(token.clone())
                             }
