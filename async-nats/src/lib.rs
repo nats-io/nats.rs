@@ -533,6 +533,10 @@ impl ConnectionHandler {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
+                    } else {
+                        result.send(Ok(())).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
                     }
                 } else {
                     result.send(Ok(())).map_err(|_| {
