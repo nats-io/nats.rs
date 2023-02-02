@@ -32,7 +32,7 @@ use std::{
     task::{self, Poll},
 };
 use std::{sync::atomic::Ordering, time::Duration};
-use tokio::sync::oneshot::error::TryRecvError;
+use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tracing::{debug, trace};
 
@@ -394,7 +394,7 @@ impl Consumer<OrderedConfig> {
         let last_sequence = Arc::new(AtomicU64::new(0));
         let consumer_sequence = Arc::new(AtomicU64::new(0));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        tokio::task::spawn({
+        let handle = tokio::task::spawn({
             let last_seen = last_seen.clone();
             let stream_name = self.info.stream_name.clone();
             let config = self.config.clone();
@@ -460,6 +460,7 @@ impl Consumer<OrderedConfig> {
             consumer_sequence,
             last_seen,
             shutdown: shutdown_rx,
+            handle,
         })
     }
 }
@@ -473,6 +474,14 @@ pub struct Ordered<'a> {
     consumer_sequence: Arc<AtomicU64>,
     last_seen: Arc<Mutex<Instant>>,
     shutdown: tokio::sync::oneshot::Receiver<Error>,
+    handle: JoinHandle<()>,
+}
+
+impl<'a> Drop for Ordered<'a> {
+    fn drop(&mut self) {
+        // Stop trying to recreate the consumer
+        self.handle.abort()
+    }
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
