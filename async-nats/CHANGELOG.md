@@ -1,3 +1,15 @@
+# 0.27.1
+## Overview
+A patch release focused solely on important fixes.
+
+## Fixed
+* Fix no error when auth is not provided but required by @Jarema in https://github.com/nats-io/nats.rs/pull/822
+* Fix flush after reconnecting by @Jarema in https://github.com/nats-io/nats.rs/pull/823
+* Fix duplicate consumer creation by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/824
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.27.0...async-nats/v0.27.1
+
 # 0.27.0
 ## Overview
 
