@@ -14,7 +14,7 @@
 use std::{env, str::from_utf8};
 
 use async_nats::jetstream;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
@@ -80,6 +80,11 @@ async fn main() -> Result<(), async_nats::Error> {
             from_utf8(&entry.value)?
         );
     }
+
+    // You can also iterate over all available keys in a bucket.
+    let keys = kv.keys().await?.try_collect::<Vec<String>>().await?;
+
+    println!("All keys: {:?}", keys);
 
     // ### Stream abstraction
     // Before moving on, it is important to understand that a KV bucket is
