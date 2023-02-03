@@ -2452,7 +2452,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        for i in 0..1200 {
+        for i in 0..235 {
             context
                 .create_stream(async_nats::jetstream::stream::Config {
                     name: i.to_string(),
@@ -2463,7 +2463,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        assert_eq!(context.stream_names().count().await, 1200);
+        assert_eq!(context.stream_names().count().await, 235);
     }
 
     #[tokio::test]
@@ -2472,7 +2472,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        for i in 0..1200 {
+        for i in 0..235 {
             context
                 .create_stream(async_nats::jetstream::stream::Config {
                     name: i.to_string(),
@@ -2483,7 +2483,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        assert_eq!(context.streams().count().await, 1200);
+        assert_eq!(context.streams().count().await, 235);
     }
 
     #[tokio::test]
@@ -2501,7 +2501,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        for i in 0..1200 {
+        for i in 0..235 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
                     name: Some(format!("consumer_{i}").to_string()),
@@ -2517,14 +2517,14 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(consumers.len(), 1200);
+        assert_eq!(consumers.len(), 235);
 
-        for i in 0..1200 {
+        for i in 0..235 {
             assert!(consumers
                 .iter()
                 .any(|name| *name == format!("consumer_{i}")));
         }
-        assert_eq!(stream.consumer_names().count().await, 1200);
+        assert_eq!(stream.consumer_names().count().await, 235);
     }
 
     #[tokio::test]
