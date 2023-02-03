@@ -2487,6 +2487,62 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn consumer_names_list() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..1200 {
+            stream
+                .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                    name: Some(format!("consumer_{i}").to_string()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(stream.consumer_names().count().await, 1200);
+    }
+
+    #[tokio::test]
+    async fn consumers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..1200 {
+            stream
+                .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                    name: Some(format!("consumer_{i}").to_string()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(stream.consumers().count().await, 1200);
+    }
+
+    #[tokio::test]
     async fn queue_push_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
