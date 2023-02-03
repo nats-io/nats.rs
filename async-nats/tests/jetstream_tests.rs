@@ -36,7 +36,7 @@ mod jetstream {
     use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
-    use async_nats::{ConnectOptions, Error};
+    use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;

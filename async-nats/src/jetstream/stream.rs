@@ -786,7 +786,7 @@ impl Stream {
     /// let stream = jetstream.get_stream("stream").await?;
     /// let mut names = stream.consumer_names();
     /// while let Some(consumer) = names.try_next().await? {
-    ///     println!("consumer: {}", stream);
+    ///     println!("consumer: {stream}");
     /// }
     /// # Ok(())
     /// # }
@@ -815,7 +815,7 @@ impl Stream {
     /// let stream = jetstream.get_stream("stream").await?;
     /// let mut consumers = stream.consumers();
     /// while let Some(consumer) = consumers.try_next().await? {
-    ///     println!("consumer: {:?}", consumer);
+    ///     println!("consumer: {consumer:?}");
     /// }
     /// # Ok(())
     /// # }
