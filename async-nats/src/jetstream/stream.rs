@@ -529,6 +529,7 @@ impl Stream {
     ///
     /// ```no_run
     /// # #[tokio::main]
+    /// # #[allow(deprecated)]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -786,7 +787,7 @@ impl Stream {
     /// let stream = jetstream.get_stream("stream").await?;
     /// let mut names = stream.consumer_names();
     /// while let Some(consumer) = names.try_next().await? {
-    ///     println!("consumer: {stream}");
+    ///     println!("consumer: {stream:?}");
     /// }
     /// # Ok(())
     /// # }
