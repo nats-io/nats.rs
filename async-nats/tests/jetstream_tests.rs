@@ -31,12 +31,12 @@ mod jetstream {
     use async_nats::connection::State;
     use async_nats::header::{HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
-        self, AckPolicy, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
+        self, AckPolicy, DeliverPolicy, Info, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
-    use async_nats::ConnectOptions;
+    use async_nats::{ConnectOptions, Error};
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
@@ -2511,6 +2511,19 @@ mod jetstream {
                 .unwrap();
         }
 
+        let consumers = stream
+            .consumer_names()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+
+        assert_eq!(consumers.len(), 1200);
+
+        for i in 0..1200 {
+            assert!(consumers
+                .iter()
+                .any(|name| *name == format!("consumer_{i}")));
+        }
         assert_eq!(stream.consumer_names().count().await, 1200);
     }
 
@@ -2539,7 +2552,16 @@ mod jetstream {
                 .unwrap();
         }
 
-        assert_eq!(stream.consumers().count().await, 1200);
+        let consumers = stream.consumers().try_collect::<Vec<Info>>().await.unwrap();
+
+        assert_eq!(consumers.len(), 1200);
+
+        for i in 0..1200 {
+            assert!(consumers
+                .iter()
+                .any(|name| *name.name == format!("consumer_{i}")));
+        }
+        assert_eq!(stream.consumer_names().count().await, 1200);
     }
 
     #[tokio::test]
