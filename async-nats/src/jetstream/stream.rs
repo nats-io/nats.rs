@@ -19,13 +19,14 @@ use std::{
     io::{self, ErrorKind},
     pin::Pin,
     str::FromStr,
+    task::Poll,
     time::Duration,
 };
 
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -528,6 +529,7 @@ impl Stream {
     ///
     /// ```no_run
     /// # #[tokio::main]
+    /// # #[allow(deprecated)]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -769,6 +771,64 @@ impl Stream {
                     error.code, error.status, error.description
                 ),
             ))),
+        }
+    }
+
+    /// Lists names of all consumers for current stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let stream = jetstream.get_stream("stream").await?;
+    /// let mut names = stream.consumer_names();
+    /// while let Some(consumer) = names.try_next().await? {
+    ///     println!("consumer: {stream:?}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn consumer_names(&self) -> ConsumerNames {
+        ConsumerNames {
+            context: self.context.clone(),
+            stream: self.info.config.name.clone(),
+            offset: 0,
+            page_request: None,
+            consumers: Vec::new(),
+            done: false,
+        }
+    }
+
+    /// Lists all consumers info for current stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let stream = jetstream.get_stream("stream").await?;
+    /// let mut consumers = stream.consumers();
+    /// while let Some(consumer) = consumers.try_next().await? {
+    ///     println!("consumer: {consumer:?}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn consumers(&self) -> Consumers {
+        Consumers {
+            context: self.context.clone(),
+            stream: self.info.config.name.clone(),
+            offset: 0,
+            page_request: None,
+            consumers: Vec::new(),
+            done: false,
         }
     }
 }
@@ -1350,5 +1410,161 @@ where
                 Response::Ok(response) => Ok(response),
             }
         }))
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct ConsumerPage {
+    total: usize,
+    consumers: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ConsumerInfoPage {
+    total: usize,
+    consumers: Option<Vec<super::consumer::Info>>,
+}
+
+type PageRequest = Pin<Box<dyn Future<Output = Result<ConsumerPage, Error>>>>;
+
+pub struct ConsumerNames {
+    context: Context,
+    stream: String,
+    offset: usize,
+    page_request: Option<PageRequest>,
+    consumers: Vec<String>,
+    done: bool,
+}
+
+impl futures::Stream for ConsumerNames {
+    type Item = Result<String, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(consumers) = page.consumers {
+                        self.offset += consumers.len();
+                        self.consumers = consumers;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.consumers.pop() {
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.consumers.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    let stream = self.stream.clone();
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                format!("CONSUMER.NAMES.{stream}"),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
+    }
+}
+
+type PageInfoRequest = Pin<Box<dyn Future<Output = Result<ConsumerInfoPage, Error>>>>;
+
+pub struct Consumers {
+    context: Context,
+    stream: String,
+    offset: usize,
+    page_request: Option<PageInfoRequest>,
+    consumers: Vec<super::consumer::Info>,
+    done: bool,
+}
+
+impl futures::Stream for Consumers {
+    type Item = Result<super::consumer::Info, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(consumers) = page.consumers {
+                        self.offset += consumers.len();
+                        self.consumers = consumers;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.consumers.pop() {
+                            Some(consumer) => Poll::Ready(Some(Ok(consumer))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.consumers.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    let stream = self.stream.clone();
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                format!("CONSUMER.LIST.{stream}"),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
     }
 }

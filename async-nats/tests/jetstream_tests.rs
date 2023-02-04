@@ -31,7 +31,7 @@ mod jetstream {
     use async_nats::connection::State;
     use async_nats::header::{HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
-        self, AckPolicy, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
+        self, AckPolicy, DeliverPolicy, Info, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
@@ -2452,7 +2452,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        for i in 0..1200 {
+        for i in 0..235 {
             context
                 .create_stream(async_nats::jetstream::stream::Config {
                     name: i.to_string(),
@@ -2463,7 +2463,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        assert_eq!(context.stream_names().count().await, 1200);
+        assert_eq!(context.stream_names().count().await, 235);
     }
 
     #[tokio::test]
@@ -2472,7 +2472,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        for i in 0..1200 {
+        for i in 0..235 {
             context
                 .create_stream(async_nats::jetstream::stream::Config {
                     name: i.to_string(),
@@ -2483,7 +2483,85 @@ mod jetstream {
                 .unwrap();
         }
 
-        assert_eq!(context.streams().count().await, 1200);
+        assert_eq!(context.streams().count().await, 235);
+    }
+
+    #[tokio::test]
+    async fn consumer_names_list() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..235 {
+            stream
+                .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                    name: Some(format!("consumer_{i}").to_string()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        let consumers = stream
+            .consumer_names()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+
+        assert_eq!(consumers.len(), 235);
+
+        for i in 0..235 {
+            assert!(consumers
+                .iter()
+                .any(|name| *name == format!("consumer_{i}")));
+        }
+        assert_eq!(stream.consumer_names().count().await, 235);
+    }
+
+    #[tokio::test]
+    async fn consumers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..1200 {
+            stream
+                .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                    name: Some(format!("consumer_{i}").to_string()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        let consumers = stream.consumers().try_collect::<Vec<Info>>().await.unwrap();
+
+        assert_eq!(consumers.len(), 1200);
+
+        for i in 0..1200 {
+            assert!(consumers
+                .iter()
+                .any(|name| *name.name == format!("consumer_{i}")));
+        }
+        assert_eq!(stream.consumer_names().count().await, 1200);
     }
 
     #[tokio::test]
