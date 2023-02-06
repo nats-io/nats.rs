@@ -34,6 +34,18 @@ mod client {
     }
 
     #[tokio::test]
+    async fn unknown_server_ca() {
+        let server = nats_server::run_server("tests/configs/tls.conf");
+        assert!(async_nats::connect(&server.client_url()).await.is_err());
+
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+            .require_tls(true)
+            .connect(server.client_url())
+            .await
+            .unwrap_err();
+    }
+
+    #[tokio::test]
     async fn basic_tls_all_certs_one_file() {
         let s = nats_server::run_server("tests/configs/tls.conf");
 
