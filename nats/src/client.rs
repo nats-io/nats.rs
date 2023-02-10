@@ -573,19 +573,18 @@ impl Client {
         // Check if the client is closed.
         self.check_shutdown()?;
 
-        let op = if let Some(headers) = headers {
-            ClientOp::Hpub {
+        let op = match headers {
+            Some(headers) if !headers.is_empty() => ClientOp::Hpub {
                 subject,
                 reply_to,
                 payload: msg,
                 headers,
-            }
-        } else {
-            ClientOp::Pub {
+            },
+            _ => ClientOp::Pub {
                 subject,
                 reply_to,
                 payload: msg,
-            }
+            },
         };
 
         let mut write = self.state.write.lock();
