@@ -2613,4 +2613,23 @@ mod jetstream {
             message.ack().await.unwrap();
         }
     }
+
+    #[tokio::test]
+    async fn publish_no_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+        assert_eq!(
+            context
+                .publish("test".to_owned(), "jghf".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
 }
