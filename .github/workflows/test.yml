@@ -61,7 +61,7 @@ jobs:
           go-version: '1.19'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@latest
+        run: go install github.com/nats-io/nats-server/v2@dev
 
       - name: Setup deno for service tests
         if: ${{ matrix.os }} != windows-latest
@@ -215,7 +215,7 @@ jobs:
           go-version: '1.19'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@latest
+        run: go install github.com/nats-io/nats-server/v2@dev
       - name: Check examples
         env:
           RUST_LOG: trace
