@@ -24,6 +24,7 @@ pub struct AccountInfo {
 
 mod jetstream {
 
+    use std::collections::HashMap;
     use std::str::from_utf8;
     use std::time::{Duration, Instant};
 
@@ -2692,5 +2693,40 @@ mod jetstream {
             let message = message.unwrap();
             assert_eq!(from_utf8(&message.payload).unwrap(), i.to_string());
         }
+    }
+
+    #[tokio::test]
+    async fn metadata() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let metadata = HashMap::from([
+            ("key".to_string(), "value".to_string()),
+            ("other".to_string(), "value".to_string()),
+        ]);
+
+        let mut stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                subjects: vec!["events".to_string()],
+                name: "filter".to_string(),
+                metadata: metadata.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(stream.info().await.unwrap().config.metadata, metadata);
+
+        let mut consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                metadata: metadata.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(consumer.info().await.unwrap().config.metadata, metadata);
     }
 }

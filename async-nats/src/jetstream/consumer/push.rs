@@ -22,6 +22,7 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     io::{self, ErrorKind},
     pin::Pin,
     sync::{Arc, Mutex},
@@ -219,6 +220,9 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default")]
     pub memory_storage: bool,
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
 }
 
 impl FromConsumer for Config {
@@ -252,6 +256,7 @@ impl FromConsumer for Config {
             idle_heartbeat: config.idle_heartbeat,
             num_replicas: config.num_replicas,
             memory_storage: config.memory_storage,
+            metadata: config.metadata,
         })
     }
 }
@@ -283,6 +288,7 @@ impl IntoConsumerConfig for Config {
             inactive_threshold: Duration::default(),
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
+            metadata: self.metadata,
         }
     }
 }
@@ -332,6 +338,9 @@ pub struct OrderedConfig {
     /// The maximum number of waiting consumers.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_waiting: i64,
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
 }
 
 impl FromConsumer for OrderedConfig {
@@ -357,6 +366,7 @@ impl FromConsumer for OrderedConfig {
             headers_only: config.headers_only,
             deliver_policy: config.deliver_policy,
             max_waiting: config.max_waiting,
+            metadata: config.metadata,
         })
     }
 }
@@ -388,6 +398,7 @@ impl IntoConsumerConfig for OrderedConfig {
             inactive_threshold: Duration::from_secs(30),
             num_replicas: 1,
             memory_storage: true,
+            metadata: self.metadata,
         }
     }
 }
