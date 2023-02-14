@@ -14,6 +14,7 @@
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::{
+    collections::HashMap,
     future,
     sync::{Arc, Mutex},
     task::Poll,
@@ -1510,6 +1511,9 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default")]
     pub memory_storage: bool,
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -1545,6 +1549,7 @@ impl IntoConsumerConfig for Config {
             inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
+            metadata: self.metadata,
         }
     }
 }
@@ -1577,6 +1582,7 @@ impl FromConsumer for Config {
             inactive_threshold: config.inactive_threshold,
             num_replicas: config.num_replicas,
             memory_storage: config.memory_storage,
+            metadata: config.metadata,
         })
     }
 }

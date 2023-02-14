@@ -15,6 +15,7 @@
 
 pub mod pull;
 pub mod push;
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::time::Duration;
 
@@ -312,6 +313,9 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
     pub memory_storage: bool,
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
 }
 
 impl From<&Config> for Config {
