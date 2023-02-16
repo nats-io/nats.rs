@@ -114,12 +114,12 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn publish_async() {
+    async fn publish_control() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        context
+        let mut stream = context
             .create_stream(stream::Config {
                 name: "TEST".to_string(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
@@ -128,16 +128,65 @@ mod jetstream {
             .await
             .unwrap();
 
-        let ack = context
-            .publish("foo".to_string(), "payload".into())
+        let id = "UUID".to_string();
+
+        // Publish duplicate messages
+        for _ in 0..3 {
+            context
+                .publish("foo".to_string(), "data".into())
+                .message_id(id.clone())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(1, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_message_id(id.clone())
+            .await
+            .unwrap()
             .await
             .unwrap();
-        assert!(ack.await.is_ok());
-        let ack = context
-            .publish("not_stream".to_string(), "payload".into())
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(2, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_sequence(2)
+            .await
+            .unwrap()
             .await
             .unwrap();
-        assert!(ack.await.is_err());
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(3, info.state.messages);
+
+        context
+            .publish("bar".to_string(), "data".into())
+            .expected_last_sequence(3)
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(4, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_subject_sequence(3)
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(5, info.state.messages);
     }
 
     #[tokio::test]
