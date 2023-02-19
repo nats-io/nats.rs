@@ -157,6 +157,17 @@ mod jetstream {
 
         context
             .publish("foo".to_string(), "data".into())
+            .expected_last_message_id("invalid")
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(2, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
             .expected_last_sequence(2)
             .await
             .unwrap()
@@ -187,6 +198,47 @@ mod jetstream {
 
         let info = stream.info().await.unwrap();
         assert_eq!(5, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_sequence(1)
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(5, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_subject_sequence(1)
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(5, info.state.messages);
+
+        let subjects = ["foo", "bar", "baz"];
+        for subject in subjects {
+            context
+                .publish(subject.into(), "data".into())
+                .expected_stream("TEST")
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+
+            context
+                .publish(subject.into(), "data".into())
+                .expected_stream("INVALID")
+                .await
+                .unwrap()
+                .await
+                .unwrap_err();
+        }
     }
 
     #[tokio::test]
