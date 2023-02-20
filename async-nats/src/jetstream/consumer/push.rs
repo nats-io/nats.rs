@@ -223,6 +223,9 @@ pub struct Config {
     // Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
+    /// Custom backoff for missed acknowledgments.
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub backoff: Vec<Duration>,
 }
 
 impl FromConsumer for Config {
@@ -257,6 +260,7 @@ impl FromConsumer for Config {
             num_replicas: config.num_replicas,
             memory_storage: config.memory_storage,
             metadata: config.metadata,
+            backoff: config.backoff,
         })
     }
 }
@@ -289,6 +293,7 @@ impl IntoConsumerConfig for Config {
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
             metadata: self.metadata,
+            backoff: self.backoff,
         }
     }
 }
@@ -399,6 +404,7 @@ impl IntoConsumerConfig for OrderedConfig {
             num_replicas: 1,
             memory_storage: true,
             metadata: self.metadata,
+            backoff: Vec::new(),
         }
     }
 }
