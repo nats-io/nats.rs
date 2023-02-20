@@ -390,7 +390,9 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(consumer.cached_info().cluster.replicas.len(), 2);
+        let cluster = consumer.cached_info().cluster.as_ref().unwrap();
+
+        assert_eq!(cluster.replicas.len(), 2);
 
         context.delete_stream("events2").await.unwrap();
     }
