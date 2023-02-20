@@ -313,9 +313,12 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
     pub memory_storage: bool,
-    // Additional consumer metadata.
+    /// Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
+    /// Custom backoff for missed acknowledgments.
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub backoff: Vec<Duration>,
 }
 
 impl From<&Config> for Config {

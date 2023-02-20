@@ -14,10 +14,10 @@
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
 use crate::Error;
-
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
+use std::time::Duration;
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -314,7 +314,7 @@ pub enum AckKind {
     /// Signals that the message will not be processed now
     /// and processing can move onto the next message, NAK'd
     /// message will be retried.
-    Nak,
+    Nak(Option<Duration>),
     /// When sent before the AckWait period indicates that
     /// work is ongoing and the period should be extended by
     /// another equal to AckWait.
@@ -333,7 +333,10 @@ impl From<AckKind> for Bytes {
         use AckKind::*;
         match kind {
             Ack => Bytes::from_static(b"+ACK"),
-            Nak => Bytes::from_static(b"-NAK"),
+            Nak(maybe_duration) => match maybe_duration {
+                None => Bytes::from_static(b"-NAK"),
+                Some(duration) => format!("-NAK {{\"delay\":{}}}", duration.as_nanos()).into(),
+            },
             Progress => Bytes::from_static(b"+WPI"),
             Next => Bytes::from_static(b"+NXT"),
             Term => Bytes::from_static(b"+TERM"),

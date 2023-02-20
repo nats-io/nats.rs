@@ -37,6 +37,7 @@ mod jetstream {
     use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
+    use async_nats::jetstream::AckKind;
     use async_nats::ConnectOptions;
     use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -2020,7 +2021,7 @@ mod jetstream {
         if let Some(message) = iter.next().await {
             message
                 .unwrap()
-                .ack_with(async_nats::jetstream::AckKind::Nak)
+                .ack_with(async_nats::jetstream::AckKind::Nak(None))
                 .await
                 .unwrap();
         }
@@ -2735,5 +2736,97 @@ mod jetstream {
             .unwrap();
 
         assert_eq!(consumer.info().await.unwrap().config.metadata, metadata);
+    }
+
+    #[tokio::test]
+    async fn backoff() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "stream".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::Config {
+                max_deliver: 10,
+                backoff: vec![
+                    std::time::Duration::from_secs(1),
+                    std::time::Duration::from_secs(5),
+                ],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = consumer.info().await.unwrap();
+
+        assert_eq!(info.config.backoff[0], Duration::from_secs(1));
+        assert_eq!(info.config.backoff[1], Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn nak_with_delay() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "stream".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::push::Config {
+                deliver_subject: "deliver".to_string(),
+                max_deliver: 30,
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(5),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("stream".to_string(), "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        let message = messages.next().await.unwrap().unwrap();
+
+        // Send NAK with much shorter duration.
+        message
+            .ack_with(AckKind::Nak(Some(Duration::from_millis(1000))))
+            .await
+            .unwrap();
+
+        // Check if we get a redelivery in that shortened duration.
+        let message = tokio::time::timeout(Duration::from_secs(3), messages.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        // Send NAK with duration longer than `ack_wait` set on the consumer.
+        message
+            .ack_with(AckKind::Nak(Some(Duration::from_secs(10))))
+            .await
+            .unwrap();
+
+        // Expect it to timeout, but in time longer than consumer `ack_wait`.
+        tokio::time::timeout(Duration::from_secs(7), messages.next())
+            .await
+            .unwrap_err();
     }
 }
