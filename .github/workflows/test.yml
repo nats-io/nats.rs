@@ -19,12 +19,13 @@ defaults:
 
 jobs:
   test_matrix:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}, ${{ matrix.nats_server }} )
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        nats_server: [latest, dev]
 
     steps:
       - name: Check out repository
@@ -61,7 +62,7 @@ jobs:
           go-version: '1.19'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@dev
+        run: go install github.com/nats-io/nats-server/v2@${{ matrix.nats_server }}
 
       - name: Setup deno for service tests
         if: ${{ matrix.os }} != windows-latest
