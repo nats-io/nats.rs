@@ -29,11 +29,10 @@ mod jetstream {
 
     use super::*;
     use async_nats::connection::State;
-    use async_nats::header::{HeaderMap, NATS_MESSAGE_ID};
+    use async_nats::header::HeaderMap;
     use async_nats::jetstream::consumer::{
         self, DeliverPolicy, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
-    use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::ConnectOptions;
@@ -53,6 +52,36 @@ mod jetstream {
 
         let account = context.query_account().await.unwrap();
         assert_eq!(account.requests.total, 1);
+    }
+
+    #[tokio::test]
+    async fn publish_headers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let _stream = context
+            .create_stream(stream::Config {
+                name: "TEST".to_string(),
+                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let headers = HeaderMap::new();
+        let payload = b"Hello JetStream";
+
+        let ack = context
+            .publish("foo".into(), payload.as_ref().into())
+            .headers(headers)
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(ack.stream, "TEST");
+        assert_eq!(ack.sequence, 1);
     }
 
     #[tokio::test]
@@ -85,34 +114,7 @@ mod jetstream {
     }
 
     #[tokio::test]
-    async fn publish_async() {
-        let server = nats_server::run_server("tests/configs/jetstream.conf");
-        let client = async_nats::connect(server.client_url()).await.unwrap();
-        let context = async_nats::jetstream::new(client);
-
-        context
-            .create_stream(stream::Config {
-                name: "TEST".to_string(),
-                subjects: vec!["foo".into(), "bar".into(), "baz".into()],
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
-        let ack = context
-            .publish("foo".to_string(), "payload".into())
-            .await
-            .unwrap();
-        assert!(ack.await.is_ok());
-        let ack = context
-            .publish("not_stream".to_string(), "payload".into())
-            .await
-            .unwrap();
-        assert!(ack.await.is_err());
-    }
-
-    #[tokio::test]
-    async fn send_publish() {
+    async fn publish_control() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
@@ -121,142 +123,122 @@ mod jetstream {
             .create_stream(stream::Config {
                 name: "TEST".to_string(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
-                allow_direct: true,
                 ..Default::default()
             })
             .await
             .unwrap();
 
         let id = "UUID".to_string();
-        // Publish first message
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build()
-                    .message_id(id.clone())
-                    .payload("data".into()),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap();
-        // Publish second message, a duplicate.
-        context
-            .send_publish("foo".to_string(), Publish::build().message_id(id.clone()))
-            .await
-            .unwrap()
-            .await
-            .unwrap();
-        // Check if we still have one message.
+
+        // Publish duplicate messages
+        for _ in 0..3 {
+            context
+                .publish("foo".to_string(), "data".into())
+                .message_id(id.clone())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
         let info = stream.info().await.unwrap();
         assert_eq!(1, info.state.messages);
-        let message = stream
-            .direct_get_last_for_subject("foo".to_string())
-            .await
-            .unwrap();
-        assert_eq!(message.payload, bytes::Bytes::from("data"));
 
-        // Publish message with different ID and expect error.
         context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_message_id("BAD_ID"),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
-        // Publish a new message with expected ID.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_message_id(id.clone()),
-            )
+            .publish("foo".to_string(), "data".into())
+            .expected_last_message_id(id.clone())
             .await
             .unwrap()
             .await
             .unwrap();
 
-        // We should have now two messages. Check it.
+        let info = stream.info().await.unwrap();
+        assert_eq!(2, info.state.messages);
+
         context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_sequence(2),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap();
-        // 3 messages should be there, so this should error.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_sequence(2),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
-        // 3 messages there, should be ok for this subject too.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_subject_sequence(3),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap();
-        // 4 messages there, should error.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_subject_sequence(3),
-            )
+            .publish("foo".to_string(), "data".into())
+            .expected_last_message_id("invalid")
             .await
             .unwrap()
             .await
             .unwrap_err();
 
-        // Check if it works for the other subjects in the stream.
+        let info = stream.info().await.unwrap();
+        assert_eq!(2, info.state.messages);
+
         context
-            .send_publish(
-                "bar".to_string(),
-                Publish::build().expected_last_subject_sequence(0),
-            )
+            .publish("foo".to_string(), "data".into())
+            .expected_last_sequence(2)
             .await
             .unwrap()
             .await
             .unwrap();
-        // Sequence is now 1, so this should fail.
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(3, info.state.messages);
+
         context
-            .send_publish(
-                "bar".to_string(),
-                Publish::build().expected_last_subject_sequence(0),
-            )
+            .publish("bar".to_string(), "data".into())
+            .expected_last_sequence(3)
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(4, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_subject_sequence(3)
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(5, info.state.messages);
+
+        context
+            .publish("foo".to_string(), "data".into())
+            .expected_last_sequence(1)
             .await
             .unwrap()
             .await
             .unwrap_err();
-        // test header shorthand
-        assert_eq!(stream.info().await.unwrap().state.messages, 5);
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(5, info.state.messages);
+
         context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().header(NATS_MESSAGE_ID, id.as_str()),
-            )
+            .publish("foo".to_string(), "data".into())
+            .expected_last_subject_sequence(1)
             .await
             .unwrap()
             .await
-            .unwrap();
-        // above message should be ignored.
-        assert_eq!(stream.info().await.unwrap().state.messages, 5);
-        context
-            .send_publish("bar".to_string(), Publish::build().expected_stream("TEST"))
-            .await
-            .unwrap()
-            .await
-            .unwrap();
+            .unwrap_err();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(5, info.state.messages);
+
+        let subjects = ["foo", "bar", "baz"];
+        for subject in subjects {
+            context
+                .publish(subject.into(), "data".into())
+                .expected_stream("TEST")
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+
+            context
+                .publish(subject.into(), "data".into())
+                .expected_stream("INVALID")
+                .await
+                .unwrap()
+                .await
+                .unwrap_err();
+        }
     }
 
     #[tokio::test]
