@@ -103,7 +103,7 @@ impl Message {
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
-    ///     message?.ack_with(AckKind::Nak).await?;
+    ///     message?.ack_with(AckKind::Nak(None)).await?;
     /// }
     /// # Ok(())
     /// # }
