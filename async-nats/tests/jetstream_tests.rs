@@ -311,6 +311,21 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn request_timeout() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let response: Response<AccountInfo> = context
+            .request("INFO".to_string(), &())
+            .timeout(Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        assert!(matches!(response, Response::Ok { .. }));
+    }
+
+    #[tokio::test]
     async fn create_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
