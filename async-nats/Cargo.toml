@@ -25,7 +25,7 @@ serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1.0.79"
 serde_repr = "0.1.7"
 http = "0.2.7"
-tokio = { version = "1.16.1", features = ["full"] }
+tokio = { version = "1.25.0", features = ["full"] }
 itoa = "1"
 url = "2"
 tokio-rustls = "0.23"
