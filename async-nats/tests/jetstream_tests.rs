@@ -1979,6 +1979,8 @@ mod jetstream {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
+                .unwrap()
+                .await
                 .unwrap();
         }
 
