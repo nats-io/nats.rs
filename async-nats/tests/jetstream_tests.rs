@@ -1739,13 +1739,17 @@ mod jetstream {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
+                .unwrap()
+                .await
                 .unwrap();
         }
 
         let mut iter = consumer.fetch().max_messages(100).messages().await.unwrap();
 
         let mut i = 0;
-        while (iter.next().await).is_some() {
+        while let Some(message) = iter.next().await {
+            let message = message.unwrap();
+            message.ack().await.unwrap();
             i += 1;
         }
         assert_eq!(i, 10);
@@ -2635,6 +2639,7 @@ mod jetstream {
             std::io::ErrorKind::NotFound
         );
     }
+
     #[tokio::test]
     async fn multiple_filters_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
