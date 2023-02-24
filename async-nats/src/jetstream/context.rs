@@ -697,7 +697,7 @@ impl Context {
         T: Sized + Serialize,
         V: DeserializeOwned,
     {
-        Request::new(self.clone(), subject, payload)
+        Request::new(self, subject, payload)
     }
 
     /// Creates a new object store bucket.
@@ -1117,16 +1117,16 @@ impl<'a> IntoFuture for Publish<'a> {
 }
 
 #[derive(Debug)]
-pub struct Request<T: Sized + Serialize, V: DeserializeOwned> {
-    context: Context,
+pub struct Request<'a, T: Sized + Serialize, V: DeserializeOwned> {
+    context: &'a Context,
     subject: String,
     payload: T,
     timeout: Option<Duration>,
     response_type: PhantomData<V>,
 }
 
-impl<T: Sized + Serialize, V: DeserializeOwned> Request<T, V> {
-    pub fn new(context: Context, subject: String, payload: T) -> Self {
+impl<'a, T: Sized + Serialize, V: DeserializeOwned> Request<'a, T, V> {
+    pub fn new(context: &'a Context, subject: String, payload: T) -> Self {
         Self {
             context,
             subject,
@@ -1142,7 +1142,7 @@ impl<T: Sized + Serialize, V: DeserializeOwned> Request<T, V> {
     }
 }
 
-impl<T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<T, V> {
+impl<'a, T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<'a, T, V> {
     type Output = Result<Response<V>, Error>;
 
     type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
@@ -1150,16 +1150,20 @@ impl<T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<T, V> {
     fn into_future(self) -> Self::IntoFuture {
         let payload_result = serde_json::to_vec(&self.payload).map(Bytes::from);
 
-        let prefix = self.context.prefix;
-        let client = self.context.client;
         let subject = self.subject;
         let timeout = self.timeout;
+
+        let context = &self.context;
+
+        // TODO: Get rid of this cloning below
+        let prefix = context.prefix.clone();
+        let client = context.client.clone();
 
         Box::pin(std::future::IntoFuture::into_future(async move {
             let payload = payload_result?;
             debug!("JetStream request sent: {:?}", payload);
 
-            let request = client.request(format!("{}.{}", prefix, subject), payload);
+            let request = client.request(format!("{}.{}", prefix, subject), payload.clone());
             let request = request.timeout(timeout);
             let message = request.await?;
 
