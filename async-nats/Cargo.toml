@@ -16,23 +16,23 @@ categories = ["network-programming", "api-bindings"]
 [dependencies]
 subslice = "0.2.3"
 base64-url = "1.4.13"
-bytes = "1.1.0"
-futures = "0.3.21"
+bytes = "1.4.0"
+futures = "0.3.26"
 nkeys = "0.2.0"
-once_cell = "1.10.0"
-regex = "1.5.5"
+once_cell = "1.17.1"
+regex = "1.7.1"
 serde = { version = "1.0.152", features = ["derive"] }
-serde_json = "1.0.79"
-serde_repr = "0.1.7"
-http = "0.2.7"
-tokio = { version = "1.16.1", features = ["full"] }
+serde_json = "1.0.93"
+serde_repr = "0.1.10"
+http = "0.2.9"
+tokio = { version = "1.25.0", features = ["full"] }
 itoa = "1"
 url = "2"
 tokio-rustls = "0.23"
-rustls-pemfile = "1.0.1"
+rustls-pemfile = "1.0.2"
 nuid = "0.3.2"
 serde_nanos = "0.1.3"
-time = { version = "0.3.6", features = ["parsing", "formatting", "serde", "serde-well-known"] }
+time = { version = "0.3.20", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6.2"
 tracing = "0.1"
 itertools = "0.10"

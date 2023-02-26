@@ -8,10 +8,10 @@ license = "Apache-2.0"
 
 [dependencies]
 lazy_static = "1.4.0"
-regex = { version = "1.5.4", default-features = false, features = ["std", "unicode-perl"] }
+regex = { version = "1.7.1", default-features = false, features = ["std", "unicode-perl"] }
 url = "2"
 json = "0.12"
-nuid = "0.3.1"
+nuid = "0.3.2"
 rand = "0.8"
 
 [dev-dependencies]
