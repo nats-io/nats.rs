@@ -2552,6 +2552,7 @@ mod jetstream {
             .await
             .unwrap();
 
+        let now = Instant::now();
         for i in 0..1200 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
@@ -2561,8 +2562,11 @@ mod jetstream {
                 .await
                 .unwrap();
         }
+        println!("consumers created in {:?}", now.elapsed());
 
+        let now = Instant::now();
         let consumers = stream.consumers().try_collect::<Vec<Info>>().await.unwrap();
+        println!("consumers retrieved in {:?}", now.elapsed());
 
         assert_eq!(consumers.len(), 1200);
 
@@ -2571,7 +2575,9 @@ mod jetstream {
                 .iter()
                 .any(|name| *name.name == format!("consumer_{i}")));
         }
+        let now = Instant::now();
         assert_eq!(stream.consumer_names().count().await, 1200);
+        println!("consumers names in {:?}", now.elapsed());
     }
 
     #[tokio::test]
