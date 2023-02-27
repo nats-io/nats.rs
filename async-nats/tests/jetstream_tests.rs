@@ -2554,6 +2554,7 @@ mod jetstream {
 
         let now = Instant::now();
         for i in 0..1200 {
+            let created = Instant::now();
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
                     name: Some(format!("consumer_{i}").to_string()),
@@ -2561,6 +2562,7 @@ mod jetstream {
                 })
                 .await
                 .unwrap();
+            println!("single {:?}", created.elapsed());
         }
         println!("consumers created in {:?}", now.elapsed());
 

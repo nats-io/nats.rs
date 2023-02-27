@@ -61,7 +61,7 @@ jobs:
           go-version: '1.19'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@dev
+        run: go install github.com/nats-io/nats-server/v2@2.9.14
 
       - name: Run tests
         env:
