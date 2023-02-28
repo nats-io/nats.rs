@@ -1142,39 +1142,33 @@ impl<'a, T: Sized + Serialize, V: DeserializeOwned> Request<'a, T, V> {
     }
 }
 
-impl<'a, T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<'a, T, V> {
+use futures::FutureExt;
+use futures::future;
+use futures::future::Map;
+
+impl<'a, T: Sized + Serialize, V: DeserializeOwned + Send> IntoFuture for Request<'a, T, V> {
     type Output = Result<Response<V>, Error>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
+     type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
+    // type IntoFuture = Map<Pin<Box<dyn Future<Output = Result<Message, Error>>> + Send>,>;
+    // type IntoFuture = MapOk<Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let payload_result = serde_json::to_vec(&self.payload)
+        serde_json::to_vec(&self.payload)
             .map(Bytes::from)
-            .map_err(|err| Box::new(err) as Error);
-
-        match payload_result {
-            Ok(payload) => {
-                let client = self.context.client.clone();
-
-                debug!("JetStream request sent: {:?}", payload);
-
-                let request =
-                    client.request(format!("{}.{}", self.context.prefix, self.subject), payload);
-                let request = request.timeout(self.timeout);
-
-                Box::pin(std::future::IntoFuture::into_future(async move {
-                    let message = request.await?;
-
-                    debug!(
-                        "JetStream request response: {:?}",
-                        from_utf8(&message.payload)
-                    );
-                    let response = serde_json::from_slice(message.payload.as_ref())?;
-
-                    Ok(response)
-                }))
-            }
-            Err(e) => Box::pin(std::future::IntoFuture::into_future(async { Err(e) })),
-        }
+            .map(|payload| {
+                self.context.client.request(format!("{}.{}", self.context.prefix, self.subject), payload)
+                    .timeout(self.timeout)
+                    .into_future()
+                    .map(|result| {
+                        let result : Self::Output = serde_json::from_slice(result.unwrap().payload.as_ref()).map_err(|err| Box::new(err));
+                        result
+                    })
+                    .boxed()
+            })
+        .or_else(|err| {
+            Ok(future::ready(Err(Box::new(err))).boxed())
+        })
+        .unwrap()
     }
 }
