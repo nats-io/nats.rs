@@ -13,8 +13,9 @@
 //
 //! Manage operations on a [Stream], create/delete/update [Consumer][crate::jetstream::consumer::Consumer].
 
+#[cfg(feature = "server-2.10")]
+use std::collections::HashMap;
 use std::{
-    collections::HashMap,
     fmt::Debug,
     future::IntoFuture,
     io::{self, ErrorKind},
@@ -923,6 +924,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<Source>>,
 
+    #[cfg(feature = "server-2.10")]
     // Additional stream metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
