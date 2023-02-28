@@ -24,6 +24,7 @@ pub struct AccountInfo {
 
 mod jetstream {
 
+    #[cfg(feature = "server-2.10")]
     use std::collections::HashMap;
     use std::str::from_utf8;
     use std::time::{Duration, Instant};
@@ -2643,6 +2644,7 @@ mod jetstream {
         );
     }
 
+    #[cfg(feature = "server-2.10")]
     #[tokio::test]
     async fn multiple_filters_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -2705,6 +2707,7 @@ mod jetstream {
         }
     }
 
+    #[cfg(feature = "server-2.10")]
     #[tokio::test]
     async fn metadata() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");

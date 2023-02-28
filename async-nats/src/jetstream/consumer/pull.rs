@@ -13,8 +13,10 @@
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
+
+#[cfg(feature = "server-2.10")]
+use std::collections::HashMap;
 use std::{
-    collections::HashMap,
     future,
     sync::{Arc, Mutex},
     task::Poll,
@@ -1474,6 +1476,7 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    #[cfg(feature = "server-2.10")]
     /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subjects: Vec<String>,
@@ -1511,6 +1514,7 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default")]
     pub memory_storage: bool,
+    #[cfg(feature = "server-2.10")]
     // Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
@@ -1538,6 +1542,7 @@ impl IntoConsumerConfig for Config {
             ack_wait: self.ack_wait,
             max_deliver: self.max_deliver,
             filter_subject: self.filter_subject,
+            #[cfg(feature = "server-2.10")]
             filter_subjects: self.filter_subjects,
             replay_policy: self.replay_policy,
             rate_limit: self.rate_limit,
@@ -1552,6 +1557,7 @@ impl IntoConsumerConfig for Config {
             inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
+            #[cfg(feature = "server-2.10")]
             metadata: self.metadata,
             backoff: self.backoff,
         }
@@ -1574,6 +1580,7 @@ impl FromConsumer for Config {
             ack_wait: config.ack_wait,
             max_deliver: config.max_deliver,
             filter_subject: config.filter_subject,
+            #[cfg(feature = "server-2.10")]
             filter_subjects: config.filter_subjects,
             replay_policy: config.replay_policy,
             rate_limit: config.rate_limit,
@@ -1586,6 +1593,7 @@ impl FromConsumer for Config {
             inactive_threshold: config.inactive_threshold,
             num_replicas: config.num_replicas,
             memory_storage: config.memory_storage,
+            #[cfg(feature = "server-2.10")]
             metadata: config.metadata,
             backoff: config.backoff,
         })
