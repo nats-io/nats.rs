@@ -1148,32 +1148,33 @@ impl<'a, T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<'a, T
     type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let payload_result = serde_json::to_vec(&self.payload).map(Bytes::from);
+        let payload_result = serde_json::to_vec(&self.payload)
+            .map(Bytes::from)
+            .map_err(|err| Box::new(err) as Error);
 
-        let subject = self.subject;
-        let timeout = self.timeout;
+        match payload_result {
+            Ok(payload) => {
+                let client = self.context.client.clone();
 
-        let context = &self.context;
+                debug!("JetStream request sent: {:?}", payload);
 
-        // TODO: Get rid of this cloning below
-        let prefix = context.prefix.clone();
-        let client = context.client.clone();
+                let request =
+                    client.request(format!("{}.{}", self.context.prefix, self.subject), payload);
+                let request = request.timeout(self.timeout);
 
-        Box::pin(std::future::IntoFuture::into_future(async move {
-            let payload = payload_result?;
-            debug!("JetStream request sent: {:?}", payload);
+                Box::pin(std::future::IntoFuture::into_future(async move {
+                    let message = request.await?;
 
-            let request = client.request(format!("{}.{}", prefix, subject), payload.clone());
-            let request = request.timeout(timeout);
-            let message = request.await?;
+                    debug!(
+                        "JetStream request response: {:?}",
+                        from_utf8(&message.payload)
+                    );
+                    let response = serde_json::from_slice(message.payload.as_ref())?;
 
-            debug!(
-                "JetStream request response: {:?}",
-                from_utf8(&message.payload)
-            );
-            let response = serde_json::from_slice(message.payload.as_ref())?;
-
-            Ok(response)
-        }))
+                    Ok(response)
+                }))
+            }
+            Err(e) => Box::pin(std::future::IntoFuture::into_future(async { Err(e) })),
+        }
     }
 }
