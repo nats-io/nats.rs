@@ -538,6 +538,7 @@ impl Store {
         self.stream
             .context
             .publish_with_headers(subject, headers, "".into())
+            .await?
             .await?;
         Ok(())
     }
