@@ -602,6 +602,11 @@ impl futures::Stream for Stream {
                 Poll::Ready(resp) => match resp {
                     Some(resp) => match resp {
                         Ok(reset) => {
+                            // Got a response, meaning consumer is alive.
+                            // Update last seen.
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
                             debug!("request successful, setting pending messages");
                             if reset {
                                 self.pending_messages = self.batch_config.batch;
@@ -626,6 +631,11 @@ impl futures::Stream for Stream {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
+                            // Got a status message from a consumer, meaning it's alive.
+                            // Update last seen.
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
                             if message.description.as_deref() == Some("Consumer is push based") {
                                 return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                     std::io::ErrorKind::Other,
