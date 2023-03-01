@@ -1,3 +1,61 @@
+# 0.28.0
+## Overview
+This release prepares the client for 2.10.0 server release and adds some fixes and improvements.
+
+To use the new features before the server 2.10.0 release, enable `server-2.10` feature.
+
+## Breaking Changes
+### To enable NAK with backoff, `AckKind::NAK` enum variant was changed
+
+What was before: 
+```rust
+AckKind::Nak
+``` 
+
+now is:
+```rust
+AckKind::Nak(Option<std::time::Duration>)
+```
+Which means a standard NAK example
+```rust
+let message = messages.next().await?;
+message.ack_kind(AckKind::Nak).await?;
+```
+Now should be used like this
+```rust
+let message = messages.next().await?;
+message.ack_kind(AckKind::Nak(None)).await?;
+```
+or with custom NAK
+```rust
+message.ack_kind(AckKind::Nak(Some(std::time::Duration::from_secs(10))).await?;
+```
+### Consumer info cluster field is now `Option`
+This field is provided only in clustered mode, so it's now properly inline with that.
+
+### Consumer `idle heartbeat` error does not terminate iterator
+This change does not require any action from the users who want to continue using client
+as they do now, but those who would like to try continuing working with consumer,
+even if it returned `idle heartbeats`, now they can.
+
+## Added
+* Add support for consumers with multiple filters by @Jarema in https://github.com/nats-io/nats.rs/pull/814
+* Add metadata support (feature `server-2.10.0`) by @Jarema in https://github.com/nats-io/nats.rs/pull/837
+* Add NAK and backoff support by @Jarema in https://github.com/nats-io/nats.rs/pull/839
+
+## Fixed
+* Fix flapping ack test by @Jarema in https://github.com/nats-io/nats.rs/pull/842
+* Fix Pull Fetch test by @Jarema in https://github.com/nats-io/nats.rs/pull/845
+* Update consumer last_seen on status messages and requests by @Jarema in https://github.com/nats-io/nats.rs/pull/856
+* Improve pull consumer robustness by @Jarema in https://github.com/nats-io/nats.rs/pull/858
+
+## Changed
+* Make consumer info cluster field optional by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/840
+* Bump dependencies by @Jarema in https://github.com/nats-io/nats.rs/pull/848
+* Idle Heartbeats now does not fuse the consumer iterator by @Jarema in https://github.com/nats-io/nats.rs/pull/856
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/nats/v0.24.0...async-nats/v0.28.0
+
 # 0.27.1
 ## Overview
 A patch release focused solely on important fixes.
