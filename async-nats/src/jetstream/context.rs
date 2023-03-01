@@ -19,6 +19,7 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{header, Client, Command, Error, HeaderMap, HeaderValue};
 use bytes::Bytes;
+use futures::FutureExt;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1142,33 +1143,36 @@ impl<'a, T: Sized + Serialize, V: DeserializeOwned> Request<'a, T, V> {
     }
 }
 
-use futures::FutureExt;
-use futures::future;
-use futures::future::Map;
-
 impl<'a, T: Sized + Serialize, V: DeserializeOwned + Send> IntoFuture for Request<'a, T, V> {
     type Output = Result<Response<V>, Error>;
 
-     type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
-    // type IntoFuture = Map<Pin<Box<dyn Future<Output = Result<Message, Error>>> + Send>,>;
-    // type IntoFuture = MapOk<Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         serde_json::to_vec(&self.payload)
+            .map_err(|s| Box::new(s) as Error)
             .map(Bytes::from)
             .map(|payload| {
-                self.context.client.request(format!("{}.{}", self.context.prefix, self.subject), payload)
+                debug!("JetStream request sent: {:?}", payload);
+
+                self.context
+                    .client
+                    .request(format!("{}.{}", self.context.prefix, self.subject), payload)
                     .timeout(self.timeout)
                     .into_future()
                     .map(|result| {
-                        let result : Self::Output = serde_json::from_slice(result.unwrap().payload.as_ref()).map_err(|err| Box::new(err));
-                        result
+                        result.and_then(|message| {
+                            debug!(
+                                "JetStream request response: {:?}",
+                                from_utf8(&message.payload)
+                            );
+
+                            serde_json::from_slice(message.payload.as_ref())
+                                .map_err(|s| Box::new(s) as Error)
+                        })
                     })
                     .boxed()
             })
-        .or_else(|err| {
-            Ok(future::ready(Err(Box::new(err))).boxed())
-        })
-        .unwrap()
+            .unwrap_or_else(|err| std::future::IntoFuture::into_future(async { Err(err) }).boxed())
     }
 }
