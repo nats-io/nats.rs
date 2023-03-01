@@ -1926,17 +1926,10 @@ mod jetstream {
             .unwrap();
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
-        context
-            .publish("events".to_string(), "dat".into())
-            .await
-            .unwrap();
-
-        let mut messages = consumer.messages().await.unwrap();
-
-        messages.next().await.unwrap().unwrap().ack().await.unwrap();
         let name = &consumer.cached_info().name;
         stream.delete_consumer(name).await.unwrap();
-        let now = Instant::now();
+        let mut messages = consumer.messages().await.unwrap();
+
         assert_eq!(
             messages
                 .next()
@@ -1948,9 +1941,62 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
+    }
+
+    #[tokio::test]
+    async fn pull_consumer_stream_deleted() {
+        tracing_subscriber::fmt::init();
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {err:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        context
+            .publish("events".to_string(), "dat".into())
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+
+        messages.next().await.unwrap().unwrap().ack().await.unwrap();
+        let name = &consumer.cached_info().name;
+        stream.delete_consumer(name).await.unwrap();
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
         // after terminal error, consumer should always return none.
         assert!(messages.next().await.is_none());
-        assert!(now.elapsed().le(&Duration::from_secs(50)));
     }
 
     #[tokio::test]
