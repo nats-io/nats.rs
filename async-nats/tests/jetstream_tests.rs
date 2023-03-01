@@ -431,6 +431,8 @@ mod jetstream {
             context
                 .publish("events".to_string(), "data".into())
                 .await
+                .unwrap()
+                .await
                 .unwrap();
         }
         let mut stream = context.get_stream("events").await.unwrap();
@@ -460,11 +462,15 @@ mod jetstream {
             context
                 .publish("events.one".to_string(), "data".into())
                 .await
+                .unwrap()
+                .await
                 .unwrap();
         }
         for _ in 0..4 {
             context
                 .publish("events.two".to_string(), "data".into())
+                .await
+                .unwrap()
                 .await
                 .unwrap();
         }
@@ -493,6 +499,8 @@ mod jetstream {
         for _ in 0..100 {
             context
                 .publish("events.two".to_string(), "data".into())
+                .await
+                .unwrap()
                 .await
                 .unwrap();
         }
@@ -608,10 +616,14 @@ mod jetstream {
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
 
         context
             .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap()
             .await
             .unwrap();
 
@@ -620,7 +632,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(raw_message.sequence, publish_ack.await.unwrap().sequence);
+        assert_eq!(raw_message.sequence, publish_ack.sequence);
     }
 
     #[tokio::test]
@@ -645,14 +657,20 @@ mod jetstream {
         context
             .publish("events".into(), "not this".into())
             .await
+            .unwrap()
+            .await
             .unwrap();
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
+            .await
+            .unwrap()
             .await
             .unwrap();
 
         context
             .publish("entries".into(), payload.as_ref().into())
+            .await
+            .unwrap()
             .await
             .unwrap();
 
@@ -667,10 +685,7 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(
-            sequence.parse::<u64>().unwrap(),
-            publish_ack.await.unwrap().sequence
-        );
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -700,9 +715,13 @@ mod jetstream {
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
         context
             .publish("events".into(), "not this".into())
+            .await
+            .unwrap()
             .await
             .unwrap();
 
@@ -725,10 +744,7 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(
-            sequence.parse::<u64>().unwrap(),
-            publish_ack.await.unwrap().sequence
-        );
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -759,22 +775,32 @@ mod jetstream {
         context
             .publish("events".into(), "not this".into())
             .await
+            .unwrap()
+            .await
             .unwrap();
         context
             .publish("events".into(), "not this".into())
+            .await
+            .unwrap()
             .await
             .unwrap();
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
         context
             .publish("events".into(), "not this".into())
+            .await
+            .unwrap()
             .await
             .unwrap();
 
         context
             .publish("events".into(), "not this".into())
+            .await
+            .unwrap()
             .await
             .unwrap();
 
@@ -792,10 +818,7 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(
-            sequence.parse::<u64>().unwrap(),
-            publish_ack.await.unwrap().sequence
-        );
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
         stream
@@ -830,16 +853,28 @@ mod jetstream {
         context
             .publish("events".into(), "not this".into())
             .await
+            .unwrap()
+            .await
             .unwrap();
+        // .await
+        // .unwrap();
         let publish_ack = context
             .publish("events".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
+        // .await
+        // .unwrap();
 
         context
             .publish("entries".into(), payload.as_ref().into())
             .await
+            .unwrap()
+            .await
             .unwrap();
+        // .await
+        // .unwrap();
 
         let message = stream.direct_get(2).await.unwrap();
 
@@ -852,10 +887,7 @@ mod jetstream {
             .iter()
             .next()
             .unwrap();
-        assert_eq!(
-            sequence.parse::<u64>().unwrap(),
-            publish_ack.await.unwrap().sequence
-        );
+        assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
         stream.direct_get(22).await.expect_err("should error");
@@ -1348,6 +1380,8 @@ mod jetstream {
             context
                 .publish("events".to_string(), "dat".into())
                 .await
+                .unwrap()
+                .await
                 .unwrap();
         }
 
@@ -1391,6 +1425,8 @@ mod jetstream {
         for i in 0..1000 {
             context
                 .publish("events".to_string(), format!("{i}").into())
+                .await
+                .unwrap()
                 .await
                 .unwrap();
         }
