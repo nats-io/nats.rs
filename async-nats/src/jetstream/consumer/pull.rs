@@ -578,7 +578,6 @@ impl futures::Stream for Stream {
                 match self.heartbeats_missing.poll_recv(cx) {
                     Poll::Ready(resp) => match resp {
                         Some(()) => {
-                            self.terminated = true;
                             trace!("received missing heartbeats notification");
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::TimedOut,
@@ -602,6 +601,7 @@ impl futures::Stream for Stream {
                 Poll::Ready(resp) => match resp {
                     Some(resp) => match resp {
                         Ok(reset) => {
+                            trace!("request response: {:?}", reset);
                             // Got a response, meaning consumer is alive.
                             // Update last seen.
                             if !self.batch_config.idle_heartbeat.is_zero() {
@@ -631,17 +631,32 @@ impl futures::Stream for Stream {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
-                            // Got a status message from a consumer, meaning it's alive.
-                            // Update last seen.
-                            if !self.batch_config.idle_heartbeat.is_zero() {
-                                *self.last_seen.lock().unwrap() = Instant::now();
+                            debug!("received status message: {:?}", message);
+                            // If consumer has been deleted, error and shutdown the iterator.
+                            if message.description.as_deref() == Some("Consumer Deleted") {
+                                self.terminated = true;
+                                return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    format!("{:?}: {:?}", message.status, message.description),
+                                )))));
                             }
+                            // If consumer is not pull based, error and shutdown the iterator.
                             if message.description.as_deref() == Some("Consumer is push based") {
+                                self.terminated = true;
                                 return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                     std::io::ErrorKind::Other,
                                     format!("{:?}: {:?}", message.status, message.description),
                                 )))));
                             }
+                            // All other cases can be handled.
+
+                            // Got a status message from a consumer, meaning it's alive.
+                            // Update last seen.
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
+
+                            // Do accounting for messages left after terminated/completed pull request.
                             let pending_messages = message
                                 .headers
                                 .as_ref()
@@ -668,7 +683,7 @@ impl futures::Stream for Stream {
                             self.pending_bytes = self.pending_bytes.saturating_sub(pending_bytes);
                             continue;
                         }
-
+                        // Idle Hearbeat means we have no messages, but consumer is fine.
                         StatusCode::IDLE_HEARTBEAT => {
                             debug!("received idle heartbeat");
                             if !self.batch_config.idle_heartbeat.is_zero() {
@@ -676,6 +691,7 @@ impl futures::Stream for Stream {
                             }
                             continue;
                         }
+                        // We got an message from a stream.
                         StatusCode::OK => {
                             trace!("message received");
                             if !self.batch_config.idle_heartbeat.is_zero() {
@@ -690,13 +706,14 @@ impl futures::Stream for Stream {
                             })));
                         }
                         status => {
+                            debug!("received unknown  message: {:?}", message);
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 format!(
                                     "error while processing messages from the stream: {}, {:?}",
                                     status, message.description
                                 ),
-                            )))))
+                            )))));
                         }
                     },
                     None => return Poll::Ready(None),
