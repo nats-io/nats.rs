@@ -165,6 +165,7 @@ impl ObjectStore {
         self.stream
             .context
             .publish_with_headers(subject, headers, data.into())
+            .await?
             .await?;
 
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
@@ -279,6 +280,7 @@ impl ObjectStore {
             self.stream
                 .context
                 .publish(chunk_subject.clone(), payload)
+                .await?
                 .await?;
         }
         let digest = context.finish();
@@ -307,6 +309,7 @@ impl ObjectStore {
         self.stream
             .context
             .publish_with_headers(subject, headers, data.into())
+            .await?
             .await?;
 
         // Purge any old chunks.
