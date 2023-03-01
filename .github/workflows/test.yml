@@ -26,6 +26,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         nats_server: [latest, main]
+        include:
+          - nats_server: main
+            features: server-2.10
 
     steps:
       - name: Check out repository
@@ -76,7 +79,7 @@ jobs:
         run: |
           rustup update
           nats-server --jetstream --port=4222 &
-          cargo test --features=unstable -- --nocapture
+          cargo test --features=${{ matrix.features }} -- --nocapture
 
   check_format:
     name: check (format)
