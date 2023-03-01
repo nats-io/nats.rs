@@ -12,6 +12,7 @@ concurrency:
 
 env:
   RUSTFLAGS: "-D warnings"
+  RUST_TEST_THREADS: 32
 
 defaults:
   run:
