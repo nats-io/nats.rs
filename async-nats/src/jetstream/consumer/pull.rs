@@ -518,15 +518,23 @@ impl Stream {
                     loop {
                         tokio::time::sleep(batch_config.idle_heartbeat).await;
                         debug!("checking for missed heartbeats");
-                        if last_seen
-                            .lock()
-                            .unwrap()
-                            .elapsed()
-                            .gt(&batch_config.idle_heartbeat.saturating_mul(2))
-                        {
+                        let should_reset = {
+                            let mut last_seen = last_seen.lock().unwrap();
+                            if last_seen
+                                .elapsed()
+                                .gt(&batch_config.idle_heartbeat.saturating_mul(2))
+                            {
+                                // If we met the missed heartbeat threshold, reset the timer
+                                // so it will not be instantly triggered again.
+                                *last_seen = Instant::now();
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if should_reset {
                             debug!("missed heartbeat threshold met");
                             missed_heartbeat_tx.send(()).await.unwrap();
-                            break;
                         }
                     }
                 }
@@ -602,12 +610,7 @@ impl futures::Stream for Stream {
                     Some(resp) => match resp {
                         Ok(reset) => {
                             trace!("request response: {:?}", reset);
-                            // Got a response, meaning consumer is alive.
-                            // Update last seen.
-                            if !self.batch_config.idle_heartbeat.is_zero() {
-                                *self.last_seen.lock().unwrap() = Instant::now();
-                            }
-                            debug!("request successful, setting pending messages");
+                            debug!("request sent, setting pending messages");
                             if reset {
                                 self.pending_messages = self.batch_config.batch;
                                 self.pending_bytes = self.batch_config.max_bytes;

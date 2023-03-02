@@ -44,6 +44,7 @@ mod jetstream {
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tokio_retry::Retry;
+    use tracing::debug;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -1898,6 +1899,7 @@ mod jetstream {
     }
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
+        tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
@@ -1926,10 +1928,12 @@ mod jetstream {
             .unwrap();
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
+        // Delete the consumer before starting fetching messages.
         let name = &consumer.cached_info().name;
         stream.delete_consumer(name).await.unwrap();
+        // Expect Idle Heartbeats to kick in.
+        debug!("waiting for the first idle heartbeat timeout");
         let mut messages = consumer.messages().await.unwrap();
-
         assert_eq!(
             messages
                 .next()
@@ -1941,10 +1945,45 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::TimedOut
         );
+        // But the consumer iterator should still be there.
+        // We should get timeout again.
+        debug!("waiting for the second idle heartbeat timeout");
+        assert_eq!(
+            messages
+                .next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .downcast::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        // Now recreate the consumer and see if we can continue.
+        // So recreate the consumer.
+        debug!("recreating the consumer");
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // Publish something.
+        debug!("publishing the message");
+        context
+            .publish("events".to_string(), "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        // and expect the message to be there.
+        debug!("awaiting the message with recreated consumer");
+        messages.next().await.unwrap().unwrap();
     }
 
     #[tokio::test]
-    async fn pull_consumer_stream_deleted() {
+    async fn pull_consumer_deleted() {
         tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
