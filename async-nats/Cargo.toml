@@ -54,6 +54,7 @@ async-nats = {path = ".", features = ["experimental"]}
 service = []
 experimental = ["service"]
 "server-2.10" = []
+slow_tests = []
 
 
 [[bench]]
