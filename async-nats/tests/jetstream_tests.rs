@@ -44,7 +44,6 @@ mod jetstream {
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tokio_retry::Retry;
-    use tracing::debug;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -1898,8 +1897,10 @@ mod jetstream {
         println!("time elapsed {:?}", now.elapsed());
     }
 
+    #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_consumer_long_idle() {
+        use tracing::debug;
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
@@ -1951,6 +1952,7 @@ mod jetstream {
         messages.next().await.unwrap().unwrap();
     }
 
+    #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
         use tracing::debug;

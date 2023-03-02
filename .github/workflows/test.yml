@@ -79,7 +79,7 @@ jobs:
         run: |
           rustup update
           nats-server --jetstream --port=4222 &
-          cargo test --features=${{ matrix.features }} -- --nocapture
+          cargo test --features=${{ matrix.features }} --features slow_tests -- --nocapture
 
   check_format:
     name: check (format)
