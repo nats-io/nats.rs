@@ -955,6 +955,70 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn info_with_subjects() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "foo".to_string(),
+                subjects: vec!["foo.*".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload = b"data";
+
+        context
+            .publish("foo.A".to_string(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("foo.A".to_string(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("foo.A".to_string(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        context
+            .publish("foo.B".to_string(), payload.as_ref().into())
+            .await
+            .unwrap();
+        context
+            .publish("foo.B".to_string(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        context
+            .publish("foo.C".to_string(), payload.as_ref().into())
+            .await
+            .unwrap();
+
+        let info = stream.info_with_subjects("foo.*").await.unwrap();
+        let subjects = info.state.subjects.as_ref().unwrap();
+
+        assert_eq!(subjects.keys().len(), 3);
+
+        assert!(subjects.contains_key("foo.A"));
+        assert!(subjects.contains_key("foo.B"));
+        assert!(subjects.contains_key("foo.C"));
+
+        assert_eq!(*subjects.get("foo.A").unwrap(), 3);
+        assert_eq!(*subjects.get("foo.B").unwrap(), 2);
+        assert_eq!(*subjects.get("foo.C").unwrap(), 1);
+
+        let info = stream.info_with_subjects("foo.A").await.unwrap();
+        let subjects = info.state.subjects.as_ref().unwrap();
+
+        assert_eq!(subjects.keys().len(), 1);
+        assert_eq!(*subjects.get("foo.A").unwrap(), 3);
+    }
+
+    #[tokio::test]
     async fn create_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
