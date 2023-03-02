@@ -1897,9 +1897,63 @@ mod jetstream {
         tokio::time::sleep(Duration::from_secs(10)).await;
         println!("time elapsed {:?}", now.elapsed());
     }
+
+    #[tokio::test]
+    async fn pull_consumer_long_idle() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {err:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+
+        // A delayed publish, making sure that until it happens, consumer properly handles idle
+        // heartbeats.
+        tokio::task::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            // Publish something.
+            debug!("publishing the message");
+            context
+                .publish("events".to_string(), "data".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        });
+        let mut messages = consumer
+            .stream()
+            .expires(Duration::from_secs(3))
+            .heartbeat(Duration::from_secs(1))
+            .messages()
+            .await
+            .unwrap();
+        messages.next().await.unwrap().unwrap();
+    }
+
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
-        tracing_subscriber::fmt::init();
+        use tracing::debug;
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
@@ -1984,7 +2038,6 @@ mod jetstream {
 
     #[tokio::test]
     async fn pull_consumer_deleted() {
-        tracing_subscriber::fmt::init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
