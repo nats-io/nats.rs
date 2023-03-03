@@ -15,7 +15,7 @@
 
 pub mod pull;
 pub mod push;
-#[cfg(feature = "server-2.10")]
+#[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::time::Duration;
@@ -271,7 +271,7 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
-    #[cfg(feature = "server-2.10")]
+    #[cfg(feature = "server_2_10")]
     /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subjects: Vec<String>,
@@ -316,7 +316,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
     pub memory_storage: bool,
 
-    #[cfg(feature = "server-2.10")]
+    #[cfg(feature = "server_2_10")]
     /// Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
