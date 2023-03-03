@@ -302,7 +302,7 @@ impl Client {
     /// # }
     /// ```
     pub fn request(&self, subject: String, payload: Bytes) -> Request {
-        Request::new(self.clone(), subject, payload)
+        Request::new(self, subject, payload)
     }
 
     /// Sends the request with headers.
@@ -325,7 +325,7 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, Error> {
-        let message = Request::new(self.clone(), subject, payload)
+        let message = Request::new(self, subject, payload)
             .headers(headers)
             .await?;
 
@@ -455,8 +455,8 @@ impl Client {
 
 /// Used for building and sending requests.
 #[derive(Debug)]
-pub struct Request {
-    client: Client,
+pub struct Request<'a> {
+    client: &'a Client,
     subject: String,
     payload: Option<Bytes>,
     headers: Option<HeaderMap>,
@@ -464,8 +464,8 @@ pub struct Request {
     inbox: Option<String>,
 }
 
-impl Request {
-    pub fn new(client: Client, subject: String, payload: Bytes) -> Request {
+impl<'a> Request<'a> {
+    pub fn new(client: &'a Client, subject: String, payload: Bytes) -> Request<'a> {
         Request {
             client,
             subject,
@@ -487,7 +487,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn payload(mut self, payload: Bytes) -> Request {
+    pub fn payload(mut self, payload: Bytes) -> Request<'a> {
         self.payload = Some(payload);
         self
     }
@@ -510,7 +510,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn headers(mut self, headers: HeaderMap) -> Request {
+    pub fn headers(mut self, headers: HeaderMap) -> Request<'a> {
         self.headers = Some(headers);
         self
     }
@@ -531,7 +531,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn timeout(mut self, timeout: Option<Duration>) -> Request {
+    pub fn timeout(mut self, timeout: Option<Duration>) -> Request<'a> {
         self.timeout = Some(timeout);
         self
     }
@@ -550,7 +550,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn inbox(mut self, inbox: String) -> Request {
+    pub fn inbox(mut self, inbox: String) -> Request<'a> {
         self.inbox = Some(inbox);
         self
     }
@@ -561,6 +561,7 @@ impl Request {
         let mut publish = self
             .client
             .publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
+
         if let Some(headers) = self.headers {
             publish = publish.headers(headers);
         }
@@ -598,11 +599,11 @@ impl Request {
     }
 }
 
-impl IntoFuture for Request {
+impl<'a> IntoFuture for Request<'a> {
     type Output = Result<Message, Error>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<Message, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Message, Error>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.send())
+        self.send().boxed()
     }
 }

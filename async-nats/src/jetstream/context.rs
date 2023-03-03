@@ -1146,7 +1146,7 @@ impl<'a, T: Sized + Serialize, V: DeserializeOwned> Request<'a, T, V> {
 impl<'a, T: Sized + Serialize, V: DeserializeOwned + Send> IntoFuture for Request<'a, T, V> {
     type Output = Result<Response<V>, Error>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
         serde_json::to_vec(&self.payload)
