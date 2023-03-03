@@ -28,7 +28,7 @@ jobs:
         nats_server: [main, dev]
         include:
           - nats_server: dev
-            features: server-2.10
+            features: server_2_10
 
     steps:
       - name: Check out repository

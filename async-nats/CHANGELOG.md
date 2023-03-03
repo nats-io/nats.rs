@@ -2,7 +2,7 @@
 ## Overview
 This release prepares the client for 2.10.0 server release and adds some fixes and improvements.
 
-To use the new features before the server 2.10.0 release, enable `server-2.10` feature.
+To use the new features before the server 2.10.0 release, enable `server_2_10` feature.
 
 ## Breaking Changes
 ### To enable NAK with backoff, `AckKind::NAK` enum variant was changed
@@ -39,8 +39,8 @@ as they do now, but those who would like to try continuing working with consumer
 even if it returned `idle heartbeats`, now they can.
 
 ## Added
-* Add support for consumers with multiple filters by @Jarema in https://github.com/nats-io/nats.rs/pull/814
-* Add metadata support (feature `server-2.10.0`) by @Jarema in https://github.com/nats-io/nats.rs/pull/837
+* Add support for consumers with multiple filters (feature `server_2_10`) by @Jarema in https://github.com/nats-io/nats.rs/pull/814
+* Add metadata support (feature `server_2_10`) by @Jarema in https://github.com/nats-io/nats.rs/pull/837
 * Add NAK and backoff support by @Jarema in https://github.com/nats-io/nats.rs/pull/839
 
 ## Fixed
