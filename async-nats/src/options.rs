@@ -457,7 +457,7 @@ impl ConnectOptions {
         self
     }
 
-    /// Registers asynchronous callback for errors that are receiver over the wire from the server.
+    /// Registers an asynchronous callback for errors that are received over the wire from the server.
     ///
     /// # Examples
     /// As asynchronous callbacks are still not in `stable` channel, here are some examples how to
