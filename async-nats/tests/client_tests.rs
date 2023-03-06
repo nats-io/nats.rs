@@ -14,7 +14,7 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectError, ConnectOptions, Event, Request, RequestError};
+    use async_nats::{ConnectError, ConnectOptions, Event, Request, RequestErrorKind};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -29,9 +29,8 @@ mod client {
         let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 
         for _ in 0..10 {
-            client.publish("foo".into(), "data".into()).await.unwrap();
+            client.publish("foo".into(), "data".into()).await.unwrap()
         }
-
         client.flush().await.unwrap();
 
         let mut i = 0;
@@ -217,10 +216,13 @@ mod client {
         let _sub = client.subscribe("service".into()).await.unwrap();
         client.flush().await.unwrap();
 
-        let err = client.request("service".into(), "payload".into()).await;
+        let err = client
+            .request("service".into(), "payload".into())
+            .await
+            .unwrap_err();
         // FIXME: we cant do PartialOrd, because mpsc errors are not PartialOrd
-        match err {
-            Err(RequestError::TimedOut) => {}
+        match err.kind() {
+            RequestErrorKind::TimedOut => {}
             _ => panic!("error should be timeout"),
         }
     }
@@ -236,8 +238,9 @@ mod client {
         )
         .await
         .unwrap()
-        .unwrap_err();
-        assert_eq!(RequestError::NoResponders, err);
+        .unwrap_err()
+        .kind();
+        assert_eq!(RequestErrorKind::NoResponders, err);
     }
 
     #[tokio::test]

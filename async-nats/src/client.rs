@@ -20,6 +20,7 @@ use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::fmt::Display;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -327,11 +328,11 @@ impl Client {
         }
         self.flush()
             .await
-            .map_err(|err| RequestError::Other(Box::new(err)))?;
+            .map_err(|err| RequestError::new(RequestErrorKind::Other, Some(err)))?;
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())
-                    .map_err(|_| RequestError::TimedOut)
+                    .map_err(|err| RequestError::new(RequestErrorKind::TimedOut, Some(err)))
                     .await?
             }
             None => sub.next().await,
@@ -339,14 +340,17 @@ impl Client {
         match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(RequestError::NoResponders);
+                    return Err(RequestError::new(
+                        RequestErrorKind::NoResponders,
+                        Some("no responders"),
+                    ));
                 }
                 Ok(message)
             }
-            None => Err(RequestError::Other(Box::new(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "broken pipe",
-            )))),
+            None => Err(RequestError::new(
+                RequestErrorKind::Other,
+                Some("broken pipe"),
+            )),
         }
     }
 
@@ -581,26 +585,56 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum RequestError {
-    #[error("request timed out")]
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum RequestErrorKind {
     TimedOut,
-    #[error("no responders")]
     NoResponders,
-    #[error("request error: {0}")]
-    Other(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Other,
+}
+
+#[derive(Debug, Error)]
+pub struct RequestError {
+    inner: RequestErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Display for RequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.inner {
+            RequestErrorKind::TimedOut => write!(f, "request timed out"),
+            RequestErrorKind::NoResponders => write!(f, "no responders"),
+            RequestErrorKind::Other => write!(f, "request failed: {:?}", self.source),
+        }
+    }
 }
 
 impl PartialEq for RequestError {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (RequestError::TimedOut, RequestError::TimedOut) => true,
-            (RequestError::NoResponders, RequestError::NoResponders) => true,
-            (RequestError::Other(self_err), RequestError::Other(other_err)) => {
-                self_err.to_string() == other_err.to_string()
+        match (&self.inner, &other.inner) {
+            (RequestErrorKind::TimedOut, RequestErrorKind::TimedOut) => true,
+            (RequestErrorKind::NoResponders, RequestErrorKind::NoResponders) => true,
+            (RequestErrorKind::Other, RequestErrorKind::Other) => {
+                self.source.as_ref().map(|e| e.to_string())
+                    == other.source.as_ref().map(|e| e.to_string())
             }
             _ => false,
         }
+    }
+}
+
+impl RequestError {
+    fn new<E>(kind: RequestErrorKind, source: Option<E>) -> RequestError
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        RequestError {
+            inner: kind,
+            source: source.map(|s| s.into()),
+        }
+    }
+
+    pub fn kind(&self) -> RequestErrorKind {
+        self.inner
     }
 }
 
@@ -614,11 +648,11 @@ pub enum FlushError {
 
 impl From<PublishError> for RequestError {
     fn from(e: PublishError) -> Self {
-        RequestError::Other(Box::new(e))
+        RequestError::new(RequestErrorKind::Other, Some(e))
     }
 }
 impl From<SubscribeError> for RequestError {
     fn from(e: SubscribeError) -> Self {
-        RequestError::Other(Box::new(e))
+        RequestError::new(RequestErrorKind::Other, Some(e))
     }
 }
