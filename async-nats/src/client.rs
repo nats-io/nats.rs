@@ -608,20 +608,6 @@ impl Display for RequestError {
     }
 }
 
-impl PartialEq for RequestError {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.kind, &other.kind) {
-            (RequestErrorKind::TimedOut, RequestErrorKind::TimedOut) => true,
-            (RequestErrorKind::NoResponders, RequestErrorKind::NoResponders) => true,
-            (RequestErrorKind::Other, RequestErrorKind::Other) => {
-                self.source.as_ref().map(|e| e.to_string())
-                    == other.source.as_ref().map(|e| e.to_string())
-            }
-            _ => false,
-        }
-    }
-}
-
 impl RequestError {
     fn with_source<E>(kind: RequestErrorKind, source: E) -> RequestError
     where

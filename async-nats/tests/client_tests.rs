@@ -652,11 +652,10 @@ mod client {
             .connect("nats://127.0.0.1:4848")
             .await;
 
-        if let Err(err) = timeout_result {
-            assert_eq!(err.kind(), ConnectErrorKind::TimedOut);
-        } else {
-            panic!("wrong error type");
-        }
+        assert_eq!(
+            timeout_result.unwrap_err().kind(),
+            ConnectErrorKind::TimedOut
+        );
         startup_listener.notify_one();
     }
 

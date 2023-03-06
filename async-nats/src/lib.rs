@@ -896,27 +896,6 @@ impl From<std::io::Error> for ConnectError {
     }
 }
 
-impl PartialEq for ConnectError {
-    fn eq(&self, other: &Self) -> bool {
-        matches!(
-            (self.kind, other.kind),
-            (ConnectErrorKind::ServerParse, ConnectErrorKind::ServerParse)
-                | (ConnectErrorKind::Dns, ConnectErrorKind::Dns)
-                | (ConnectErrorKind::Tls, ConnectErrorKind::Dns)
-                | (ConnectErrorKind::Io, ConnectErrorKind::Io)
-                | (ConnectErrorKind::TimedOut, ConnectErrorKind::TimedOut)
-                | (
-                    ConnectErrorKind::AuthorizationViolation,
-                    ConnectErrorKind::AuthorizationViolation,
-                )
-                | (
-                    ConnectErrorKind::Authentication,
-                    ConnectErrorKind::Authentication
-                )
-        )
-    }
-}
-
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
 /// Implements [futures::stream::Stream] for ergonomic async message processing.
