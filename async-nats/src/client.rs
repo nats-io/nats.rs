@@ -34,13 +34,13 @@ lazy_static! {
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error)]
 #[error("failed to publish message: {0}")]
-pub struct PublishError(String);
+pub struct PublishError(#[source] Box<dyn std::error::Error + Send + Sync>);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        PublishError(err.to_string())
+        PublishError(Box::new(err))
     }
 }
 
@@ -575,13 +575,13 @@ impl Request {
     }
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 #[error("failed to send subscribe: {0}")]
-pub struct SubscribeError(String);
+pub struct SubscribeError(#[source] Box<dyn std::error::Error + Sync + Send>);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        SubscribeError(err.to_string())
+        SubscribeError(Box::new(err))
     }
 }
 
