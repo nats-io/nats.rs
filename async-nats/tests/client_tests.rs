@@ -14,7 +14,7 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectError, ConnectOptions, Event, Request, RequestErrorKind};
+    use async_nats::{ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -422,8 +422,9 @@ mod client {
         let err = async_nats::ConnectOptions::new()
             .connect(server.client_url())
             .await
-            .unwrap_err();
-        assert_eq!(ConnectError::AuthorizationViolation, err);
+            .unwrap_err()
+            .kind();
+        assert_eq!(ConnectErrorKind::AuthorizationViolation, err);
     }
 
     #[tokio::test]
@@ -435,8 +436,9 @@ mod client {
         )
         .connect(server.client_url())
         .await
-        .unwrap_err();
-        assert_eq!(ConnectError::AuthorizationViolation, err);
+        .unwrap_err()
+        .kind();
+        assert_eq!(ConnectErrorKind::AuthorizationViolation, err);
     }
 
     #[tokio::test]
@@ -656,8 +658,8 @@ mod client {
             .connect("nats://127.0.0.1:4848")
             .await;
 
-        if let Err(ConnectError::Io(err)) = timeout_result {
-            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        if let Err(err) = timeout_result {
+            assert_eq!(err.kind(), ConnectErrorKind::TimedOut);
         } else {
             panic!("wrong error type");
         }

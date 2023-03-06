@@ -109,6 +109,7 @@ use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
@@ -690,7 +691,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         events_tx,
         state_tx,
     )
-    .map_err(|err| ConnectError::ServerParse(Box::new(err)))?;
+    .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
     let mut info: ServerInfo = Default::default();
     let mut connection = None;
@@ -833,39 +834,86 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError>
     connect_with_options(addrs, ConnectOptions::default()).await
 }
 
-#[derive(Error, Debug)]
-pub enum ConnectError {
-    #[error("failed to parse server or server list: {0}")]
-    ServerParse(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("DNS error: {0}")]
-    Dns(#[source] io::Error),
-    #[error("failed signing nonce")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ConnectErrorKind {
+    ServerParse,
+    Dns,
     Authentication,
-    #[error("authorization violation")]
     AuthorizationViolation,
-    #[error("TLS error: {0}")]
-    Tls(#[source] io::Error),
-    #[error("Io error: {0}")]
-    Io(#[source] io::Error),
+    TimedOut,
+    Tls,
+    Io,
+}
+
+#[derive(Debug, Error)]
+pub struct ConnectError {
+    kind: ConnectErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Display for ConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source_info = self
+            .source
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "no details".to_string());
+        match self.kind {
+            ConnectErrorKind::ServerParse => {
+                write!(f, "failed to parse server or server list: {}", source_info)
+            }
+            ConnectErrorKind::Dns => write!(f, "DNS error: {}", source_info),
+            ConnectErrorKind::Authentication => write!(f, "failed signing nonce"),
+            ConnectErrorKind::AuthorizationViolation => write!(f, "authorization violation"),
+            ConnectErrorKind::TimedOut => write!(f, "timed out"),
+            ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
+            ConnectErrorKind::Io => write!(f, "{}", source_info),
+        }
+    }
+}
+
+impl ConnectError {
+    fn with_source<E>(kind: ConnectErrorKind, source: E) -> ConnectError
+    where
+        E: Into<Box<dyn std::error::Error + Sync + Send>>,
+    {
+        ConnectError {
+            kind,
+            source: Some(source.into()),
+        }
+    }
+    fn new(kind: ConnectErrorKind) -> ConnectError {
+        ConnectError { kind, source: None }
+    }
+    pub fn kind(&self) -> ConnectErrorKind {
+        self.kind
+    }
 }
 
 impl From<std::io::Error> for ConnectError {
     fn from(err: std::io::Error) -> Self {
-        ConnectError::Io(err)
+        ConnectError::with_source(ConnectErrorKind::Io, err)
     }
 }
 
 impl PartialEq for ConnectError {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::ServerParse(l0), Self::ServerParse(r0)) => l0.to_string() == r0.to_string(),
-            (Self::Dns(l0), Self::Dns(r0)) => l0.to_string() == r0.to_string(),
-            (Self::Tls(l0), Self::Tls(r0)) => l0.to_string() == r0.to_string(),
-            (Self::Io(l0), Self::Io(r0)) => l0.to_string() == r0.to_string(),
-            (Self::AuthorizationViolation, Self::AuthorizationViolation) => true,
-            (Self::Authentication, Self::Authentication) => true,
-            _ => false,
-        }
+        matches!(
+            (self.kind, other.kind),
+            (ConnectErrorKind::ServerParse, ConnectErrorKind::ServerParse)
+                | (ConnectErrorKind::Dns, ConnectErrorKind::Dns)
+                | (ConnectErrorKind::Tls, ConnectErrorKind::Dns)
+                | (ConnectErrorKind::Io, ConnectErrorKind::Io)
+                | (ConnectErrorKind::TimedOut, ConnectErrorKind::TimedOut)
+                | (
+                    ConnectErrorKind::AuthorizationViolation,
+                    ConnectErrorKind::AuthorizationViolation,
+                )
+                | (
+                    ConnectErrorKind::Authentication,
+                    ConnectErrorKind::Authentication
+                )
+        )
     }
 }
 
@@ -1024,7 +1072,7 @@ impl From<ClientError> for CallbackError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
 pub enum ServerError {
     AuthorizationViolation,
     SlowConsumer(u64),

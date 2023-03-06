@@ -117,7 +117,9 @@ impl Connector {
             *server_attempts += 1;
             sleep(duration).await;
 
-            let socket_addrs = server_addr.socket_addrs().map_err(ConnectError::Dns)?;
+            let socket_addrs = server_addr
+                .socket_addrs()
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
             for socket_addr in socket_addrs {
                 match self
                     .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
@@ -126,9 +128,12 @@ impl Connector {
                     Ok((server_info, mut connection)) => {
                         if !self.options.ignore_discovered_servers {
                             for url in &server_info.connect_urls {
-                                let server_addr = url
-                                    .parse::<ServerAddr>()
-                                    .map_err(|err| ConnectError::ServerParse(Box::new(err)))?;
+                                let server_addr = url.parse::<ServerAddr>().map_err(|err| {
+                                    ConnectError::with_source(
+                                        crate::ConnectErrorKind::ServerParse,
+                                        err,
+                                    )
+                                })?;
                                 self.servers.entry(server_addr).or_insert(0);
                             }
                         }
@@ -177,10 +182,18 @@ impl Connector {
                                                 connect_info.signature =
                                                     Some(base64_url::encode(&signed));
                                             }
-                                            Err(_) => return Err(ConnectError::Authentication),
+                                            Err(_) => {
+                                                return Err(ConnectError::new(
+                                                    crate::ConnectErrorKind::Authentication,
+                                                ))
+                                            }
                                         };
                                     }
-                                    Err(_) => return Err(ConnectError::Authentication),
+                                    Err(_) => {
+                                        return Err(ConnectError::new(
+                                            crate::ConnectErrorKind::Authentication,
+                                        ))
+                                    }
                                 }
                             }
                             Authorization::Jwt(jwt, sign_fn) => {
@@ -189,7 +202,11 @@ impl Connector {
                                         connect_info.user_jwt = Some(jwt.clone());
                                         connect_info.signature = Some(sig);
                                     }
-                                    Err(_) => return Err(ConnectError::Authentication),
+                                    Err(_) => {
+                                        return Err(ConnectError::new(
+                                            crate::ConnectErrorKind::Authentication,
+                                        ))
+                                    }
                                 }
                             }
                         }
@@ -201,15 +218,16 @@ impl Connector {
                         match connection.read_op().await? {
                             Some(ServerOp::Error(err)) => match err {
                                 ServerError::AuthorizationViolation => {
-                                    println!("viola");
-                                    return Err(ConnectError::AuthorizationViolation);
+                                    return Err(ConnectError::with_source(
+                                        crate::ConnectErrorKind::AuthorizationViolation,
+                                        err,
+                                    ));
                                 }
                                 err => {
-                                    println!("OTH");
-                                    return Err(ConnectError::Io(std::io::Error::new(
-                                        ErrorKind::Other,
-                                        format!("server error: {}", err),
-                                    )));
+                                    return Err(ConnectError::with_source(
+                                        crate::ConnectErrorKind::Io,
+                                        err,
+                                    ));
                                 }
                             },
                             Some(_) => {
@@ -218,10 +236,10 @@ impl Connector {
                                 return Ok((server_info, connection));
                             }
                             None => {
-                                return Err(ConnectError::Io(std::io::Error::new(
-                                    ErrorKind::ConnectionAborted,
-                                    "connection aborted",
-                                )))
+                                return Err(ConnectError::with_source(
+                                    crate::ConnectErrorKind::Io,
+                                    "broken pipe",
+                                ))
                             }
                         }
                     }
@@ -245,9 +263,7 @@ impl Connector {
             TcpStream::connect(socket_addr),
         )
         .await
-        .map_err(|_| {
-            ConnectError::Io(io::Error::new(ErrorKind::TimedOut, "connection timed out"))
-        })??;
+        .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
 
         tcp_stream.set_nodelay(true)?;
 
@@ -260,16 +276,16 @@ impl Connector {
         let info = match op {
             Some(ServerOp::Info(info)) => info,
             Some(op) => {
-                return Err(ConnectError::Io(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("expected info, got {op:?}"),
-                )))
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    format!("expected INFO, got {:?}", op),
+                ))
             }
             None => {
-                return Err(ConnectError::Io(std::io::Error::new(
-                    ErrorKind::Other,
-                    "expected info, got nothing",
-                )))
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    "expected INFO, got nothing",
+                ))
             }
         };
 
@@ -277,7 +293,7 @@ impl Connector {
             let tls_config = Arc::new(
                 tls::config_tls(&self.options)
                     .await
-                    .map_err(ConnectError::Tls)?,
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
             );
             let tls_connector = tokio_rustls::TlsConnector::try_from(tls_config)
                 .map_err(|err| {
@@ -286,7 +302,7 @@ impl Connector {
                         format!("failed to create TLS connector from TLS config: {err}"),
                     )
                 })
-                .map_err(ConnectError::Tls)?;
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
             // Use the server-advertised hostname to validate if given as a hostname, not an IP address
             let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
@@ -302,7 +318,7 @@ impl Connector {
                     ErrorKind::InvalidInput,
                     "cannot determine hostname for TLS connection",
                 ))
-                .map_err(ConnectError::Tls);
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err));
             };
 
             connection = Connection {

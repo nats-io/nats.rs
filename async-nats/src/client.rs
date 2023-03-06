@@ -328,11 +328,11 @@ impl Client {
         }
         self.flush()
             .await
-            .map_err(|err| RequestError::new(RequestErrorKind::Other, Some(err)))?;
+            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())
-                    .map_err(|err| RequestError::new(RequestErrorKind::TimedOut, Some(err)))
+                    .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
                     .await?
             }
             None => sub.next().await,
@@ -340,16 +340,16 @@ impl Client {
         match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(RequestError::new(
+                    return Err(RequestError::with_source(
                         RequestErrorKind::NoResponders,
-                        Some("no responders"),
+                        "no responders",
                     ));
                 }
                 Ok(message)
             }
-            None => Err(RequestError::new(
+            None => Err(RequestError::with_source(
                 RequestErrorKind::Other,
-                Some("broken pipe"),
+                "broken pipe",
             )),
         }
     }
@@ -456,11 +456,11 @@ impl Client {
         self.sender
             .send(Command::Flush { result: tx })
             .await
-            .map_err(|err| FlushError::SendError(err.to_string()))?;
+            .map_err(|err| FlushError::with_source(FlushErrorKind::SendError, err))?;
         // first question mark is an error from rx itself, second for error from flush.
         rx.await
-            .map_err(|err| FlushError::FlushError(err.to_string()))?
-            .map_err(|err| FlushError::FlushError(err.to_string()))?;
+            .map_err(|err| FlushError::with_source(FlushErrorKind::FlushError, err))?
+            .map_err(|err| FlushError::with_source(FlushErrorKind::FlushError, err))?;
         Ok(())
     }
 
@@ -594,13 +594,13 @@ pub enum RequestErrorKind {
 
 #[derive(Debug, Error)]
 pub struct RequestError {
-    inner: RequestErrorKind,
+    kind: RequestErrorKind,
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.inner {
+        match self.kind {
             RequestErrorKind::TimedOut => write!(f, "request timed out"),
             RequestErrorKind::NoResponders => write!(f, "no responders"),
             RequestErrorKind::Other => write!(f, "request failed: {:?}", self.source),
@@ -610,7 +610,7 @@ impl Display for RequestError {
 
 impl PartialEq for RequestError {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.inner, &other.inner) {
+        match (&self.kind, &other.kind) {
             (RequestErrorKind::TimedOut, RequestErrorKind::TimedOut) => true,
             (RequestErrorKind::NoResponders, RequestErrorKind::NoResponders) => true,
             (RequestErrorKind::Other, RequestErrorKind::Other) => {
@@ -623,36 +623,69 @@ impl PartialEq for RequestError {
 }
 
 impl RequestError {
-    fn new<E>(kind: RequestErrorKind, source: Option<E>) -> RequestError
+    fn with_source<E>(kind: RequestErrorKind, source: E) -> RequestError
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         RequestError {
-            inner: kind,
-            source: source.map(|s| s.into()),
+            kind,
+            source: Some(source.into()),
         }
     }
 
     pub fn kind(&self) -> RequestErrorKind {
-        self.inner
+        self.kind
     }
 }
 
-#[derive(Debug, Error, PartialEq)]
-pub enum FlushError {
-    #[error("failed to send flush request: {0}")]
-    SendError(String),
-    #[error("flush failed: {0}")]
-    FlushError(String),
+#[derive(Debug, Error)]
+pub struct FlushError {
+    kind: FlushErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Display for FlushError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source_info = self
+            .source
+            .as_ref()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "no details".into());
+        match self.kind {
+            FlushErrorKind::SendError => write!(f, "failed to send flush request: {}", source_info),
+            FlushErrorKind::FlushError => write!(f, "flush failed: {}", source_info),
+        }
+    }
+}
+
+impl FlushError {
+    fn with_source<E>(kind: FlushErrorKind, source: E) -> FlushError
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        FlushError {
+            kind,
+            source: Some(source.into()),
+        }
+    }
+    pub fn kind(&self) -> FlushErrorKind {
+        self.kind
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum FlushErrorKind {
+    SendError,
+    FlushError,
 }
 
 impl From<PublishError> for RequestError {
     fn from(e: PublishError) -> Self {
-        RequestError::new(RequestErrorKind::Other, Some(e))
+        RequestError::with_source(RequestErrorKind::Other, e)
     }
 }
 impl From<SubscribeError> for RequestError {
     fn from(e: SubscribeError) -> Self {
-        RequestError::new(RequestErrorKind::Other, Some(e))
+        RequestError::with_source(RequestErrorKind::Other, e)
     }
 }
