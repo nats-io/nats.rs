@@ -841,10 +841,18 @@ pub enum ConnectError {
     Dns(#[source] io::Error),
     #[error("failed signing nonce")]
     Authentication,
+    #[error("authorization violation")]
+    AuthorizationViolation,
     #[error("TLS error: {0}")]
     Tls(#[source] io::Error),
-    #[error("Io error")]
-    Io(#[from] io::Error),
+    #[error("Io error: {0}")]
+    Io(#[source] io::Error),
+}
+
+impl From<std::io::Error> for ConnectError {
+    fn from(err: std::io::Error) -> Self {
+        ConnectError::Io(err)
+    }
 }
 
 impl PartialEq for ConnectError {
@@ -854,6 +862,7 @@ impl PartialEq for ConnectError {
             (Self::Dns(l0), Self::Dns(r0)) => l0.to_string() == r0.to_string(),
             (Self::Tls(l0), Self::Tls(r0)) => l0.to_string() == r0.to_string(),
             (Self::Io(l0), Self::Io(r0)) => l0.to_string() == r0.to_string(),
+            (Self::AuthorizationViolation, Self::AuthorizationViolation) => true,
             (Self::Authentication, Self::Authentication) => true,
             _ => false,
         }

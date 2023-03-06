@@ -420,13 +420,7 @@ mod client {
             .connect(server.client_url())
             .await
             .unwrap_err();
-        assert_eq!(
-            ConnectError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "server error: nats: authorization violation"
-            )),
-            err
-        );
+        assert_eq!(ConnectError::AuthorizationViolation, err);
     }
 
     #[tokio::test]

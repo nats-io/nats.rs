@@ -22,6 +22,7 @@ use crate::ConnectInfo;
 use crate::Event;
 use crate::Protocol;
 use crate::ServerAddr;
+use crate::ServerError;
 use crate::ServerInfo;
 use crate::ServerOp;
 use crate::SocketAddr;
@@ -198,12 +199,19 @@ impl Connector {
                         connection.flush().await?;
 
                         match connection.read_op().await? {
-                            Some(ServerOp::Error(err)) => {
-                                return Err(ConnectError::Io(std::io::Error::new(
-                                    ErrorKind::Other,
-                                    format!("server error: {}", err),
-                                )));
-                            }
+                            Some(ServerOp::Error(err)) => match err {
+                                ServerError::AuthorizationViolation => {
+                                    println!("viola");
+                                    return Err(ConnectError::AuthorizationViolation);
+                                }
+                                err => {
+                                    println!("OTH");
+                                    return Err(ConnectError::Io(std::io::Error::new(
+                                        ErrorKind::Other,
+                                        format!("server error: {}", err),
+                                    )));
+                                }
+                            },
                             Some(_) => {
                                 self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
