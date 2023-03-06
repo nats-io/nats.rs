@@ -928,6 +928,10 @@ pub struct Config {
     // Additional stream metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
+
+    // Allow applying a subject transform to incoming messages before doing anything else
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_transform: Option<SubjectTransform>,
 }
 
 impl From<&Config> for Config {
@@ -944,6 +948,17 @@ impl From<&str> for Config {
         }
     }
 }
+
+// SubjectTransform is for applying a subject transform (to )
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct SubjectTransform {
+    #[serde(rename = "src")]
+    pub source: String,
+
+    #[serde(rename = "dest")]
+    pub destination: String,
+}
+
 // Republish is for republishing messages once committed to a stream.
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Republish {
@@ -1277,6 +1292,9 @@ pub struct Source {
     /// Optional config to set a domain, if source is residing in different one.
     #[serde(default, skip_serializing_if = "is_default")]
     pub domain: Option<String>,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub subject_transform_dest: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]

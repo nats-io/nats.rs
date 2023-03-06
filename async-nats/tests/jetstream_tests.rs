@@ -3032,4 +3032,70 @@ mod jetstream {
             .await
             .unwrap_err();
     }
+
+    #[tokio::test]
+    async fn subject_transform() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                subject_transform: Some(async_nats::jetstream::stream::SubjectTransform {
+                    source: ">".to_string(),
+                    destination: "transformed.>".to_string(),
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("test".to_string(), "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "sourcing".to_string(),
+                sources: Some(vec![async_nats::jetstream::stream::Source {
+                    name: "origin".to_string(),
+                    subject_transform_dest: Some("fromtest.>".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .get_or_create_stream(async_nats::jetstream::stream::Config {
+                subjects: vec!["fromtest.>".to_string()],
+                name: "events".to_string(),
+
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // ephemeral consumer
+        let consumer = stream
+            .get_or_create_consumer(
+                "consumer",
+                async_nats::jetstream::consumer::pull::Config {
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap().take(1000);
+        let message = messages.next().await.unwrap().unwrap();
+
+        assert_eq!(message.subject, "fromtest.transformed.test");
+    }
 }
