@@ -220,11 +220,7 @@ mod client {
             .request("service".into(), "payload".into())
             .await
             .unwrap_err();
-        // FIXME: we cant do PartialOrd, because mpsc errors are not PartialOrd
-        match err.kind() {
-            RequestErrorKind::TimedOut => {}
-            _ => panic!("error should be timeout"),
-        }
+        assert_eq!(err.kind(), RequestErrorKind::TimedOut)
     }
 
     #[tokio::test]
@@ -238,9 +234,8 @@ mod client {
         )
         .await
         .unwrap()
-        .unwrap_err()
-        .kind();
-        assert_eq!(RequestErrorKind::NoResponders, err);
+        .unwrap_err();
+        assert_eq!(RequestErrorKind::NoResponders, err.kind());
     }
 
     #[tokio::test]
@@ -436,9 +431,8 @@ mod client {
         )
         .connect(server.client_url())
         .await
-        .unwrap_err()
-        .kind();
-        assert_eq!(ConnectErrorKind::AuthorizationViolation, err);
+        .unwrap_err();
+        assert_eq!(ConnectErrorKind::AuthorizationViolation, err.kind());
     }
 
     #[tokio::test]
