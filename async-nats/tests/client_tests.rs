@@ -416,10 +416,17 @@ mod client {
     #[tokio::test]
     async fn required_auth_not_provided() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        async_nats::ConnectOptions::new()
+        let err = async_nats::ConnectOptions::new()
             .connect(server.client_url())
             .await
             .unwrap_err();
+        assert_eq!(
+            ConnectError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "server error: nats: authorization violation"
+            )),
+            err
+        );
     }
 
     #[tokio::test]
