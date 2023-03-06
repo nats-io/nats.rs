@@ -148,7 +148,7 @@ mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
-pub use client::{Client, IoErrorKind, PublishError, Request, RequestError};
+pub use client::{Client, PublishError, Request, RequestError};
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
@@ -690,7 +690,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         events_tx,
         state_tx,
     )
-    .map_err(|_| ConnectError::ServerParse)?;
+    .map_err(|err| ConnectError::ServerParse(Box::new(err)))?;
 
     let mut info: ServerInfo = Default::default();
     let mut connection = None;
@@ -835,16 +835,29 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError>
 
 #[derive(Error, Debug)]
 pub enum ConnectError {
-    #[error("failed to parse server or server list")]
-    ServerParse,
+    #[error("failed to parse server or server list: {0}")]
+    ServerParse(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("DNS error: {0}")]
-    Dns(io::Error),
+    Dns(#[source] io::Error),
     #[error("failed signing nonce")]
     Authentication,
     #[error("TLS error: {0}")]
     Tls(#[source] io::Error),
     #[error("Io error")]
     Io(#[from] io::Error),
+}
+
+impl PartialEq for ConnectError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::ServerParse(l0), Self::ServerParse(r0)) => l0.to_string() == r0.to_string(),
+            (Self::Dns(l0), Self::Dns(r0)) => l0.to_string() == r0.to_string(),
+            (Self::Tls(l0), Self::Tls(r0)) => l0.to_string() == r0.to_string(),
+            (Self::Io(l0), Self::Io(r0)) => l0.to_string() == r0.to_string(),
+            (Self::Authentication, Self::Authentication) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
@@ -942,9 +955,15 @@ impl Subscriber {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 #[error("failed to send unsubscribe")]
-pub struct UnsubscribeError(#[from] mpsc::error::SendError<Command>);
+pub struct UnsubscribeError(String);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        UnsubscribeError(err.to_string())
+    }
+}
 
 impl Drop for Subscriber {
     fn drop(&mut self) {

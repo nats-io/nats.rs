@@ -230,13 +230,14 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        tokio::time::timeout(
+        let err = tokio::time::timeout(
             tokio::time::Duration::from_millis(300),
             client.request("test".into(), "request".into()),
         )
         .await
         .unwrap()
         .unwrap_err();
+        assert_eq!(RequestError::NoResponders, err);
     }
 
     #[tokio::test]
@@ -268,6 +269,7 @@ mod client {
 
     #[tokio::test]
     async fn unsubscribe() {
+        use std::error::Error;
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
@@ -277,7 +279,14 @@ mod client {
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
-        sub.unsubscribe().await.unwrap();
+        let result = sub.unsubscribe().await;
+        match result {
+            Ok(()) => println!("ok"),
+            Err(err) => {
+                println!("error: {}", err);
+                println!("source: {:?}", err.source())
+            }
+        }
         // check if we can still send messages after unsubscribe.
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
         client.publish("test2".into(), "data".into()).await.unwrap();

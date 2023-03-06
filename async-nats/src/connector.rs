@@ -126,8 +126,8 @@ impl Connector {
                         if !self.options.ignore_discovered_servers {
                             for url in &server_info.connect_urls {
                                 let server_addr = url
-                                .parse::<ServerAddr>()
-                                .map_err(|_| ConnectError::ServerParse)?;
+                                    .parse::<ServerAddr>()
+                                    .map_err(|err| ConnectError::ServerParse(Box::new(err)))?;
                                 self.servers.entry(server_addr).or_insert(0);
                             }
                         }
@@ -266,10 +266,11 @@ impl Connector {
         };
 
         if self.options.tls_required || info.tls_required || tls_required {
-                let tls_config = Arc::new(tls::config_tls(&self.options)
+            let tls_config = Arc::new(
+                tls::config_tls(&self.options)
                     .await
-                    .map_err(ConnectError::Tls)?);
-            let tls_config = Arc::new(tls::config_tls(&self.options).await?);
+                    .map_err(ConnectError::Tls)?,
+            );
             let tls_connector = tokio_rustls::TlsConnector::try_from(tls_config)
                 .map_err(|err| {
                     io::Error::new(

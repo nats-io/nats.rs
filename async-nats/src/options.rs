@@ -595,7 +595,7 @@ impl<A, T> fmt::Debug for CallbackArg1<A, T> {
 
 /// Error report from signing callback.
 // This was needed because std::io::Error isn't Send.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct AuthError(String);
 
 impl AuthError {
