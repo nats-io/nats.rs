@@ -21,6 +21,8 @@ use crate::{
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server_2_10")]
+use std::collections::HashMap;
 use std::{
     io::{self, ErrorKind},
     pin::Pin,
@@ -32,7 +34,7 @@ use std::{
     task::{self, Poll},
 };
 use std::{sync::atomic::Ordering, time::Duration};
-use tokio::sync::oneshot::error::TryRecvError;
+use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tracing::{debug, trace};
 
@@ -75,7 +77,14 @@ impl Consumer<Config> {
     /// ```
     pub async fn messages(&self) -> Result<Messages, Error> {
         let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
-        let subscriber = self.context.client.subscribe(deliver_subject).await?;
+        let subscriber = if let Some(ref group) = self.info.config.deliver_group {
+            self.context
+                .client
+                .queue_subscribe(deliver_subject, group.to_owned())
+                .await?
+        } else {
+            self.context.client.subscribe(deliver_subject).await?
+        };
 
         Ok(Messages {
             context: self.context.clone(),
@@ -178,6 +187,10 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -209,6 +222,13 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default")]
     pub memory_storage: bool,
+    #[cfg(feature = "server_2_10")]
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+    /// Custom backoff for missed acknowledgments.
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub backoff: Vec<Duration>,
 }
 
 impl FromConsumer for Config {
@@ -231,6 +251,8 @@ impl FromConsumer for Config {
             ack_wait: config.ack_wait,
             max_deliver: config.max_deliver,
             filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
             replay_policy: config.replay_policy,
             rate_limit: config.rate_limit,
             sample_frequency: config.sample_frequency,
@@ -241,6 +263,9 @@ impl FromConsumer for Config {
             idle_heartbeat: config.idle_heartbeat,
             num_replicas: config.num_replicas,
             memory_storage: config.memory_storage,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
+            backoff: config.backoff,
         })
     }
 }
@@ -258,6 +283,8 @@ impl IntoConsumerConfig for Config {
             ack_wait: self.ack_wait,
             max_deliver: self.max_deliver,
             filter_subject: self.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: self.filter_subjects,
             replay_policy: self.replay_policy,
             rate_limit: self.rate_limit,
             sample_frequency: self.sample_frequency,
@@ -271,6 +298,9 @@ impl IntoConsumerConfig for Config {
             inactive_threshold: Duration::default(),
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
+            #[cfg(feature = "server_2_10")]
+            metadata: self.metadata,
+            backoff: self.backoff,
         }
     }
 }
@@ -300,6 +330,10 @@ pub struct OrderedConfig {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -317,6 +351,10 @@ pub struct OrderedConfig {
     /// The maximum number of waiting consumers.
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_waiting: i64,
+    #[cfg(feature = "server_2_10")]
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
 }
 
 impl FromConsumer for OrderedConfig {
@@ -335,12 +373,16 @@ impl FromConsumer for OrderedConfig {
             deliver_subject: config.deliver_subject.unwrap(),
             description: config.description,
             filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
             replay_policy: config.replay_policy,
             rate_limit: config.rate_limit,
             sample_frequency: config.sample_frequency,
             headers_only: config.headers_only,
             deliver_policy: config.deliver_policy,
             max_waiting: config.max_waiting,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
         })
     }
 }
@@ -358,6 +400,8 @@ impl IntoConsumerConfig for OrderedConfig {
             ack_wait: Duration::from_secs(60 * 60 * 22),
             max_deliver: 1,
             filter_subject: self.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: self.filter_subjects,
             replay_policy: self.replay_policy,
             rate_limit: self.rate_limit,
             sample_frequency: self.sample_frequency,
@@ -371,6 +415,9 @@ impl IntoConsumerConfig for OrderedConfig {
             inactive_threshold: Duration::from_secs(30),
             num_replicas: 1,
             memory_storage: true,
+            #[cfg(feature = "server_2_10")]
+            metadata: self.metadata,
+            backoff: Vec::new(),
         }
     }
 }
@@ -387,7 +434,7 @@ impl Consumer<OrderedConfig> {
         let last_sequence = Arc::new(AtomicU64::new(0));
         let consumer_sequence = Arc::new(AtomicU64::new(0));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        tokio::task::spawn({
+        let handle = tokio::task::spawn({
             let last_seen = last_seen.clone();
             let stream_name = self.info.stream_name.clone();
             let config = self.config.clone();
@@ -453,6 +500,7 @@ impl Consumer<OrderedConfig> {
             consumer_sequence,
             last_seen,
             shutdown: shutdown_rx,
+            handle,
         })
     }
 }
@@ -466,6 +514,14 @@ pub struct Ordered<'a> {
     consumer_sequence: Arc<AtomicU64>,
     last_seen: Arc<Mutex<Instant>>,
     shutdown: tokio::sync::oneshot::Receiver<Error>,
+    handle: JoinHandle<()>,
+}
+
+impl<'a> Drop for Ordered<'a> {
+    fn drop(&mut self) {
+        // Stop trying to recreate the consumer
+        self.handle.abort()
+    }
 }
 
 impl<'a> futures::Stream for Ordered<'a> {

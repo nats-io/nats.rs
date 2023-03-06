@@ -51,6 +51,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
     pub(crate) name: Option<String>,
+    pub(crate) ignore_discovered_servers: bool,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -122,11 +123,13 @@ impl Connector {
                     .await
                 {
                     Ok((server_info, mut connection)) => {
-                        for url in &server_info.connect_urls {
-                            let server_addr = url
+                        if !self.options.ignore_discovered_servers {
+                            for url in &server_info.connect_urls {
+                                let server_addr = url
                                 .parse::<ServerAddr>()
                                 .map_err(|_| ConnectError::ServerParse)?;
-                            self.servers.entry(server_addr).or_insert(0);
+                                self.servers.entry(server_addr).or_insert(0);
+                            }
                         }
 
                         let server_attempts = self.servers.get_mut(&server_addr).unwrap();
@@ -135,7 +138,6 @@ impl Connector {
                         let tls_required = self.options.tls_required || server_addr.tls_required();
                         let mut connect_info = ConnectInfo {
                             tls_required,
-                            // FIXME(tp): have optional name
                             name: self.options.name.clone(),
                             pedantic: false,
                             verbose: false,
@@ -154,13 +156,9 @@ impl Connector {
                         };
 
                         match &self.options.auth {
-                            Authorization::None => {
-                                connection.write_op(ClientOp::Connect(connect_info)).await?;
-
-                                self.events_tx.send(Event::Connected).await.ok();
-                                self.state_tx.send(State::Connected).ok();
-                                return Ok((server_info, connection));
-                            }
+                            // We don't want to early return here,
+                            // as server might require auth that we did not provide.
+                            Authorization::None => {}
                             Authorization::Token(token) => {
                                 connect_info.auth_token = Some(token.clone())
                             }
@@ -234,10 +232,6 @@ impl Connector {
         tls_required: bool,
         tls_host: &str,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
-        let tls_config = tls::config_tls(&self.options)
-            .await
-            .map_err(ConnectError::Tls)?;
-
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
@@ -272,7 +266,10 @@ impl Connector {
         };
 
         if self.options.tls_required || info.tls_required || tls_required {
-            let tls_config = Arc::new(tls_config);
+                let tls_config = Arc::new(tls::config_tls(&self.options)
+                    .await
+                    .map_err(ConnectError::Tls)?);
+            let tls_config = Arc::new(tls::config_tls(&self.options).await?);
             let tls_connector = tokio_rustls::TlsConnector::try_from(tls_config)
                 .map_err(|err| {
                     io::Error::new(

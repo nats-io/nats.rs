@@ -53,6 +53,7 @@ pub struct ConnectOptions {
     pub(crate) inbox_prefix: String,
     pub(crate) request_timeout: Option<Duration>,
     pub(crate) retry_on_initial_connect: bool,
+    pub(crate) ignore_discovered_servers: bool,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -93,10 +94,10 @@ impl Default for ConnectOptions {
             client_cert: None,
             client_key: None,
             tls_client_config: None,
-            flush_interval: Duration::from_millis(100),
+            flush_interval: Duration::from_millis(1),
             ping_interval: Duration::from_secs(60),
             sender_capacity: 128,
-            subscription_capacity: 1024,
+            subscription_capacity: 4096,
             event_callback: CallbackArg1::<Event, ()>(Box::new(move |event| {
                 Box::pin(async move {
                     tracing::info!("event: {}", event);
@@ -105,6 +106,7 @@ impl Default for ConnectOptions {
             inbox_prefix: "_INBOX".to_string(),
             request_timeout: Some(Duration::from_secs(10)),
             retry_on_initial_connect: false,
+            ignore_discovered_servers: false,
         }
     }
 }
@@ -137,6 +139,21 @@ impl ConnectOptions {
     /// let nc = async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
+    /// ```
+    ///
+    /// ## Pass multiple URLs.
+    /// ```no_run
+    ///#[tokio::main]
+    ///# async fn main() -> Result<(), async_nats::Error> {
+    ///use async_nats::ServerAddr;
+    ///let client = async_nats::connect(vec![
+    ///    "demo.nats.io".parse::<ServerAddr>()?,
+    ///    "other.nats.io".parse::<ServerAddr>()?,
+    ///])
+    ///.await
+    ///.unwrap();
+    ///# Ok(())
+    ///# }
     /// ```
     pub async fn connect<A: ToServerAddrs>(self, addrs: A) -> Result<Client, ConnectError> {
         crate::connect_with_options(addrs, self).await
@@ -440,7 +457,7 @@ impl ConnectOptions {
         self
     }
 
-    /// Registers asynchronous callback for errors that are receiver over the wire from the server.
+    /// Registers an asynchronous callback for errors that are received over the wire from the server.
     ///
     /// # Examples
     /// As asynchronous callbacks are still not in `stable` channel, here are some examples how to
@@ -551,6 +568,11 @@ impl ConnectOptions {
 
     pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
+        self
+    }
+
+    pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
+        self.ignore_discovered_servers = true;
         self
     }
 }

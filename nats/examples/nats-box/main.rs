@@ -28,7 +28,11 @@ enum Command {
     #[structopt(name = "pub", about = "Publishes a message to a given subject")]
     Pub { subject: String, msg: String },
     #[structopt(name = "sub", about = "Subscribes to a given subject")]
-    Sub { subject: String },
+    Sub {
+        subject: String,
+        #[structopt(long, help = "parse message data as json")]
+        json: bool,
+    },
     #[structopt(name = "request", about = "Sends a request and waits on reply")]
     Request { subject: String, msg: String },
     #[structopt(name = "reply", about = "Listens for requests and sends the reply")]
@@ -57,11 +61,17 @@ fn main() -> CliResult {
             nc.publish(&subject, &msg)?;
             println!("Published to '{subject}': '{msg}'");
         }
-        Command::Sub { subject } => {
+        Command::Sub { subject, json } => {
             let sub = nc.subscribe(&subject)?;
             println!("Listening on '{subject}'");
             for msg in sub.messages() {
                 println!("Received a {msg:?}");
+                if json {
+                    match serde_json::from_slice::<serde_json::Value>(&msg.data) {
+                        Ok(parsed_msg) => println!("{parsed_msg}"),
+                        Err(e) => eprintln!("failed to parse as json: {e:?}"),
+                    }
+                }
             }
         }
         Command::Request { subject, msg } => {

@@ -342,10 +342,13 @@ impl Connection {
                 respond,
                 headers,
             } => {
-                if headers.is_some() {
-                    self.stream.write_all(b"HPUB ").await?;
-                } else {
-                    self.stream.write_all(b"PUB ").await?;
+                match headers.as_ref() {
+                    Some(headers) if !headers.is_empty() => {
+                        self.stream.write_all(b"HPUB ").await?;
+                    }
+                    _ => {
+                        self.stream.write_all(b"PUB ").await?;
+                    }
                 }
 
                 self.stream.write_all(subject.as_bytes()).await?;
@@ -356,33 +359,36 @@ impl Connection {
                     self.stream.write_all(b" ").await?;
                 }
 
-                if let Some(headers) = headers {
-                    let headers = headers.to_bytes();
+                match headers {
+                    Some(headers) if !headers.is_empty() => {
+                        let headers = headers.to_bytes();
 
-                    let mut header_len_buf = itoa::Buffer::new();
-                    self.stream
-                        .write_all(header_len_buf.format(headers.len()).as_bytes())
-                        .await?;
+                        let mut header_len_buf = itoa::Buffer::new();
+                        self.stream
+                            .write_all(header_len_buf.format(headers.len()).as_bytes())
+                            .await?;
 
-                    self.stream.write_all(b" ").await?;
+                        self.stream.write_all(b" ").await?;
 
-                    let mut total_len_buf = itoa::Buffer::new();
-                    self.stream
-                        .write_all(
-                            total_len_buf
-                                .format(headers.len() + payload.len())
-                                .as_bytes(),
-                        )
-                        .await?;
+                        let mut total_len_buf = itoa::Buffer::new();
+                        self.stream
+                            .write_all(
+                                total_len_buf
+                                    .format(headers.len() + payload.len())
+                                    .as_bytes(),
+                            )
+                            .await?;
 
-                    self.stream.write_all(b"\r\n").await?;
-                    self.stream.write_all(&headers).await?;
-                } else {
-                    let mut len_buf = itoa::Buffer::new();
-                    self.stream
-                        .write_all(len_buf.format(payload.len()).as_bytes())
-                        .await?;
-                    self.stream.write_all(b"\r\n").await?;
+                        self.stream.write_all(b"\r\n").await?;
+                        self.stream.write_all(&headers).await?;
+                    }
+                    _ => {
+                        let mut len_buf = itoa::Buffer::new();
+                        self.stream
+                            .write_all(len_buf.format(payload.len()).as_bytes())
+                            .await?;
+                        self.stream.write_all(b"\r\n").await?;
+                    }
                 }
 
                 self.stream.write_all(&payload).await?;

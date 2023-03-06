@@ -1,3 +1,15 @@
+# 0.24.0
+## Added
+* Add timeout to JetStream requests by @j13tw in https://github.com/nats-io/nats.rs/pull/771
+
+## Fixed
+* Send PUB instead of HPUB if headers are set but empty by @Jarema in https://github.com/nats-io/nats.rs/pull/833
+
+## Misc
+*  Allow parse message data as json in nats-box example by @xoac in https://github.com/nats-io/nats.rs/pull/816
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/nats/v0.23.2...nats/v0.23.1
+
 # 0.23.1
 ## Overview
 This is a minor sync client release with fixes to Object Store API

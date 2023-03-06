@@ -119,3 +119,10 @@ cloneable
 PurgeRequest
 StatsResponse
 SemVer
+ServerAddr
+Vec
+const
+stats_handler
+schemas
+filter_subject
+metadata

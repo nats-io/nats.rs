@@ -14,14 +14,13 @@
 pub mod bucket;
 
 use std::{
-    collections::{self, HashSet},
     io::{self, ErrorKind},
     task::Poll,
 };
 
 use crate::{HeaderValue, StatusCode};
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use lazy_static::lazy_static;
 use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -539,6 +538,7 @@ impl Store {
         self.stream
             .context
             .publish_with_headers(subject, headers, "".into())
+            .await?
             .await?;
         Ok(())
     }
@@ -581,6 +581,7 @@ impl Store {
         self.stream
             .context
             .publish_with_headers(subject, headers, "".into())
+            .await?
             .await?;
         Ok(())
     }
@@ -640,10 +641,12 @@ impl Store {
     ///
     /// # Examples
     ///
+    /// Iterating over each each key individually
+    ///
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures::{StreamExt, TryStreamExt};
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
@@ -651,14 +654,33 @@ impl Store {
     ///     history: 10,
     ///     ..Default::default()
     /// }).await?;
-    /// let mut entries = kv.keys().await?;
-    /// while let Some(key) = entries.next() {
+    /// let mut keys = kv.keys().await?.boxed();
+    /// while let Some(key) = keys.try_next().await? {
     ///     println!("key: {:?}", key);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn keys(&self) -> Result<collections::hash_set::IntoIter<String>, Error> {
+    ///
+    /// Collecting it into a vector of keys
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let keys = kv.keys().await?.try_collect::<Vec<String>>().await?;
+    /// println!("Keys: {:?}", keys);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn keys(&self) -> Result<Keys, Error> {
         let subject = format!("{}>", self.prefix.as_str());
 
         let consumer = self
@@ -669,22 +691,20 @@ impl Store {
                 filter_subject: subject,
                 headers_only: true,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
+                // We only need to know the latest state for each key, not the whole history
+                deliver_policy: DeliverPolicy::LastPerSubject,
                 ..Default::default()
             })
             .await?;
 
-        let mut entries = History {
+        let entries = History {
             done: consumer.info.num_pending == 0,
             subscription: consumer.messages().await?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
         };
 
-        let mut keys = HashSet::new();
-        while let Some(entry) = entries.try_next().await? {
-            keys.insert(entry.key);
-        }
-        Ok(keys.into_iter())
+        Ok(Keys { inner: entries })
     }
 }
 
@@ -814,6 +834,38 @@ impl<'a> futures::Stream for History<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
+    }
+}
+
+pub struct Keys<'a> {
+    inner: History<'a>,
+}
+
+impl<'a> futures::Stream for Keys<'a> {
+    type Item = Result<String, Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        loop {
+            match self.inner.poll_next_unpin(cx) {
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(Some(res)) => match res {
+                    Ok(entry) => {
+                        // Skip purged and deleted keys
+                        if matches!(entry.operation, Operation::Purge | Operation::Delete) {
+                            // Try to poll again if we skip this one
+                            continue;
+                        } else {
+                            return Poll::Ready(Some(Ok(entry.key)));
+                        }
+                    }
+                    Err(e) => return Poll::Ready(Some(Err(e))),
+                },
+                Poll::Pending => return Poll::Pending,
+            }
+        }
     }
 }
 

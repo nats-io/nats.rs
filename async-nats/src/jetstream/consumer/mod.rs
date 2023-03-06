@@ -15,6 +15,8 @@
 
 pub mod pull;
 pub mod push;
+#[cfg(feature = "server_2_10")]
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::time::Duration;
 
@@ -170,7 +172,7 @@ pub struct Info {
     pub num_pending: u64,
     /// Information about the consumer's cluster
     #[serde(default)]
-    pub cluster: ClusterInfo,
+    pub cluster: Option<ClusterInfo>,
     /// Indicates if any client is connected and receiving messages from a push consumer
     #[serde(default)]
     pub push_bound: bool,
@@ -269,6 +271,10 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -309,6 +315,14 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
     pub memory_storage: bool,
+
+    #[cfg(feature = "server_2_10")]
+    /// Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+    /// Custom backoff for missed acknowledgments.
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub backoff: Vec<Duration>,
 }
 
 impl From<&Config> for Config {

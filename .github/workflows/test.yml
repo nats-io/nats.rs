@@ -19,12 +19,16 @@ defaults:
 
 jobs:
   test_matrix:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}, nats-${{ matrix.nats_server }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        nats_server: [main, dev]
+        include:
+          - nats_server: dev
+            features: server_2_10
 
     steps:
       - name: Check out repository
@@ -61,16 +65,13 @@ jobs:
           go-version: '1.19'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@latest
+        run: go install github.com/nats-io/nats-server/v2@${{ matrix.nats_server }}
 
-      - name: Configure nats hosts
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            echo "127.0.0.1 demo.nats.io" >> "C:\\Windows\\System32\\drivers\\etc\\hosts"
-            cmd "/c ipconfig /flushdns"
-          else
-            echo "127.0.0.1 demo.nats.io" | sudo tee -a /etc/hosts
-          fi
+      - name: Setup deno for service tests
+        if: ${{ matrix.os }} != windows-latest
+        uses: "denoland/setup-deno@v1"
+        with:
+          deno-version: v1.x
 
       - name: Run tests
         env:
@@ -78,7 +79,7 @@ jobs:
         run: |
           rustup update
           nats-server --jetstream --port=4222 &
-          cargo test --features=unstable -- --nocapture
+          cargo test --features=${{ matrix.features }} --features slow_tests -- --nocapture
 
   check_format:
     name: check (format)
@@ -218,7 +219,7 @@ jobs:
           go-version: '1.19'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@latest
+        run: go install github.com/nats-io/nats-server/v2@dev
       - name: Check examples
         env:
           RUST_LOG: trace

@@ -535,6 +535,10 @@ impl ConnectionHandler {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
+                    } else {
+                        result.send(Ok(())).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
                     }
                 } else {
                     result.send(Ok(())).map_err(|_| {
@@ -681,6 +685,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
             name: options.name,
+            ignore_discovered_servers: options.ignore_discovered_servers,
         },
         events_tx,
         state_tx,
@@ -690,6 +695,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let mut info: ServerInfo = Default::default();
     let mut connection = None;
     if !options.retry_on_initial_connect {
+        debug!("retry on initial connect failure is disabled");
         let (info_ok, connection_ok) = connector.try_connect().await?;
         connection = Some(connection_ok);
         info = info_ok;
@@ -763,6 +769,8 @@ impl fmt::Display for Event {
 /// To have customized NATS connection, check [ConnectOptions].
 ///
 /// # Examples
+///
+/// ## Single URL
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
@@ -771,6 +779,56 @@ impl fmt::Display for Event {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// ## Connect with [Vec] of [ServerAddr].
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let client = async_nats::connect(vec![
+///    "demo.nats.io".parse::<ServerAddr>()?,
+///    "other.nats.io".parse::<ServerAddr>()?,
+///])
+///.await
+///.unwrap();
+///# Ok(())
+///# }
+/// ```
+///
+/// ## with [Vec], but parse URLs inside [crate::connect()]
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let servers = vec!["demo.nats.io", "other.nats.io"];
+///let client = async_nats::connect(
+///    servers
+///        .iter()
+///        .map(|url| url.parse())
+///        .collect::<Result<Vec<ServerAddr>, _>>()?
+///)
+///.await?;
+///# Ok(())
+///# }
+///```
+///
+///
+/// ## with slice.
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let client = async_nats::connect(
+///    [
+///        "demo.nats.io".parse::<ServerAddr>()?,
+///        "other.nats.io".parse::<ServerAddr>()?,
+///    ]
+///    .as_slice(),
+///)
+///.await?;
+///# Ok(())
+///# }
+///
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
@@ -1181,6 +1239,14 @@ impl<'a> ToServerAddrs for &'a [ServerAddr] {
 
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         Ok(self.iter().cloned())
+    }
+}
+
+impl ToServerAddrs for Vec<ServerAddr> {
+    type Iter = std::vec::IntoIter<ServerAddr>;
+
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        Ok(self.clone().into_iter())
     }
 }
 

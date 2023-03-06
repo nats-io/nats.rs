@@ -405,6 +405,15 @@ mod client {
     }
 
     #[tokio::test]
+    async fn required_auth_not_provided() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap_err();
+    }
+
+    #[tokio::test]
     async fn user_pass_auth_wrong_pass() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
         async_nats::ConnectOptions::with_user_and_password("derek".into(), "bad_password".into())
