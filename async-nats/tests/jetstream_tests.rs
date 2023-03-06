@@ -3033,6 +3033,7 @@ mod jetstream {
             .unwrap_err();
     }
 
+    #[cfg(feature = "server_2_10")]
     #[tokio::test]
     async fn subject_transform() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");

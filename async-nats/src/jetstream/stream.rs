@@ -929,6 +929,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
 
+    #[cfg(feature = "server_2_10")]
     // Allow applying a subject transform to incoming messages
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_transform: Option<SubjectTransform>,
@@ -1293,6 +1294,7 @@ pub struct Source {
     #[serde(default, skip_serializing_if = "is_default")]
     pub domain: Option<String>,
 
+    #[cfg(feature = "server_2_10")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub subject_transform_dest: Option<String>,
 }
