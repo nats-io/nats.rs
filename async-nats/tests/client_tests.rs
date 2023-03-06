@@ -426,10 +426,14 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth_wrong_pass() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        async_nats::ConnectOptions::with_user_and_password("derek".into(), "bad_password".into())
-            .connect(server.client_url())
-            .await
-            .unwrap_err();
+        let err = async_nats::ConnectOptions::with_user_and_password(
+            "derek".into(),
+            "bad_password".into(),
+        )
+        .connect(server.client_url())
+        .await
+        .unwrap_err();
+        assert_eq!(ConnectError::AuthorizationViolation, err);
     }
 
     #[tokio::test]
