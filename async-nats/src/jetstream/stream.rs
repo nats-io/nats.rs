@@ -929,7 +929,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
 
-    // Allow applying a subject transform to incoming messages before doing anything else
+    // Allow applying a subject transform to incoming messages
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_transform: Option<SubjectTransform>,
 }
@@ -949,7 +949,7 @@ impl From<&str> for Config {
     }
 }
 
-// SubjectTransform is for applying a subject transform (to )
+// SubjectTransform is for applying a subject transform (to matching messages) when a new message is received
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct SubjectTransform {
     #[serde(rename = "src")]
