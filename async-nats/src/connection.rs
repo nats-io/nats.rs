@@ -340,6 +340,7 @@ impl Connection {
                 payload,
                 respond,
                 headers,
+                require_flush,
             } => {
                 if headers.is_some() {
                     self.stream.write_all(b"HPUB ").await?;
@@ -386,6 +387,10 @@ impl Connection {
 
                 self.stream.write_all(&payload).await?;
                 self.stream.write_all(b"\r\n").await?;
+
+                if require_flush {
+                    self.flush().await?;
+                }
             }
 
             ClientOp::Subscribe {
@@ -756,10 +761,11 @@ mod write_op {
                 payload: "Hello World".into(),
                 respond: None,
                 headers: None,
+                require_flush: true,
             })
             .await
             .unwrap();
-        connection.flush().await.unwrap();
+        // connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -773,10 +779,11 @@ mod write_op {
                 payload: "Hello World".into(),
                 respond: Some("INBOX.67".into()),
                 headers: None,
+                require_flush: true,
             })
             .await
             .unwrap();
-        connection.flush().await.unwrap();
+        // connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -792,10 +799,11 @@ mod write_op {
                     "Header".parse().unwrap(),
                     "X".parse().unwrap(),
                 )])),
+                require_flush: true,
             })
             .await
             .unwrap();
-        connection.flush().await.unwrap();
+        // connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();

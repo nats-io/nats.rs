@@ -241,6 +241,7 @@ pub enum Command {
         payload: Bytes,
         respond: Option<String>,
         headers: Option<HeaderMap>,
+        require_flush: bool,
     },
     Subscribe {
         sid: u64,
@@ -268,6 +269,7 @@ pub enum ClientOp {
         payload: Bytes,
         respond: Option<String>,
         headers: Option<HeaderMap>,
+        require_flush: bool,
     },
     Subscribe {
         sid: u64,
@@ -576,6 +578,7 @@ impl ConnectionHandler {
                 payload,
                 respond,
                 headers,
+                require_flush,
             } => {
                 while let Err(err) = self
                     .connection
@@ -584,6 +587,7 @@ impl ConnectionHandler {
                         payload: payload.clone(),
                         respond: respond.clone(),
                         headers: headers.clone(),
+                        require_flush,
                     })
                     .await
                 {

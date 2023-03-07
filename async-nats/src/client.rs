@@ -44,6 +44,7 @@ pub struct Publish {
     payload: Bytes,
     headers: Option<HeaderMap>,
     respond: Option<String>,
+    require_flush: bool,
 }
 
 impl Publish {
@@ -54,6 +55,7 @@ impl Publish {
             payload,
             headers: None,
             respond: None,
+            require_flush: false,
         }
     }
 
@@ -64,6 +66,11 @@ impl Publish {
 
     pub fn reply(mut self, subject: String) -> Publish {
         self.respond = Some(subject);
+        self
+    }
+
+    pub fn require_flush(mut self) -> Publish {
+        self.require_flush = true;
         self
     }
 }
@@ -78,6 +85,7 @@ impl IntoFuture for Publish {
         let payload = self.payload;
         let respond = self.respond;
         let headers = self.headers;
+        let require_flush = self.require_flush;
 
         Box::pin(async move {
             sender
@@ -86,6 +94,7 @@ impl IntoFuture for Publish {
                     payload,
                     respond,
                     headers,
+                    require_flush,
                 })
                 .map_err(PublishError)
                 .await?;

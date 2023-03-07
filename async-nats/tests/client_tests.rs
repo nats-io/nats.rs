@@ -138,10 +138,11 @@ mod client {
         client
             .publish("test".into(), b"".as_ref().into())
             .headers(headers.clone())
+            .require_flush()
             .await
             .unwrap();
 
-        client.flush().await.unwrap();
+        // client.flush().await.unwrap();
 
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.headers.unwrap(), headers);
@@ -298,8 +299,12 @@ mod client {
                 let request = sub.next().await.unwrap();
                 let reply = request.reply.unwrap();
                 assert_eq!(reply, inbox);
-                client.publish(reply, "ok".into()).await.unwrap();
-                client.flush().await.unwrap();
+                client
+                    .publish(reply, "ok".into())
+                    .require_flush()
+                    .await
+                    .unwrap();
+                // client.flush().await.unwrap();
             }
         });
 
@@ -324,8 +329,12 @@ mod client {
         sub.unsubscribe().await.unwrap();
         // check if we can still send messages after unsubscribe.
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
-        client.publish("test2".into(), "data".into()).await.unwrap();
-        client.flush().await.unwrap();
+        client
+            .publish("test2".into(), "data".into())
+            .require_flush()
+            .await
+            .unwrap();
+        // client.flush().await.unwrap();
         assert!(sub2.next().await.is_some());
     }
 
