@@ -273,6 +273,7 @@ impl Consumer<Config> {
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
+            expires: Some(Duration::from_secs(60).as_millis().try_into()?),
             ..Default::default()
         })
         .map(Bytes::from)?;
@@ -422,7 +423,7 @@ impl<'a> futures::Stream for Sequence<'a> {
                         subscriber,
                         context,
                         terminated: false,
-                        timeout: None,
+                        timeout: Some(Box::pin(tokio::time::sleep(Duration::from_secs(60)))),
                     })
                 }));
 
