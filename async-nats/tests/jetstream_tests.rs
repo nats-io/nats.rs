@@ -3065,7 +3065,7 @@ mod jetstream {
                 name: "sourcing".to_string(),
                 sources: Some(vec![async_nats::jetstream::stream::Source {
                     name: "origin".to_string(),
-                    subject_transform_dest: Some("fromtest.>".to_string()),
+                    subject_transform_destination: Some("fromtest.>".to_string()),
                     ..Default::default()
                 }]),
                 ..Default::default()
