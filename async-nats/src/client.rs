@@ -577,15 +577,15 @@ impl Request {
         let mut subscriber = self.client.subscribe(inbox.clone()).await?;
         let mut publish = self
             .client
-            .publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
+            .publish(self.subject, self.payload.unwrap_or_else(Bytes::new))
+            .reply(inbox)
+            .require_flush();
+
         if let Some(headers) = self.headers {
             publish = publish.headers(headers);
         }
 
-        publish = publish.reply(inbox);
-        publish.into_future().await?;
-
-        self.client.flush().await?;
+        publish.await?;
 
         let period = self.timeout.unwrap_or(self.client.request_timeout);
         let message = match period {
