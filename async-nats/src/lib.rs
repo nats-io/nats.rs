@@ -836,15 +836,24 @@ pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError>
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ConnectErrorKind {
+    /// Parsing the passed server address failed.
     ServerParse,
+    /// DNS related issues.
     Dns,
+    /// Failed authentication process, signing nonce, etc.
     Authentication,
+    /// Server returned authorization violation error.
     AuthorizationViolation,
+    /// Connect timed out.
     TimedOut,
+    /// Erronous TLS setup.
     Tls,
+    /// Other IO error.
     Io,
 }
 
+/// Returned when initial connection fails.
+/// To be enumerate over the variants, call [ConnectError::kind].
 #[derive(Debug, Error)]
 pub struct ConnectError {
     kind: ConnectErrorKind,

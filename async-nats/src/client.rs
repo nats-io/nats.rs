@@ -587,11 +587,17 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum RequestErrorKind {
+    /// There are services listening on requested subject, but they didn't respond
+    /// in time.
     TimedOut,
+    /// Noone is listening on request subject.
     NoResponders,
+    /// Other errors, client/io related.
     Other,
 }
 
+/// Error returned when a core NATS request fails.
+/// To be enumerate over the variants, call [RequestError::kind].
 #[derive(Debug, Error)]
 pub struct RequestError {
     kind: RequestErrorKind,
@@ -619,11 +625,15 @@ impl RequestError {
         }
     }
 
+    /// Returns the [RequestErrorKind] enum, allowing iterating over
+    /// all error variants.
     pub fn kind(&self) -> RequestErrorKind {
         self.kind
     }
 }
 
+/// Error returned when flushing the messages buffered on the client fails.
+/// To be enumerate over the variants, call [FlushError::kind].
 #[derive(Debug, Error)]
 pub struct FlushError {
     kind: FlushErrorKind,
@@ -661,7 +671,11 @@ impl FlushError {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum FlushErrorKind {
+    /// Sending the flush failed client side.
     SendError,
+    /// Flush failed.
+    /// This can happen mostly in case of connection issues
+    /// that canno be resolved quickly.
     FlushError,
 }
 
