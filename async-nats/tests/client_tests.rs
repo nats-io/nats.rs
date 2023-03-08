@@ -142,8 +142,6 @@ mod client {
             .await
             .unwrap();
 
-        // client.flush().await.unwrap();
-
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.headers.unwrap(), headers);
 
@@ -172,11 +170,11 @@ mod client {
         headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
 
         client
-            .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
+            .publish("test".into(), b"".as_ref().into())
+            .headers(headers.clone())
+            .require_flush()
             .await
             .unwrap();
-
-        client.flush().await.unwrap();
 
         let message = subscriber.next().await.unwrap();
         assert_eq!(message.headers.unwrap(), headers);
@@ -299,12 +297,12 @@ mod client {
                 let request = sub.next().await.unwrap();
                 let reply = request.reply.unwrap();
                 assert_eq!(reply, inbox);
+
                 client
                     .publish(reply, "ok".into())
                     .require_flush()
                     .await
                     .unwrap();
-                // client.flush().await.unwrap();
             }
         });
 
@@ -322,11 +320,15 @@ mod client {
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
-        client.publish("test".into(), "data".into()).await.unwrap();
-        client.flush().await.unwrap();
+        client
+            .publish("test".into(), "data".into())
+            .require_flush()
+            .await
+            .unwrap();
 
         assert!(sub.next().await.is_some());
         sub.unsubscribe().await.unwrap();
+
         // check if we can still send messages after unsubscribe.
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
         client
@@ -334,7 +336,7 @@ mod client {
             .require_flush()
             .await
             .unwrap();
-        // client.flush().await.unwrap();
+
         assert!(sub2.next().await.is_some());
     }
 
@@ -350,8 +352,11 @@ mod client {
         }
 
         sub.unsubscribe_after(3).await.unwrap();
-        client.publish("test".into(), "data".into()).await.unwrap();
-        client.flush().await.unwrap();
+        client
+            .publish("test".into(), "data".into())
+            .require_flush()
+            .await
+            .unwrap();
 
         for _ in 0..3 {
             assert!(sub.next().await.is_some());
@@ -419,8 +424,11 @@ mod client {
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
             assert_eq!(State::Connected, client.connection_state());
-            client.publish("test".into(), "data".into()).await.unwrap();
-            client.flush().await.unwrap();
+            client
+                .publish("test".into(), "data".into())
+                .require_flush()
+                .await
+                .unwrap();
             assert!(subscriber.next().await.is_some());
 
             drop(servers.remove(0));
@@ -437,8 +445,12 @@ mod client {
             .unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
-        client.publish("test".into(), "test".into()).await.unwrap();
-        client.flush().await.unwrap();
+        client
+            .publish("test".into(), "test".into())
+            .require_flush()
+            .await
+            .unwrap();
+
         assert!(sub.next().await.is_some());
     }
 
@@ -452,8 +464,12 @@ mod client {
                 .unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
-        client.publish("test".into(), "test".into()).await.unwrap();
-        client.flush().await.unwrap();
+        client
+            .publish("test".into(), "test".into())
+            .require_flush()
+            .await
+            .unwrap();
+
         assert!(sub.next().await.is_some());
     }
 
@@ -571,14 +587,14 @@ mod client {
             .unwrap();
         client
             .publish("data".to_string(), "data".into())
+            .require_flush()
             .await
             .unwrap();
-        client.flush().await.unwrap();
         client
             .publish("data".to_string(), "data".into())
+            .require_flush()
             .await
             .unwrap();
-        client.flush().await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 

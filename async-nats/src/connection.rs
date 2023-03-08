@@ -765,7 +765,6 @@ mod write_op {
             })
             .await
             .unwrap();
-        // connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -783,7 +782,6 @@ mod write_op {
             })
             .await
             .unwrap();
-        // connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -803,7 +801,6 @@ mod write_op {
             })
             .await
             .unwrap();
-        // connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
