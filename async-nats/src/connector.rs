@@ -227,8 +227,8 @@ impl Connector {
                                 }
                             },
                             Some(_) => {
-                                self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
+                                self.events_tx.send(Event::Connected).await.ok();
                                 return Ok((server_info, connection));
                             }
                             None => {
