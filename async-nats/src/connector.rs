@@ -30,6 +30,8 @@ use crate::ToServerAddrs;
 use crate::LANG;
 use crate::VERSION;
 use bytes::BytesMut;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use std::cmp;
 use std::collections::HashMap;
 use std::io;
@@ -97,8 +99,13 @@ impl Connector {
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         let mut error = None;
+        let server_addrs = {
+            let mut rng = thread_rng();
+            let mut server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
+            server_addrs.shuffle(&mut rng);
+            server_addrs
+        };
 
-        let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
         for server_addr in server_addrs {
             let server_attempts = self.servers.get_mut(&server_addr).unwrap();
             let duration = if *server_attempts == 0 {
@@ -109,7 +116,6 @@ impl Connector {
 
                 cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
             };
-
             *server_attempts += 1;
             sleep(duration).await;
 
