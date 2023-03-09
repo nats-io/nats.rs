@@ -60,7 +60,10 @@ mod object_store {
             }
         }
         assert_eq!(
-            format!("SHA-256={}", base64::encode_config(digest, URL_SAFE)),
+            Some(format!(
+                "SHA-256={}",
+                base64::encode_config(digest, URL_SAFE)
+            )),
             object.info.digest
         );
         assert_eq!(result, bytes);
@@ -104,7 +107,7 @@ mod object_store {
         assert_eq!(object.name, "BAR".to_string());
         let object = watcher.next().await.unwrap().unwrap();
         assert_eq!(object.name, "BAR".to_string());
-        assert!(object.deleted);
+        assert!(object.deleted.unwrap_or(false));
     }
 
     #[tokio::test]
@@ -130,13 +133,13 @@ mod object_store {
 
         let info = bucket.info("FOO").await.unwrap();
 
-        assert!(!info.deleted);
+        assert!(!info.deleted.unwrap_or(false));
         assert!(info.size > 0);
 
         bucket.delete("FOO").await.unwrap();
 
         let info = bucket.info("FOO").await.unwrap();
-        assert!(info.deleted);
+        assert!(info.deleted.unwrap_or(false));
         assert!(info.size == 0);
     }
 
@@ -163,7 +166,7 @@ mod object_store {
 
         let info = bucket.info("FOO").await.unwrap();
 
-        assert!(!info.deleted);
+        assert!(!info.deleted.unwrap_or(false));
         assert!(info.size > 0);
 
         bucket.seal().await.unwrap();
@@ -214,7 +217,7 @@ mod object_store {
             bucket.put(filename, &mut file.as_slice()).await.unwrap();
 
             let mut object = bucket.get(filename).await.unwrap();
-            assert_eq!(object.info.digest, format!("SHA-256={digest}"));
+            assert_eq!(object.info.digest, Some(format!("SHA-256={digest}")));
 
             let mut result = Vec::new();
             object.read_to_end(&mut result).await.unwrap();
