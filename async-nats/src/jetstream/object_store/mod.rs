@@ -292,7 +292,7 @@ impl ObjectStore {
             nuid: object_nuid,
             chunks: object_chunks,
             size: object_size,
-            digest: format!("SHA-256={}", URL_SAFE.encode(digest)),
+            digest: Some(format!("SHA-256={}", URL_SAFE.encode(digest))),
             modified: OffsetDateTime::now_utc(),
             deleted: false,
         };
@@ -564,8 +564,15 @@ impl tokio::io::AsyncRead for Object<'_> {
                         if info.pending == 0 {
                             let digest = self.digest.take().map(|context| context.finish());
                             if let Some(digest) = digest {
-                                if format!("SHA-256={}", URL_SAFE.encode(digest))
-                                    != self.info.digest
+                                if self
+                                    .info
+                                    .digest
+                                    .as_ref()
+                                    .map(|digest_self| {
+                                        format!("SHA-256={}", URL_SAFE.encode(digest))
+                                            != *digest_self
+                                    })
+                                    .unwrap_or(false)
                                 {
                                     return Poll::Ready(Err(io::Error::new(
                                         ErrorKind::InvalidData,
@@ -614,11 +621,18 @@ pub struct ObjectInfo {
     pub chunks: usize,
     /// Date and time the object was last modified.
     #[serde(with = "rfc3339")]
+    #[serde(rename = "mtime")]
     pub modified: time::OffsetDateTime,
     /// Digest of the object stream.
-    pub digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
     /// Set to true if the object has been deleted.
+    #[serde(default, skip_serializing_if = "is_default")]
     pub deleted: bool,
+}
+
+fn is_default<T: Default + Eq>(t: &T) -> bool {
+    t == &T::default()
 }
 /// A link to another object, potentially in another bucket.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
