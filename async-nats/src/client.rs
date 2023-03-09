@@ -590,7 +590,7 @@ pub enum RequestErrorKind {
     /// There are services listening on requested subject, but they didn't respond
     /// in time.
     TimedOut,
-    /// Noone is listening on request subject.
+    /// No one is listening on request subject.
     NoResponders,
     /// Other errors, client/io related.
     Other,
@@ -675,7 +675,7 @@ pub enum FlushErrorKind {
     SendError,
     /// Flush failed.
     /// This can happen mostly in case of connection issues
-    /// that canno be resolved quickly.
+    /// that cannot be resolved quickly.
     FlushError,
 }
 

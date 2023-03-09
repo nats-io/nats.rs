@@ -126,3 +126,9 @@ stats_handler
 schemas
 filter_subject
 metadata
+RequestError
+enum
+FlushError
+ConnectError
+DNS
+RequestErrorKind

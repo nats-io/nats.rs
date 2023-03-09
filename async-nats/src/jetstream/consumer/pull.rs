@@ -17,9 +17,8 @@ use futures::{future::BoxFuture, FutureExt};
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
-    future,
+    future, io,
     pin::Pin,
-    io,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,

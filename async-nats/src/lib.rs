@@ -846,7 +846,7 @@ pub enum ConnectErrorKind {
     AuthorizationViolation,
     /// Connect timed out.
     TimedOut,
-    /// Erronous TLS setup.
+    /// Erroneous TLS setup.
     Tls,
     /// Other IO error.
     Io,
