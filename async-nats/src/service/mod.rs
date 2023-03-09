@@ -597,7 +597,10 @@ impl Stream for Endpoint {
 
 impl Endpoint {
     pub async fn stop(&mut self) -> Result<(), std::io::Error> {
-        self.requests.unsubscribe().await
+        self.requests
+            .unsubscribe()
+            .await
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "failed to unsubscribe"))
     }
 }
 

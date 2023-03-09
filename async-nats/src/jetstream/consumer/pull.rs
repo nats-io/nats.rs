@@ -17,7 +17,7 @@ use futures::{future::BoxFuture, FutureExt};
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
-    future,
+    future, io,
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
@@ -538,20 +538,18 @@ impl Stream {
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
-
                     let result = context
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
-                        .await;
+                        .await
+                        .map(|_| pending_reset)
+                        .map_err(|err| Box::from(io::Error::new(io::ErrorKind::Other, err)));
                     if let Err(err) = consumer.context.client.flush().await {
                         debug!("flush failed: {err:?}");
                     }
-                    debug!("request published");
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
-                        .send(result.map(|_| pending_reset).map_err(|err| {
-                            Box::from(std::io::Error::new(std::io::ErrorKind::Other, err))
-                        }))
+                        .send(result.map(|_| pending_reset))
                         .await
                         .unwrap();
                     trace!("result send over tx");

@@ -17,10 +17,12 @@ use crate::tls;
 use crate::Authorization;
 use crate::ClientError;
 use crate::ClientOp;
+use crate::ConnectError;
 use crate::ConnectInfo;
 use crate::Event;
 use crate::Protocol;
 use crate::ServerAddr;
+use crate::ServerError;
 use crate::ServerInfo;
 use crate::ServerOp;
 use crate::SocketAddr;
@@ -97,7 +99,7 @@ impl Connector {
         }
     }
 
-    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         let mut error = None;
 
         let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
@@ -115,7 +117,9 @@ impl Connector {
             *server_attempts += 1;
             sleep(duration).await;
 
-            let socket_addrs = server_addr.socket_addrs()?;
+            let socket_addrs = server_addr
+                .socket_addrs()
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
             for socket_addr in socket_addrs {
                 match self
                     .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
@@ -124,7 +128,12 @@ impl Connector {
                     Ok((server_info, mut connection)) => {
                         if !self.options.ignore_discovered_servers {
                             for url in &server_info.connect_urls {
-                                let server_addr = url.parse::<ServerAddr>()?;
+                                let server_addr = url.parse::<ServerAddr>().map_err(|err| {
+                                    ConnectError::with_source(
+                                        crate::ConnectErrorKind::ServerParse,
+                                        err,
+                                    )
+                                })?;
                                 self.servers.entry(server_addr).or_insert(0);
                             }
                         }
@@ -173,21 +182,17 @@ impl Connector {
                                                 connect_info.signature =
                                                     Some(base64_url::encode(&signed));
                                             }
-                                            Err(e) => {
-                                                return Err(std::io::Error::new(
-                                                    ErrorKind::Other,
-                                                    format!(
-                                                        "NKey auth: failed signing the nonce: {e}"
-                                                    ),
-                                                ));
+                                            Err(_) => {
+                                                return Err(ConnectError::new(
+                                                    crate::ConnectErrorKind::Authentication,
+                                                ))
                                             }
                                         };
                                     }
-                                    Err(e) => {
-                                        return Err(std::io::Error::new(
-                                            ErrorKind::Other,
-                                            format!("NKey auth: failed signing the nonce: {e}"),
-                                        ));
+                                    Err(_) => {
+                                        return Err(ConnectError::new(
+                                            crate::ConnectErrorKind::Authentication,
+                                        ))
                                     }
                                 }
                             }
@@ -197,11 +202,10 @@ impl Connector {
                                         connect_info.user_jwt = Some(jwt.clone());
                                         connect_info.signature = Some(sig);
                                     }
-                                    Err(e) => {
-                                        return Err(std::io::Error::new(
-                                            ErrorKind::Other,
-                                            format!("JWT auth: failed signing the nonce: {e}"),
-                                        ));
+                                    Err(_) => {
+                                        return Err(ConnectError::new(
+                                            crate::ConnectErrorKind::Authentication,
+                                        ))
                                     }
                                 }
                             }
@@ -212,21 +216,29 @@ impl Connector {
                         connection.flush().await?;
 
                         match connection.read_op().await? {
-                            Some(ServerOp::Error(err)) => {
-                                return Err(io::Error::new(
-                                    ErrorKind::InvalidInput,
-                                    err.to_string(),
-                                ));
-                            }
+                            Some(ServerOp::Error(err)) => match err {
+                                ServerError::AuthorizationViolation => {
+                                    return Err(ConnectError::with_source(
+                                        crate::ConnectErrorKind::AuthorizationViolation,
+                                        err,
+                                    ));
+                                }
+                                err => {
+                                    return Err(ConnectError::with_source(
+                                        crate::ConnectErrorKind::Io,
+                                        err,
+                                    ));
+                                }
+                            },
                             Some(_) => {
                                 self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
                             }
                             None => {
-                                return Err(io::Error::new(
-                                    ErrorKind::BrokenPipe,
-                                    "connection aborted",
+                                return Err(ConnectError::with_source(
+                                    crate::ConnectErrorKind::Io,
+                                    "broken pipe",
                                 ))
                             }
                         }
@@ -245,18 +257,13 @@ impl Connector {
         socket_addr: &SocketAddr,
         tls_required: bool,
         tls_host: &str,
-    ) -> Result<(ServerInfo, Connection), io::Error> {
+    ) -> Result<(ServerInfo, Connection), ConnectError> {
         let tcp_stream = tokio::time::timeout(
             self.options.connection_timeout,
             TcpStream::connect(socket_addr),
         )
         .await
-        .map_err(|_| {
-            io::Error::new(
-                ErrorKind::TimedOut,
-                "connection: timeout elapsed with no server response",
-            )
-        })??;
+        .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
 
         tcp_stream.set_nodelay(true)?;
 
@@ -269,28 +276,33 @@ impl Connector {
         let info = match op {
             Some(ServerOp::Info(info)) => info,
             Some(op) => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    format!("expected INFO, got {op:?}"),
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    format!("expected INFO, got {:?}", op),
                 ))
             }
             None => {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
                     "expected INFO, got nothing",
                 ))
             }
         };
 
         if self.options.tls_required || info.tls_required || tls_required {
-            let tls_config = Arc::new(tls::config_tls(&self.options).await?);
-            let tls_connector =
-                tokio_rustls::TlsConnector::try_from(tls_config).map_err(|err| {
+            let tls_config = Arc::new(
+                tls::config_tls(&self.options)
+                    .await
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
+            );
+            let tls_connector = tokio_rustls::TlsConnector::try_from(tls_config)
+                .map_err(|err| {
                     io::Error::new(
                         ErrorKind::Other,
                         format!("failed to create TLS connector from TLS config: {err}"),
                     )
-                })?;
+                })
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
             // Use the server-advertised hostname to validate if given as a hostname, not an IP address
             let domain = if let Ok(server_hostname @ rustls::ServerName::DnsName(_)) =
@@ -305,7 +317,8 @@ impl Connector {
                 return Err(io::Error::new(
                     ErrorKind::InvalidInput,
                     "cannot determine hostname for TLS connection",
-                ));
+                ))
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err));
             };
 
             connection = Connection {
