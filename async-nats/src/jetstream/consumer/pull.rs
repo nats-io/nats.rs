@@ -12,17 +12,22 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
+use futures::{future::BoxFuture, FutureExt};
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
-    future, io,
+    future,
+    pin::Pin,
+    io,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,
 };
-use tokio::{task::JoinHandle, time::Instant};
+use tokio::{
+    task::JoinHandle,
+    time::{Instant, Sleep},
+};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -124,6 +129,7 @@ impl Consumer<Config> {
         batch: I,
         inbox: String,
     ) -> Result<(), Error> {
+        debug!("sending batch");
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             self.context.prefix, self.info.stream_name, self.info.name
@@ -135,6 +141,8 @@ impl Consumer<Config> {
             .client
             .publish_with_reply(subject, inbox, payload.into())
             .await?;
+        self.context.client.flush().await?;
+        debug!("batch request sent");
         Ok(())
     }
 
@@ -266,6 +274,7 @@ impl Consumer<Config> {
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
+            expires: Some(Duration::from_secs(60).as_millis().try_into()?),
             ..Default::default()
         })
         .map(Bytes::from)?;
@@ -284,6 +293,8 @@ pub struct Batch {
     pending_messages: usize,
     subscriber: Subscriber,
     context: Context,
+    timeout: Option<Pin<Box<Sleep>>>,
+    terminated: bool,
 }
 
 impl<'a> Batch {
@@ -292,10 +303,18 @@ impl<'a> Batch {
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
 
+        let sleep = batch.expires.map(|e| {
+            Box::pin(tokio::time::sleep(
+                Duration::from_nanos(e as u64).saturating_add(Duration::from_secs(5)),
+            ))
+        });
+
         Ok(Batch {
             pending_messages: batch.batch,
             subscriber: subscription,
             context: consumer.context.clone(),
+            terminated: false,
+            timeout: sleep,
         })
     }
 }
@@ -307,29 +326,59 @@ impl futures::Stream for Batch {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        if self.pending_messages == 0 {
-            return std::task::Poll::Ready(None);
+        if self.terminated {
+            return Poll::Ready(None);
         }
-
+        if self.pending_messages == 0 {
+            self.terminated = true;
+            return Poll::Ready(None);
+        }
+        if let Some(sleep) = self.timeout.as_mut() {
+            match sleep.poll_unpin(cx) {
+                Poll::Ready(_) => {
+                    debug!("batch timeout timer triggered");
+                    // TODO(tp): Maybe we can be smarter here and before timing out, check if
+                    // we consumed all the messages from the subscription buffer in case of user
+                    // slowly consuming messages. Keep in mind that we time out here only if
+                    // for some reason we missed timeout from the server and few seconds have
+                    // passed since expected timeout message.
+                    self.terminated = true;
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => (),
+            }
+        }
         match self.subscriber.receiver.poll_recv(cx) {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
-                    StatusCode::TIMEOUT => Poll::Ready(None),
-                    StatusCode::IDLE_HEARTBEAT => Poll::Pending,
+                    StatusCode::TIMEOUT => {
+                        debug!("recived timeout. Iterator done.");
+                        self.terminated = true;
+                        Poll::Ready(None)
+                    }
+                    StatusCode::IDLE_HEARTBEAT => {
+                        debug!("received heartbeat");
+                        Poll::Pending
+                    }
                     StatusCode::OK => {
+                        debug!("received message");
                         self.pending_messages -= 1;
                         Poll::Ready(Some(Ok(jetstream::Message {
                             context: self.context.clone(),
                             message,
                         })))
                     }
-                    status => Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!(
-                            "error while processing messages from the stream: {}, {:?}",
-                            status, message.description
-                        ),
-                    ))))),
+                    status => {
+                        debug!("received error");
+                        self.terminated = true;
+                        Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!(
+                                "error while processing messages from the stream: {}, {:?}",
+                                status, message.description
+                            ),
+                        )))))
+                    }
                 },
                 None => Poll::Ready(None),
             },
@@ -369,10 +418,13 @@ impl<'a> futures::Stream for Sequence<'a> {
                         .publish_with_reply(subject, inbox, request)
                         .await?;
 
+                    // TODO(tp): Add timeout config and defaults.
                     Ok(Batch {
                         pending_messages,
                         subscriber,
                         context,
+                        terminated: false,
+                        timeout: Some(Box::pin(tokio::time::sleep(Duration::from_secs(60)))),
                     })
                 }));
 
@@ -996,7 +1048,7 @@ pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: usize,
+    expires: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1006,7 +1058,7 @@ impl<'a> FetchBuilder<'a> {
             consumer,
             batch: 200,
             max_bytes: 0,
-            expires: 0,
+            expires: None,
             heartbeat: Duration::default(),
         }
     }
@@ -1151,7 +1203,7 @@ impl<'a> FetchBuilder<'a> {
     /// # }
     /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
-        self.expires = expires.as_nanos().try_into().unwrap();
+        self.expires = Some(expires.as_nanos().try_into().unwrap());
         self
     }
 
@@ -1187,7 +1239,7 @@ impl<'a> FetchBuilder<'a> {
         Batch::batch(
             BatchConfig {
                 batch: self.batch,
-                expires: Some(self.expires),
+                expires: self.expires,
                 no_wait: true,
                 max_bytes: self.max_bytes,
                 idle_heartbeat: self.heartbeat,
