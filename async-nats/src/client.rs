@@ -18,7 +18,7 @@ use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber}
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,9 +28,8 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::trace;
 
-lazy_static! {
-    static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
-}
+static VERSION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap());
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.

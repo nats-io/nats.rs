@@ -27,7 +27,7 @@ use futures::{
     stream::{self, SelectAll},
     Future, Stream, StreamExt,
 };
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -43,13 +43,14 @@ const QUEUE_GROUP: &str = "q";
 pub const NATS_SERVICE_ERROR: &str = "Nats-Service-Error";
 pub const NATS_SERVICE_ERROR_CODE: &str = "Nats-Service-Error-Code";
 
-lazy_static! {
-    // uses recommended semver validation expression from
-    // https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-    static ref SEMVER: Regex = Regex::new(r#"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#).unwrap();
-    // From ADR-33: Name can only have A-Z, a-z, 0-9, dash, underscore.
-    static ref NAME: Regex = Regex::new(r#"^[A-Za-z0-9\-_]+$"#).unwrap();
-}
+// uses recommended semver validation expression from
+// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+static SEMVER: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#)
+        .unwrap()
+});
+// From ADR-33: Name can only have A-Z, a-z, 0-9, dash, underscore.
+static NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r#"^[A-Za-z0-9\-_]+$"#).unwrap());
 
 /// Represents stats for all endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]

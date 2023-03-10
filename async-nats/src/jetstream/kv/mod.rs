@@ -21,7 +21,7 @@ use std::{
 use crate::{HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::StreamExt;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -50,10 +50,8 @@ fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation 
 fn kv_operation_from_stream_message(message: &RawMessage) -> Operation {
     kv_operation_from_maybe_headers(message.headers.as_ref())
 }
-lazy_static! {
-    static ref VALID_BUCKET_RE: Regex = Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap();
-    static ref VALID_KEY_RE: Regex = Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap();
-}
+static VALID_BUCKET_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
+static VALID_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap());
 
 pub(crate) const MAX_HISTORY: i64 = 64;
 const ALL_KEYS: &str = ">";
