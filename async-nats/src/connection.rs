@@ -14,7 +14,6 @@
 use std::fmt::Display;
 use std::str::{self, FromStr};
 
-use subslice::SubsliceExt;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
 
@@ -58,7 +57,7 @@ pub(crate) struct Connection {
 /// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        let maybe_len = self.buffer.find(b"\r\n");
+        let maybe_len = memchr::memmem::find(&self.buffer, b"\r\n");
         if maybe_len.is_none() {
             return Ok(None);
         }
