@@ -14,7 +14,7 @@ keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
-subslice = "0.2.3"
+memchr = "2.4"
 base64-url = "1.4.13"
 bytes = "1.4.0"
 futures = { version = "0.3.26", default-features = false, features = ["std", "async-await"] }
