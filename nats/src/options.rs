@@ -664,9 +664,10 @@ impl Options {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) enum AuthStyle {
     /// No authentication.
+    #[default]
     NoAuth,
 
     /// Authenticate using a token.
@@ -705,12 +706,6 @@ impl fmt::Debug for AuthStyle {
             AuthStyle::Credentials { .. } => f.debug_struct("Credentials").finish(),
             AuthStyle::NKey { .. } => f.debug_struct("NKey").finish(),
         }
-    }
-}
-
-impl Default for AuthStyle {
-    fn default() -> AuthStyle {
-        AuthStyle::NoAuth
     }
 }
 
