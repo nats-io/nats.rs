@@ -24,6 +24,7 @@ pub struct AccountInfo {
 
 mod jetstream {
 
+    use std::future::IntoFuture;
     use std::str::from_utf8;
     use std::time::{Duration, Instant};
 
@@ -2533,5 +2534,43 @@ mod jetstream {
             let message = message.unwrap();
             message.ack().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn publish_move() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "test_stream".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let publish = context
+            .publish("test_stream".to_string(), "data".into())
+            .into_future();
+
+        // Ensure that you get a result after moving the publish and awaiting it
+        let handle = tokio::task::spawn(async move { publish.await.unwrap().await.unwrap() });
+
+        let result = handle.await.unwrap();
+        assert_eq!(result.stream, "test_stream");
+        assert_eq!(result.sequence, 1);
+
+        let publish_ack = context
+            .publish("test_stream".to_string(), "data".into())
+            .await
+            .unwrap();
+
+        // Ensure that you get a result after moving the ack and awaiting it
+        let handle = tokio::task::spawn(async move { publish_ack.await.unwrap() });
+
+        let result = handle.await.unwrap();
+        assert_eq!(result.stream, "test_stream");
+        assert_eq!(result.sequence, 2);
     }
 }

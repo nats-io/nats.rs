@@ -19,6 +19,7 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{header, Client, Command, Error, HeaderMap, HeaderValue};
 use bytes::Bytes;
+use futures::FutureExt;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -117,7 +118,7 @@ impl Context {
     /// # }
     /// ```
     pub fn publish(&self, subject: String, payload: Bytes) -> Publish {
-        Publish::new(self.clone(), subject, payload)
+        Publish::new(self, subject, payload)
     }
 
     /// Publish a message with headers to a given subject associated with a stream and returns an acknowledgment from
@@ -697,7 +698,7 @@ impl Context {
         T: Sized + Serialize,
         V: DeserializeOwned,
     {
-        Request::new(self.clone(), subject, payload)
+        Request::new(self, subject, payload)
     }
 
     /// Creates a new object store bucket.
@@ -1011,16 +1012,16 @@ impl futures::Stream for Streams {
 }
 /// Used for building customized `publish` message.
 #[derive(Clone, Debug)]
-pub struct Publish {
-    context: Context,
+pub struct Publish<'a> {
+    context: &'a Context,
     subject: String,
     payload: Bytes,
     headers: Option<header::HeaderMap>,
 }
 
-impl Publish {
+impl<'a> Publish<'a> {
     /// Creates a new custom Publish struct to be used with.
-    pub(crate) fn new(context: Context, subject: String, payload: Bytes) -> Self {
+    pub(crate) fn new(context: &'a Context, subject: String, payload: Bytes) -> Self {
         Publish {
             context,
             subject,
@@ -1085,25 +1086,22 @@ impl Publish {
     }
 }
 
-impl IntoFuture for Publish {
+impl<'a> IntoFuture for Publish<'a> {
     type Output = Result<PublishAckFuture, Error>;
     type IntoFuture = Pin<Box<dyn Future<Output = Result<PublishAckFuture, Error>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
+        let client = self.context.client.clone();
+        let timeout = self.context.timeout;
+
         Box::pin(std::future::IntoFuture::into_future(async move {
-            let inbox = self.context.client.new_inbox();
-            let subscription = self.context.client.subscribe(inbox.clone()).await?;
-            let mut publish = self
-                .context
-                .client
-                .publish(self.subject, self.payload)
-                .reply(inbox);
+            let inbox = client.new_inbox();
+            let subscription = client.subscribe(inbox.clone()).await?;
+            let mut publish = client.publish(self.subject, self.payload).reply(inbox);
 
             if let Some(headers) = self.headers {
                 publish = publish.headers(headers);
             }
-
-            let timeout = self.context.timeout;
 
             tokio::time::timeout(timeout, publish.into_future())
                 .map_err(|_| {
@@ -1120,16 +1118,16 @@ impl IntoFuture for Publish {
 }
 
 #[derive(Debug)]
-pub struct Request<T: Sized + Serialize, V: DeserializeOwned> {
-    context: Context,
+pub struct Request<'a, T: Sized + Serialize, V: DeserializeOwned> {
+    context: &'a Context,
     subject: String,
     payload: T,
     timeout: Option<Duration>,
     response_type: PhantomData<V>,
 }
 
-impl<T: Sized + Serialize, V: DeserializeOwned> Request<T, V> {
-    pub fn new(context: Context, subject: String, payload: T) -> Self {
+impl<'a, T: Sized + Serialize, V: DeserializeOwned> Request<'a, T, V> {
+    pub fn new(context: &'a Context, subject: String, payload: T) -> Self {
         Self {
             context,
             subject,
@@ -1145,34 +1143,36 @@ impl<T: Sized + Serialize, V: DeserializeOwned> Request<T, V> {
     }
 }
 
-impl<T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<T, V> {
+impl<'a, T: Sized + Serialize, V: DeserializeOwned + Send> IntoFuture for Request<'a, T, V> {
     type Output = Result<Response<V>, Error>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, Error>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let payload_result = serde_json::to_vec(&self.payload).map(Bytes::from);
+        serde_json::to_vec(&self.payload)
+            .map_err(|s| Box::new(s) as Error)
+            .map(Bytes::from)
+            .map(|payload| {
+                debug!("JetStream request sent: {:?}", payload);
 
-        let prefix = self.context.prefix;
-        let client = self.context.client;
-        let subject = self.subject;
-        let timeout = self.timeout;
+                self.context
+                    .client
+                    .request(format!("{}.{}", self.context.prefix, self.subject), payload)
+                    .timeout(self.timeout)
+                    .into_future()
+                    .map(|result| {
+                        result.and_then(|message| {
+                            debug!(
+                                "JetStream request response: {:?}",
+                                from_utf8(&message.payload)
+                            );
 
-        Box::pin(std::future::IntoFuture::into_future(async move {
-            let payload = payload_result?;
-            debug!("JetStream request sent: {:?}", payload);
-
-            let request = client.request(format!("{}.{}", prefix, subject), payload);
-            let request = request.timeout(timeout);
-            let message = request.await?;
-
-            debug!(
-                "JetStream request response: {:?}",
-                from_utf8(&message.payload)
-            );
-            let response = serde_json::from_slice(message.payload.as_ref())?;
-
-            Ok(response)
-        }))
+                            serde_json::from_slice(message.payload.as_ref())
+                                .map_err(|s| Box::new(s) as Error)
+                        })
+                    })
+                    .boxed()
+            })
+            .unwrap_or_else(|err| std::future::IntoFuture::into_future(async { Err(err) }).boxed())
     }
 }

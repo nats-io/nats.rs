@@ -18,6 +18,7 @@ use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subs
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
+use futures::FutureExt;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::error;
@@ -38,18 +39,18 @@ lazy_static! {
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
 pub struct PublishError(mpsc::error::SendError<Command>);
 
-pub struct Publish {
-    sender: mpsc::Sender<Command>,
+pub struct Publish<'a> {
+    client: &'a Client,
     subject: String,
     payload: Bytes,
     headers: Option<HeaderMap>,
     respond: Option<String>,
 }
 
-impl Publish {
-    pub fn new(sender: mpsc::Sender<Command>, subject: String, payload: Bytes) -> Publish {
+impl<'a> Publish<'a> {
+    pub fn new(client: &Client, subject: String, payload: Bytes) -> Publish {
         Publish {
-            sender,
+            client,
             subject,
             payload,
             headers: None,
@@ -57,41 +58,32 @@ impl Publish {
         }
     }
 
-    pub fn headers(mut self, headers: HeaderMap) -> Publish {
+    pub fn headers(mut self, headers: HeaderMap) -> Publish<'a> {
         self.headers = Some(headers);
         self
     }
 
-    pub fn reply(mut self, subject: String) -> Publish {
+    pub fn reply(mut self, subject: String) -> Publish<'a> {
         self.respond = Some(subject);
         self
     }
 }
 
-impl IntoFuture for Publish {
+impl<'a> IntoFuture for Publish<'a> {
     type Output = Result<(), PublishError>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let sender = self.sender.clone();
-        let subject = self.subject;
-        let payload = self.payload;
-        let respond = self.respond;
-        let headers = self.headers;
-
-        Box::pin(async move {
-            sender
-                .send(Command::Publish {
-                    subject,
-                    payload,
-                    respond,
-                    headers,
-                })
-                .map_err(PublishError)
-                .await?;
-
-            Ok(())
-        })
+        self.client
+            .sender
+            .send(Command::Publish {
+                subject: self.subject,
+                payload: self.payload,
+                respond: self.respond,
+                headers: self.headers,
+            })
+            .map_err(PublishError)
+            .boxed()
     }
 }
 
@@ -213,7 +205,7 @@ impl Client {
     /// # }
     /// ```
     pub fn publish(&self, subject: String, payload: Bytes) -> Publish {
-        Publish::new(self.sender.clone(), subject, payload)
+        Publish::new(self, subject, payload)
     }
 
     /// Publish a [Message] with headers to a given subject.
@@ -310,7 +302,7 @@ impl Client {
     /// # }
     /// ```
     pub fn request(&self, subject: String, payload: Bytes) -> Request {
-        Request::new(self.clone(), subject, payload)
+        Request::new(self, subject, payload)
     }
 
     /// Sends the request with headers.
@@ -333,7 +325,7 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, Error> {
-        let message = Request::new(self.clone(), subject, payload)
+        let message = Request::new(self, subject, payload)
             .headers(headers)
             .await?;
 
@@ -463,8 +455,8 @@ impl Client {
 
 /// Used for building and sending requests.
 #[derive(Debug)]
-pub struct Request {
-    client: Client,
+pub struct Request<'a> {
+    client: &'a Client,
     subject: String,
     payload: Option<Bytes>,
     headers: Option<HeaderMap>,
@@ -472,8 +464,8 @@ pub struct Request {
     inbox: Option<String>,
 }
 
-impl Request {
-    pub fn new(client: Client, subject: String, payload: Bytes) -> Request {
+impl<'a> Request<'a> {
+    pub fn new(client: &'a Client, subject: String, payload: Bytes) -> Request<'a> {
         Request {
             client,
             subject,
@@ -495,7 +487,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn payload(mut self, payload: Bytes) -> Request {
+    pub fn payload(mut self, payload: Bytes) -> Request<'a> {
         self.payload = Some(payload);
         self
     }
@@ -518,7 +510,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn headers(mut self, headers: HeaderMap) -> Request {
+    pub fn headers(mut self, headers: HeaderMap) -> Request<'a> {
         self.headers = Some(headers);
         self
     }
@@ -539,7 +531,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn timeout(mut self, timeout: Option<Duration>) -> Request {
+    pub fn timeout(mut self, timeout: Option<Duration>) -> Request<'a> {
         self.timeout = Some(timeout);
         self
     }
@@ -558,7 +550,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn inbox(mut self, inbox: String) -> Request {
+    pub fn inbox(mut self, inbox: String) -> Request<'a> {
         self.inbox = Some(inbox);
         self
     }
@@ -569,6 +561,7 @@ impl Request {
         let mut publish = self
             .client
             .publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
+
         if let Some(headers) = self.headers {
             publish = publish.headers(headers);
         }
@@ -606,11 +599,11 @@ impl Request {
     }
 }
 
-impl IntoFuture for Request {
+impl<'a> IntoFuture for Request<'a> {
     type Output = Result<Message, Error>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<Message, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Message, Error>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.send())
+        self.send().boxed()
     }
 }
