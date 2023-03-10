@@ -69,11 +69,7 @@ impl Connector {
         events_tx: tokio::sync::mpsc::Sender<Event>,
         state_tx: tokio::sync::watch::Sender<State>,
     ) -> Result<Connector, io::Error> {
-        let servers = addrs
-            .to_server_addrs()?
-            .into_iter()
-            .map(|addr| (addr, 0))
-            .collect();
+        let servers = addrs.to_server_addrs()?.map(|addr| (addr, 0)).collect();
 
         Ok(Connector {
             servers,

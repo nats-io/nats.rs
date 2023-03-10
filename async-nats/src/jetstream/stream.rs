@@ -960,10 +960,11 @@ pub struct Republish {
 
 /// `DiscardPolicy` determines how we proceed when limits of messages or bytes are hit. The default, `Old` will
 /// remove older messages. `New` will fail to store the new message.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DiscardPolicy {
     /// will remove older messages when limits are hit.
+    #[default]
     #[serde(rename = "old")]
     Old = 0,
     /// will error on a StoreMsg call when limits are hit
@@ -971,18 +972,13 @@ pub enum DiscardPolicy {
     New = 1,
 }
 
-impl Default for DiscardPolicy {
-    fn default() -> DiscardPolicy {
-        DiscardPolicy::Old
-    }
-}
-
 /// `RetentionPolicy` determines how messages in a set are retained.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RetentionPolicy {
     /// `Limits` (default) means that messages are retained until any given limit is reached.
     /// This could be one of messages, bytes, or age.
+    #[default]
     #[serde(rename = "limits")]
     Limits = 0,
     /// `Interest` specifies that when all known observables have acknowledged a message it can be removed.
@@ -993,28 +989,17 @@ pub enum RetentionPolicy {
     WorkQueue = 2,
 }
 
-impl Default for RetentionPolicy {
-    fn default() -> RetentionPolicy {
-        RetentionPolicy::Limits
-    }
-}
-
 /// determines how messages are stored for retention.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum StorageType {
     /// Stream data is kept in files. This is the default.
+    #[default]
     #[serde(rename = "file")]
     File = 0,
     /// Stream data is kept only in memory.
     #[serde(rename = "memory")]
     Memory = 1,
-}
-
-impl Default for StorageType {
-    fn default() -> StorageType {
-        StorageType::File
-    }
 }
 
 /// Shows config and current state for this stream.

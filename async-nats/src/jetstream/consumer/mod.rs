@@ -361,12 +361,13 @@ impl FromConsumer for Config {
 }
 
 /// `DeliverPolicy` determines how the consumer should select the first message to deliver.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 #[serde(tag = "deliver_policy")]
 pub enum DeliverPolicy {
     /// All causes the consumer to receive the oldest messages still present in the system.
     /// This is the default.
+    #[default]
     #[serde(rename = "all")]
     All,
     /// Last will start the consumer with the last sequence received.
@@ -396,18 +397,13 @@ pub enum DeliverPolicy {
     LastPerSubject,
 }
 
-impl Default for DeliverPolicy {
-    fn default() -> DeliverPolicy {
-        DeliverPolicy::All
-    }
-}
-
 /// Determines whether messages will be acknowledged individually,
 /// in batches, or never.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AckPolicy {
     /// All messages will be individually acknowledged. This is the default.
+    #[default]
     #[serde(rename = "explicit")]
     Explicit = 2,
     /// No messages are acknowledged.
@@ -419,18 +415,13 @@ pub enum AckPolicy {
     All = 1,
 }
 
-impl Default for AckPolicy {
-    fn default() -> AckPolicy {
-        AckPolicy::Explicit
-    }
-}
-
 /// `ReplayPolicy` controls whether messages are sent to a consumer
 /// as quickly as possible or at the rate that they were originally received at.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ReplayPolicy {
     /// Sends all messages in a stream to the consumer as quickly as possible. This is the default.
+    #[default]
     #[serde(rename = "instant")]
     Instant = 0,
     /// Sends messages to a consumer in a rate-limited fashion based on the rate of receipt. This
@@ -440,11 +431,6 @@ pub enum ReplayPolicy {
     Original = 1,
 }
 
-impl Default for ReplayPolicy {
-    fn default() -> ReplayPolicy {
-        ReplayPolicy::Instant
-    }
-}
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
