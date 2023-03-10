@@ -36,7 +36,6 @@ time = { version = "0.3.20", features = ["parsing", "formatting", "serde", "serd
 rustls-native-certs = "0.6.2"
 tracing = "0.1"
 thiserror = "1.0"
-lazy_static = "1.4"
 base64 = "0.13"
 tokio-retry = "0.3"
 ring = "0.16"
