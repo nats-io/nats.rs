@@ -16,7 +16,7 @@
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
-    fmt::Debug,
+    fmt::{self, Debug, Display},
     future::IntoFuture,
     io::{self, ErrorKind},
     pin::Pin,
@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{header::HeaderName, HeaderMap, HeaderValue};
+use crate::{header::HeaderName, is_valid_subject, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
@@ -37,9 +37,91 @@ use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
+    context::{RequestError, RequestErrorKind, StreamsError},
+    errors::ErrorCode,
     response::Response,
     Context, Message,
 };
+
+pub type InfoError = RequestError;
+
+#[derive(Debug)]
+pub struct DirectGetError {
+    kind: DirectGetErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+crate::error_impls!(DirectGetError, DirectGetErrorKind);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DirectGetErrorKind {
+    NotFound,
+    InvalidSubject,
+    TimedOut,
+    FailedRequest,
+    ErrorResponse(StatusCode, String),
+    Other,
+}
+
+impl Display for DirectGetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match self.kind() {
+            DirectGetErrorKind::InvalidSubject => write!(f, "invalid subject"),
+            DirectGetErrorKind::NotFound => write!(f, "message not found"),
+            DirectGetErrorKind::ErrorResponse(status, description) => {
+                write!(f, "unable to get message: {} {}", status, description)
+            }
+            DirectGetErrorKind::Other => {
+                write!(f, "error getting message: {}", source)
+            }
+            DirectGetErrorKind::TimedOut => write!(f, "timed out"),
+            DirectGetErrorKind::FailedRequest => write!(f, "request failed: {}", source),
+        }
+    }
+}
+
+impl From<crate::RequestError> for DirectGetError {
+    fn from(err: crate::RequestError) -> Self {
+        match err.kind() {
+            crate::RequestErrorKind::TimedOut => DirectGetError::new(DirectGetErrorKind::TimedOut),
+            crate::RequestErrorKind::NoResponders => DirectGetError::new(DirectGetErrorKind::Other),
+            crate::RequestErrorKind::Other => {
+                DirectGetError::with_source(DirectGetErrorKind::Other, err)
+            }
+        }
+    }
+}
+
+impl From<serde_json::Error> for DirectGetError {
+    fn from(err: serde_json::Error) -> Self {
+        DirectGetError::with_source(DirectGetErrorKind::Other, err)
+    }
+}
+
+#[derive(Debug)]
+pub struct DeleteMessageError {
+    kind: DeleteMessageErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeleteMessageErrorKind {
+    FailedRequest,
+    TimedOut,
+    JetStreamError(super::errors::Error),
+}
+crate::error_impls!(DeleteMessageError, DeleteMessageErrorKind);
+
+impl Display for DeleteMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match &self.kind {
+            DeleteMessageErrorKind::FailedRequest => write!(f, "request failed: {}", source),
+            DeleteMessageErrorKind::TimedOut => write!(f, "timed out"),
+            DeleteMessageErrorKind::JetStreamError(err) => write!(f, "JetStream error: {}", err),
+        }
+    }
+}
 
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug, Clone)]
@@ -66,7 +148,7 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn info(&mut self) -> Result<&Info, Error> {
+    pub async fn info(&mut self) -> Result<&Info, InfoError> {
         let subject = format!("STREAM.INFO.{}", self.info.config.name);
 
         match self.context.request(subject, &json!({})).await? {
@@ -74,13 +156,7 @@ impl Stream {
                 self.info = info;
                 Ok(&self.info)
             }
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting stream info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(error.into()),
         }
     }
 
@@ -148,7 +224,10 @@ impl Stream {
         &self,
         subject: T,
         sequence: Option<u64>,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, DirectGetError> {
+        if !is_valid_subject(&subject) {
+            return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
+        }
         let request_subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -179,10 +258,21 @@ impl Stream {
             })?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{status} {description}"),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
             }
         }
         Ok(response)
@@ -224,7 +314,10 @@ impl Stream {
     pub async fn direct_get_first_for_subject<T: AsRef<str>>(
         &self,
         subject: T,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, DirectGetError> {
+        if !is_valid_subject(&subject) {
+            return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
+        }
         let request_subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -247,10 +340,21 @@ impl Stream {
             })?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{status} {description}"),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
             }
         }
         Ok(response)
@@ -289,7 +393,7 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn direct_get(&self, sequence: u64) -> Result<Message, Error> {
+    pub async fn direct_get(&self, sequence: u64) -> Result<Message, DirectGetError> {
         let subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -310,10 +414,21 @@ impl Stream {
 
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{status} {description}"),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
             }
         }
         Ok(response)
@@ -355,7 +470,7 @@ impl Stream {
     pub async fn direct_get_last_for_subject<T: AsRef<str>>(
         &self,
         subject: T,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, DirectGetError> {
         let subject = format!(
             "{}.DIRECT.GET.{}.{}",
             &self.context.prefix,
@@ -376,23 +491,17 @@ impl Stream {
             if let Some(ref description) = response.description {
                 match status {
                     StatusCode::NOT_FOUND => {
-                        return Err(Box::from(std::io::Error::new(
-                            ErrorKind::NotFound,
-                            "message not found in stream",
-                        )))
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
                     }
                     // 408 is used in Direct Message for bad/empty payload.
                     StatusCode::TIMEOUT => {
-                        return Err(Box::from(std::io::Error::new(
-                            ErrorKind::Other,
-                            "empty or invalid request",
-                        )))
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
                     }
-                    other => {
-                        return Err(Box::from(std::io::Error::new(
-                            ErrorKind::Other,
-                            format!("{other}: {description}"),
-                        )))
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
                     }
                 }
             }
@@ -436,10 +545,7 @@ impl Stream {
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
-                format!(
-                    "nats: error while getting message: {}, {}",
-                    error.code, error.description
-                ),
+                format!("nats: error while getting message: {}", error),
             ))),
             Response::Ok(value) => Ok(value.message),
         }
@@ -475,15 +581,29 @@ impl Stream {
     pub async fn get_last_raw_message_by_subject(
         &self,
         stream_subject: &str,
-    ) -> Result<RawMessage, Error> {
+    ) -> Result<RawMessage, LastRawMessageError> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
             "last_by_subj":  stream_subject,
         });
 
-        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        let response: Response<GetRawMessage> = self
+            .context
+            .request(subject, &payload)
+            .map_err(|err| LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err))
+            .await?;
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(ErrorKind::Other, error))),
+            Response::Err { error } => {
+                if error.error_code() == ErrorCode::NO_MESSAGE_FOUND {
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::NoMessageFound,
+                    ))
+                } else {
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::JetStreamError,
+                    ))
+                }
+            }
             Response::Ok(value) => Ok(value.message),
         }
     }
@@ -511,22 +631,27 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_message(&self, sequence: u64) -> Result<bool, Error> {
+    pub async fn delete_message(&self, sequence: u64) -> Result<bool, DeleteMessageError> {
         let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
         let payload = json!({
             "seq": sequence,
         });
 
-        let response: Response<DeleteStatus> = self.context.request(subject, &payload).await?;
+        let response: Response<DeleteStatus> = self
+            .context
+            .request(subject, &payload)
+            .map_err(|err| match err.kind() {
+                RequestErrorKind::TimedOut => {
+                    DeleteMessageError::new(DeleteMessageErrorKind::TimedOut)
+                }
+                _ => DeleteMessageError::with_source(DeleteMessageErrorKind::FailedRequest, err),
+            })
+            .await?;
 
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while deleting message: {}, {}",
-                    error.code, error.status
-                ),
-            ))),
+            Response::Err { error } => Err(DeleteMessageError::new(
+                DeleteMessageErrorKind::JetStreamError(error),
+            )),
             Response::Ok(value) => Ok(value.success),
         }
     }
@@ -570,7 +695,7 @@ impl Stream {
         since = "0.25.0",
         note = "Overloads have been replaced with an into_future based builder. Use Stream::purge().filter(subject) instead."
     )]
-    pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, Error>
+    pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, PurgeError>
     where
         T: Into<String>,
     {
@@ -602,7 +727,7 @@ impl Stream {
     pub async fn create_consumer<C: IntoConsumerConfig + FromConsumer>(
         &self,
         config: C,
-    ) -> Result<Consumer<C>, Error> {
+    ) -> Result<Consumer<C>, ConsumerError> {
         let config = config.into_consumer_config();
 
         let subject = {
@@ -624,10 +749,10 @@ impl Stream {
                     })
                     .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", self.info.config.name))
             } else if config.name.is_some() {
-                return Err(Box::new(std::io::Error::new(
-                    ErrorKind::Other,
-                    "can't use consumer name with server below version 2.9",
-                )));
+                return Err(ConsumerError::with_source(
+                    ConsumerErrorKind::Other,
+                    "can't use consumer name with server < 2.9.0",
+                ));
             } else if let Some(ref durable_name) = config.durable_name {
                 format!(
                     "CONSUMER.DURABLE.CREATE.{}.{}",
@@ -646,15 +771,12 @@ impl Stream {
             )
             .await?
         {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while creating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => {
+                Err(ConsumerError::new(ConsumerErrorKind::JetStreamError(error)))
+            }
             Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
-                FromConsumer::try_from_consumer_config(info.clone().config)?,
+                FromConsumer::try_from_consumer_config(info.clone().config)
+                    .map_err(|err| ConsumerError::with_source(ConsumerErrorKind::Other, err))?,
                 info,
                 self.context.clone(),
             )),
@@ -686,10 +808,7 @@ impl Stream {
             Response::Ok(info) => Ok(info),
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
-                format!(
-                    "nats: error while getting consumer info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
+                format!("nats: error while getting consumer info: {}", error),
             ))),
         }
     }
@@ -756,20 +875,16 @@ impl Stream {
         &self,
         name: &str,
         config: T,
-    ) -> Result<Consumer<T>, Error> {
+    ) -> Result<Consumer<T>, ConsumerError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
-            Response::Err { error } if error.status == 404 => self.create_consumer(config).await,
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting or creating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } if error.code() == 404 => self.create_consumer(config).await,
+            Response::Err { error } => Err(error.into()),
             Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
-                T::try_from_consumer_config(info.config.clone())?,
+                T::try_from_consumer_config(info.config.clone()).map_err(|err| {
+                    ConsumerError::with_source(ConsumerErrorKind::InvalidConsumerType, err)
+                })?,
                 info,
                 self.context.clone(),
             )),
@@ -796,18 +911,12 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
+    pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, ConsumerError> {
         let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while deleting consumer: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(error.into()),
         }
     }
 
@@ -1429,14 +1538,39 @@ where
     }
 }
 
+#[derive(Debug)]
+pub struct PurgeError {
+    kind: PurgeErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PurgeErrorKind {
+    FailedRequest,
+    TimedOut,
+    JetStreamError(super::errors::Error),
+}
+crate::error_impls!(PurgeError, PurgeErrorKind);
+
+impl Display for PurgeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match &self.kind {
+            PurgeErrorKind::FailedRequest => write!(f, "request failed: {}", source),
+            PurgeErrorKind::TimedOut => write!(f, "timed out"),
+            PurgeErrorKind::JetStreamError(err) => write!(f, "JetStream error: {}", err),
+        }
+    }
+}
+
 impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
     S: ToAssign + std::marker::Send,
     K: ToAssign + std::marker::Send,
 {
-    type Output = Result<PurgeResponse, Error>;
+    type Output = Result<PurgeResponse, PurgeError>;
 
-    type IntoFuture = BoxFuture<'a, Result<PurgeResponse, Error>>;
+    type IntoFuture = BoxFuture<'a, Result<PurgeResponse, PurgeError>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(async move {
@@ -1445,16 +1579,16 @@ where
                 .stream
                 .context
                 .request(request_subject, &self.inner)
+                .map_err(|err| match err.kind() {
+                    RequestErrorKind::TimedOut => PurgeError::new(PurgeErrorKind::TimedOut),
+                    _ => PurgeError::with_source(PurgeErrorKind::FailedRequest, err),
+                })
                 .await?;
 
             match response {
-                Response::Err { error } => Err(Box::from(io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "error while purging stream: {}, {}, {}",
-                        error.code, error.status, error.description
-                    ),
-                ))),
+                Response::Err { error } => {
+                    Err(PurgeError::new(PurgeErrorKind::JetStreamError(error)))
+                }
                 Response::Ok(response) => Ok(response),
             }
         }))
@@ -1473,7 +1607,8 @@ struct ConsumerInfoPage {
     consumers: Option<Vec<super::consumer::Info>>,
 }
 
-type PageRequest<'a> = BoxFuture<'a, Result<ConsumerPage, Error>>;
+type ConsumerNamesError = StreamsError;
+type PageRequest<'a> = BoxFuture<'a, Result<ConsumerPage, RequestError>>;
 
 pub struct ConsumerNames<'a> {
     context: Context,
@@ -1485,7 +1620,7 @@ pub struct ConsumerNames<'a> {
 }
 
 impl futures::Stream for ConsumerNames<'_> {
-    type Item = Result<String, Error>;
+    type Item = Result<String, ConsumerNamesError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -1495,7 +1630,10 @@ impl futures::Stream for ConsumerNames<'_> {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page?;
+                    let page = page.map_err(|err| {
+                        ConsumerNamesError::with_source(RequestErrorKind::Other, err)
+                    })?;
+
                     if let Some(consumers) = page.consumers {
                         self.offset += consumers.len();
                         self.consumers = consumers;
@@ -1532,9 +1670,10 @@ impl futures::Stream for ConsumerNames<'_> {
                             )
                             .await?
                         {
-                            Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
-                            }
+                            Response::Err { error } => Err(RequestError::with_source(
+                                super::context::RequestErrorKind::Other,
+                                error,
+                            )),
                             Response::Ok(page) => Ok(page),
                         }
                     }));
@@ -1545,7 +1684,8 @@ impl futures::Stream for ConsumerNames<'_> {
     }
 }
 
-type PageInfoRequest<'a> = BoxFuture<'a, Result<ConsumerInfoPage, Error>>;
+pub type ConsumersError = StreamsError;
+type PageInfoRequest<'a> = BoxFuture<'a, Result<ConsumerInfoPage, RequestError>>;
 
 pub struct Consumers<'a> {
     context: Context,
@@ -1557,7 +1697,7 @@ pub struct Consumers<'a> {
 }
 
 impl futures::Stream for Consumers<'_> {
-    type Item = Result<super::consumer::Info, Error>;
+    type Item = Result<super::consumer::Info, ConsumersError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -1567,7 +1707,8 @@ impl futures::Stream for Consumers<'_> {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page?;
+                    let page = page
+                        .map_err(|err| ConsumersError::with_source(RequestErrorKind::Other, err))?;
                     if let Some(consumers) = page.consumers {
                         self.offset += consumers.len();
                         self.consumers = consumers;
@@ -1604,9 +1745,10 @@ impl futures::Stream for Consumers<'_> {
                             )
                             .await?
                         {
-                            Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
-                            }
+                            Response::Err { error } => Err(RequestError::with_source(
+                                super::context::RequestErrorKind::Other,
+                                error,
+                            )),
                             Response::Ok(page) => Ok(page),
                         }
                     }));
@@ -1615,4 +1757,96 @@ impl futures::Stream for Consumers<'_> {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub struct LastRawMessageError {
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    kind: LastRawMessageErrorKind,
+}
+crate::error_impls!(LastRawMessageError, LastRawMessageErrorKind);
+
+impl LastRawMessageError {
+    fn jetstream_error(&self) -> Option<super::errors::Error> {
+        self.source
+            .as_ref()
+            .and_then(|err| err.downcast_ref::<super::errors::Error>())
+            .cloned()
+    }
+}
+
+impl fmt::Display for LastRawMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            LastRawMessageErrorKind::NoMessageFound => write!(f, "no message found"),
+            LastRawMessageErrorKind::Other => write!(
+                f,
+                "failed to get last raw message: {}",
+                self.format_source()
+            ),
+            LastRawMessageErrorKind::JetStreamError => {
+                write!(
+                    f,
+                    "JetStream error: {}",
+                    self.jetstream_error()
+                        .map(|err| err.to_string())
+                        .unwrap_or("None".to_string())
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum LastRawMessageErrorKind {
+    NoMessageFound,
+    JetStreamError,
+    Other,
+}
+
+#[derive(Debug)]
+pub struct ConsumerError {
+    pub kind: ConsumerErrorKind,
+    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+crate::error_impls!(ConsumerError, ConsumerErrorKind);
+
+impl Display for ConsumerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match &self.kind() {
+            ConsumerErrorKind::TimedOut => write!(f, "timed out"),
+            ConsumerErrorKind::RequestFailed => write!(f, "request failed: {}", source),
+            ConsumerErrorKind::JetStreamError(err) => write!(f, "JetStream error: {}", err),
+            ConsumerErrorKind::Other => write!(f, "consumer error: {}", source),
+            ConsumerErrorKind::InvalidConsumerType => {
+                write!(f, "invalid consumer type: {}", source)
+            }
+        }
+    }
+}
+
+impl From<super::context::RequestError> for ConsumerError {
+    fn from(err: super::context::RequestError) -> Self {
+        match err.kind() {
+            RequestErrorKind::TimedOut => ConsumerError::new(ConsumerErrorKind::TimedOut),
+            _ => ConsumerError::with_source(ConsumerErrorKind::RequestFailed, err),
+        }
+    }
+}
+
+impl From<super::errors::Error> for ConsumerError {
+    fn from(err: super::errors::Error) -> Self {
+        ConsumerError::new(ConsumerErrorKind::JetStreamError(err))
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ConsumerErrorKind {
+    TimedOut,
+    RequestFailed,
+    InvalidConsumerType,
+    JetStreamError(super::errors::Error),
+    Other,
 }

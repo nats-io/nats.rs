@@ -1305,6 +1305,48 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
+    !subject.as_ref().contains([' ', '.', '\r', '\n'])
+}
+
+// TODO: rewrite into derivable proc macro.
+macro_rules! error_impls {
+    ($t:ty, $k:ty) => {
+        impl $t {
+            #[allow(dead_code)]
+            pub(crate) fn new(kind: $k) -> $t {
+                Self { kind, source: None }
+            }
+            pub(crate) fn with_source<S>(kind: $k, source: S) -> $t
+            where
+                S: Into<Box<dyn std::error::Error + Sync + Send>>,
+            {
+                Self {
+                    kind,
+                    source: Some(source.into()),
+                }
+            }
+            #[allow(dead_code)]
+            pub fn kind(&self) -> $k {
+                // ALmost all `kind` types implement `Copy`, so it's almost always copy.
+                // We need to clone, as some more complex one may have nested other errors, that
+                // implement Clone only.
+                self.kind.clone()
+            }
+            #[allow(dead_code)]
+            pub(crate) fn format_source(&self) -> String {
+                self.source
+                    .as_ref()
+                    .map(|err| err.to_string())
+                    .unwrap_or("unknown".to_string())
+            }
+        }
+        impl std::error::Error for $t {}
+    };
+}
+
+pub(crate) use error_impls;
+
 #[cfg(test)]
 mod tests {
     use super::*;
