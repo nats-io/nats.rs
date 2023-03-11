@@ -925,9 +925,14 @@ pub struct Config {
     pub sources: Option<Vec<Source>>,
 
     #[cfg(feature = "server_2_10")]
-    // Additional stream metadata.
+    /// Additional stream metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
+
+    #[cfg(feature = "server_2_10")]
+    /// Allow applying a subject transform to incoming messages
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_transform: Option<SubjectTransform>,
 }
 
 impl From<&Config> for Config {
@@ -944,6 +949,17 @@ impl From<&str> for Config {
         }
     }
 }
+
+// SubjectTransform is for applying a subject transform (to matching messages) when a new message is received
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct SubjectTransform {
+    #[serde(rename = "src")]
+    pub source: String,
+
+    #[serde(rename = "dest")]
+    pub destination: String,
+}
+
 // Republish is for republishing messages once committed to a stream.
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Republish {
@@ -1277,6 +1293,14 @@ pub struct Source {
     /// Optional config to set a domain, if source is residing in different one.
     #[serde(default, skip_serializing_if = "is_default")]
     pub domain: Option<String>,
+    /// Optional config to set the subject transform destination
+    #[cfg(feature = "server_2_10")]
+    #[serde(
+        default,
+        rename = "subject_transform_dest",
+        skip_serializing_if = "is_default"
+    )]
+    pub subject_transform_destination: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
