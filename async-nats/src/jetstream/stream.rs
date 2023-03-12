@@ -1122,7 +1122,6 @@ fn is_continuation(c: char) -> bool {
     c == ' ' || c == '\t'
 }
 const HEADER_LINE: &str = "NATS/1.0";
-const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 
 #[allow(clippy::type_complexity)]
 fn parse_headers(
@@ -1141,29 +1140,29 @@ fn parse_headers(
     };
 
     if let Some(line) = lines.next() {
-        if !line.starts_with(HEADER_LINE) {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "version lie does not start with NATS/1.0",
-            )));
-        }
+        let line = line
+            .strip_prefix(HEADER_LINE)
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    "version line does not start with NATS/1.0",
+                ))
+            })?
+            .trim();
 
-        // TODO: return this as description to be consistent?
-        if let Some(slice) = line.get(HEADER_LINE_LEN..).map(|s| s.trim()) {
-            match slice.split_once(' ') {
-                Some((status, description)) => {
-                    if !status.is_empty() {
-                        maybe_status = Some(status.trim().parse()?);
-                    }
-
-                    if !description.is_empty() {
-                        maybe_description = Some(description.trim().to_string());
-                    }
+        match line.split_once(' ') {
+            Some((status, description)) => {
+                if !status.is_empty() {
+                    maybe_status = Some(status.parse()?);
                 }
-                None => {
-                    if !slice.is_empty() {
-                        maybe_status = Some(slice.trim().parse()?);
-                    }
+
+                if !description.is_empty() {
+                    maybe_description = Some(description.trim().to_string());
+                }
+            }
+            None => {
+                if !line.is_empty() {
+                    maybe_status = Some(line.parse()?);
                 }
             }
         }
