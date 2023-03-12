@@ -35,9 +35,9 @@ use super::{
 };
 
 // Helper to extract key value operation from message headers
-fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation {
+fn kv_operation_from_maybe_headers(maybe_headers: Option<&str>) -> Operation {
     if let Some(headers) = maybe_headers {
-        return match headers.as_str() {
+        return match headers {
             KV_OPERATION_DELETE => Operation::Delete,
             KV_OPERATION_PURGE => Operation::Purge,
             _ => Operation::Put,
@@ -48,7 +48,7 @@ fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation 
 }
 
 fn kv_operation_from_stream_message(message: &RawMessage) -> Operation {
-    kv_operation_from_maybe_headers(message.headers.as_ref())
+    kv_operation_from_maybe_headers(message.headers.as_deref())
 }
 static VALID_BUCKET_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
 static VALID_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap());
