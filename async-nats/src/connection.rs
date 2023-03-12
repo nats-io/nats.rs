@@ -282,7 +282,7 @@ impl Connection {
                     io::Error::new(io::ErrorKind::InvalidInput, "no header version line found")
                 })?;
 
-                let mut value = String::from_str(value).unwrap();
+                let mut value = value.to_owned();
                 while let Some(v) = lines.next_if(|s| s.starts_with(char::is_whitespace)) {
                     value.push_str(v);
                 }
