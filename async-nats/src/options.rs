@@ -306,7 +306,7 @@ impl ConnectOptions {
     pub fn with_credentials(creds: &str) -> io::Result<Self> {
         let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
         let key_pair = std::sync::Arc::new(key_pair);
-        Ok(Self::with_jwt(jwt, move |nonce| {
+        Ok(Self::with_jwt(jwt.to_owned(), move |nonce| {
             let key_pair = key_pair.clone();
             async move { key_pair.sign(&nonce).map_err(AuthError::new) }
         }))

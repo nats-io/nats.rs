@@ -28,8 +28,8 @@ pub(crate) async fn load_certs(path: PathBuf) -> io::Result<Vec<Certificate>> {
         let file = std::fs::File::open(path)?;
         let mut reader = BufReader::new(file);
         let certs = rustls_pemfile::certs(&mut reader)?
-            .iter()
-            .map(|v| Certificate(v.clone()))
+            .into_iter()
+            .map(Certificate)
             .collect();
         Ok(certs)
     })
