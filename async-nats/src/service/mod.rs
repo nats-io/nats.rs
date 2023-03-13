@@ -79,11 +79,10 @@ pub struct StatsResponse {
 /// Right now, there is only one business endpoint, all other are internals.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct EndpointStats {
-    // Response type.
-    #[serde(rename = "type")]
-    pub response_type: String,
     /// Service name.
     pub name: String,
+    
+    pub subject: String,
     /// Number of requests handled.
     #[serde(rename = "num_requests")]
     pub requests: usize,
@@ -99,7 +98,7 @@ pub struct EndpointStats {
     /// Last error that occurred.
     pub last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
-    pub data: String,
+    pub data: Option<String>
 }
 
 /// Information about service instance.
@@ -377,6 +376,7 @@ impl Group {
             .entry(subject.clone())
             .or_insert(EndpointStats {
                 name: subject.clone(),
+                subject: format!("{}.{subject}", self.prefix),
                 ..Default::default()
             });
         Ok(Endpoint {
@@ -483,7 +483,7 @@ impl Service {
                                 let mut endpoint_stats_locked = endpoint_stats.lock().unwrap();
                                 for (key, value) in &mut endpoint_stats_locked.endpoints {
                                     let data = stats_callback.0(key.to_string(), value.clone());
-                                    value.data = data;
+                                    value.data = Some(data);
                                 }
                             }
 
@@ -666,6 +666,7 @@ impl Service {
             .entry(subject.clone())
             .or_insert(EndpointStats {
                 name: subject.clone(),
+                subject: subject.clone(),
                 ..Default::default()
             });
         self.subjects.lock().unwrap().push(subject.clone());
