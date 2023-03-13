@@ -522,7 +522,7 @@ impl Stream {
     /// # }
     /// ```
     pub fn purge(&self) -> Purge<No, No> {
-        Purge::build(self.clone())
+        Purge::build(self)
     }
 
     /// Purge `Stream` messages for a matching subject.
@@ -1326,31 +1326,31 @@ impl ToAssign for Yes {}
 impl ToAssign for No {}
 
 #[derive(Debug)]
-pub struct Purge<SEQUENCE, KEEP>
+pub struct Purge<'a, SEQUENCE, KEEP>
 where
     SEQUENCE: ToAssign,
     KEEP: ToAssign,
 {
-    stream: Stream,
+    stream: &'a Stream,
     inner: PurgeRequest,
     sequence_set: PhantomData<SEQUENCE>,
     keep_set: PhantomData<KEEP>,
 }
 
-impl<SEQUENCE, KEEP> Purge<SEQUENCE, KEEP>
+impl<'a, SEQUENCE, KEEP> Purge<'a, SEQUENCE, KEEP>
 where
     SEQUENCE: ToAssign,
     KEEP: ToAssign,
 {
     /// Adds subject filter to [PurgeRequest]
-    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<SEQUENCE, KEEP> {
+    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<'a, SEQUENCE, KEEP> {
         self.inner.filter = Some(filter.into());
         self
     }
 }
 
-impl Purge<No, No> {
-    pub(crate) fn build(stream: Stream) -> Purge<No, No> {
+impl<'a> Purge<'a, No, No> {
+    pub(crate) fn build(stream: &'a Stream) -> Purge<'a, No, No> {
         Purge {
             stream,
             inner: Default::default(),
@@ -1360,13 +1360,13 @@ impl Purge<No, No> {
     }
 }
 
-impl<KEEP> Purge<No, KEEP>
+impl<'a, KEEP> Purge<'a, No, KEEP>
 where
     KEEP: ToAssign,
 {
     /// Creates a new [PurgeRequest].
     /// `keep` and `sequence` are exclusive, enforced compile time by generics.
-    pub fn keep(self, keep: u64) -> Purge<No, Yes> {
+    pub fn keep(self, keep: u64) -> Purge<'a, No, Yes> {
         Purge {
             stream: self.stream,
             sequence_set: PhantomData {},
@@ -1378,13 +1378,13 @@ where
         }
     }
 }
-impl<SEQUENCE> Purge<SEQUENCE, No>
+impl<'a, SEQUENCE> Purge<'a, SEQUENCE, No>
 where
     SEQUENCE: ToAssign,
 {
     /// Creates a new [PurgeRequest].
     /// `keep` and `sequence` are exclusive, enforces compile time by generics.
-    pub fn sequence(self, sequence: u64) -> Purge<Yes, No> {
+    pub fn sequence(self, sequence: u64) -> Purge<'a, Yes, No> {
         Purge {
             stream: self.stream,
             sequence_set: PhantomData {},
@@ -1397,24 +1397,24 @@ where
     }
 }
 
-impl<S, K> IntoFuture for Purge<S, K>
+impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
     S: ToAssign + std::marker::Send,
     K: ToAssign + std::marker::Send,
 {
     type Output = Result<PurgeResponse, Error>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(async move {
             let request_subject = format!("STREAM.PURGE.{}", self.stream.info.config.name);
-
             let response: Response<PurgeResponse> = self
                 .stream
                 .context
                 .request(request_subject, &self.inner)
                 .await?;
+
             match response {
                 Response::Err { error } => Err(Box::from(io::Error::new(
                     ErrorKind::Other,
