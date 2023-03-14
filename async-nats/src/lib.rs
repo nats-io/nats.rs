@@ -118,7 +118,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration, Interval};
+use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -316,7 +316,8 @@ impl ConnectionHandler {
         flush_period: Duration,
     ) -> ConnectionHandler {
         let ping_interval = interval(ping_period);
-        let flush_interval = interval(flush_period);
+        let mut flush_interval = interval(flush_period);
+        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         ConnectionHandler {
             connection,
