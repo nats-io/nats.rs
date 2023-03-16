@@ -28,12 +28,12 @@ http = "0.2.9"
 tokio = { version = "1.25.0", features = ["macros", "rt", "fs", "net", "sync", "time", "io-util"] }
 itoa = "1"
 url = "2"
-tokio-rustls = "0.23"
+tokio-rustls = { git = "https://github.com/Jarema/tls", rev = "935b459"}
 rustls-pemfile = "1.0.2"
 nuid = "0.3.2"
 serde_nanos = "0.1.3"
 time = { version = "0.3.20", features = ["parsing", "formatting", "serde", "serde-well-known"] }
-rustls-native-certs = "0.6.2"
+rustls-native-certs = "0.6"
 tracing = "0.1"
 thiserror = "1.0"
 base64 = "0.13"
