@@ -14,10 +14,21 @@
 mod client {
     use std::path::PathBuf;
 
+    use futures::StreamExt;
+
     #[tokio::test]
     async fn basic_tls() {
         let server = nats_server::run_server("tests/configs/tls.conf");
+
+        // Should fail without certs.
         assert!(async_nats::connect(&server.client_url()).await.is_err());
+
+        // Should fail with IP (cert doesn't have proper SAN entry)
+        assert!(
+            async_nats::connect(format!("tls://127.0.0.1:{}", server.client_port()))
+                .await
+                .is_err()
+        );
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
@@ -33,6 +44,19 @@ mod client {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn ip_basic_tls() {
+        let server = nats_server::run_server("tests/configs/ip-tls.conf");
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+            .add_root_certificates(path.join("tests/configs/certs/ip-ca.pem"))
+            .require_tls(true)
+            .connect(format!("tls://127.0.0.1:{}", server.client_port()))
+            .await
+            .unwrap();
+    }
     #[tokio::test]
     async fn unknown_server_ca() {
         let server = nats_server::run_server("tests/configs/tls.conf");
@@ -75,9 +99,13 @@ mod client {
             .await
             .unwrap();
 
+        let mut subscription = client.subscribe("subject".into()).await.unwrap();
         client
             .publish("subject".into(), "data".into())
             .await
             .unwrap();
+
+        client.flush().await.unwrap();
+        assert!(subscription.next().await.is_some());
     }
 }
