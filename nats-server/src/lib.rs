@@ -83,7 +83,7 @@ impl Server {
         if si["tls_required"].as_bool().unwrap_or(false) {
             scheme = "tls://";
         }
-        format!("{scheme}127.0.0.1:{port}")
+        format!("{scheme}localhost:{port}")
     }
 
     pub fn client_port(&self) -> u16 {
@@ -120,7 +120,7 @@ impl Server {
             match fs::read_to_string(self.inner.logfile.as_os_str()) {
                 Ok(l) => {
                     if let Some(cre) = CLIENT_RE.captures(&l) {
-                        return cre.get(1).unwrap().as_str().replace("0.0.0.0", "127.0.0.1");
+                        return cre.get(1).unwrap().as_str().replace("0.0.0.0", "localhost");
                     } else {
                         thread::sleep(Duration::from_millis(500));
                     }
