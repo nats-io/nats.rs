@@ -1,3 +1,46 @@
+# 0.29.0
+## Overview
+
+This release focuses on preparing for the 1.0.0 release.
+
+The main highlight is Core NATS concrete errors.
+There are also security improvements (@paolobarbolini thanks for your help!) and JetStream API improvements.
+
+## Concrete Errors
+
+New errors returned by Core NATS methods are not boxed anymore.
+They themselves are not enums, but follow more flexible approach of `std::io::Error` and expose `kind()` method to get the enum.
+All enums implement `PartialEq` for more straightforward assertions.
+
+## Added
+* Add support for stream subject transform by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/867
+* Add retaining server list order option by @Jarema in https://github.com/nats-io/nats.rs/pull/890
+
+## Fixed
+* Fix a typo in the documentation by @marcusirgens in https://github.com/nats-io/nats.rs/pull/864
+* Fix reconnect burst on auth failure by @Jarema in https://github.com/nats-io/nats.rs/pull/890
+
+## Changed
+* Concrete error types for Core NATS by @Jarema in https://github.com/nats-io/nats.rs/pull/632
+* Improve TLS connection resilience by @Jarema in https://github.com/nats-io/nats.rs/pull/881
+* Improve `batch` and `fetch` pull consumer methods by @Jarema in https://github.com/nats-io/nats.rs/pull/862
+* Make `Stream` a ref in `Purge` by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/877
+* Cleanup dependencies by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/872
+* Make `Stream` a ref in `Purge` by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/877
+* Use `MissedTickBehavior::Skip` for flush interval by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/880
+* Use `MissedTickBehavior::Delay` for ping interval by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/885
+
+## New Contributors
+* @marcusirgens made their first contribution in https://github.com/nats-io/nats.rs/pull/864
+* @paolobarbolini made their first contribution in https://github.com/nats-io/nats.rs/pull/872
+
+Once again, thanks @abalmos & @NorbertBodziony for helping out with replicating the issues around fetch.
+Also big thanks @paolobarbolini for the very detailed report and reproduction for TLS issue and @n1ghtmare for debugging Windows related issues.
+
+Your contributions are invaluable to the  NATS ecosystem.
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.28.0...async-nats/v0.29.0
+
 # 0.28.0
 ## Overview
 This release prepares the client for 2.10.0 server release and adds some fixes and improvements.
