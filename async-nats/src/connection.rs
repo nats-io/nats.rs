@@ -325,7 +325,7 @@ impl Connection {
         }
     }
 
-    pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
+    pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> Result<(), io::Error> {
         match item {
             ClientOp::Connect(connect_info) => {
                 let op = format!(
@@ -757,7 +757,7 @@ mod write_op {
         };
 
         connection
-            .write_op(ClientOp::Publish {
+            .write_op(&ClientOp::Publish {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: None,
@@ -774,7 +774,7 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR 11\r\nHello World\r\n");
 
         connection
-            .write_op(ClientOp::Publish {
+            .write_op(&ClientOp::Publish {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: Some("INBOX.67".into()),
@@ -790,7 +790,7 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR INBOX.67 11\r\nHello World\r\n");
 
         connection
-            .write_op(ClientOp::Publish {
+            .write_op(&ClientOp::Publish {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: Some("INBOX.67".into()),
@@ -823,7 +823,7 @@ mod write_op {
         };
 
         connection
-            .write_op(ClientOp::Subscribe {
+            .write_op(&ClientOp::Subscribe {
                 sid: 11,
                 subject: "FOO.BAR".into(),
                 queue_group: None,
@@ -838,7 +838,7 @@ mod write_op {
         assert_eq!(buffer, "SUB FOO.BAR 11\r\n");
 
         connection
-            .write_op(ClientOp::Subscribe {
+            .write_op(&ClientOp::Subscribe {
                 sid: 11,
                 subject: "FOO.BAR".into(),
                 queue_group: Some("QUEUE.GROUP".into()),
@@ -861,7 +861,7 @@ mod write_op {
         };
 
         connection
-            .write_op(ClientOp::Unsubscribe { sid: 11, max: None })
+            .write_op(&ClientOp::Unsubscribe { sid: 11, max: None })
             .await
             .unwrap();
         connection.flush().await.unwrap();
@@ -872,7 +872,7 @@ mod write_op {
         assert_eq!(buffer, "UNSUB 11\r\n");
 
         connection
-            .write_op(ClientOp::Unsubscribe {
+            .write_op(&ClientOp::Unsubscribe {
                 sid: 11,
                 max: Some(2),
             })
@@ -896,7 +896,7 @@ mod write_op {
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(ClientOp::Ping).await.unwrap();
+        connection.write_op(&ClientOp::Ping).await.unwrap();
         connection.flush().await.unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
@@ -915,7 +915,7 @@ mod write_op {
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(ClientOp::Pong).await.unwrap();
+        connection.write_op(&ClientOp::Pong).await.unwrap();
         connection.flush().await.unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
@@ -935,7 +935,7 @@ mod write_op {
         let mut buffer = String::new();
 
         connection
-            .write_op(ClientOp::Connect(ConnectInfo {
+            .write_op(&ClientOp::Connect(ConnectInfo {
                 verbose: false,
                 pedantic: false,
                 user_jwt: None,
