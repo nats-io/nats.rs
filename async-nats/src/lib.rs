@@ -511,6 +511,7 @@ impl ConnectionHandler {
                     self.pending_pings, self.max_pings
                 );
                 self.pending_pings += 1;
+                self.ping_interval.reset();
 
                 if self.pending_pings > self.max_pings {
                     debug!(
