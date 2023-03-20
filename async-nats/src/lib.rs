@@ -315,7 +315,9 @@ impl ConnectionHandler {
         ping_period: Duration,
         flush_period: Duration,
     ) -> ConnectionHandler {
-        let ping_interval = interval(ping_period);
+        let mut ping_interval = interval(ping_period);
+        ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         let mut flush_interval = interval(flush_period);
         flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
