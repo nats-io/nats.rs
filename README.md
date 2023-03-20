@@ -37,6 +37,7 @@ Supports:
 * JetStream Management API
 * Key Value Store
 * Object Store
+* Service API
 
 Any feedback related to this client is welcomed.
 
