@@ -57,6 +57,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_initial_connect: bool,
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
+    pub(crate) receive_buffer_capacity: usize,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -78,6 +79,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
+            .entry(&"receive_buffer_capacity", &self.receive_buffer_capacity)
             .finish()
     }
 }
@@ -111,6 +113,7 @@ impl Default for ConnectOptions {
             retry_on_initial_connect: false,
             ignore_discovered_servers: false,
             retain_servers_order: false,
+            receive_buffer_capacity: 65535,
         }
     }
 }
