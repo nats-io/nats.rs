@@ -624,6 +624,21 @@ impl ConnectOptions {
         self.tls_client_config = Some(config);
         self
     }
+    
+    /// Sets default receive buffer capacity.
+    /// 
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new().receive_buffer_capacity(65535).connect("demo.nats.io").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn receive_buffer_capacity(mut self, size: usize) -> ConnectOptions {
+        self.receive_buffer_capacity = size;
+        self
+    }
 }
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
