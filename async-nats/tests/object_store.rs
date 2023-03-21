@@ -16,7 +16,7 @@ mod object_store {
     use std::{io, time::Duration};
 
     use async_nats::jetstream::object_store::ObjectMeta;
-    use base64::URL_SAFE;
+    use base64::Engine;
     use futures::StreamExt;
     use rand::RngCore;
     use ring::digest::SHA256;
@@ -60,7 +60,10 @@ mod object_store {
             }
         }
         assert_eq!(
-            format!("SHA-256={}", base64::encode_config(digest, URL_SAFE)),
+            format!(
+                "SHA-256={}",
+                base64::engine::general_purpose::URL_SAFE.encode(digest)
+            ),
             object.info.digest
         );
         assert_eq!(result, bytes);

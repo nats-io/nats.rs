@@ -27,6 +27,8 @@ use std::{
 
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
+use base64::engine::general_purpose::STANDARD;
+use base64::engine::Engine;
 use bytes::Bytes;
 use futures::{future::BoxFuture, TryFutureExt};
 use serde::{Deserialize, Serialize};
@@ -1090,11 +1092,12 @@ impl TryFrom<RawMessage> for crate::Message {
     type Error = Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
-        let decoded_payload = base64::decode(value.payload)
+        let decoded_payload = STANDARD
+            .decode(value.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
         let decoded_headers = value
             .headers
-            .map(base64::decode)
+            .map(|header| STANDARD.decode(header))
             .map_or(Ok(None), |v| v.map(Some))?;
 
         let length = decoded_headers
