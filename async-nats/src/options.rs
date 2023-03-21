@@ -626,7 +626,7 @@ impl ConnectOptions {
     }
     
     /// Sets default receive buffer capacity.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # #[tokio::main]
