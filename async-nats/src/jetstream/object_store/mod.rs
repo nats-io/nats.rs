@@ -21,12 +21,12 @@ use std::{
 };
 
 use crate::{HeaderMap, HeaderValue};
-use base64::URL_SAFE;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE};
+use base64::engine::Engine;
 use once_cell::sync::Lazy;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
 
-use base64_url::base64;
 use futures::{Stream, StreamExt};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -57,7 +57,7 @@ pub(crate) fn is_valid_object_name(object_name: &str) -> bool {
 }
 
 pub(crate) fn encode_object_name(object_name: &str) -> String {
-    base64::encode_config(object_name, base64::URL_SAFE)
+    URL_SAFE.encode(object_name)
 }
 
 /// Configuration values for object store buckets.
@@ -205,7 +205,8 @@ impl ObjectStore {
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
             .await?;
-        let decoded_payload = base64::decode(message.payload)
+        let decoded_payload = STANDARD
+            .decode(message.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
         let object_info = serde_json::from_slice::<ObjectInfo>(&decoded_payload)?;
 
@@ -291,10 +292,7 @@ impl ObjectStore {
             nuid: object_nuid,
             chunks: object_chunks,
             size: object_size,
-            digest: format!(
-                "SHA-256={}",
-                base64::encode_config(digest, base64::URL_SAFE)
-            ),
+            digest: format!("SHA-256={}", URL_SAFE.encode(digest)),
             modified: OffsetDateTime::now_utc(),
             deleted: false,
         };
@@ -566,7 +564,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                         if info.pending == 0 {
                             let digest = self.digest.take().map(|context| context.finish());
                             if let Some(digest) = digest {
-                                if format!("SHA-256={}", base64::encode_config(digest, URL_SAFE))
+                                if format!("SHA-256={}", URL_SAFE.encode(digest))
                                     != self.info.digest
                                 {
                                     return Poll::Ready(Err(io::Error::new(

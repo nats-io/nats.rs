@@ -15,7 +15,6 @@ categories = ["network-programming", "api-bindings"]
 
 [dependencies]
 memchr = "2.4"
-base64-url = "1.4.13"
 bytes = "1.4.0"
 futures = { version = "0.3.26", default-features = false, features = ["std", "async-await"] }
 nkeys = "0.2.0"
@@ -36,7 +35,7 @@ time = { version = "0.3.20", features = ["parsing", "formatting", "serde", "serd
 rustls-native-certs = "0.6"
 tracing = "0.1"
 thiserror = "1.0"
-base64 = "0.13"
+base64 = "0.21"
 tokio-retry = "0.3"
 ring = "0.16"
 

@@ -12,6 +12,8 @@
 // limitations under the License.
 
 use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::Engine;
 use futures::Future;
 use std::fmt::Formatter;
 use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
@@ -249,7 +251,7 @@ impl ConnectOptions {
                         let sig = sign_cb(nonce.as_bytes().to_vec())
                             .await
                             .map_err(AuthError::new)?;
-                        Ok(base64_url::encode(&sig))
+                        Ok(URL_SAFE_NO_PAD.encode(sig))
                     })
                 })),
             ),

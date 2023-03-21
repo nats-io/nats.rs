@@ -29,6 +29,8 @@ use crate::SocketAddr;
 use crate::ToServerAddrs;
 use crate::LANG;
 use crate::VERSION;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::Engine;
 use bytes::BytesMut;
 use std::cmp;
 use std::collections::HashMap;
@@ -176,7 +178,7 @@ impl Connector {
                                             Ok(signed) => {
                                                 connect_info.nkey = Some(key_pair.public_key());
                                                 connect_info.signature =
-                                                    Some(base64_url::encode(&signed));
+                                                    Some(URL_SAFE_NO_PAD.encode(signed));
                                             }
                                             Err(_) => {
                                                 return Err(ConnectError::new(
