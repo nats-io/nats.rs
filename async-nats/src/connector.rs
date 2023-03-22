@@ -30,8 +30,9 @@ use crate::ToServerAddrs;
 use crate::LANG;
 use crate::VERSION;
 use bytes::BytesMut;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use std::cmp;
-use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,13 +54,15 @@ pub(crate) struct ConnectorOptions {
     pub(crate) connection_timeout: Duration,
     pub(crate) name: Option<String>,
     pub(crate) ignore_discovered_servers: bool,
+    pub(crate) retain_servers_order: bool,
 }
 
 /// Maintains a list of servers and establishes connections.
 pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
-    servers: HashMap<ServerAddr, usize>,
+    servers: Vec<(ServerAddr, usize)>,
     options: ConnectorOptions,
+    attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
 }
@@ -74,6 +77,7 @@ impl Connector {
         let servers = addrs.to_server_addrs()?.map(|addr| (addr, 0)).collect();
 
         Ok(Connector {
+            attempts: 0,
             servers,
             options,
             events_tx,
@@ -98,19 +102,23 @@ impl Connector {
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         let mut error = None;
 
-        let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
-        for server_addr in server_addrs {
-            let server_attempts = self.servers.get_mut(&server_addr).unwrap();
-            let duration = if *server_attempts == 0 {
+        let mut servers = self.servers.clone();
+        if !self.options.retain_servers_order {
+            servers.shuffle(&mut thread_rng());
+            // sort_by is stable, meaning it will retain the order for equal elements.
+            servers.sort_by(|a, b| a.1.cmp(&b.1));
+        }
+
+        for (server_addr, _) in servers {
+            let duration = if self.attempts == 0 {
                 Duration::from_millis(0)
             } else {
-                let exp: u32 = (*server_attempts - 1).try_into().unwrap_or(std::u32::MAX);
+                let exp: u32 = (self.attempts - 1).try_into().unwrap_or(std::u32::MAX);
                 let max = Duration::from_secs(4);
-
                 cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
             };
 
-            *server_attempts += 1;
+            self.attempts += 1;
             sleep(duration).await;
 
             let socket_addrs = server_addr
@@ -130,12 +138,12 @@ impl Connector {
                                         err,
                                     )
                                 })?;
-                                self.servers.entry(server_addr).or_insert(0);
+                                if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
+                                    self.servers.push((server_addr, 0));
+                                }
                             }
                         }
-
-                        let server_attempts = self.servers.get_mut(&server_addr).unwrap();
-                        *server_attempts = 0;
+                        self.attempts = 0;
 
                         let tls_required = self.options.tls_required || server_addr.tls_required();
                         let mut connect_info = ConnectInfo {

@@ -14,7 +14,9 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind};
+    use async_nats::{
+        ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind, ServerAddr,
+    };
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
@@ -730,5 +732,35 @@ mod client {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let _server = nats_server::run_server_with_port("", Some("7777"));
         sub.next().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retained_servers_order() {
+        let mut servers = vec![
+            nats_server::run_basic_server(),
+            nats_server::run_basic_server(),
+        ];
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let _ = ConnectOptions::with_user_and_password("js".into(), "js".into())
+            .event_callback(move |event| {
+                let tx = tx.clone();
+                async move {
+                    if let Event::Disconnected = event {
+                        tx.send(()).unwrap();
+                    }
+                }
+            })
+            .retain_servers_order()
+            .connect(
+                servers
+                    .iter()
+                    .map(|s| s.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>(),
+            )
+            .await
+            .unwrap();
+
+        drop(servers.remove(0));
+        rx.recv().await;
     }
 }

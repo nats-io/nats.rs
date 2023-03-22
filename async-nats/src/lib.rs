@@ -691,6 +691,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection_timeout: options.connection_timeout,
             name: options.name,
             ignore_discovered_servers: options.ignore_discovered_servers,
+            retain_servers_order: options.retain_servers_order,
         },
         events_tx,
         state_tx,
