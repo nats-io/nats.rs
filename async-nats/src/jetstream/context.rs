@@ -19,6 +19,7 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::{header, Client, Command, Error, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -947,17 +948,17 @@ struct StreamInfoPage {
     streams: Option<Vec<super::stream::Info>>,
 }
 
-type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
+type PageRequest<'a> = BoxFuture<'a, Result<StreamPage, Error>>;
 
-pub struct StreamNames {
+pub struct StreamNames<'a> {
     context: Context,
     offset: usize,
-    page_request: Option<PageRequest>,
+    page_request: Option<PageRequest<'a>>,
     streams: Vec<String>,
     done: bool,
 }
 
-impl futures::Stream for StreamNames {
+impl futures::Stream for StreamNames<'_> {
     type Item = Result<String, Error>;
 
     fn poll_next(
@@ -1017,17 +1018,17 @@ impl futures::Stream for StreamNames {
     }
 }
 
-type PageInfoRequest = Pin<Box<dyn Future<Output = Result<StreamInfoPage, Error>>>>;
+type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, Error>>;
 
-pub struct Streams {
+pub struct Streams<'a> {
     context: Context,
     offset: usize,
-    page_request: Option<PageInfoRequest>,
+    page_request: Option<PageInfoRequest<'a>>,
     streams: Vec<super::stream::Info>,
     done: bool,
 }
 
-impl futures::Stream for Streams {
+impl futures::Stream for Streams<'_> {
     type Item = Result<super::stream::Info, Error>;
 
     fn poll_next(

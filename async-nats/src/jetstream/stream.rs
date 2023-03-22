@@ -28,7 +28,7 @@ use std::{
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
-use futures::{Future, TryFutureExt};
+use futures::{future::BoxFuture, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -1404,7 +1404,7 @@ where
 {
     type Output = Result<PurgeResponse, Error>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send + 'a>>;
+    type IntoFuture = BoxFuture<'a, Result<PurgeResponse, Error>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(async move {
@@ -1441,18 +1441,18 @@ struct ConsumerInfoPage {
     consumers: Option<Vec<super::consumer::Info>>,
 }
 
-type PageRequest = Pin<Box<dyn Future<Output = Result<ConsumerPage, Error>>>>;
+type PageRequest<'a> = BoxFuture<'a, Result<ConsumerPage, Error>>;
 
-pub struct ConsumerNames {
+pub struct ConsumerNames<'a> {
     context: Context,
     stream: String,
     offset: usize,
-    page_request: Option<PageRequest>,
+    page_request: Option<PageRequest<'a>>,
     consumers: Vec<String>,
     done: bool,
 }
 
-impl futures::Stream for ConsumerNames {
+impl futures::Stream for ConsumerNames<'_> {
     type Item = Result<String, Error>;
 
     fn poll_next(
@@ -1513,18 +1513,18 @@ impl futures::Stream for ConsumerNames {
     }
 }
 
-type PageInfoRequest = Pin<Box<dyn Future<Output = Result<ConsumerInfoPage, Error>>>>;
+type PageInfoRequest<'a> = BoxFuture<'a, Result<ConsumerInfoPage, Error>>;
 
-pub struct Consumers {
+pub struct Consumers<'a> {
     context: Context,
     stream: String,
     offset: usize,
-    page_request: Option<PageInfoRequest>,
+    page_request: Option<PageInfoRequest<'a>>,
     consumers: Vec<super::consumer::Info>,
     done: bool,
 }
 
-impl futures::Stream for Consumers {
+impl futures::Stream for Consumers<'_> {
     type Item = Result<super::consumer::Info, Error>;
 
     fn poll_next(

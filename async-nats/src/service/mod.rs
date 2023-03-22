@@ -279,7 +279,7 @@ pub trait ServiceExt {
 }
 
 impl ServiceExt for crate::Client {
-    type Output = Pin<Box<dyn Future<Output = Result<Service, crate::Error>>>>;
+    type Output = Pin<Box<dyn Future<Output = Result<Service, crate::Error>> + Send>>;
 
     fn add_service(&self, config: Config) -> Self::Output {
         let client = self.clone();
