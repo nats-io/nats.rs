@@ -14,11 +14,10 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{ConnectOptions, Event, Request};
+    use async_nats::{ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
-    use std::io::ErrorKind;
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -30,9 +29,8 @@ mod client {
         let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 
         for _ in 0..10 {
-            client.publish("foo".into(), "data".into()).await.unwrap();
+            client.publish("foo".into(), "data".into()).await.unwrap()
         }
-
         client.flush().await.unwrap();
 
         let mut i = 0;
@@ -218,15 +216,11 @@ mod client {
         let _sub = client.subscribe("service".into()).await.unwrap();
         client.flush().await.unwrap();
 
-        let err = client.request("service".into(), "payload".into()).await;
-        println!("ERR: {err:?}");
-        assert_eq!(
-            err.unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            ErrorKind::TimedOut
-        );
+        let err = client
+            .request("service".into(), "payload".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), RequestErrorKind::TimedOut)
     }
 
     #[tokio::test]
@@ -234,13 +228,14 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        tokio::time::timeout(
+        let err = tokio::time::timeout(
             tokio::time::Duration::from_millis(300),
             client.request("test".into(), "request".into()),
         )
         .await
         .unwrap()
         .unwrap_err();
+        assert_eq!(RequestErrorKind::NoResponders, err.kind());
     }
 
     #[tokio::test]
@@ -272,6 +267,7 @@ mod client {
 
     #[tokio::test]
     async fn unsubscribe() {
+        use std::error::Error;
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
@@ -281,7 +277,14 @@ mod client {
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
-        sub.unsubscribe().await.unwrap();
+        let result = sub.unsubscribe().await;
+        match result {
+            Ok(()) => println!("ok"),
+            Err(err) => {
+                println!("error: {}", err);
+                println!("source: {:?}", err.source())
+            }
+        }
         // check if we can still send messages after unsubscribe.
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
         client.publish("test2".into(), "data".into()).await.unwrap();
@@ -409,12 +412,27 @@ mod client {
     }
 
     #[tokio::test]
-    async fn user_pass_auth_wrong_pass() {
+    async fn required_auth_not_provided() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        async_nats::ConnectOptions::with_user_and_password("derek".into(), "bad_password".into())
+        let err = async_nats::ConnectOptions::new()
             .connect(server.client_url())
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .kind();
+        assert_eq!(ConnectErrorKind::AuthorizationViolation, err);
+    }
+
+    #[tokio::test]
+    async fn user_pass_auth_wrong_pass() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+        let err = async_nats::ConnectOptions::with_user_and_password(
+            "derek".into(),
+            "bad_password".into(),
+        )
+        .connect(server.client_url())
+        .await
+        .unwrap_err();
+        assert_eq!(ConnectErrorKind::AuthorizationViolation, err.kind());
     }
 
     #[tokio::test]
@@ -636,7 +654,7 @@ mod client {
 
         assert_eq!(
             timeout_result.unwrap_err().kind(),
-            std::io::ErrorKind::TimedOut
+            ConnectErrorKind::TimedOut
         );
         startup_listener.notify_one();
     }

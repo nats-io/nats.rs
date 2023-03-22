@@ -253,11 +253,21 @@ impl TryFrom<u16> for StatusCode {
 }
 
 impl StatusCode {
-    pub const IDLE_HEARTBEAT: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(100) });
-    pub const OK: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(200) });
-    pub const NOT_FOUND: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(404) });
-    pub const TIMEOUT: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(408) });
-    pub const NO_RESPONDERS: StatusCode = StatusCode(unsafe { NonZeroU16::new_unchecked(503) });
-    pub const REQUEST_TERMINATED: StatusCode =
-        StatusCode(unsafe { NonZeroU16::new_unchecked(409) });
+    pub const IDLE_HEARTBEAT: StatusCode = StatusCode(new_nonzero_u16(100));
+    pub const OK: StatusCode = StatusCode(new_nonzero_u16(200));
+    pub const NOT_FOUND: StatusCode = StatusCode(new_nonzero_u16(404));
+    pub const TIMEOUT: StatusCode = StatusCode(new_nonzero_u16(408));
+    pub const NO_RESPONDERS: StatusCode = StatusCode(new_nonzero_u16(503));
+    pub const REQUEST_TERMINATED: StatusCode = StatusCode(new_nonzero_u16(409));
+}
+
+/// This function is needed until const Option::unwrap becomes stable.
+/// Ref: https://github.com/nats-io/nats.rs/issues/804
+const fn new_nonzero_u16(n: u16) -> NonZeroU16 {
+    match NonZeroU16::new(n) {
+        Some(d) => d,
+        None => {
+            panic!("Invalid non-zero u16");
+        }
+    }
 }

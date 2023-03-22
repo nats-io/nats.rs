@@ -14,7 +14,6 @@
 use std::fmt::Display;
 use std::str::{self, FromStr};
 
-use subslice::SubsliceExt;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
 
@@ -58,7 +57,7 @@ pub(crate) struct Connection {
 /// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        let maybe_len = self.buffer.find(b"\r\n");
+        let maybe_len = memchr::memmem::find(&self.buffer, b"\r\n");
         if maybe_len.is_none() {
             return Ok(None);
         }
@@ -309,6 +308,7 @@ impl Connection {
         ))
     }
 
+    // TODO: do we want an custom error here?
     pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         loop {
             if let Some(op) = self.try_read_op()? {
@@ -341,10 +341,13 @@ impl Connection {
                 respond,
                 headers,
             } => {
-                if headers.is_some() {
-                    self.stream.write_all(b"HPUB ").await?;
-                } else {
-                    self.stream.write_all(b"PUB ").await?;
+                match headers.as_ref() {
+                    Some(headers) if !headers.is_empty() => {
+                        self.stream.write_all(b"HPUB ").await?;
+                    }
+                    _ => {
+                        self.stream.write_all(b"PUB ").await?;
+                    }
                 }
 
                 self.stream.write_all(subject.as_bytes()).await?;
@@ -355,33 +358,36 @@ impl Connection {
                     self.stream.write_all(b" ").await?;
                 }
 
-                if let Some(headers) = headers {
-                    let headers = headers.to_bytes();
+                match headers {
+                    Some(headers) if !headers.is_empty() => {
+                        let headers = headers.to_bytes();
 
-                    let mut header_len_buf = itoa::Buffer::new();
-                    self.stream
-                        .write_all(header_len_buf.format(headers.len()).as_bytes())
-                        .await?;
+                        let mut header_len_buf = itoa::Buffer::new();
+                        self.stream
+                            .write_all(header_len_buf.format(headers.len()).as_bytes())
+                            .await?;
 
-                    self.stream.write_all(b" ").await?;
+                        self.stream.write_all(b" ").await?;
 
-                    let mut total_len_buf = itoa::Buffer::new();
-                    self.stream
-                        .write_all(
-                            total_len_buf
-                                .format(headers.len() + payload.len())
-                                .as_bytes(),
-                        )
-                        .await?;
+                        let mut total_len_buf = itoa::Buffer::new();
+                        self.stream
+                            .write_all(
+                                total_len_buf
+                                    .format(headers.len() + payload.len())
+                                    .as_bytes(),
+                            )
+                            .await?;
 
-                    self.stream.write_all(b"\r\n").await?;
-                    self.stream.write_all(&headers).await?;
-                } else {
-                    let mut len_buf = itoa::Buffer::new();
-                    self.stream
-                        .write_all(len_buf.format(payload.len()).as_bytes())
-                        .await?;
-                    self.stream.write_all(b"\r\n").await?;
+                        self.stream.write_all(b"\r\n").await?;
+                        self.stream.write_all(&headers).await?;
+                    }
+                    _ => {
+                        let mut len_buf = itoa::Buffer::new();
+                        self.stream
+                            .write_all(len_buf.format(payload.len()).as_bytes())
+                            .await?;
+                        self.stream.write_all(b"\r\n").await?;
+                    }
                 }
 
                 self.stream.write_all(&payload).await?;

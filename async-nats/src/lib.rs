@@ -100,6 +100,8 @@
 #![deny(rustdoc::invalid_codeblock_attributes)]
 #![deny(rustdoc::invalid_rust_codeblocks)]
 
+use thiserror::Error;
+
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
@@ -107,6 +109,7 @@ use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::iter;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
@@ -115,7 +118,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration, Interval};
+use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -146,7 +149,7 @@ mod connector;
 mod options;
 
 use crate::options::CallbackArg1;
-pub use client::{Client, PublishError, Request};
+pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind};
 pub use options::{AuthError, ConnectOptions};
 
 pub mod header;
@@ -312,8 +315,11 @@ impl ConnectionHandler {
         ping_period: Duration,
         flush_period: Duration,
     ) -> ConnectionHandler {
-        let ping_interval = interval(ping_period);
-        let flush_interval = interval(flush_period);
+        let mut ping_interval = interval(ping_period);
+        ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        let mut flush_interval = interval(flush_period);
+        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         ConnectionHandler {
             connection,
@@ -508,6 +514,7 @@ impl ConnectionHandler {
                     self.pending_pings, self.max_pings
                 );
                 self.pending_pings += 1;
+                self.ping_interval.reset();
 
                 if self.pending_pings > self.max_pings {
                     debug!(
@@ -531,6 +538,10 @@ impl ConnectionHandler {
                         })?;
                     } else if let Err(err) = self.handle_flush().await {
                         result.send(Err(err)).map_err(|_| {
+                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
+                        })?;
+                    } else {
+                        result.send(Ok(())).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                         })?;
                     }
@@ -660,7 +671,7 @@ impl ConnectionHandler {
 pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
-) -> Result<Client, io::Error> {
+) -> Result<Client, ConnectError> {
     let ping_period = options.ping_interval;
     let flush_period = options.flush_interval;
 
@@ -679,14 +690,17 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
             name: options.name,
+            ignore_discovered_servers: options.ignore_discovered_servers,
         },
         events_tx,
         state_tx,
-    )?;
+    )
+    .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
     let mut info: ServerInfo = Default::default();
     let mut connection = None;
     if !options.retry_on_initial_connect {
+        debug!("retry on initial connect failure is disabled");
         let (info_ok, connection_ok) = connector.try_connect().await?;
         connection = Some(connection_ok);
         info = info_ok;
@@ -760,6 +774,8 @@ impl fmt::Display for Event {
 /// To have customized NATS connection, check [ConnectOptions].
 ///
 /// # Examples
+///
+/// ## Single URL
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
@@ -768,8 +784,129 @@ impl fmt::Display for Event {
 /// # Ok(())
 /// # }
 /// ```
-pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, io::Error> {
+///
+/// ## Connect with [Vec] of [ServerAddr].
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let client = async_nats::connect(vec![
+///    "demo.nats.io".parse::<ServerAddr>()?,
+///    "other.nats.io".parse::<ServerAddr>()?,
+///])
+///.await
+///.unwrap();
+///# Ok(())
+///# }
+/// ```
+///
+/// ## with [Vec], but parse URLs inside [crate::connect()]
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let servers = vec!["demo.nats.io", "other.nats.io"];
+///let client = async_nats::connect(
+///    servers
+///        .iter()
+///        .map(|url| url.parse())
+///        .collect::<Result<Vec<ServerAddr>, _>>()?
+///)
+///.await?;
+///# Ok(())
+///# }
+///```
+///
+///
+/// ## with slice.
+/// ```no_run
+///#[tokio::main]
+///# async fn main() -> Result<(), async_nats::Error> {
+///use async_nats::ServerAddr;
+///let client = async_nats::connect(
+///    [
+///        "demo.nats.io".parse::<ServerAddr>()?,
+///        "other.nats.io".parse::<ServerAddr>()?,
+///    ]
+///    .as_slice(),
+///)
+///.await?;
+///# Ok(())
+///# }
+///
+pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ConnectErrorKind {
+    /// Parsing the passed server address failed.
+    ServerParse,
+    /// DNS related issues.
+    Dns,
+    /// Failed authentication process, signing nonce, etc.
+    Authentication,
+    /// Server returned authorization violation error.
+    AuthorizationViolation,
+    /// Connect timed out.
+    TimedOut,
+    /// Erroneous TLS setup.
+    Tls,
+    /// Other IO error.
+    Io,
+}
+
+/// Returned when initial connection fails.
+/// To be enumerate over the variants, call [ConnectError::kind].
+#[derive(Debug, Error)]
+pub struct ConnectError {
+    kind: ConnectErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Display for ConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source_info = self
+            .source
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "no details".to_string());
+        match self.kind {
+            ConnectErrorKind::ServerParse => {
+                write!(f, "failed to parse server or server list: {}", source_info)
+            }
+            ConnectErrorKind::Dns => write!(f, "DNS error: {}", source_info),
+            ConnectErrorKind::Authentication => write!(f, "failed signing nonce"),
+            ConnectErrorKind::AuthorizationViolation => write!(f, "authorization violation"),
+            ConnectErrorKind::TimedOut => write!(f, "timed out"),
+            ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
+            ConnectErrorKind::Io => write!(f, "{}", source_info),
+        }
+    }
+}
+
+impl ConnectError {
+    fn with_source<E>(kind: ConnectErrorKind, source: E) -> ConnectError
+    where
+        E: Into<Box<dyn std::error::Error + Sync + Send>>,
+    {
+        ConnectError {
+            kind,
+            source: Some(source.into()),
+        }
+    }
+    fn new(kind: ConnectErrorKind) -> ConnectError {
+        ConnectError { kind, source: None }
+    }
+    pub fn kind(&self) -> ConnectErrorKind {
+        self.kind
+    }
+}
+
+impl From<std::io::Error> for ConnectError {
+    fn from(err: std::io::Error) -> Self {
+        ConnectError::with_source(ConnectErrorKind::Io, err)
+    }
 }
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
@@ -819,14 +956,13 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn unsubscribe(&mut self) -> io::Result<()> {
+    pub async fn unsubscribe(&mut self) -> Result<(), UnsubscribeError> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
                 max: None,
             })
-            .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+            .await?;
         self.receiver.close();
         Ok(())
     }
@@ -857,15 +993,24 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
+    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> Result<(), UnsubscribeError> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
                 max: Some(unsub_after),
             })
-            .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+            .await?;
         Ok(())
+    }
+}
+
+#[derive(Error, Debug, PartialEq)]
+#[error("failed to send unsubscribe")]
+pub struct UnsubscribeError(String);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        UnsubscribeError(err.to_string())
     }
 }
 
@@ -919,7 +1064,7 @@ impl From<ClientError> for CallbackError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
 pub enum ServerError {
     AuthorizationViolation,
     SlowConsumer(u64),
@@ -1162,6 +1307,14 @@ impl<'a> ToServerAddrs for &'a [ServerAddr] {
 
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         Ok(self.iter().cloned())
+    }
+}
+
+impl ToServerAddrs for Vec<ServerAddr> {
+    type Iter = std::vec::IntoIter<ServerAddr>;
+
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        Ok(self.clone().into_iter())
     }
 }
 

@@ -63,24 +63,22 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
 }
 
 pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls::ClientConfig> {
-    let mut root_store = rustls::RootCertStore::empty();
+    let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
     // load native system certs only if user did not specify them.
     if options.tls_client_config.is_some() || options.certificates.is_empty() {
-        for cert in rustls_native_certs::load_native_certs().map_err(|err| {
-            io::Error::new(
-                ErrorKind::Other,
-                format!("could not load platform certs: {err}"),
-            )
-        })? {
-            root_store
-                .add(&rustls::Certificate(cert.0))
+        root_store.add_parsable_certificates(
+            rustls_native_certs::load_native_certs()
                 .map_err(|err| {
                     io::Error::new(
                         ErrorKind::Other,
-                        format!("failed to read root certificates: {err}"),
+                        format!("could not load platform certs: {err}"),
                     )
-                })?;
-        }
+                })?
+                .into_iter()
+                .map(|cert| cert.0)
+                .collect::<Vec<Vec<u8>>>()
+                .as_ref(),
+        );
     }
 
     // use provided ClientConfig or built it from options.

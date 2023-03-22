@@ -12,14 +12,21 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
+use futures::{future::BoxFuture, FutureExt};
+
+#[cfg(feature = "server_2_10")]
+use std::collections::HashMap;
 use std::{
-    future,
+    future, io,
+    pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
     time::Duration,
 };
-use tokio::{task::JoinHandle, time::Instant};
+use tokio::{
+    task::JoinHandle,
+    time::{Instant, Sleep},
+};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -121,6 +128,7 @@ impl Consumer<Config> {
         batch: I,
         inbox: String,
     ) -> Result<(), Error> {
+        debug!("sending batch");
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             self.context.prefix, self.info.stream_name, self.info.name
@@ -132,6 +140,8 @@ impl Consumer<Config> {
             .client
             .publish_with_reply(subject, inbox, payload.into())
             .await?;
+        self.context.client.flush().await?;
+        debug!("batch request sent");
         Ok(())
     }
 
@@ -263,6 +273,7 @@ impl Consumer<Config> {
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
+            expires: Some(Duration::from_secs(60).as_millis().try_into()?),
             ..Default::default()
         })
         .map(Bytes::from)?;
@@ -281,6 +292,8 @@ pub struct Batch {
     pending_messages: usize,
     subscriber: Subscriber,
     context: Context,
+    timeout: Option<Pin<Box<Sleep>>>,
+    terminated: bool,
 }
 
 impl<'a> Batch {
@@ -289,10 +302,18 @@ impl<'a> Batch {
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
 
+        let sleep = batch.expires.map(|e| {
+            Box::pin(tokio::time::sleep(
+                Duration::from_nanos(e as u64).saturating_add(Duration::from_secs(5)),
+            ))
+        });
+
         Ok(Batch {
             pending_messages: batch.batch,
             subscriber: subscription,
             context: consumer.context.clone(),
+            terminated: false,
+            timeout: sleep,
         })
     }
 }
@@ -304,29 +325,59 @@ impl futures::Stream for Batch {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        if self.pending_messages == 0 {
-            return std::task::Poll::Ready(None);
+        if self.terminated {
+            return Poll::Ready(None);
         }
-
+        if self.pending_messages == 0 {
+            self.terminated = true;
+            return Poll::Ready(None);
+        }
+        if let Some(sleep) = self.timeout.as_mut() {
+            match sleep.poll_unpin(cx) {
+                Poll::Ready(_) => {
+                    debug!("batch timeout timer triggered");
+                    // TODO(tp): Maybe we can be smarter here and before timing out, check if
+                    // we consumed all the messages from the subscription buffer in case of user
+                    // slowly consuming messages. Keep in mind that we time out here only if
+                    // for some reason we missed timeout from the server and few seconds have
+                    // passed since expected timeout message.
+                    self.terminated = true;
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => (),
+            }
+        }
         match self.subscriber.receiver.poll_recv(cx) {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
-                    StatusCode::TIMEOUT => Poll::Ready(None),
-                    StatusCode::IDLE_HEARTBEAT => Poll::Pending,
+                    StatusCode::TIMEOUT => {
+                        debug!("recived timeout. Iterator done.");
+                        self.terminated = true;
+                        Poll::Ready(None)
+                    }
+                    StatusCode::IDLE_HEARTBEAT => {
+                        debug!("received heartbeat");
+                        Poll::Pending
+                    }
                     StatusCode::OK => {
+                        debug!("received message");
                         self.pending_messages -= 1;
                         Poll::Ready(Some(Ok(jetstream::Message {
                             context: self.context.clone(),
                             message,
                         })))
                     }
-                    status => Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!(
-                            "error while processing messages from the stream: {}, {:?}",
-                            status, message.description
-                        ),
-                    ))))),
+                    status => {
+                        debug!("received error");
+                        self.terminated = true;
+                        Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!(
+                                "error while processing messages from the stream: {}, {:?}",
+                                status, message.description
+                            ),
+                        )))))
+                    }
                 },
                 None => Poll::Ready(None),
             },
@@ -366,10 +417,13 @@ impl<'a> futures::Stream for Sequence<'a> {
                         .publish_with_reply(subject, inbox, request)
                         .await?;
 
+                    // TODO(tp): Add timeout config and defaults.
                     Ok(Batch {
                         pending_messages,
                         subscriber,
                         context,
+                        terminated: false,
+                        timeout: Some(Box::pin(tokio::time::sleep(Duration::from_secs(60)))),
                     })
                 }));
 
@@ -478,24 +532,24 @@ impl Stream {
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
-                        _ = expires => debug!("expired pull request"),
+                        _ = expires => {
+                            pending_reset = true;
+                            debug!("expired pull request")},
                     }
 
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
-
                     let result = context
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
-                        .await;
+                        .await
+                        .map(|_| pending_reset)
+                        .map_err(|err| Box::from(io::Error::new(io::ErrorKind::Other, err)));
                     if let Err(err) = consumer.context.client.flush().await {
-                        debug!("flush failed: {}", err);
+                        debug!("flush failed: {err:?}");
                     }
-                    debug!("request published");
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
-                        .send(result.map(|_| pending_reset).map_err(|err| {
-                            Box::from(std::io::Error::new(std::io::ErrorKind::Other, err))
-                        }))
+                        .send(result.map(|_| pending_reset))
                         .await
                         .unwrap();
                     trace!("result send over tx");
@@ -513,15 +567,23 @@ impl Stream {
                     loop {
                         tokio::time::sleep(batch_config.idle_heartbeat).await;
                         debug!("checking for missed heartbeats");
-                        if last_seen
-                            .lock()
-                            .unwrap()
-                            .elapsed()
-                            .gt(&batch_config.idle_heartbeat.saturating_mul(2))
-                        {
+                        let should_reset = {
+                            let mut last_seen = last_seen.lock().unwrap();
+                            if last_seen
+                                .elapsed()
+                                .gt(&batch_config.idle_heartbeat.saturating_mul(2))
+                            {
+                                // If we met the missed heartbeat threshold, reset the timer
+                                // so it will not be instantly triggered again.
+                                *last_seen = Instant::now();
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if should_reset {
                             debug!("missed heartbeat threshold met");
                             missed_heartbeat_tx.send(()).await.unwrap();
-                            break;
                         }
                     }
                 }
@@ -573,7 +635,6 @@ impl futures::Stream for Stream {
                 match self.heartbeats_missing.poll_recv(cx) {
                     Poll::Ready(resp) => match resp {
                         Some(()) => {
-                            self.terminated = true;
                             trace!("received missing heartbeats notification");
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::TimedOut,
@@ -597,7 +658,8 @@ impl futures::Stream for Stream {
                 Poll::Ready(resp) => match resp {
                     Some(resp) => match resp {
                         Ok(reset) => {
-                            debug!("request successful, setting pending messages");
+                            trace!("request response: {:?}", reset);
+                            debug!("request sent, setting pending messages");
                             if reset {
                                 self.pending_messages = self.batch_config.batch;
                                 self.pending_bytes = self.batch_config.max_bytes;
@@ -621,12 +683,32 @@ impl futures::Stream for Stream {
                 Poll::Ready(maybe_message) => match maybe_message {
                     Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                         StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
+                            debug!("received status message: {:?}", message);
+                            // If consumer has been deleted, error and shutdown the iterator.
+                            if message.description.as_deref() == Some("Consumer Deleted") {
+                                self.terminated = true;
+                                return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    format!("{:?}: {:?}", message.status, message.description),
+                                )))));
+                            }
+                            // If consumer is not pull based, error and shutdown the iterator.
                             if message.description.as_deref() == Some("Consumer is push based") {
+                                self.terminated = true;
                                 return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                     std::io::ErrorKind::Other,
                                     format!("{:?}: {:?}", message.status, message.description),
                                 )))));
                             }
+                            // All other cases can be handled.
+
+                            // Got a status message from a consumer, meaning it's alive.
+                            // Update last seen.
+                            if !self.batch_config.idle_heartbeat.is_zero() {
+                                *self.last_seen.lock().unwrap() = Instant::now();
+                            }
+
+                            // Do accounting for messages left after terminated/completed pull request.
                             let pending_messages = message
                                 .headers
                                 .as_ref()
@@ -653,7 +735,7 @@ impl futures::Stream for Stream {
                             self.pending_bytes = self.pending_bytes.saturating_sub(pending_bytes);
                             continue;
                         }
-
+                        // Idle Hearbeat means we have no messages, but consumer is fine.
                         StatusCode::IDLE_HEARTBEAT => {
                             debug!("received idle heartbeat");
                             if !self.batch_config.idle_heartbeat.is_zero() {
@@ -661,6 +743,7 @@ impl futures::Stream for Stream {
                             }
                             continue;
                         }
+                        // We got an message from a stream.
                         StatusCode::OK => {
                             trace!("message received");
                             if !self.batch_config.idle_heartbeat.is_zero() {
@@ -675,13 +758,14 @@ impl futures::Stream for Stream {
                             })));
                         }
                         status => {
+                            debug!("received unknown  message: {:?}", message);
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 format!(
                                     "error while processing messages from the stream: {}, {:?}",
                                     status, message.description
                                 ),
-                            )))))
+                            )))));
                         }
                     },
                     None => return Poll::Ready(None),
@@ -963,7 +1047,7 @@ pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: usize,
+    expires: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -973,7 +1057,7 @@ impl<'a> FetchBuilder<'a> {
             consumer,
             batch: 200,
             max_bytes: 0,
-            expires: 0,
+            expires: None,
             heartbeat: Duration::default(),
         }
     }
@@ -1118,7 +1202,7 @@ impl<'a> FetchBuilder<'a> {
     /// # }
     /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
-        self.expires = expires.as_nanos().try_into().unwrap();
+        self.expires = Some(expires.as_nanos().try_into().unwrap());
         self
     }
 
@@ -1154,7 +1238,7 @@ impl<'a> FetchBuilder<'a> {
         Batch::batch(
             BatchConfig {
                 batch: self.batch,
-                expires: Some(self.expires),
+                expires: self.expires,
                 no_wait: true,
                 max_bytes: self.max_bytes,
                 idle_heartbeat: self.heartbeat,
@@ -1471,6 +1555,10 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -1505,6 +1593,13 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default")]
     pub memory_storage: bool,
+    #[cfg(feature = "server_2_10")]
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+    /// Custom backoff for missed acknowledgments.
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub backoff: Vec<Duration>,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -1526,6 +1621,8 @@ impl IntoConsumerConfig for Config {
             ack_wait: self.ack_wait,
             max_deliver: self.max_deliver,
             filter_subject: self.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: self.filter_subjects,
             replay_policy: self.replay_policy,
             rate_limit: self.rate_limit,
             sample_frequency: self.sample_frequency,
@@ -1539,6 +1636,9 @@ impl IntoConsumerConfig for Config {
             inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
+            #[cfg(feature = "server_2_10")]
+            metadata: self.metadata,
+            backoff: self.backoff,
         }
     }
 }
@@ -1559,6 +1659,8 @@ impl FromConsumer for Config {
             ack_wait: config.ack_wait,
             max_deliver: config.max_deliver,
             filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
             replay_policy: config.replay_policy,
             rate_limit: config.rate_limit,
             sample_frequency: config.sample_frequency,
@@ -1570,6 +1672,9 @@ impl FromConsumer for Config {
             inactive_threshold: config.inactive_threshold,
             num_replicas: config.num_replicas,
             memory_storage: config.memory_storage,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
+            backoff: config.backoff,
         })
     }
 }

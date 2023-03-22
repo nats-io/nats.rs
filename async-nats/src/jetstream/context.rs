@@ -17,7 +17,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{header, Client, Command, Error, HeaderMap, HeaderValue};
+use crate::{header, Client, Command, Error, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
@@ -902,6 +902,12 @@ impl PublishAckFuture {
                 )))
             },
             |m| {
+                if m.status == Some(StatusCode::NO_RESPONDERS) {
+                    return Err(Box::from(std::io::Error::new(
+                        ErrorKind::NotFound,
+                        "no stream found for given subject",
+                    )));
+                }
                 let response = serde_json::from_slice(m.payload.as_ref())?;
                 match response {
                     Response::Err { error } => Err(Box::from(std::io::Error::new(

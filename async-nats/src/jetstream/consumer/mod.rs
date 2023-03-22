@@ -15,6 +15,8 @@
 
 pub mod pull;
 pub mod push;
+#[cfg(feature = "server_2_10")]
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::time::Duration;
 
@@ -170,7 +172,7 @@ pub struct Info {
     pub num_pending: u64,
     /// Information about the consumer's cluster
     #[serde(default)]
-    pub cluster: ClusterInfo,
+    pub cluster: Option<ClusterInfo>,
     /// Indicates if any client is connected and receiving messages from a push consumer
     #[serde(default)]
     pub push_bound: bool,
@@ -269,6 +271,10 @@ pub struct Config {
     /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
@@ -309,6 +315,14 @@ pub struct Config {
     /// Force consumer to use memory storage.
     #[serde(default, skip_serializing_if = "is_default", rename = "mem_storage")]
     pub memory_storage: bool,
+
+    #[cfg(feature = "server_2_10")]
+    /// Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+    /// Custom backoff for missed acknowledgments.
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub backoff: Vec<Duration>,
 }
 
 impl From<&Config> for Config {
@@ -347,12 +361,13 @@ impl FromConsumer for Config {
 }
 
 /// `DeliverPolicy` determines how the consumer should select the first message to deliver.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 #[serde(tag = "deliver_policy")]
 pub enum DeliverPolicy {
     /// All causes the consumer to receive the oldest messages still present in the system.
     /// This is the default.
+    #[default]
     #[serde(rename = "all")]
     All,
     /// Last will start the consumer with the last sequence received.
@@ -382,18 +397,13 @@ pub enum DeliverPolicy {
     LastPerSubject,
 }
 
-impl Default for DeliverPolicy {
-    fn default() -> DeliverPolicy {
-        DeliverPolicy::All
-    }
-}
-
 /// Determines whether messages will be acknowledged individually,
 /// in batches, or never.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AckPolicy {
     /// All messages will be individually acknowledged. This is the default.
+    #[default]
     #[serde(rename = "explicit")]
     Explicit = 2,
     /// No messages are acknowledged.
@@ -405,18 +415,13 @@ pub enum AckPolicy {
     All = 1,
 }
 
-impl Default for AckPolicy {
-    fn default() -> AckPolicy {
-        AckPolicy::Explicit
-    }
-}
-
 /// `ReplayPolicy` controls whether messages are sent to a consumer
 /// as quickly as possible or at the rate that they were originally received at.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ReplayPolicy {
     /// Sends all messages in a stream to the consumer as quickly as possible. This is the default.
+    #[default]
     #[serde(rename = "instant")]
     Instant = 0,
     /// Sends messages to a consumer in a rate-limited fashion based on the rate of receipt. This
@@ -426,11 +431,6 @@ pub enum ReplayPolicy {
     Original = 1,
 }
 
-impl Default for ReplayPolicy {
-    fn default() -> ReplayPolicy {
-        ReplayPolicy::Instant
-    }
-}
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }

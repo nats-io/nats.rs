@@ -14,42 +14,34 @@
 use crate::connection::State;
 use crate::ServerInfo;
 
-use super::{header::HeaderMap, status::StatusCode, Command, Error, Message, Subscriber};
+use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
-use std::error;
-use std::fmt;
+use std::fmt::Display;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{self, ErrorKind};
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::trace;
 
-lazy_static! {
-    static ref VERSION_RE: Regex = Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap();
-}
+static VERSION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap());
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
-pub struct PublishError(mpsc::error::SendError<Command>);
+#[derive(Debug, Error)]
+#[error("failed to publish message: {0}")]
+pub struct PublishError(#[source] Box<dyn std::error::Error + Send + Sync>);
 
-impl fmt::Debug for PublishError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PublishError").finish_non_exhaustive()
+impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        PublishError(Box::new(err))
     }
 }
-
-impl fmt::Display for PublishError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "publishing on a closed client".fmt(f)
-    }
-}
-
-impl error::Error for PublishError {}
 
 /// Client is a `Cloneable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
@@ -162,7 +154,6 @@ impl Client {
                 respond: None,
                 headers: None,
             })
-            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -194,7 +185,6 @@ impl Client {
                 respond: None,
                 headers: Some(headers),
             })
-            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -226,7 +216,6 @@ impl Client {
                 respond: Some(reply),
                 headers: None,
             })
-            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -261,7 +250,6 @@ impl Client {
                 respond: Some(reply),
                 headers: Some(headers),
             })
-            .map_err(PublishError)
             .await?;
         Ok(())
     }
@@ -278,7 +266,7 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
+    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, RequestError> {
         trace!("request sent to subject: {} ({})", subject, payload.len());
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
@@ -303,7 +291,7 @@ impl Client {
         subject: String,
         headers: HeaderMap,
         payload: Bytes,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, RequestError> {
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
@@ -321,7 +309,11 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_request(&self, subject: String, request: Request) -> Result<Message, Error> {
+    pub async fn send_request(
+        &self,
+        subject: String,
+        request: Request,
+    ) -> Result<Message, RequestError> {
         let inbox = request.inbox.unwrap_or_else(|| self.new_inbox());
         let timeout = request.timeout.unwrap_or(self.request_timeout);
         let mut sub = self.subscribe(inbox.clone()).await?;
@@ -333,11 +325,13 @@ impl Client {
             }
             None => self.publish_with_reply(subject, inbox, payload).await?,
         }
-        self.flush().await?;
+        self.flush()
+            .await
+            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())
-                    .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "request timed out"))
+                    .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
                     .await?
             }
             None => sub.next().await,
@@ -345,17 +339,17 @@ impl Client {
         match request {
             Some(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "nats: no responders",
-                    )));
+                    return Err(RequestError::with_source(
+                        RequestErrorKind::NoResponders,
+                        "no responders",
+                    ));
                 }
                 Ok(message)
             }
-            None => Err(Box::new(io::Error::new(
-                ErrorKind::BrokenPipe,
-                "did not receive any message",
-            ))),
+            None => Err(RequestError::with_source(
+                RequestErrorKind::Other,
+                "broken pipe",
+            )),
         }
     }
 
@@ -392,7 +386,7 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, Error> {
+    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, SubscribeError> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -428,7 +422,7 @@ impl Client {
         &self,
         subject: String,
         queue_group: String,
-    ) -> Result<Subscriber, Error> {
+    ) -> Result<Subscriber, SubscribeError> {
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -456,11 +450,16 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn flush(&self) -> Result<(), Error> {
+    pub async fn flush(&self) -> Result<(), FlushError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sender.send(Command::Flush { result: tx }).await?;
+        self.sender
+            .send(Command::Flush { result: tx })
+            .await
+            .map_err(|err| FlushError::with_source(FlushErrorKind::SendError, err))?;
         // first question mark is an error from rx itself, second for error from flush.
-        rx.await??;
+        rx.await
+            .map_err(|err| FlushError::with_source(FlushErrorKind::FlushError, err))?
+            .map_err(|err| FlushError::with_source(FlushErrorKind::FlushError, err))?;
         Ok(())
     }
 
@@ -572,5 +571,120 @@ impl Request {
     pub fn inbox(mut self, inbox: String) -> Request {
         self.inbox = Some(inbox);
         self
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("failed to send subscribe: {0}")]
+pub struct SubscribeError(#[source] Box<dyn std::error::Error + Sync + Send>);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        SubscribeError(Box::new(err))
+    }
+}
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum RequestErrorKind {
+    /// There are services listening on requested subject, but they didn't respond
+    /// in time.
+    TimedOut,
+    /// No one is listening on request subject.
+    NoResponders,
+    /// Other errors, client/io related.
+    Other,
+}
+
+/// Error returned when a core NATS request fails.
+/// To be enumerate over the variants, call [RequestError::kind].
+#[derive(Debug, Error)]
+pub struct RequestError {
+    kind: RequestErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Display for RequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            RequestErrorKind::TimedOut => write!(f, "request timed out"),
+            RequestErrorKind::NoResponders => write!(f, "no responders"),
+            RequestErrorKind::Other => write!(f, "request failed: {:?}", self.source),
+        }
+    }
+}
+
+impl RequestError {
+    fn with_source<E>(kind: RequestErrorKind, source: E) -> RequestError
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        RequestError {
+            kind,
+            source: Some(source.into()),
+        }
+    }
+
+    /// Returns the [RequestErrorKind] enum, allowing iterating over
+    /// all error variants.
+    pub fn kind(&self) -> RequestErrorKind {
+        self.kind
+    }
+}
+
+/// Error returned when flushing the messages buffered on the client fails.
+/// To be enumerate over the variants, call [FlushError::kind].
+#[derive(Debug, Error)]
+pub struct FlushError {
+    kind: FlushErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Display for FlushError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source_info = self
+            .source
+            .as_ref()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "no details".into());
+        match self.kind {
+            FlushErrorKind::SendError => write!(f, "failed to send flush request: {}", source_info),
+            FlushErrorKind::FlushError => write!(f, "flush failed: {}", source_info),
+        }
+    }
+}
+
+impl FlushError {
+    fn with_source<E>(kind: FlushErrorKind, source: E) -> FlushError
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        FlushError {
+            kind,
+            source: Some(source.into()),
+        }
+    }
+    pub fn kind(&self) -> FlushErrorKind {
+        self.kind
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum FlushErrorKind {
+    /// Sending the flush failed client side.
+    SendError,
+    /// Flush failed.
+    /// This can happen mostly in case of connection issues
+    /// that cannot be resolved quickly.
+    FlushError,
+}
+
+impl From<PublishError> for RequestError {
+    fn from(e: PublishError) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, e)
+    }
+}
+impl From<SubscribeError> for RequestError {
+    fn from(e: SubscribeError) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, e)
     }
 }

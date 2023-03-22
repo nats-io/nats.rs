@@ -22,12 +22,12 @@ use std::{
 
 use crate::{HeaderMap, HeaderValue};
 use base64::URL_SAFE;
+use once_cell::sync::Lazy;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
 
 use base64_url::base64;
 use futures::{Stream, StreamExt};
-use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -41,10 +41,8 @@ const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
 const ROLLUP_SUBJECT: &str = "sub";
 
-lazy_static! {
-    static ref BUCKET_NAME_RE: Regex = Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap();
-    static ref OBJECT_NAME_RE: Regex = Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap();
-}
+static BUCKET_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
+static OBJECT_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap());
 
 pub(crate) fn is_valid_bucket_name(bucket_name: &str) -> bool {
     BUCKET_NAME_RE.is_match(bucket_name)
@@ -165,6 +163,7 @@ impl ObjectStore {
         self.stream
             .context
             .publish_with_headers(subject, headers, data.into())
+            .await?
             .await?;
 
         let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
@@ -279,6 +278,7 @@ impl ObjectStore {
             self.stream
                 .context
                 .publish(chunk_subject.clone(), payload)
+                .await?
                 .await?;
         }
         let digest = context.finish();
@@ -307,6 +307,7 @@ impl ObjectStore {
         self.stream
             .context
             .publish_with_headers(subject, headers, data.into())
+            .await?
             .await?;
 
         // Purge any old chunks.

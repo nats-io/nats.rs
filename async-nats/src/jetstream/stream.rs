@@ -13,19 +13,22 @@
 //
 //! Manage operations on a [Stream], create/delete/update [Consumer][crate::jetstream::consumer::Consumer].
 
+#[cfg(feature = "server_2_10")]
+use std::collections::HashMap;
 use std::{
     fmt::Debug,
     future::IntoFuture,
     io::{self, ErrorKind},
     pin::Pin,
     str::FromStr,
+    task::Poll,
     time::Duration,
 };
 
 use crate::{header::HeaderName, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
 use bytes::Bytes;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -519,7 +522,7 @@ impl Stream {
     /// # }
     /// ```
     pub fn purge(&self) -> Purge<No, No> {
-        Purge::build(self.clone())
+        Purge::build(self)
     }
 
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
@@ -745,6 +748,64 @@ impl Stream {
             ))),
         }
     }
+
+    /// Lists names of all consumers for current stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let stream = jetstream.get_stream("stream").await?;
+    /// let mut names = stream.consumer_names();
+    /// while let Some(consumer) = names.try_next().await? {
+    ///     println!("consumer: {stream:?}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn consumer_names(&self) -> ConsumerNames {
+        ConsumerNames {
+            context: self.context.clone(),
+            stream: self.info.config.name.clone(),
+            offset: 0,
+            page_request: None,
+            consumers: Vec::new(),
+            done: false,
+        }
+    }
+
+    /// Lists all consumers info for current stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let stream = jetstream.get_stream("stream").await?;
+    /// let mut consumers = stream.consumers();
+    /// while let Some(consumer) = consumers.try_next().await? {
+    ///     println!("consumer: {consumer:?}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn consumers(&self) -> Consumers {
+        Consumers {
+            context: self.context.clone(),
+            stream: self.info.config.name.clone(),
+            offset: 0,
+            page_request: None,
+            consumers: Vec::new(),
+            done: false,
+        }
+    }
 }
 
 /// `StreamConfig` determines the properties for a stream.
@@ -835,6 +896,16 @@ pub struct Config {
     /// Sources configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<Source>>,
+
+    #[cfg(feature = "server_2_10")]
+    /// Additional stream metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+
+    #[cfg(feature = "server_2_10")]
+    /// Allow applying a subject transform to incoming messages
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_transform: Option<SubjectTransform>,
 }
 
 impl From<&Config> for Config {
@@ -851,6 +922,17 @@ impl From<&str> for Config {
         }
     }
 }
+
+// SubjectTransform is for applying a subject transform (to matching messages) when a new message is received
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct SubjectTransform {
+    #[serde(rename = "src")]
+    pub source: String,
+
+    #[serde(rename = "dest")]
+    pub destination: String,
+}
+
 // Republish is for republishing messages once committed to a stream.
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Republish {
@@ -867,10 +949,11 @@ pub struct Republish {
 
 /// `DiscardPolicy` determines how we proceed when limits of messages or bytes are hit. The default, `Old` will
 /// remove older messages. `New` will fail to store the new message.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DiscardPolicy {
     /// will remove older messages when limits are hit.
+    #[default]
     #[serde(rename = "old")]
     Old = 0,
     /// will error on a StoreMsg call when limits are hit
@@ -878,18 +961,13 @@ pub enum DiscardPolicy {
     New = 1,
 }
 
-impl Default for DiscardPolicy {
-    fn default() -> DiscardPolicy {
-        DiscardPolicy::Old
-    }
-}
-
 /// `RetentionPolicy` determines how messages in a set are retained.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RetentionPolicy {
     /// `Limits` (default) means that messages are retained until any given limit is reached.
     /// This could be one of messages, bytes, or age.
+    #[default]
     #[serde(rename = "limits")]
     Limits = 0,
     /// `Interest` specifies that when all known observables have acknowledged a message it can be removed.
@@ -900,28 +978,17 @@ pub enum RetentionPolicy {
     WorkQueue = 2,
 }
 
-impl Default for RetentionPolicy {
-    fn default() -> RetentionPolicy {
-        RetentionPolicy::Limits
-    }
-}
-
 /// determines how messages are stored for retention.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum StorageType {
     /// Stream data is kept in files. This is the default.
+    #[default]
     #[serde(rename = "file")]
     File = 0,
     /// Stream data is kept only in memory.
     #[serde(rename = "memory")]
     Memory = 1,
-}
-
-impl Default for StorageType {
-    fn default() -> StorageType {
-        StorageType::File
-    }
 }
 
 /// Shows config and current state for this stream.
@@ -1199,6 +1266,14 @@ pub struct Source {
     /// Optional config to set a domain, if source is residing in different one.
     #[serde(default, skip_serializing_if = "is_default")]
     pub domain: Option<String>,
+    /// Optional config to set the subject transform destination
+    #[cfg(feature = "server_2_10")]
+    #[serde(
+        default,
+        rename = "subject_transform_dest",
+        skip_serializing_if = "is_default"
+    )]
+    pub subject_transform_destination: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
@@ -1224,31 +1299,31 @@ impl ToAssign for Yes {}
 impl ToAssign for No {}
 
 #[derive(Debug)]
-pub struct Purge<SEQUENCE, KEEP>
+pub struct Purge<'a, SEQUENCE, KEEP>
 where
     SEQUENCE: ToAssign,
     KEEP: ToAssign,
 {
-    stream: Stream,
+    stream: &'a Stream,
     inner: PurgeRequest,
     sequence_set: PhantomData<SEQUENCE>,
     keep_set: PhantomData<KEEP>,
 }
 
-impl<SEQUENCE, KEEP> Purge<SEQUENCE, KEEP>
+impl<'a, SEQUENCE, KEEP> Purge<'a, SEQUENCE, KEEP>
 where
     SEQUENCE: ToAssign,
     KEEP: ToAssign,
 {
     /// Adds subject filter to [PurgeRequest]
-    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<SEQUENCE, KEEP> {
+    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<'a, SEQUENCE, KEEP> {
         self.inner.filter = Some(filter.into());
         self
     }
 }
 
-impl Purge<No, No> {
-    pub(crate) fn build(stream: Stream) -> Purge<No, No> {
+impl<'a> Purge<'a, No, No> {
+    pub(crate) fn build(stream: &'a Stream) -> Purge<'a, No, No> {
         Purge {
             stream,
             inner: Default::default(),
@@ -1258,13 +1333,13 @@ impl Purge<No, No> {
     }
 }
 
-impl<KEEP> Purge<No, KEEP>
+impl<'a, KEEP> Purge<'a, No, KEEP>
 where
     KEEP: ToAssign,
 {
     /// Creates a new [PurgeRequest].
     /// `keep` and `sequence` are exclusive, enforced compile time by generics.
-    pub fn keep(self, keep: u64) -> Purge<No, Yes> {
+    pub fn keep(self, keep: u64) -> Purge<'a, No, Yes> {
         Purge {
             stream: self.stream,
             sequence_set: PhantomData {},
@@ -1276,13 +1351,13 @@ where
         }
     }
 }
-impl<SEQUENCE> Purge<SEQUENCE, No>
+impl<'a, SEQUENCE> Purge<'a, SEQUENCE, No>
 where
     SEQUENCE: ToAssign,
 {
     /// Creates a new [PurgeRequest].
     /// `keep` and `sequence` are exclusive, enforces compile time by generics.
-    pub fn sequence(self, sequence: u64) -> Purge<Yes, No> {
+    pub fn sequence(self, sequence: u64) -> Purge<'a, Yes, No> {
         Purge {
             stream: self.stream,
             sequence_set: PhantomData {},
@@ -1295,24 +1370,24 @@ where
     }
 }
 
-impl<S, K> IntoFuture for Purge<S, K>
+impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
     S: ToAssign + std::marker::Send,
     K: ToAssign + std::marker::Send,
 {
     type Output = Result<PurgeResponse, Error>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(async move {
             let request_subject = format!("STREAM.PURGE.{}", self.stream.info.config.name);
-
             let response: Response<PurgeResponse> = self
                 .stream
                 .context
                 .request(request_subject, &self.inner)
                 .await?;
+
             match response {
                 Response::Err { error } => Err(Box::from(io::Error::new(
                     ErrorKind::Other,
@@ -1324,5 +1399,161 @@ where
                 Response::Ok(response) => Ok(response),
             }
         }))
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct ConsumerPage {
+    total: usize,
+    consumers: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ConsumerInfoPage {
+    total: usize,
+    consumers: Option<Vec<super::consumer::Info>>,
+}
+
+type PageRequest = Pin<Box<dyn Future<Output = Result<ConsumerPage, Error>>>>;
+
+pub struct ConsumerNames {
+    context: Context,
+    stream: String,
+    offset: usize,
+    page_request: Option<PageRequest>,
+    consumers: Vec<String>,
+    done: bool,
+}
+
+impl futures::Stream for ConsumerNames {
+    type Item = Result<String, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(consumers) = page.consumers {
+                        self.offset += consumers.len();
+                        self.consumers = consumers;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.consumers.pop() {
+                            Some(stream) => Poll::Ready(Some(Ok(stream))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.consumers.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    let stream = self.stream.clone();
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                format!("CONSUMER.NAMES.{stream}"),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
+    }
+}
+
+type PageInfoRequest = Pin<Box<dyn Future<Output = Result<ConsumerInfoPage, Error>>>>;
+
+pub struct Consumers {
+    context: Context,
+    stream: String,
+    offset: usize,
+    page_request: Option<PageInfoRequest>,
+    consumers: Vec<super::consumer::Info>,
+    done: bool,
+}
+
+impl futures::Stream for Consumers {
+    type Item = Result<super::consumer::Info, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.page_request.as_mut() {
+            Some(page) => match page.try_poll_unpin(cx) {
+                std::task::Poll::Ready(page) => {
+                    self.page_request = None;
+                    let page = page?;
+                    if let Some(consumers) = page.consumers {
+                        self.offset += consumers.len();
+                        self.consumers = consumers;
+                        if self.offset >= page.total {
+                            self.done = true;
+                        }
+                        match self.consumers.pop() {
+                            Some(consumer) => Poll::Ready(Some(Ok(consumer))),
+                            None => Poll::Ready(None),
+                        }
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            },
+            None => {
+                if let Some(stream) = self.consumers.pop() {
+                    Poll::Ready(Some(Ok(stream)))
+                } else {
+                    if self.done {
+                        return Poll::Ready(None);
+                    }
+                    let context = self.context.clone();
+                    let offset = self.offset;
+                    let stream = self.stream.clone();
+                    self.page_request = Some(Box::pin(async move {
+                        match context
+                            .request(
+                                format!("CONSUMER.LIST.{stream}"),
+                                &json!({
+                                    "offset": offset,
+                                }),
+                            )
+                            .await?
+                        {
+                            Response::Err { error } => {
+                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                            }
+                            Response::Ok(page) => Ok(page),
+                        }
+                    }));
+                    self.poll_next(cx)
+                }
+            }
+        }
     }
 }
