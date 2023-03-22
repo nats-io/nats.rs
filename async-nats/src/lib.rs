@@ -648,8 +648,6 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
-        self.connector.events_tx.try_send(Event::Connected).ok();
-
         Ok(())
     }
 }

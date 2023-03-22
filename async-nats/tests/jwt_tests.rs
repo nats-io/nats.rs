@@ -34,6 +34,48 @@ mod client {
             .await
             .expect("published");
     }
+
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn jwt_lame_duck_reconnect() {
+        use async_nats::Event;
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let c = nats_server::run_cluster("tests/configs/jwt.conf");
+
+        let (tx_recconect, mut rx_reconnect) = tokio::sync::mpsc::channel(10);
+
+        let client = async_nats::ConnectOptions::with_credentials_file(
+            path.join("tests/configs/TestUser.creds"),
+        )
+        .await
+        .unwrap()
+        .event_callback({
+            let tx = tx_recconect.clone();
+            move |event| {
+                let tx = tx.clone();
+                async move {
+                    if event == Event::Connected {
+                        tx.send(()).await.unwrap();
+                    }
+                }
+            }
+        })
+        .connect(c.client_url())
+        .await
+        .unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        for i in 0..2 {
+            rx_reconnect.recv().await;
+            let mut subscribe = client.subscribe("test".into()).await.unwrap();
+            client.publish("test".into(), "data".into()).await.unwrap();
+            subscribe.next().await.unwrap();
+            client.flush().await.unwrap();
+            assert!(subscriber.next().await.is_some());
+            nats_server::set_lame_duck_mode(&c.servers[i]);
+        }
+    }
+
     #[tokio::test]
     async fn jwt_reconnect() {
         use async_nats::ServerAddr;
