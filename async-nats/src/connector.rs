@@ -143,7 +143,6 @@ impl Connector {
                                 }
                             }
                         }
-                        self.attempts = 0;
 
                         let tls_required = self.options.tls_required || server_addr.tls_required();
                         let mut connect_info = ConnectInfo {
@@ -235,6 +234,7 @@ impl Connector {
                                 }
                             },
                             Some(_) => {
+                                self.attempts = 0;
                                 self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 return Ok((server_info, connection));
