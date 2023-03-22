@@ -54,6 +54,7 @@ pub struct ConnectOptions {
     pub(crate) request_timeout: Option<Duration>,
     pub(crate) retry_on_initial_connect: bool,
     pub(crate) ignore_discovered_servers: bool,
+    pub(crate) retain_servers_order: bool,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -107,6 +108,7 @@ impl Default for ConnectOptions {
             request_timeout: Some(Duration::from_secs(10)),
             retry_on_initial_connect: false,
             ignore_discovered_servers: false,
+            retain_servers_order: false,
         }
     }
 }
@@ -573,6 +575,14 @@ impl ConnectOptions {
 
     pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
         self.ignore_discovered_servers = true;
+        self
+    }
+
+    /// By default, client will pick random server to which it will try connect to.
+    /// This option disables that feature, forcing it to always respect the order
+    /// in which server addresses were passed.
+    pub fn retain_servers_order(mut self) -> ConnectOptions {
+        self.retain_servers_order = true;
         self
     }
 }

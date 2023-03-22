@@ -39,6 +39,7 @@ thiserror = "1.0"
 base64 = "0.13"
 tokio-retry = "0.3"
 ring = "0.16"
+rand = "0.8"
 
 [dev-dependencies]
 criterion =  { version = "0.3", features = ["async_tokio"]}
