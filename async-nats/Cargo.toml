@@ -28,7 +28,7 @@ http = "0.2.9"
 tokio = { version = "1.25.0", features = ["macros", "rt", "fs", "net", "sync", "time", "io-util"] }
 itoa = "1"
 url = "2"
-tokio-rustls = { git = "https://github.com/Jarema/tls", rev = "935b459"}
+tokio-rustls = {package = "async-nats-tokio-rustls-deps", version = "0.24.0-ALPHA.1"}
 rustls-pemfile = "1.0.2"
 nuid = "0.3.2"
 serde_nanos = "0.1.3"
