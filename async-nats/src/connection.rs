@@ -101,9 +101,8 @@ impl Connection {
 
         if self.buffer.starts_with(b"MSG ") {
             let line = str::from_utf8(&self.buffer[4..len]).unwrap();
-            let args = line.split(' ').filter(|s| !s.is_empty());
+            let mut args = line.split(' ').filter(|s| !s.is_empty());
 
-            let mut args = args.into_iter();
             // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
             let subject = args.next();
             let sid = args.next();
@@ -158,9 +157,8 @@ impl Connection {
         if self.buffer.starts_with(b"HMSG ") {
             // Extract whitespace-delimited arguments that come after "HMSG".
             let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
-            let args = line.split_whitespace().filter(|s| !s.is_empty());
+            let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
-            let mut args = args.into_iter();
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
             let subject = args.next();
             let sid = args.next();
