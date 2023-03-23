@@ -594,11 +594,7 @@ impl ConnectionHandler {
                     respond: respond,
                     headers: headers,
                 };
-                while let Err(err) = self
-                    .connection
-                    .write_op(&pub_op)
-                    .await
-                {
+                while let Err(err) = self.connection.write_op(&pub_op).await {
                     self.handle_disconnect().await?;
                     error!("Sending Publish failed with {:?}", err);
                 }
