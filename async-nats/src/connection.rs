@@ -101,29 +101,30 @@ impl Connection {
 
         if self.buffer.starts_with(b"MSG ") {
             let line = str::from_utf8(&self.buffer[4..len]).unwrap();
-            let args = line.split(' ').filter(|s| !s.is_empty());
-            // TODO(caspervonb) we can drop this alloc
-            let args = args.collect::<Vec<_>>();
+            let mut args = line.split(' ').filter(|s| !s.is_empty());
 
             // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
-            let (subject, sid, reply_to, payload_len) = match args[..] {
-                [subject, sid, payload_len] => (subject, sid, None, payload_len),
-                [subject, sid, reply_to, payload_len] => {
-                    (subject, sid, Some(reply_to), payload_len)
-                }
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "invalid number of arguments after MSG",
-                    ));
-                }
-            };
+            let subject = args.next();
+            let sid = args.next();
+            let mut reply_to = args.next();
+            let mut payload_len = args.next();
+            if payload_len.is_none() {
+                std::mem::swap(&mut reply_to, &mut payload_len);
+            }
 
-            let sid = u64::from_str(sid)
+            if subject.is_none() || sid.is_none() || payload_len.is_none() || args.next().is_some()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid number of arguments after MSG",
+                ));
+            }
+
+            let sid = u64::from_str(sid.unwrap())
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
             // Parse the number of payload bytes.
-            let payload_len = usize::from_str(payload_len)
+            let payload_len = usize::from_str(payload_len.unwrap())
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
             // Return early without advancing if there is not enough data read the entire
@@ -132,7 +133,7 @@ impl Connection {
                 return Ok(None);
             }
 
-            let subject = subject.to_owned();
+            let subject = subject.unwrap().to_owned();
             let reply_to = reply_to.map(String::from);
 
             self.buffer.advance(len + 2);
@@ -156,30 +157,36 @@ impl Connection {
         if self.buffer.starts_with(b"HMSG ") {
             // Extract whitespace-delimited arguments that come after "HMSG".
             let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
-            let args = line.split_whitespace().filter(|s| !s.is_empty());
-            let args = args.collect::<Vec<_>>();
+            let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
-            let (subject, sid, reply_to, num_header_bytes, num_bytes) = match args[..] {
-                [subject, sid, num_header_bytes, num_bytes] => {
-                    (subject, sid, None, num_header_bytes, num_bytes)
-                }
-                [subject, sid, reply_to, num_header_bytes, num_bytes] => {
-                    (subject, sid, Some(reply_to), num_header_bytes, num_bytes)
-                }
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "invalid number of arguments after HMSG",
-                    ));
-                }
-            };
+            let subject = args.next();
+            let sid = args.next();
+            let mut reply_to = args.next();
+            let mut num_header_bytes = args.next();
+            let mut num_bytes = args.next();
+            if num_bytes.is_none() {
+                std::mem::swap(&mut num_header_bytes, &mut num_bytes);
+                std::mem::swap(&mut reply_to, &mut num_header_bytes);
+            }
+
+            if subject.is_none()
+                || sid.is_none()
+                || num_header_bytes.is_none()
+                || num_bytes.is_none()
+                || args.next().is_some()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid number of arguments after HMSG",
+                ));
+            }
 
             // Convert the slice into an owned string.
-            let subject = subject.to_string();
+            let subject = subject.unwrap().to_string();
 
             // Parse the subject ID.
-            let sid = u64::from_str(sid).map_err(|_| {
+            let sid = u64::from_str(sid.unwrap()).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "cannot parse sid argument after HMSG",
@@ -190,7 +197,7 @@ impl Connection {
             let reply_to = reply_to.map(ToString::to_string);
 
             // Parse the number of payload bytes.
-            let num_header_bytes = usize::from_str(num_header_bytes).map_err(|_| {
+            let num_header_bytes = usize::from_str(num_header_bytes.unwrap()).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "cannot parse the number of header bytes argument after \
@@ -199,7 +206,7 @@ impl Connection {
             })?;
 
             // Parse the number of payload bytes.
-            let num_bytes = usize::from_str(num_bytes).map_err(|_| {
+            let num_bytes = usize::from_str(num_bytes.unwrap()).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "cannot parse the number of bytes argument after HMSG",

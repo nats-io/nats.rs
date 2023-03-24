@@ -24,7 +24,7 @@ pub struct Status {
 
 impl Status {
     /// The name of the bucket
-    pub fn bucket(&self) -> &String {
+    pub fn bucket(&self) -> &str {
         &self.bucket
     }
 

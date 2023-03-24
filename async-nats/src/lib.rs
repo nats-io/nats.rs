@@ -691,6 +691,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection_timeout: options.connection_timeout,
             name: options.name,
             ignore_discovered_servers: options.ignore_discovered_servers,
+            retain_servers_order: options.retain_servers_order,
         },
         events_tx,
         state_tx,
@@ -1247,18 +1248,18 @@ impl ServerAddr {
     }
 
     /// Returns the optional username in the url.
-    pub fn username(&self) -> Option<String> {
+    pub fn username(&self) -> Option<&str> {
         let user = self.0.username();
         if user.is_empty() {
             None
         } else {
-            Some(user.to_string())
+            Some(user)
         }
     }
 
     /// Returns the optional password in the url.
-    pub fn password(&self) -> Option<String> {
-        self.0.password().map(|pwd| pwd.to_string())
+    pub fn password(&self) -> Option<&str> {
+        self.0.password()
     }
 
     /// Return the sockets from resolving the server address.
