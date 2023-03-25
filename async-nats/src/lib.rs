@@ -589,10 +589,10 @@ impl ConnectionHandler {
                 headers,
             } => {
                 let pub_op = ClientOp::Publish {
-                    subject: subject,
-                    payload: payload,
-                    respond: respond,
-                    headers: headers,
+                    subject,
+                    payload,
+                    respond,
+                    headers,
                 };
                 while let Err(err) = self.connection.write_op(&pub_op).await {
                     self.handle_disconnect().await?;

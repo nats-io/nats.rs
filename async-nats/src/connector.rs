@@ -214,7 +214,9 @@ impl Connector {
                             }
                         }
 
-                        connection.write_op(&ClientOp::Connect(connect_info)).await?;
+                        connection
+                            .write_op(&ClientOp::Connect(connect_info))
+                            .await?;
                         connection.write_op(&ClientOp::Ping).await?;
                         connection.flush().await?;
 

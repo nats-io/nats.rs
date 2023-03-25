@@ -390,7 +390,7 @@ impl Connection {
                     }
                 }
 
-                self.stream.write_all(&payload).await?;
+                self.stream.write_all(payload).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
 
