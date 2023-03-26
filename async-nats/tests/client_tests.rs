@@ -351,6 +351,7 @@ mod client {
             .is_err());
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn reconnect_fallback() {
         use async_nats::ServerAddr;
