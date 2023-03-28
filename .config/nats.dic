@@ -132,3 +132,4 @@ FlushError
 ConnectError
 DNS
 RequestErrorKind
+rustls
