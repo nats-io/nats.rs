@@ -585,6 +585,40 @@ impl ConnectOptions {
         self.retain_servers_order = true;
         self
     }
+
+    /// Allows passing custom rustls tls config.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let mut root_store = async_nats::rustls::RootCertStore::empty();
+    ///
+    /// root_store.add_parsable_certificates( rustls_native_certs::load_native_certs()?
+    ///   .into_iter()
+    ///   .map(|cert| cert.0)
+    ///   .collect::<Vec<Vec<u8>>>()
+    ///   .as_ref(),
+    /// );
+    ///
+    /// let tls_client = async_nats::rustls::ClientConfig::builder()
+    ///   .with_safe_defaults()
+    ///   .with_root_certificates(root_store)
+    ///   .with_no_client_auth();
+    ///
+    /// let client = async_nats::ConnectOptions::new()
+    ///   .require_tls(true)
+    ///   .tls_client_config(tls_client)
+    ///   .connect("tls://demo.nats.io")
+    ///   .await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_client_config(mut self, config: rustls::ClientConfig) -> ConnectOptions {
+        self.tls_client_config = Some(config);
+        self
+    }
 }
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
