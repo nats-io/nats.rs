@@ -341,7 +341,7 @@ impl ConnectionHandler {
             select! {
                 _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
-                    if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
+                    if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
                         self.handle_disconnect().await?;
                     }
 
@@ -392,7 +392,7 @@ impl ConnectionHandler {
     async fn handle_server_op(&mut self, server_op: ServerOp) -> Result<(), io::Error> {
         match server_op {
             ServerOp::Ping => {
-                self.connection.write_op(ClientOp::Pong).await?;
+                self.connection.write_op(&ClientOp::Pong).await?;
                 self.handle_flush().await?;
             }
             ServerOp::Pong => {
@@ -450,7 +450,7 @@ impl ConnectionHandler {
                         Err(mpsc::error::TrySendError::Closed(_)) => {
                             self.subscriptions.remove(&sid);
                             self.connection
-                                .write_op(ClientOp::Unsubscribe { sid, max: None })
+                                .write_op(&ClientOp::Unsubscribe { sid, max: None })
                                 .await?;
                             self.handle_flush().await?;
                         }
@@ -501,7 +501,7 @@ impl ConnectionHandler {
 
                     if let Err(err) = self
                         .connection
-                        .write_op(ClientOp::Unsubscribe { sid, max })
+                        .write_op(&ClientOp::Unsubscribe { sid, max })
                         .await
                     {
                         error!("Send failed with {:?}", err);
@@ -524,7 +524,7 @@ impl ConnectionHandler {
                     self.handle_disconnect().await?;
                 }
 
-                if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
+                if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
                     self.handle_disconnect().await?;
                 }
 
@@ -572,7 +572,7 @@ impl ConnectionHandler {
 
                 if let Err(err) = self
                     .connection
-                    .write_op(ClientOp::Subscribe {
+                    .write_op(&ClientOp::Subscribe {
                         sid,
                         subject,
                         queue_group,
@@ -588,16 +588,13 @@ impl ConnectionHandler {
                 respond,
                 headers,
             } => {
-                while let Err(err) = self
-                    .connection
-                    .write_op(ClientOp::Publish {
-                        subject: subject.clone(),
-                        payload: payload.clone(),
-                        respond: respond.clone(),
-                        headers: headers.clone(),
-                    })
-                    .await
-                {
+                let pub_op = ClientOp::Publish {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                };
+                while let Err(err) = self.connection.write_op(&pub_op).await {
                     self.handle_disconnect().await?;
                     error!("Sending Publish failed with {:?}", err);
                 }
@@ -605,7 +602,7 @@ impl ConnectionHandler {
             Command::Connect(connect_info) => {
                 while let Err(_err) = self
                     .connection
-                    .write_op(ClientOp::Connect(connect_info.clone()))
+                    .write_op(&ClientOp::Connect(connect_info.clone()))
                     .await
                 {
                     self.handle_disconnect().await?;
@@ -640,7 +637,7 @@ impl ConnectionHandler {
 
         for (sid, subscription) in &self.subscriptions {
             self.connection
-                .write_op(ClientOp::Subscribe {
+                .write_op(&ClientOp::Subscribe {
                     sid: *sid,
                     subject: subscription.subject.to_owned(),
                     queue_group: subscription.queue_group.to_owned(),
