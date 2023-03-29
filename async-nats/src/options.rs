@@ -624,7 +624,7 @@ impl ConnectOptions {
         self.tls_client_config = Some(config);
         self
     }
-    
+
     /// Sets default receive buffer capacity.
     ///
     /// # Examples
