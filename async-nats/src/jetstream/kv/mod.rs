@@ -391,7 +391,7 @@ impl Store {
     }
 
     /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
-    /// values whenever there are changes for that key with as well as changes in history.
+    /// values whenever there are changes for that key with as well as last value.
     ///
     /// # Examples
     ///
