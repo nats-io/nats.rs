@@ -346,7 +346,7 @@ impl Context {
         }
     }
 
-    /// Create a stream with the given configuration on the server if it is not present. Returns a handle to the stream  on the server.
+    /// Create a stream with the given configuration on the server if it is not present. Returns a handle to the stream on the server.
     ///
     /// Note: This does not validate if the Stream on the server is compatible with the configuration passed in.
     ///

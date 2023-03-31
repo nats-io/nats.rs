@@ -19,7 +19,7 @@
 //! system for cloud native applications, `IoT` messaging, and microservices
 //! architectures.
 //!
-//! For sync API refer  <https://crates.io/crates/nats>
+//! For sync API refer <https://crates.io/crates/nats>
 //!
 //! For more information see [https://nats.io/].
 //!

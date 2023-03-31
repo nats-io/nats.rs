@@ -37,7 +37,7 @@ All enums implement `PartialEq` for more straightforward assertions.
 Once again, thanks @abalmos & @NorbertBodziony for helping out with replicating the issues around fetch.
 Also big thanks @paolobarbolini for the very detailed report and reproduction for TLS issue and @n1ghtmare for debugging Windows related issues.
 
-Your contributions are invaluable to the  NATS ecosystem.
+Your contributions are invaluable to the NATS ecosystem.
 
 **Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.28.0...async-nats/v0.29.0
 
@@ -126,7 +126,7 @@ The main focus of this release is Service API with support for multiple endpoint
 * Explicitly delete consumer after iterating over kv keys by @Jarema in https://github.com/nats-io/nats.rs/pull/818
 
 ## Fixed
-* Fix key listing for async client to match Go client  by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/792
+* Fix key listing for async client to match Go client by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/792
 
 
 ## New Contributors
@@ -225,7 +225,7 @@ It also introduces a breaking change, as not all `publish()` methods did return 
 
 ## New Contributors
 * @c0d3x42 made their first contribution in https://github.com/nats-io/nats.rs/pull/716
-* @piotrpio  made their first contribution in https://github.com/nats-io/nats.rs/pull/728
+* @piotrpio made their first contribution in https://github.com/nats-io/nats.rs/pull/728
 
 **Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.22.1...async-nats/v0.23.0
 
@@ -335,9 +335,9 @@ This release's highlight is added support for Object Store.
 This release focuses on KV and 2.9 nats-server features.
 
 ## Added
-* Add Key Value by @Jarema and @caspervonb  in https://github.com/nats-io/nats.rs/pull/586
+* Add Key Value by @Jarema and @caspervonb in https://github.com/nats-io/nats.rs/pull/586
 * Add Direct get by @Jarema in https://github.com/nats-io/nats.rs/pull/636
-* Add timeout to request & request builder by @Jarema  in https://github.com/nats-io/nats.rs/pull/616
+* Add timeout to request & request builder by @Jarema in https://github.com/nats-io/nats.rs/pull/616
 * Add memory storage option to consumers by @Jarema in https://github.com/nats-io/nats.rs/pull/638
 * Add Consumer name by @Jarema in https://github.com/nats-io/nats.rs/pull/637
 
@@ -346,7 +346,7 @@ This release focuses on KV and 2.9 nats-server features.
 
 ## What's Changed
 * Headers refactor by @Jarema in https://github.com/nats-io/nats.rs/pull/629
-* Use new Consumer API  by @Jarema in https://github.com/nats-io/nats.rs/pull/637
+* Use new Consumer API by @Jarema in https://github.com/nats-io/nats.rs/pull/637
 
 **Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.19.0...async-nats/v0.20.0
 # 0.19.0

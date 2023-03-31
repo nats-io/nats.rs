@@ -141,7 +141,7 @@ This release brings a lot of changes and refactors among which the highlights ar
 * Add support for JetStream publishing by @caspervonb in https://github.com/nats-io/nats.rs/pull/248
 * Add `error_callback` by @derekcollison in https://github.com/nats-io/nats.rs/pull/253
 * Add `get_message` to JetStream context by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
-* Add `get_last_message` to JetStream context  by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
+* Add `get_last_message` to JetStream context by @caspervonb in https://github.com/nats-io/nats.rs/pull/267
 * Add option `retry_on_failed_connect` by @pozsgaic in https://github.com/nats-io/nats.rs/pull/223
 * Add support for different .pem contents by @Jarema https://github.com/nats-io/nats.rs/pull/280
 * Introduce ServerAddress https://github.com/nats-io/nats.rs/pull/276

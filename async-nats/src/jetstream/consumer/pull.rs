@@ -510,7 +510,7 @@ impl Stream {
                     let mut pending_reset = false;
 
                     tokio::select! {
-                       _  = context.client.state.changed() => {
+                       _ = context.client.state.changed() => {
                             let state = context.client.state.borrow().to_owned();
                             if !(state == crate::connection::State::Connected
                                 && prev_state != State::Connected) {
@@ -757,7 +757,7 @@ impl futures::Stream for Stream {
                             })));
                         }
                         status => {
-                            debug!("received unknown  message: {:?}", message);
+                            debug!("received unknown message: {:?}", message);
                             return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 format!(
