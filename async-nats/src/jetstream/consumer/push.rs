@@ -447,7 +447,7 @@ impl Consumer<OrderedConfig> {
                     let current_state = state.borrow().to_owned();
                     tokio::select! {
                         _ = context.client.state.changed() => {
-                            if state.borrow().to_owned() != State::Connected  || current_state == State::Connected {
+                            if state.borrow().to_owned() != State::Connected || current_state == State::Connected {
                                continue;
                             }
                             debug!("reconnected. trigger consumer recreation");
