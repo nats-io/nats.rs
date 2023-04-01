@@ -386,6 +386,81 @@ mod kv {
     }
 
     #[tokio::test]
+    async fn watch_with_history() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".to_string(),
+                description: "test_description".to_string(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // check if we get updated values. This should not pop up in watcher.
+        kv.put("foo.bar", 42.to_string().into()).await.unwrap();
+        let mut watch = kv.watch_with_history("foo.>").await.unwrap().enumerate();
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put(format!("foo.{i}"), i.to_string().into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("var", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+
+        // check to see if we get the values in accordance to the LastPerSubject deliver policy
+        // we should get `foo.bar` as well
+        let (_, entry) = watch.next().await.unwrap();
+        let entry = entry.unwrap();
+        assert_eq!("foo.bar", entry.key);
+        assert_eq!(
+            42,
+            from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+        );
+
+        // make sure we get the rest correctly
+        while let Some((i, entry)) = watch.next().await {
+            let entry = entry.unwrap();
+            // we now start at 1, we've done one iteration
+            let i = i - 1;
+            assert_eq!(entry.key, format!("foo.{i}"));
+            assert_eq!(
+                i,
+                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            );
+            if i == 9 {
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn watch_all() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()

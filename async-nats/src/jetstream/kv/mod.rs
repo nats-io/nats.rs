@@ -386,6 +386,43 @@ impl Store {
     /// # }
     /// ```
     pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
+        self.watch_with_deliver_policy(key, DeliverPolicy::New)
+            .await
+    }
+
+    /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
+    /// values whenever there are changes for that key with as well as last value.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
+    ///     bucket: "kv".to_string(),
+    ///     history: 10,
+    ///     ..Default::default()
+    /// }).await?;
+    /// let mut entries = kv.watch_with_history("kv") .await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
+        self.watch_with_deliver_policy(key, DeliverPolicy::LastPerSubject)
+            .await
+    }
+
+    async fn watch_with_deliver_policy<T: AsRef<str>>(
+        &self,
+        key: T,
+        deliver_policy: DeliverPolicy,
+    ) -> Result<Watch<'_>, Error> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         let consumer = self
@@ -395,7 +432,7 @@ impl Store {
                 description: Some("kv watch consumer".to_string()),
                 filter_subject: subject,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
-                deliver_policy: DeliverPolicy::New,
+                deliver_policy,
                 ..Default::default()
             })
             .await?;
