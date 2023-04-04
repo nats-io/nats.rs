@@ -37,6 +37,11 @@ async fn main() -> Result<(), async_nats::Error> {
     for i in 0..10 {
         jetstream
             .publish(format!("events.{i}"), "data".into())
+            // The first `await` sends the publish
+            .await?
+            // The second `await` awaits a publish acknowledgement.
+            // This can be skipped (for the cost of processing guarantee)
+            // or deferred to not block another `publish`
             .await?;
     }
 
