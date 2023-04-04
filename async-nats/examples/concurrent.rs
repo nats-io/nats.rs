@@ -35,6 +35,9 @@ async fn main() -> Result<(), async_nats::Error> {
             .await?;
     }
 
+    // Flush the internal buffer and ensure that all messages are sent.
+    client.flush().await?;
+
     // Iterate over messages concurrently.
     // for_each_concurrent allows us to not wait for time-consuming operation and receive next
     // message immediately.
