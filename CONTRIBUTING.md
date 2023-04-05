@@ -6,5 +6,6 @@ When contributing to this repository, please first discuss the change you wish t
 
 ## Pull Request Process
 
-1. We use linear history, please make sure your commits are atomic.
-2. Write well formed commit messages (e.g [Example](https://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html))
+- We use linear history, please make sure your commits are atomic.
+- Do your best to keep commits to a reasonable size, split out into a different pull request for tangental changes that are observable externally.
+- Write well formed commit messages (e.g [Example](https://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html))
