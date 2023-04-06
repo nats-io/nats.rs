@@ -12,12 +12,13 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, FutureExt, StreamExt};
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
-    future, io,
+    future,
+    io::{self, ErrorKind},
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
@@ -489,6 +490,318 @@ impl<'a> futures::Stream for Sequence<'a> {
     }
 }
 
+impl<'a> Consumer<OrderedConfig> {
+    /// Returns a stream of messages for Ordered Pull Consumer.
+    ///
+    /// Ordered consumers uses single replica ephemeral consumer, no matter the replication factor of the
+    /// Stream. It does not use acks, instead it tracks sequences and recreate itself whenever it
+    /// sees mismatch.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    ///
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
+    ///
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "consumer",
+    ///         async_nats::jetstream::consumer::pull::OrderedConfig {
+    ///             name: Some("consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.messages().await?.take(100);
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///     println!("got message {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
+    pub async fn messages(self) -> Result<Ordered<'a>, Error> {
+        let config = Consumer {
+            config: self.config.clone().into(),
+            context: self.context.clone(),
+            info: self.info.clone(),
+        };
+        let stream = Stream::stream(
+            BatchConfig {
+                batch: 500,
+                expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
+                no_wait: false,
+                max_bytes: 0,
+                idle_heartbeat: Duration::from_secs(15),
+            },
+            &config,
+        )
+        .await?;
+
+        Ok(Ordered {
+            consumer_sequence: 0,
+            stream_sequence: 0,
+            create_stream: None,
+            context: self.context.clone(),
+            consumer_name: self
+                .config
+                .name
+                .clone()
+                .unwrap_or_else(|| self.context.client.new_inbox()),
+            consumer: self.config,
+            stream: Some(stream),
+            stream_name: self.info.stream_name.clone(),
+        })
+    }
+}
+
+/// Configuration for consumers. From a high level, the
+/// `durable_name` and `deliver_subject` fields have a particularly
+/// strong influence on the consumer's overall behavior.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct OrderedConfig {
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A short description of the purpose of this consumer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
+    /// Whether messages are sent as quickly as possible or at the rate of receipt
+    pub replay_policy: ReplayPolicy,
+    /// The rate of message delivery in bits per second
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub rate_limit: u64,
+    /// What percentage of acknowledgments should be samples for observability, 0-100
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub sample_frequency: u8,
+    /// Only deliver headers without payloads.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub headers_only: bool,
+    /// Allows for a variety of options that determine how this consumer will receive messages
+    #[serde(flatten)]
+    pub deliver_policy: DeliverPolicy,
+    /// The maximum number of waiting consumers.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_waiting: i64,
+    #[cfg(feature = "server_2_10")]
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+    // Maximum number of messages that can be requested in single Pull Request.
+    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
+    // [stream]
+    pub max_batch: i64,
+    // Maximum expiry that can be set for a single Pull Request.
+    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
+    // [stream]
+    pub max_expires: Duration,
+}
+
+impl From<OrderedConfig> for Config {
+    fn from(config: OrderedConfig) -> Self {
+        Config {
+            durable_name: None,
+            name: config.name,
+            description: config.description,
+            deliver_policy: config.deliver_policy,
+            ack_policy: AckPolicy::None,
+            ack_wait: Duration::default(),
+            max_deliver: 1,
+            filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
+            replay_policy: config.replay_policy,
+            rate_limit: config.rate_limit,
+            sample_frequency: config.sample_frequency,
+            max_waiting: config.max_waiting,
+            max_ack_pending: 0,
+            headers_only: config.headers_only,
+            max_batch: config.max_batch,
+            max_expires: config.max_expires,
+            inactive_threshold: Duration::from_secs(30),
+            num_replicas: 1,
+            memory_storage: true,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
+            backoff: Vec::new(),
+        }
+    }
+}
+
+impl FromConsumer for OrderedConfig {
+    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
+        Ok(OrderedConfig {
+            name: config.name,
+            description: config.description,
+            filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
+            replay_policy: config.replay_policy,
+            rate_limit: config.rate_limit,
+            sample_frequency: config.sample_frequency,
+            headers_only: config.headers_only,
+            deliver_policy: config.deliver_policy,
+            max_waiting: config.max_waiting,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
+            max_batch: config.max_batch,
+            max_expires: config.max_expires,
+        })
+    }
+}
+
+impl IntoConsumerConfig for OrderedConfig {
+    fn into_consumer_config(self) -> super::Config {
+        jetstream::consumer::Config {
+            deliver_subject: None,
+            durable_name: None,
+            name: self.name,
+            description: self.description,
+            deliver_group: None,
+            deliver_policy: self.deliver_policy,
+            ack_policy: AckPolicy::None,
+            ack_wait: Duration::default(),
+            max_deliver: 1,
+            filter_subject: self.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: self.filter_subjects,
+            replay_policy: self.replay_policy,
+            rate_limit: self.rate_limit,
+            sample_frequency: self.sample_frequency,
+            max_waiting: self.max_waiting,
+            max_ack_pending: 0,
+            headers_only: self.headers_only,
+            flow_control: false,
+            idle_heartbeat: Duration::default(),
+            max_batch: 0,
+            max_expires: Duration::default(),
+            inactive_threshold: Duration::from_secs(30),
+            num_replicas: 1,
+            memory_storage: true,
+            #[cfg(feature = "server_2_10")]
+            metadata: self.metadata,
+            backoff: Vec::new(),
+        }
+    }
+}
+
+pub struct Ordered<'a> {
+    context: Context,
+    stream_name: String,
+    consumer: OrderedConfig,
+    consumer_name: String,
+    stream: Option<Stream>,
+    create_stream: Option<BoxFuture<'a, Result<Stream, Error>>>,
+    consumer_sequence: u64,
+    stream_sequence: u64,
+}
+
+impl<'a> futures::Stream for Ordered<'a> {
+    type Item = Result<jetstream::Message, Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let mut recreate = false;
+        // Poll messages
+        if let Some(stream) = self.stream.as_mut() {
+            match stream.poll_next_unpin(cx) {
+                Poll::Ready(message) => match message {
+                    Some(message) => {
+                        // Do we bail out on all errors?
+                        // Or we want to handle some? (like consumer deleted?)
+                        let message = message?;
+                        let info = message.info()?;
+                        trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
+                                           self.consumer_sequence,
+                                           self.stream_sequence,
+                                           info.consumer_sequence,
+                                           info.stream_sequence);
+                        if info.consumer_sequence != self.consumer_sequence + 1 {
+                            debug!(
+                                "ordered consumer mismatch. current {}, info: {}",
+                                self.consumer_sequence, info.consumer_sequence
+                            );
+                            recreate = true;
+                            self.consumer_sequence = 0;
+                        } else {
+                            self.stream_sequence = info.stream_sequence;
+                            self.consumer_sequence = info.consumer_sequence;
+                            return Poll::Ready(Some(Ok(message)));
+                        }
+                    }
+                    None => return Poll::Ready(None),
+                },
+                Poll::Pending => (),
+            }
+        }
+        // Recreate consumer if needed
+        if recreate {
+            self.stream = None;
+            self.create_stream = Some(Box::pin({
+                let context = self.context.clone();
+                let config = self.consumer.clone().into();
+                let stream_name = self.stream_name.clone();
+                let consumer_name = self.consumer_name.clone();
+                let sequence = self.consumer_sequence;
+                async move {
+                    recreate_consumer_stream(context, config, stream_name, consumer_name, sequence)
+                        .await
+                }
+            }))
+        }
+        // check for recreation future
+        if let Some(result) = self.create_stream.as_mut() {
+            match result.poll_unpin(cx) {
+                Poll::Ready(result) => match result {
+                    Ok(stream) => {
+                        self.create_stream = None;
+                        self.stream = Some(stream);
+                        return self.poll_next(cx);
+                    }
+                    Err(err) => {
+                        return Poll::Ready(Some(Err(Box::from(std::io::Error::new(
+                            ErrorKind::Other,
+                            format!("failed to recreate a consumer: {}", err),
+                        )))))
+                    }
+                },
+                Poll::Pending => (),
+            }
+        }
+        Poll::Pending
+    }
+}
+
 pub struct Stream {
     pending_messages: usize,
     pending_bytes: usize,
@@ -529,8 +842,8 @@ impl Stream {
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let task_handle = tokio::task::spawn({
-            let consumer = consumer.clone();
             let batch = batch_config;
+            let consumer = consumer.clone();
             let mut context = consumer.context.clone();
             let subject = subject;
             let inbox = inbox.clone();
@@ -1762,4 +2075,36 @@ impl FromConsumer for Config {
             backoff: config.backoff,
         })
     }
+}
+
+async fn recreate_consumer_stream(
+    context: Context,
+    config: Config,
+    stream_name: String,
+    consumer_name: String,
+    sequence: u64,
+) -> Result<Stream, Error> {
+    let stream = context.get_stream(stream_name.clone()).await?;
+    stream.delete_consumer(&consumer_name).await?;
+
+    let deliver_policy = {
+        if sequence == 0 {
+            DeliverPolicy::All
+        } else {
+            DeliverPolicy::ByStartSequence {
+                start_sequence: sequence + 1,
+            }
+        }
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        stream.create_consumer(jetstream::consumer::pull::Config {
+            deliver_policy,
+            ..config
+        }),
+    )
+    .await
+    .map_err(|_| io::Error::new(ErrorKind::TimedOut, "timed out"))??
+    .messages()
+    .await
 }

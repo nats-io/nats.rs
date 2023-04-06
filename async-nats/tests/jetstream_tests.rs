@@ -33,7 +33,8 @@ mod jetstream {
     use async_nats::connection::State;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
-        self, AckPolicy, DeliverPolicy, Info, OrderedPushConsumer, PullConsumer, PushConsumer,
+        self, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
+        PullConsumer, PushConsumer,
     };
     use async_nats::jetstream::context::Publish;
     use async_nats::jetstream::response::Response;
@@ -1314,6 +1315,55 @@ mod jetstream {
             assert_eq!(message.payload.as_ref(), b"dat");
         }
     }
+
+    #[tokio::test]
+    async fn pull_ordered() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPullConsumer = stream
+            .create_consumer(consumer::pull::OrderedConfig {
+                name: Some("pull_ordered".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        tokio::task::spawn({
+            let context = context.clone();
+            async move {
+                for i in 0..1000 {
+                    if i % 500 == 0 {
+                        tokio::time::sleep(Duration::from_secs(6)).await
+                    }
+                    context
+                        .publish("events".to_string(), "dat".into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        let mut messages = consumer.messages().await.unwrap().take(1000);
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
     #[tokio::test]
     async fn push_ordered_recreate() {
         let mut server =
@@ -2139,6 +2189,7 @@ mod jetstream {
                 .kind(),
             std::io::ErrorKind::NotFound
         );
+        messages.next().await;
         // after terminal error, consumer should always return none.
         assert!(messages.next().await.is_none());
     }
@@ -3157,13 +3208,12 @@ mod jetstream {
 
         let mut messages = consumer.messages().await.unwrap().take(10);
 
-        while let Some((message, acker)) = messages
+        while let Some((_, acker)) = messages
             .try_next()
             .await
             .unwrap()
             .map(|message| message.split())
         {
-            println!("message: {:?}", message);
             acker.ack().await.unwrap();
         }
     }
