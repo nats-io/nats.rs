@@ -39,7 +39,7 @@ base64 = "0.21"
 tokio-retry = "0.3"
 ring = "0.16"
 rand = "0.8"
-webpki = "0.22.0"
+webpki = { package = "rustls-webpki", version = "0.100.0", features = ["alloc", "std"] }
 
 [dev-dependencies]
 criterion =  { version = "0.3", features = ["async_tokio"]}
