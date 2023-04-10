@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
 use tokio_rustls::rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
-use tokio_rustls::webpki::TrustAnchor;
+use webpki::TrustAnchor;
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
