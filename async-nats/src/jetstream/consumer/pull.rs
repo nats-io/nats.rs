@@ -1571,19 +1571,19 @@ impl<'a> BatchBuilder<'a> {
 }
 
 /// Used for next Pull Request for Pull Consumer
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, Clone, Copy, PartialEq, Eq)]
 pub struct BatchConfig {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expires: Option<u64>,
     /// This optionally causes the server not to store this pending request at all, but when there are no
     /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
     /// can know when you reached the end of the stream for example. A 409 is returned if the
     /// Consumer has reached MaxAckPending limits.
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub no_wait: bool,
 
     /// Sets max number of bytes in total in given batch size. This works together with `batch`.
@@ -1592,7 +1592,7 @@ pub struct BatchConfig {
 
     /// Setting this other than zero will cause the server to send 100 Idle Heartbeat status to the
     /// client
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
 }
 
