@@ -311,6 +311,12 @@ impl FromStr for HeaderName {
     }
 }
 
+impl From<HeaderName> for String {
+    fn from(hn: HeaderName) -> Self {
+        hn.value
+    }
+}
+
 impl AsRef<[u8]> for HeaderName {
     fn as_ref(&self) -> &[u8] {
         self.value.as_bytes()
