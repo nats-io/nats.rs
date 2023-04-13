@@ -123,7 +123,7 @@ pub struct Info {
 
 /// Schema of requests and responses.
 /// Currently, it does not do anything except providing information.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Schema {
     /// A string/url describing the format of the request payload can be JSON schema etc.
     pub request: String,
