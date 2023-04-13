@@ -317,6 +317,12 @@ impl AsRef<[u8]> for HeaderName {
     }
 }
 
+impl AsRef<str> for HeaderName {
+    fn as_ref(&self) -> &str {
+        self.value.as_ref()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParseError;
 
