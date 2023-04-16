@@ -14,7 +14,7 @@
 //! NATS [Message][crate::Message] headers, leveraging [http::header] crate.
 // pub use http::header::{HeaderMap, HeaderName, HeaderValue};
 
-use std::{collections::HashMap, slice, str::FromStr};
+use std::{collections::HashMap, fmt, slice, str::FromStr};
 
 use serde::Serialize;
 
@@ -308,6 +308,12 @@ impl FromStr for HeaderName {
         Ok(HeaderName {
             value: s.to_string(),
         })
+    }
+}
+
+impl fmt::Display for HeaderName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.value, f)
     }
 }
 
