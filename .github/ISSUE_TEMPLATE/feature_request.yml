@@ -1,0 +1,36 @@
+name: Feature Request
+description: Request a feature for the NATS Rust client
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What is the use case for this feature?
+      placeholder: Info about the use case with details...
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: Proposed change
+      description: What is the change that you propose?
+      placeholder: Details about the proposed change...
+    validations:
+      required: true
+  - type: input
+    id: who_benefits
+    attributes:
+      label: Who benefits from the change(s)?
+      description: Who will this be useful to?
+      placeholder: Beneficiaries...
+    validations:
+      required: true
+  - type: textarea
+    id: alt_approaches
+    attributes:
+      label: Alternative Approaches
+      description: Are there any alternative approaches?
+      placeholder: Alt approaches if any...
+    validations:
+      required: false
