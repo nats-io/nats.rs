@@ -1,6 +1,6 @@
 name: Bug Report
 description: Report a bug found in the NATS Rust client
-labels: ["bug"]
+labels: ["bug", "needs triage"]
 body:
   - type: markdown
     attributes:
