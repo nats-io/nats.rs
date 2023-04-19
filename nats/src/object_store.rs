@@ -215,11 +215,12 @@ pub struct ObjectInfo {
     /// Number of chunks the object is stored in.
     pub chunks: usize,
     /// Date and time the object was last modified.
-    #[serde(with = "rfc3339")]
+    #[serde(with = "rfc3339", rename = "mtime")]
     pub modified: DateTime,
     /// Digest of the object stream.
     pub digest: String,
     /// Set to true if the object has been deleted.
+    #[serde(default)]
     pub deleted: bool,
 }
 

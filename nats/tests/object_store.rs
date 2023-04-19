@@ -207,6 +207,29 @@ fn object_names() {
 }
 
 #[test]
+fn object_info_modified() {
+    let server = nats_server::run_server("tests/configs/jetstream.conf");
+    let client = nats::connect(server.client_url()).unwrap();
+    let context = nats::jetstream::new(client);
+
+    let bucket = context
+        .create_object_store(&nats::object_store::Config {
+            bucket: "NAMES".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let empty = Vec::new();
+
+    bucket.put("foo.bar", &mut empty.as_slice()).unwrap();
+
+    let info = bucket.info("foo.bar").unwrap();
+
+    // Make sure that modified is set
+    assert!(info.modified.unix_timestamp_nanos() > 0);
+}
+
+#[test]
 fn object_watch() {
     let server = nats_server::run_server("tests/configs/jetstream.conf");
     let client = nats::connect(server.client_url()).unwrap();
