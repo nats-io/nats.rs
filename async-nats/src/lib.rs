@@ -486,6 +486,8 @@ impl ConnectionHandler {
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
+        self.ping_interval.reset();
+
         match command {
             Command::Unsubscribe { sid, max } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
