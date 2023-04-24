@@ -390,6 +390,8 @@ impl ConnectionHandler {
     }
 
     async fn handle_server_op(&mut self, server_op: ServerOp) -> Result<(), io::Error> {
+        self.ping_interval.reset();
+
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(&ClientOp::Pong).await?;
