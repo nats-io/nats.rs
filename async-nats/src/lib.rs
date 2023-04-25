@@ -304,7 +304,8 @@ pub(crate) struct ConnectionHandler {
     max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
-    flush_interval: Interval,
+    flush_period: Duration,
+    flush_wanted: bool,
 }
 
 impl ConnectionHandler {
@@ -318,9 +319,6 @@ impl ConnectionHandler {
         let mut ping_interval = interval(ping_period);
         ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut flush_interval = interval(flush_period);
-        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
         ConnectionHandler {
             connection,
             connector,
@@ -329,7 +327,8 @@ impl ConnectionHandler {
             max_pings: 2,
             info_sender,
             ping_interval,
-            flush_interval,
+            flush_period,
+            flush_wanted: false,
         }
     }
 
@@ -338,6 +337,12 @@ impl ConnectionHandler {
         mut receiver: mpsc::Receiver<Command>,
     ) -> Result<(), io::Error> {
         loop {
+            let flush_sleep = if self.flush_wanted {
+                tokio::time::sleep(self.flush_period).boxed()
+            } else {
+                std::future::pending().boxed()
+            };
+
             select! {
                 _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
@@ -348,11 +353,12 @@ impl ConnectionHandler {
                     self.handle_flush().await?;
 
                 },
-                _ = self.flush_interval.tick().fuse() => {
+                _ = flush_sleep.fuse() => {
                     if let Err(_err) = self.handle_flush().await {
                         self.handle_disconnect().await?;
                     }
                 },
+
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
@@ -480,13 +486,14 @@ impl ConnectionHandler {
 
     async fn handle_flush(&mut self) -> Result<(), io::Error> {
         self.connection.flush().await?;
-        self.flush_interval.reset();
+        self.flush_wanted = false;
 
         Ok(())
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
         self.ping_interval.reset();
+        self.flush_wanted = true;
 
         match command {
             Command::Unsubscribe { sid, max } => {
