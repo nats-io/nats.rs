@@ -102,9 +102,8 @@
 
 use thiserror::Error;
 
-use futures::future::FutureExt;
-use futures::select;
 use futures::stream::Stream;
+use tokio::select;
 use tracing::{debug, error};
 
 use core::fmt;
@@ -339,7 +338,7 @@ impl ConnectionHandler {
     ) -> Result<(), io::Error> {
         loop {
             select! {
-                _ = self.ping_interval.tick().fuse() => {
+                _ = self.ping_interval.tick() => {
                     self.pending_pings += 1;
                     if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
                         self.handle_disconnect().await?;
@@ -348,12 +347,12 @@ impl ConnectionHandler {
                     self.handle_flush().await?;
 
                 },
-                _ = self.flush_interval.tick().fuse() => {
+                _ = self.flush_interval.tick() => {
                     if let Err(_err) = self.handle_flush().await {
                         self.handle_disconnect().await?;
                     }
                 },
-                maybe_command = receiver.recv().fuse() => {
+                maybe_command = receiver.recv() => {
                     match maybe_command {
                         Some(command) => if let Err(err) = self.handle_command(command).await {
                             error!("error handling command {}", err);
@@ -364,7 +363,7 @@ impl ConnectionHandler {
                     }
                 }
 
-                maybe_op_result = self.connection.read_op().fuse() => {
+                maybe_op_result = self.connection.read_op() => {
                     match maybe_op_result {
                         Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
                             error!("error handling operation {}", err);
