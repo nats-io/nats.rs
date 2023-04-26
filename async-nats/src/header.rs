@@ -51,7 +51,9 @@ pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
 /// let client = async_nats::connect("demo.nats.io").await?;
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
-/// client.publish_with_headers("subject".to_string(), headers, "payload".into()).await?;
+/// client
+///     .publish_with_headers("subject".to_string(), headers, "payload".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -175,7 +177,10 @@ impl HeaderMap {
 /// use std::str::FromStr;
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
-/// headers.insert("Another", async_nats::HeaderValue::from_str("AnotherValue")?);
+/// headers.insert(
+///     "Another",
+///     async_nats::HeaderValue::from_str("AnotherValue")?,
+/// );
 /// # Ok(())
 /// # }
 /// ```

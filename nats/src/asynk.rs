@@ -355,7 +355,7 @@ impl Subscription {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let sub = nc.subscribe("foo")?;
     /// if let Some(msg) = sub.try_next() {
-    ///   println!("Received {}", msg);
+    ///     println!("Received {}", msg);
     /// }
     /// # Ok(())
     /// # }

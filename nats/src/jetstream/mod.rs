@@ -33,7 +33,7 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use nats::jetstream::{StreamConfig, StorageType};
+//! use nats::jetstream::{StorageType, StreamConfig};
 //!
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
@@ -64,17 +64,20 @@
 //! Create a new consumer with configuration:
 //!
 //! ```no_run
-//! use nats::jetstream::{ ConsumerConfig };
+//! use nats::jetstream::ConsumerConfig;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let nc = nats::connect("my_server::4222")?;
 //! let js = nats::jetstream::new(nc);
 //!
 //! js.add_stream("my_stream")?;
-//! js.add_consumer("my_stream", ConsumerConfig {
-//!   deliver_subject: Some("my_deliver_subject".to_string()),
-//!   durable_name: Some("my_durable_consumer".to_string()),
-//!   ..Default::default()
-//! })?;
+//! js.add_consumer(
+//!     "my_stream",
+//!     ConsumerConfig {
+//!         deliver_subject: Some("my_deliver_subject".to_string()),
+//!         durable_name: Some("my_durable_consumer".to_string()),
+//!         ..Default::default()
+//!     },
+//! )?;
 //!
 //! # Ok(()) }
 //! ```
@@ -93,7 +96,6 @@
 //! ```
 //! This will attempt to bind to an existing consumer if it exists, otherwise it will create a new
 //! internally managed consumer resource that gets destroyed when the subscription is dropped.
-//!
 use std::{
     collections::VecDeque,
     convert::TryFrom,
@@ -177,8 +179,7 @@ impl JetStreamOptions {
     /// # Example
     ///
     /// ```
-    /// let options = nats::JetStreamOptions::new()
-    ///     .api_prefix("some_exported_prefix".to_string());
+    /// let options = nats::JetStreamOptions::new().api_prefix("some_exported_prefix".to_string());
     /// ```
     pub fn api_prefix(mut self, mut api_prefix: String) -> Self {
         if !api_prefix.ends_with('.') {
@@ -194,8 +195,7 @@ impl JetStreamOptions {
     /// # Example
     ///
     /// ```
-    /// let options = nats::JetStreamOptions::new()
-    ///   .domain("some_domain");
+    /// let options = nats::JetStreamOptions::new().domain("some_domain");
     /// ```
     pub fn domain(mut self, domain: &str) -> Self {
         if domain.is_empty() {
@@ -677,7 +677,7 @@ impl JetStream {
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("ephemeral");
     /// # context.publish("ephemeral", "hello");
-    /// #    
+    /// #
     /// let subscription = context.subscribe("ephemeral")?;
     /// println!("Received message {:?}", subscription.next());
     /// # Ok(())
@@ -813,7 +813,13 @@ impl JetStream {
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let js = nats::jetstream::new(nc);
-    /// let sub = js.subscribe_with_options("foo", &SubscribeOptions::bind("existing_stream".to_string(), "existing_consumer".to_string()))?;
+    /// let sub = js.subscribe_with_options(
+    ///     "foo",
+    ///     &SubscribeOptions::bind(
+    ///         "existing_stream".to_string(),
+    ///         "existing_consumer".to_string(),
+    ///     ),
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
@@ -847,7 +853,6 @@ impl JetStream {
     ///
     /// If a durable name is not set within the options provided options then the queue group will
     /// be used as the durable name.
-    ///
     pub fn queue_subscribe_with_options(
         &self,
         subject: &str,
@@ -1808,7 +1813,6 @@ impl JetStream {
 }
 
 /// Creates a new `JetStream` context using the given `Connection` and default options.
-///
 pub fn new(nc: Connection) -> JetStream {
     JetStream::new(nc, JetStreamOptions::default())
 }

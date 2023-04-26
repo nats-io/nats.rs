@@ -47,12 +47,11 @@
 //!     }
 //!
 //!     while let Some(message) = subscriber.next().await {
-//!       println!("Received message {:?}", message);
+//!         println!("Received message {:?}", message);
 //!     }
 //!
 //!     Ok(())
 //! }
-//!
 //! ```
 //!
 //! ### Publish
@@ -664,7 +663,8 @@ impl ConnectionHandler {
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
-/// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
+/// let mut nc =
+///     async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
@@ -789,53 +789,52 @@ impl fmt::Display for Event {
 ///
 /// ## Connect with [Vec] of [ServerAddr].
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let client = async_nats::connect(vec![
-///    "demo.nats.io".parse::<ServerAddr>()?,
-///    "other.nats.io".parse::<ServerAddr>()?,
-///])
-///.await
-///.unwrap();
-///# Ok(())
-///# }
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let client = async_nats::connect(vec![
+///     "demo.nats.io".parse::<ServerAddr>()?,
+///     "other.nats.io".parse::<ServerAddr>()?,
+/// ])
+/// .await
+/// .unwrap();
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## with [Vec], but parse URLs inside [crate::connect()]
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let servers = vec!["demo.nats.io", "other.nats.io"];
-///let client = async_nats::connect(
-///    servers
-///        .iter()
-///        .map(|url| url.parse())
-///        .collect::<Result<Vec<ServerAddr>, _>>()?
-///)
-///.await?;
-///# Ok(())
-///# }
-///```
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let servers = vec!["demo.nats.io", "other.nats.io"];
+/// let client = async_nats::connect(
+///     servers
+///         .iter()
+///         .map(|url| url.parse())
+///         .collect::<Result<Vec<ServerAddr>, _>>()?,
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
+/// ```
 ///
 ///
 /// ## with slice.
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let client = async_nats::connect(
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let client = async_nats::connect(
 ///    [
 ///        "demo.nats.io".parse::<ServerAddr>()?,
 ///        "other.nats.io".parse::<ServerAddr>()?,
 ///    ]
 ///    .as_slice(),
-///)
-///.await?;
-///# Ok(())
-///# }
-///
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
@@ -954,7 +953,7 @@ impl Subscriber {
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
-    ///  subscriber.unsubscribe().await?;
+    /// subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
     /// ```

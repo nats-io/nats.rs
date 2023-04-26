@@ -28,23 +28,32 @@
 //! let client = async_nats::connect("localhost:4222").await?;
 //! let jetstream = async_nats::jetstream::new(client);
 //!
-//! let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-//!     name: "events".to_string(),
-//!     max_messages: 10_000,
-//!     ..Default::default()
-//! }).await?;
+//! let stream = jetstream
+//!     .get_or_create_stream(async_nats::jetstream::stream::Config {
+//!         name: "events".to_string(),
+//!         max_messages: 10_000,
+//!         ..Default::default()
+//!     })
+//!     .await?;
 //!
-//! jetstream.publish("events".to_string(), "data".into()).await?;
+//! jetstream
+//!     .publish("events".to_string(), "data".into())
+//!     .await?;
 //!
-//! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-//!     durable_name: Some("consumer".to_string()),
-//!     ..Default::default()
-//! }).await?;
+//! let consumer = stream
+//!     .get_or_create_consumer(
+//!         "consumer",
+//!         async_nats::jetstream::consumer::pull::Config {
+//!             durable_name: Some("consumer".to_string()),
+//!             ..Default::default()
+//!         },
+//!     )
+//!     .await?;
 //!
 //! let mut messages = consumer.messages().await?.take(100);
 //! while let Ok(Some(message)) = messages.try_next().await {
-//!   println!("message receiver: {:?}", message);
-//!   message.ack().await?;
+//!     println!("message receiver: {:?}", message);
+//!     message.ack().await?;
 //! }
 //! Ok(())
 //! # }
@@ -59,18 +68,27 @@
 //! let client = async_nats::connect("localhost:4222").await?;
 //! let jetstream = async_nats::jetstream::new(client);
 //!
-//! let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-//!     name: "events".to_string(),
-//!     max_messages: 10_000,
-//!     ..Default::default()
-//! }).await?;
+//! let stream = jetstream
+//!     .get_or_create_stream(async_nats::jetstream::stream::Config {
+//!         name: "events".to_string(),
+//!         max_messages: 10_000,
+//!         ..Default::default()
+//!     })
+//!     .await?;
 //!
-//! jetstream.publish("events".to_string(), "data".into()).await?;
+//! jetstream
+//!     .publish("events".to_string(), "data".into())
+//!     .await?;
 //!
-//! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-//!     durable_name: Some("consumer".to_string()),
-//!     ..Default::default()
-//! }).await?;
+//! let consumer = stream
+//!     .get_or_create_consumer(
+//!         "consumer",
+//!         async_nats::jetstream::consumer::pull::Config {
+//!             durable_name: Some("consumer".to_string()),
+//!             ..Default::default()
+//!         },
+//!     )
+//!     .await?;
 //!
 //! let mut batches = consumer.sequence(50)?.take(10);
 //! while let Ok(Some(mut batch)) = batches.try_next().await {
@@ -110,7 +128,9 @@ pub use message::{AckKind, Message};
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream
+///     .publish("subject".to_string(), "data".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -129,7 +149,9 @@ pub fn new(client: Client) -> Context {
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::with_domain(client, "hub");
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream
+///     .publish("subject".to_string(), "data".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -148,7 +170,9 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::with_prefix(client, "JS.acc@hub.API");
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream
+///     .publish("subject".to_string(), "data".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```

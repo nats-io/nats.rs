@@ -65,8 +65,10 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let mut consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let info = consumer.info().await?;
     /// # Ok(())
@@ -119,8 +121,10 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let info = consumer.cached_info();
     /// # Ok(())
