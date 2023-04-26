@@ -142,7 +142,9 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.publish("events.data".into(), "payload".into()).await?;
+    /// client
+    ///     .publish("events.data".into(), "payload".into())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -167,8 +169,13 @@ impl Client {
     /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
-    /// headers.insert("X-Header", async_nats::HeaderValue::from_str("Value").unwrap());
-    /// client.publish_with_headers("events.data".into(), headers, "payload".into()).await?;
+    /// headers.insert(
+    ///     "X-Header",
+    ///     async_nats::HeaderValue::from_str("Value").unwrap(),
+    /// );
+    /// client
+    ///     .publish_with_headers("events.data".into(), headers, "payload".into())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -199,7 +206,13 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client.publish_with_reply("events.data".into(), "reply_subject".into(), "payload".into()).await?;
+    /// client
+    ///     .publish_with_reply(
+    ///         "events.data".into(),
+    ///         "reply_subject".into(),
+    ///         "payload".into(),
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -232,7 +245,14 @@ impl Client {
     /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
-    /// client.publish_with_reply_and_headers("events.data".into(), "reply_subject".into(), headers, "payload".into()).await?;
+    /// client
+    ///     .publish_with_reply_and_headers(
+    ///         "events.data".into(),
+    ///         "reply_subject".into(),
+    ///         headers,
+    ///         "payload".into(),
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -258,7 +278,6 @@ impl Client {
     ///
     /// # Examples
     /// ```no_run
-    ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -276,13 +295,14 @@ impl Client {
     ///
     /// # Examples
     /// ```no_run
-    ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
-    /// let response = client.request_with_headers("service".into(), headers, "data".into()).await?;
+    /// let response = client
+    ///     .request_with_headers("service".into(), headers, "data".into())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -411,7 +431,9 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut subscription = client.queue_subscribe("events.>".into(), "queue".into()).await?;
+    /// let mut subscription = client
+    ///     .queue_subscribe("events.>".into(), "queue".into())
+    ///     .await?;
     /// while let Some(message) = subscription.next().await {
     ///     println!("received message: {:?}", message);
     /// }
@@ -519,7 +541,10 @@ impl Request {
     /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
-    /// headers.insert("X-Example", async_nats::HeaderValue::from_str("Value").unwrap());
+    /// headers.insert(
+    ///     "X-Example",
+    ///     async_nats::HeaderValue::from_str("Value").unwrap(),
+    /// );
     /// let request = async_nats::Request::new()
     ///     .headers(headers)
     ///     .payload("data".into());

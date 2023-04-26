@@ -230,16 +230,18 @@ pub trait ServiceExt {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::service::ServiceExt;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut service = client.add_service( async_nats::service::Config {
-    ///     name: "generator".to_string(),
-    ///     version: "1.0.0".to_string(),
-    ///     schema: None,
-    ///     description: None,
-    ///     stats_handler: None,
-    /// }).await?;
+    /// let mut service = client
+    ///     .add_service(async_nats::service::Config {
+    ///         name: "generator".to_string(),
+    ///         version: "1.0.0".to_string(),
+    ///         schema: None,
+    ///         description: None,
+    ///         stats_handler: None,
+    ///     })
+    ///     .await?;
     ///
     /// let mut endpoint = service.endpoint("get").await?;
     ///
@@ -259,13 +261,15 @@ pub trait ServiceExt {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::service::ServiceExt;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut service = client.service_builder()
+    /// let mut service = client
+    ///     .service_builder()
     ///     .description("some service")
     ///     .stats_handler(|endpoint, stats| format!("customstats"))
-    ///     .start("products","1.0.0").await?;
+    ///     .start("products", "1.0.0")
+    ///     .await?;
     ///
     /// let mut endpoint = service.endpoint("get").await?;
     ///
@@ -298,16 +302,18 @@ impl ServiceExt for crate::Client {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
-/// use futures::StreamExt;
 /// use async_nats::service::ServiceExt;
+/// use futures::StreamExt;
 /// let client = async_nats::connect("demo.nats.io").await?;
-/// let mut service = client.add_service( async_nats::service::Config {
-///     name: "generator".to_string(),
-///     version: "1.0.0".to_string(),
-///     schema: None,
-///     description: None,
-///     stats_handler: None,
-/// }).await?;
+/// let mut service = client
+///     .add_service(async_nats::service::Config {
+///         name: "generator".to_string(),
+///         version: "1.0.0".to_string(),
+///         schema: None,
+///         description: None,
+///         stats_handler: None,
+///     })
+///     .await?;
 ///
 /// let mut endpoint = service.endpoint("get").await?;
 ///

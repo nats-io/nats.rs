@@ -270,9 +270,7 @@ impl PushSubscription {
     /// # context.add_stream("try_iter");
     /// #
     /// # let subscription = context.subscribe("try_iter")?;
-    /// for message in subscription.try_iter() {
-    ///
-    /// }
+    /// for message in subscription.try_iter() {}
     /// # Ok(())
     /// # }
     /// ```
@@ -321,10 +319,12 @@ impl PushSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("with_handler");
-    /// context.subscribe("with_handler")?.with_handler(move |message| {
-    ///     println!("received {}", &message);
-    ///     Ok(())
-    /// });
+    /// context
+    ///     .subscribe("with_handler")?
+    ///     .with_handler(move |message| {
+    ///         println!("received {}", &message);
+    ///         Ok(())
+    ///     });
     ///
     /// # Ok(())
     /// # }
@@ -368,11 +368,13 @@ impl PushSubscription {
     /// # let client = nats::connect("demo.nats.io")?;
     /// # let context = nats::jetstream::new(client);
     /// # context.add_stream("with_process_handler");
-    /// context.subscribe("with_process_handler")?.with_process_handler(|message| {
-    ///     println!("Received {}", &message);
+    /// context
+    ///     .subscribe("with_process_handler")?
+    ///     .with_process_handler(|message| {
+    ///         println!("Received {}", &message);
     ///
-    ///     Ok(())
-    /// });
+    ///         Ok(())
+    ///     });
     ///
     /// # Ok(())
     /// # }

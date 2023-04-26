@@ -111,7 +111,7 @@ impl PullSubscription {
     /// }
     ///
     /// // pass whole `BatchOptions` to fetch
-    /// let messages = consumer.fetch(BatchOptions{
+    /// let messages = consumer.fetch(BatchOptions {
     ///     expires: None,
     ///     no_wait: false,
     ///     batch: 10,
@@ -163,11 +163,14 @@ impl PullSubscription {
     /// }
     ///
     /// // pass whole `BatchOptions` to fetch
-    /// let messages = consumer.timeout_fetch(BatchOptions{
-    ///     expires: None,
-    ///     no_wait: false,
-    ///     batch: 10,
-    /// }, Duration::from_millis(100))?;
+    /// let messages = consumer.timeout_fetch(
+    ///     BatchOptions {
+    ///         expires: None,
+    ///         no_wait: false,
+    ///         batch: 10,
+    ///     },
+    ///     Duration::from_millis(100),
+    /// )?;
     /// for message in messages {
     ///     println!("received message {:?}", message);
     /// }
@@ -365,7 +368,7 @@ impl PullSubscription {
     /// consumer.request_batch(10)?;
     ///
     /// // request messages specifying whole config.
-    /// consumer.request_batch(BatchOptions{
+    /// consumer.request_batch(BatchOptions {
     ///     expires: None,
     ///     no_wait: false,
     ///     batch: 10,
@@ -416,7 +419,7 @@ impl PullSubscription {
     /// consumer.request_batch(10)?;
     ///
     /// // request messages specifying whole config.
-    /// consumer.request_batch(BatchOptions{
+    /// consumer.request_batch(BatchOptions {
     ///     expires: Some(10000),
     ///     no_wait: true,
     ///     batch: 10,
