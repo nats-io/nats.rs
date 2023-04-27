@@ -42,7 +42,7 @@ pub struct ConnectOptions {
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
     pub(crate) connection_timeout: Duration,
-    pub(crate) auth: Authorization,
+    pub(crate) authorizations: Vec<Authorization>,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
@@ -95,7 +95,7 @@ impl Default for ConnectOptions {
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
             connection_timeout: Duration::from_secs(5),
-            auth: Authorization::None,
+            authorizations: Vec::new(),
             tls_required: false,
             certificates: Vec::new(),
             client_cert: None,
@@ -180,17 +180,16 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::with_token("t0k3n!".into())
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .with_token("t0k3n!".into())?
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_token(token: String) -> Self {
-        ConnectOptions {
-            auth: Authorization::Token(token),
-            ..Default::default()
-        }
+    pub fn with_token(mut self, token: String) -> Result<Self, AuthError> {
+        self.authorizations.push(Authorization::Token(token));
+        Ok(self)
     }
 
     /// Auth against NATS Server with provided username and password.
@@ -199,17 +198,17 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .with_user_and_password("derek".into(), "s3cr3t!".into())?
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_user_and_password(user: String, pass: String) -> Self {
-        ConnectOptions {
-            auth: Authorization::UserAndPassword(user, pass),
-            ..Default::default()
-        }
+    pub fn with_user_and_password(mut self, user: String, pass: String) -> Result<Self, AuthError> {
+        self.authorizations
+            .push(Authorization::UserAndPassword(user, pass));
+        Ok(self)
     }
 
     /// Authenticate with a NKey. Requires NKey Seed secret.
@@ -219,17 +218,27 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
-    /// let nc = async_nats::ConnectOptions::with_nkey(seed.into())
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .with_nkey(seed.into())?
     ///     .connect("localhost")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_nkey(seed: String) -> Self {
-        ConnectOptions {
-            auth: Authorization::NKey(seed),
-            ..Default::default()
+    pub fn with_nkey(mut self, seed: String) -> Result<Self, AuthError> {
+        // make sure that NKey is not used together with JWT
+        if self
+            .authorizations
+            .iter()
+            .any(|x| matches!(x, Authorization::Jwt(_, _)))
+        {
+            return Err(AuthError::new(
+                "cannot mix NKey with JWT as authorization methods",
+            ));
         }
+
+        self.authorizations.push(Authorization::NKey(seed));
+        Ok(self)
     }
 
     /// Authenticate with a JWT. Requires function to sign the server nonce.
@@ -246,36 +255,55 @@ impl ConnectOptions {
     ///     todo!();
     /// }
     /// let jwt = load_jwt().await?;
-    /// let nc = async_nats::ConnectOptions::with_jwt(jwt, move |nonce| {
-    ///     let key_pair = key_pair.clone();
-    ///     async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
-    /// })
-    /// .connect("localhost")
-    /// .await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .with_jwt(jwt, move |nonce| {
+    ///         let key_pair = key_pair.clone();
+    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    ///     })?
+    ///     .connect("localhost")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_jwt<F, Fut>(jwt: String, sign_cb: F) -> Self
+    pub fn with_jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Result<Self, AuthError>
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
+    {
+        // make sure that JWT is not used together with NKey
+        if self
+            .authorizations
+            .iter()
+            .any(|x| matches!(x, Authorization::NKey(_)))
+        {
+            return Err(AuthError::new(
+                "cannot mix JWT with NKey as authorization methods",
+            ));
+        }
+
+        let jwt_auth = Self::generate_jwt_auth(jwt, sign_cb);
+        self.authorizations.push(jwt_auth);
+        Ok(self)
+    }
+
+    fn generate_jwt_auth<F, Fut>(jwt: String, sign_cb: F) -> Authorization
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
     {
         let sign_cb = Arc::new(sign_cb);
-        ConnectOptions {
-            auth: Authorization::Jwt(
-                jwt,
-                CallbackArg1(Box::new(move |nonce: String| {
-                    let sign_cb = sign_cb.clone();
-                    Box::pin(async move {
-                        let sig = sign_cb(nonce.as_bytes().to_vec())
-                            .await
-                            .map_err(AuthError::new)?;
-                        Ok(URL_SAFE_NO_PAD.encode(sig))
-                    })
-                })),
-            ),
-            ..Default::default()
-        }
+        Authorization::Jwt(
+            jwt,
+            CallbackArg1(Box::new(move |nonce: String| {
+                let sign_cb = sign_cb.clone();
+                Box::pin(async move {
+                    let sig = sign_cb(nonce.as_bytes().to_vec())
+                        .await
+                        .map_err(AuthError::new)?;
+                    Ok(URL_SAFE_NO_PAD.encode(sig))
+                })
+            })),
+        )
     }
 
     /// Authenticate with NATS using a `.creds` file.
@@ -286,16 +314,18 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds".into())
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .with_credentials_file("path/to/my.creds".into())
     ///     .await?
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn with_credentials_file(path: PathBuf) -> io::Result<Self> {
+    pub async fn with_credentials_file(self, path: PathBuf) -> io::Result<Self> {
         let cred_file_contents = crate::auth_utils::load_creds(path).await?;
-        Self::with_credentials(&cred_file_contents)
+
+        self.with_credentials(&cred_file_contents)
     }
 
     /// Authenticate with NATS using a credential str, in the creds file format.
@@ -317,20 +347,24 @@ impl ConnectOptions {
     /// ------END USER NKEY SEED------
     /// ";
     ///
-    /// let nc = async_nats::ConnectOptions::with_credentials(creds)
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .with_credentials(creds)
     ///     .expect("failed to parse static creds")
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_credentials(creds: &str) -> io::Result<Self> {
+    pub fn with_credentials(mut self, creds: &str) -> io::Result<Self> {
         let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
         let key_pair = std::sync::Arc::new(key_pair);
-        Ok(Self::with_jwt(jwt.to_owned(), move |nonce| {
+        let jwt_auth = Self::generate_jwt_auth(jwt.to_owned(), move |nonce| {
             let key_pair = key_pair.clone();
             async move { key_pair.sign(&nonce).map_err(AuthError::new) }
-        }))
+        });
+
+        self.authorizations.push(jwt_auth);
+        Ok(self)
     }
 
     /// Loads root certificates by providing the path to them.
@@ -725,6 +759,7 @@ impl ConnectOptions {
         self
     }
 }
+
 type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 

@@ -662,7 +662,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             client_key: options.client_key,
             client_cert: options.client_cert,
             tls_client_config: options.tls_client_config,
-            auth: options.auth,
+            authorizations: options.authorizations,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
             name: options.name,
@@ -884,6 +884,12 @@ impl ConnectError {
 impl From<std::io::Error> for ConnectError {
     fn from(err: std::io::Error) -> Self {
         ConnectError::with_source(ConnectErrorKind::Io, err)
+    }
+}
+
+impl From<AuthError> for ConnectError {
+    fn from(err: AuthError) -> Self {
+        ConnectError::with_source(ConnectErrorKind::Authentication, err)
     }
 }
 
@@ -1304,9 +1310,6 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
 }
 
 pub(crate) enum Authorization {
-    /// No authentication.
-    None,
-
     /// Authenticate using a token.
     Token(String),
 

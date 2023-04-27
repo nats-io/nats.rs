@@ -20,7 +20,9 @@ mod client {
     async fn nkey_auth() {
         let s = nats_server::run_server("tests/configs/nkey.conf");
 
-        let nc = async_nats::ConnectOptions::with_nkey(SECRET_SEED.into())
+        let nc = async_nats::ConnectOptions::new()
+            .with_nkey(SECRET_SEED.into())
+            .unwrap()
             .connect(s.client_url())
             .await
             .unwrap();
@@ -41,7 +43,9 @@ mod client {
             nats_server::run_server("tests/configs/nkey.conf"),
         ];
 
-        let client = async_nats::ConnectOptions::with_nkey(SECRET_SEED.into())
+        let client = async_nats::ConnectOptions::new()
+            .with_nkey(SECRET_SEED.into())
+            .unwrap()
             .connect(
                 servers
                     .iter()

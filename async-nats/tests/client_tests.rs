@@ -20,6 +20,7 @@ mod client {
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::path::PathBuf;
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -388,7 +389,9 @@ mod client {
     #[tokio::test]
     async fn token_auth() {
         let server = nats_server::run_server("tests/configs/token.conf");
-        let client = async_nats::ConnectOptions::with_token("s3cr3t".into())
+        let client = async_nats::ConnectOptions::new()
+            .with_token("s3cr3t".into())
+            .unwrap()
             .connect(server.client_url())
             .await
             .unwrap();
@@ -402,11 +405,12 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let client =
-            async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t".into())
-                .connect(server.client_url())
-                .await
-                .unwrap();
+        let client = async_nats::ConnectOptions::new()
+            .with_user_and_password("derek".into(), "s3cr3t".into())
+            .unwrap()
+            .connect(server.client_url())
+            .await
+            .unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
         client.publish("test".into(), "test".into()).await.unwrap();
@@ -428,13 +432,12 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth_wrong_pass() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let err = async_nats::ConnectOptions::with_user_and_password(
-            "derek".into(),
-            "bad_password".into(),
-        )
-        .connect(server.client_url())
-        .await
-        .unwrap_err();
+        let err = async_nats::ConnectOptions::new()
+            .with_user_and_password("derek".into(), "bad_password".into())
+            .unwrap()
+            .connect(server.client_url())
+            .await
+            .unwrap_err();
         assert_eq!(ConnectErrorKind::AuthorizationViolation, err.kind());
     }
 
@@ -791,7 +794,9 @@ mod client {
             nats_server::run_basic_server(),
         ];
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let _ = ConnectOptions::with_user_and_password("js".into(), "js".into())
+        let _ = ConnectOptions::new()
+            .with_user_and_password("js".into(), "js".into())
+            .unwrap()
             .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
@@ -812,5 +817,63 @@ mod client {
 
         drop(servers.remove(0));
         rx.recv().await;
+    }
+
+    #[tokio::test]
+    async fn multiple_auth_methods() {
+        use async_nats::ServerAddr;
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let mut servers = vec![
+            nats_server::run_basic_server(),
+            nats_server::run_server("tests/configs/jwt.conf"),
+            nats_server::run_server("tests/configs/token.conf"),
+        ];
+
+        // multiple auth methods
+        let client = async_nats::ConnectOptions::new()
+            .with_user_and_password("js".into(), "js".into())
+            .unwrap()
+            .with_token("s3cr3t".into())
+            .unwrap()
+            .with_credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .unwrap()
+            .connect(
+                servers
+                    .iter()
+                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>()
+                    .as_slice(),
+            )
+            .await
+            .unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        while !servers.is_empty() {
+            client.publish("test".into(), "data".into()).await.unwrap();
+            client.flush().await.unwrap();
+            assert!(subscriber.next().await.is_some());
+
+            drop(servers.remove(0));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn multiple_auth_methods_mutually_exclusive() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let nkey_secret_seed: &str = "SUACH75SWCM5D2JMJM6EKLR2WDARVGZT4QC6LX3AGHSWOMVAKERABBBRWM";
+
+        // multiple auth methods that are mutually exclusive - you shouldn't be able to mix nkey and jwt
+        let client = async_nats::ConnectOptions::new()
+            .with_credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .unwrap()
+            .with_nkey(nkey_secret_seed.into());
+
+        // we should get back an error
+        assert!(client.is_err());
     }
 }

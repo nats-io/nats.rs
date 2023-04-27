@@ -51,7 +51,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
-    pub(crate) auth: Authorization,
+    pub(crate) authorizations: Vec<Authorization>,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
     pub(crate) name: Option<String>,
@@ -173,51 +173,52 @@ impl Connector {
                             no_responders: true,
                         };
 
-                        match &self.options.auth {
-                            // We don't want to early return here,
-                            // as server might require auth that we did not provide.
-                            Authorization::None => {}
-                            Authorization::Token(token) => {
-                                connect_info.auth_token = Some(token.clone())
-                            }
-                            Authorization::UserAndPassword(user, pass) => {
-                                connect_info.user = Some(user.clone());
-                                connect_info.pass = Some(pass.clone());
-                            }
-                            Authorization::NKey(ref seed) => {
-                                match nkeys::KeyPair::from_seed(seed.as_str()) {
-                                    Ok(key_pair) => {
-                                        let nonce = server_info.nonce.clone();
-                                        match key_pair.sign(nonce.as_bytes()) {
-                                            Ok(signed) => {
-                                                connect_info.nkey = Some(key_pair.public_key());
-                                                connect_info.signature =
-                                                    Some(URL_SAFE_NO_PAD.encode(signed));
-                                            }
-                                            Err(_) => {
-                                                return Err(ConnectError::new(
-                                                    crate::ConnectErrorKind::Authentication,
-                                                ))
-                                            }
-                                        };
-                                    }
-                                    Err(_) => {
-                                        return Err(ConnectError::new(
-                                            crate::ConnectErrorKind::Authentication,
-                                        ))
+                        for auth in &self.options.authorizations {
+                            match auth {
+                                // We don't want to early return here,
+                                // as server might require auth that we did not provide.
+                                Authorization::Token(token) => {
+                                    connect_info.auth_token = Some(token.clone())
+                                }
+                                Authorization::UserAndPassword(user, pass) => {
+                                    connect_info.user = Some(user.clone());
+                                    connect_info.pass = Some(pass.clone());
+                                }
+                                Authorization::NKey(ref seed) => {
+                                    match nkeys::KeyPair::from_seed(seed.as_str()) {
+                                        Ok(key_pair) => {
+                                            let nonce = server_info.nonce.clone();
+                                            match key_pair.sign(nonce.as_bytes()) {
+                                                Ok(signed) => {
+                                                    connect_info.nkey = Some(key_pair.public_key());
+                                                    connect_info.signature =
+                                                        Some(URL_SAFE_NO_PAD.encode(signed));
+                                                }
+                                                Err(_) => {
+                                                    return Err(ConnectError::new(
+                                                        crate::ConnectErrorKind::Authentication,
+                                                    ))
+                                                }
+                                            };
+                                        }
+                                        Err(_) => {
+                                            return Err(ConnectError::new(
+                                                crate::ConnectErrorKind::Authentication,
+                                            ))
+                                        }
                                     }
                                 }
-                            }
-                            Authorization::Jwt(jwt, sign_fn) => {
-                                match sign_fn.call(server_info.nonce.clone()).await {
-                                    Ok(sig) => {
-                                        connect_info.user_jwt = Some(jwt.clone());
-                                        connect_info.signature = Some(sig);
-                                    }
-                                    Err(_) => {
-                                        return Err(ConnectError::new(
-                                            crate::ConnectErrorKind::Authentication,
-                                        ))
+                                Authorization::Jwt(jwt, sign_fn) => {
+                                    match sign_fn.call(server_info.nonce.clone()).await {
+                                        Ok(sig) => {
+                                            connect_info.user_jwt = Some(jwt.clone());
+                                            connect_info.signature = Some(sig);
+                                        }
+                                        Err(_) => {
+                                            return Err(ConnectError::new(
+                                                crate::ConnectErrorKind::Authentication,
+                                            ))
+                                        }
                                     }
                                 }
                             }
