@@ -11,8 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! NATS [Message][crate::Message] headers, leveraging [http::header] crate.
-// pub use http::header::{HeaderMap, HeaderName, HeaderValue};
+//! NATS [Message][crate::Message] headers, modeled loosely after the [http::header] crate.
 
 use std::{collections::HashMap, fmt, slice, str::FromStr};
 
