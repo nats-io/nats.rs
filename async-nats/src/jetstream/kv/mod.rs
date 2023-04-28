@@ -355,7 +355,7 @@ impl Store {
                 let entry = Entry {
                     bucket: self.name.clone(),
                     key,
-                    value: message.payload.to_vec(),
+                    value: message.payload,
                     revision,
                     created,
                     operation,
@@ -483,7 +483,7 @@ impl Store {
         self.watch(ALL_KEYS).await
     }
 
-    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Vec<u8>>, Error> {
+    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Bytes>, Error> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
                 Operation::Put => Ok(Some(entry.value)),
@@ -811,7 +811,7 @@ impl<'a> futures::Stream for Watch<'a> {
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.to_vec(),
+                        value: message.payload.clone(),
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,
@@ -879,7 +879,7 @@ impl<'a> futures::Stream for History<'a> {
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.to_vec(),
+                        value: message.payload.clone(),
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,
@@ -936,8 +936,7 @@ pub struct Entry {
     /// The key that was retrieved.
     pub key: String,
     /// The value that was retrieved.
-    // TODO: should we use Bytes?
-    pub value: Vec<u8>,
+    pub value: Bytes,
     /// A unique sequence for this value.
     pub revision: u64,
     /// Distance from the latest value.
