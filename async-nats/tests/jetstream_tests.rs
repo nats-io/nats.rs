@@ -3127,4 +3127,44 @@ mod jetstream {
 
         assert_eq!(message.subject, "fromtest.transformed.test");
     }
+
+    #[tokio::test]
+    async fn acker() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            context.publish("test".into(), "data".into()).await.unwrap();
+        }
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap().take(10);
+
+        while let Some((message, acker)) = messages
+            .try_next()
+            .await
+            .unwrap()
+            .map(|message| message.split())
+        {
+            println!("message: {:?}", message);
+            acker.ack().await.unwrap();
+        }
+    }
 }
