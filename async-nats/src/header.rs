@@ -222,6 +222,10 @@ impl FromStr for HeaderValue {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains(['\r', '\n']) {
+            return Err(ParseError);
+        }
+
         let mut set = HeaderValue::new();
         set.value.push(s.to_string());
         Ok(set)
@@ -419,5 +423,12 @@ mod tests {
         headers.append("Key", "second_value");
         headers.insert("Second", "SecondValue");
         assert!(!headers.is_empty());
+    }
+
+    #[test]
+    fn parse_value() {
+        assert!("Foo\r".parse::<HeaderValue>().is_err());
+        assert!("Foo\n".parse::<HeaderValue>().is_err());
+        assert!("Foo\r\n".parse::<HeaderValue>().is_err());
     }
 }
