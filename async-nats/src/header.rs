@@ -324,6 +324,10 @@ impl FromStr for HeaderName {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
+            return Err(ParseError);
+        }
+
         Ok(HeaderName {
             value: s.to_string(),
         })
@@ -362,8 +366,7 @@ impl std::error::Error for ParseError {}
 #[cfg(test)]
 mod tests {
     use std::str::from_utf8;
-
-    use crate::{HeaderMap, HeaderValue};
+    use super::{HeaderMap, HeaderName, HeaderValue};
 
     #[test]
     fn try_from() {
@@ -440,5 +443,41 @@ mod tests {
         assert!("Foo\r".parse::<HeaderValue>().is_err());
         assert!("Foo\n".parse::<HeaderValue>().is_err());
         assert!("Foo\r\n".parse::<HeaderValue>().is_err());
+    }
+
+    #[test]
+    fn valid_header_name() {
+        let valid_header_name = "X-Custom-Header";
+        let parsed_header = HeaderName::from_str(valid_header_name);
+
+        assert!(
+            parsed_header.is_ok(),
+            "Expected Ok(HeaderName), but got an error: {:?}",
+            parsed_header.err()
+        );
+    }
+
+    #[test]
+    fn invalid_header_name_with_space() {
+        let invalid_header_name = "X Custom Header";
+        let parsed_header = HeaderName::from_str(invalid_header_name);
+
+        assert!(
+            parsed_header.is_err(),
+            "Expected Err(InvalidHeaderNameError), but got Ok: {:?}",
+            parsed_header.ok()
+        );
+    }
+
+    #[test]
+    fn invalid_header_name_with_special_chars() {
+        let invalid_header_name = "X-Header!@#";
+        let parsed_header = HeaderName::from_str(invalid_header_name);
+
+        assert!(
+            parsed_header.is_err(),
+            "Expected Err(InvalidHeaderNameError), but got Ok: {:?}",
+            parsed_header.ok()
+        );
     }
 }
