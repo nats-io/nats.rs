@@ -18,7 +18,7 @@ use std::{collections::HashMap, fmt, slice, str::FromStr};
 
 use serde::Serialize;
 
-pub const NATS_LAST_STREAM: &str = "nats-last-stream";
+pub const NATS_LAST_STREAM: &str = "Nats-Last-Stream";
 pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
 
 /// Direct Get headers
