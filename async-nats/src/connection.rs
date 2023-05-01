@@ -24,6 +24,7 @@ use tokio::io;
 
 use crate::header::{HeaderMap, HeaderName};
 use crate::status::StatusCode;
+use crate::subject::Subject;
 use crate::{ClientOp, ServerError, ServerOp};
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
@@ -108,13 +109,13 @@ impl Connection {
             let line = str::from_utf8(&self.buffer[4..len]).unwrap();
             let mut args = line.split(' ').filter(|s| !s.is_empty());
 
-            // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
+            // Parse the operation syntax: MSG <subject> <sid> [reply] <#bytes>
             let subject = args.next();
             let sid = args.next();
-            let mut reply_to = args.next();
+            let mut reply = args.next();
             let mut payload_len = args.next();
             if payload_len.is_none() {
-                std::mem::swap(&mut reply_to, &mut payload_len);
+                std::mem::swap(&mut reply, &mut payload_len);
             }
 
             if subject.is_none() || sid.is_none() || payload_len.is_none() || args.next().is_some()
@@ -138,8 +139,8 @@ impl Connection {
                 return Ok(None);
             }
 
-            let subject = subject.unwrap().to_owned();
-            let reply_to = reply_to.map(String::from);
+            let subject = Subject::from(subject.unwrap());
+            let reply = reply.map(Subject::from);
 
             self.buffer.advance(len + 2);
             let payload = self.buffer.split_to(payload_len).freeze();
@@ -148,9 +149,9 @@ impl Connection {
             return Ok(Some(ServerOp::Message {
                 sid,
                 length: payload_len
-                    + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                    + reply.as_ref().map(|reply| reply.len()).unwrap_or(0)
                     + subject.len(),
-                reply: reply_to,
+                reply,
                 headers: None,
                 subject,
                 payload,
@@ -164,15 +165,15 @@ impl Connection {
             let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
             let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
-            // <subject> <sid> [reply-to] <# header bytes><# total bytes>
+            // <subject> <sid> [reply] <# header bytes><# total bytes>
             let subject = args.next();
             let sid = args.next();
-            let mut reply_to = args.next();
+            let mut reply = args.next();
             let mut num_header_bytes = args.next();
             let mut num_bytes = args.next();
             if num_bytes.is_none() {
                 std::mem::swap(&mut num_header_bytes, &mut num_bytes);
-                std::mem::swap(&mut reply_to, &mut num_header_bytes);
+                std::mem::swap(&mut reply, &mut num_header_bytes);
             }
 
             if subject.is_none()
@@ -198,8 +199,8 @@ impl Connection {
                 )
             })?;
 
-            // Convert the slice into an owned string.
-            let reply_to = reply_to.map(ToString::to_string);
+            // Convert the slice into a subject.
+            let reply = reply.map(Subject::from);
 
             // Parse the number of payload bytes.
             let num_header_bytes = usize::from_str(num_header_bytes.unwrap()).map_err(|_| {
@@ -299,11 +300,11 @@ impl Connection {
             }
 
             return Ok(Some(ServerOp::Message {
-                length: reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                length: reply.as_ref().map(|reply| reply.len()).unwrap_or(0)
                     + subject.len()
                     + num_bytes,
                 sid,
-                reply: reply_to,
+                reply,
                 subject,
                 headers: Some(headers),
                 payload,

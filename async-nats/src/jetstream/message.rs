@@ -87,7 +87,7 @@ impl Message {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string(), "".into())
+                .publish(reply.clone(), "".into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -129,7 +129,7 @@ impl Message {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string(), kind.into())
+                .publish(reply.to_owned(), kind.into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -173,10 +173,10 @@ impl Message {
     pub async fn double_ack(&self) -> Result<(), Error> {
         if let Some(ref reply) = self.reply {
             let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
+            let mut subscription = self.context.client.subscribe(inbox.clone().into()).await?;
             self.context
                 .client
-                .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
+                .publish_with_reply(reply.clone(), inbox.into(), AckKind::Ack.into())
                 .await?;
             match tokio::time::timeout(self.context.timeout, subscription.next())
                 .await

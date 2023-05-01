@@ -15,6 +15,7 @@
 use std::fmt::Display;
 use std::{cmp, str::FromStr, task::Poll, time::Duration};
 
+use crate::subject::Subject;
 use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use base64::engine::Engine;
@@ -170,7 +171,7 @@ impl ObjectStore {
             })?,
         );
 
-        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name));
+        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name)).into();
 
         self.stream
             .context
@@ -272,7 +273,7 @@ impl ObjectStore {
         };
 
         let object_nuid = nuid::next();
-        let chunk_subject = format!("$O.{}.C.{}", &self.name, &object_nuid);
+        let chunk_subject = Subject::from(format!("$O.{}.C.{}", &self.name, &object_nuid));
 
         let mut object_chunks = 0;
         let mut object_size = 0;
@@ -349,7 +350,7 @@ impl ObjectStore {
         // publish meta.
         self.stream
             .context
-            .publish_with_headers(subject, headers, data.into())
+            .publish_with_headers(subject.into(), headers, data.into())
             .await
             .map_err(|err| {
                 PutError::with_source(
