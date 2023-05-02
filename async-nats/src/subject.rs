@@ -56,7 +56,8 @@ impl Subject {
 
 impl<'a> From<&'a str> for Subject {
     fn from(s: &'a str) -> Self {
-        Subject::from_static(s)
+        // Since &str is guaranteed to be valid UTF-8, we can create the Subject instance by copying the contents of the &str
+        Subject { bytes: Bytes::copy_from_slice(s.as_bytes()) }
     }
 }
 

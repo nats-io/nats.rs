@@ -914,7 +914,7 @@ impl Stream {
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
                     let result = context
                         .client
-                        .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
+                        .publish_with_reply(subject.clone().into(), inbox.clone().into(), request.clone())
                         .await
                         .map(|_| pending_reset);
                     if let Err(err) = consumer.context.client.flush().await {

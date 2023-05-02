@@ -19,7 +19,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("nats://localhost:4222").await?;
 
     let now = Instant::now();
-    let subject = String::from("foo");
+    let subject = Subject::from("foo");
     let dat = Bytes::from("bar");
     for _ in 0..10_000_000 {
         client.publish(subject.clone(), dat.clone()).await?;

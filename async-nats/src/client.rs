@@ -286,7 +286,7 @@ impl Client {
     /// # }
     /// ```
     pub async fn request(&self, subject: Subject, payload: Bytes) -> Result<Message, RequestError> {
-        trace!("request sent to subject: {} ({})", subject, payload.len());
+        trace!("request sent to subject: {} ({})", subject.as_ref(), payload.len());
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }

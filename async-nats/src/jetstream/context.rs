@@ -458,7 +458,7 @@ impl Context {
     {
         let config = config.borrow();
         let subject = format!("STREAM.UPDATE.{}", config.name);
-        match self.request(subject, config).await? {
+        match self.request(subject.into(), config).await? {
             Response::Err { error } => Err(error.into()),
             Response::Ok(info) => Ok(info),
         }
@@ -768,7 +768,7 @@ impl Context {
     {
         let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
 
-        let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
+        let info: super::consumer::Info = match self.request(subject.into(), &json!({})).await? {
             Response::Ok(info) => info,
             Response::Err { error } => {
                 return Err(Box::new(std::io::Error::new(
@@ -820,7 +820,7 @@ impl Context {
         let message = self
             .client
             .request(
-                format!("{}.{}", self.prefix, subject.as_ref().into()),
+                format!("{}.{}", self.prefix, subject.as_ref()).into(),
                 request,
             )
             .await;
@@ -1097,7 +1097,7 @@ impl futures::Stream for StreamNames<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.NAMES".to_string(),
+                                "STREAM.NAMES".into(),
                                 &json!({
                                     "offset": offset,
                                 }),
@@ -1181,7 +1181,7 @@ impl futures::Stream for Streams<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.LIST".to_string(),
+                                "STREAM.LIST".into(),
                                 &json!({
                                     "offset": offset,
                                 }),

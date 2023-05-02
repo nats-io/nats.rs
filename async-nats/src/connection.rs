@@ -189,7 +189,7 @@ impl Connection {
             }
 
             // Convert the slice into an owned string.
-            let subject = subject.unwrap().to_string();
+            let subject = Subject::from(subject.unwrap());
 
             // Parse the subject ID.
             let sid = u64::from_str(sid.unwrap()).map_err(|_| {
