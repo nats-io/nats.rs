@@ -37,8 +37,8 @@ mod kv {
 
         let mut kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
-                description: "test_description".to_string(),
+                bucket: "test".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -65,8 +65,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
-                description: "test_description".to_string(),
+                bucket: "test".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -97,8 +97,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
-                description: "test_description".to_string(),
+                bucket: "test".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -131,8 +131,8 @@ mod kv {
 
         let mut kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
-                description: "test_description".to_string(),
+                bucket: "test".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -154,7 +154,7 @@ mod kv {
         context
             .update_stream(async_nats::jetstream::stream::Config {
                 max_messages_per_subject: 10,
-                name: "KV_test".to_string(),
+                name: "KV_test".into(),
                 deny_delete: true,
                 allow_direct: false,
                 ..Default::default()
@@ -184,8 +184,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
-                description: "test_description".to_string(),
+                bucket: "test".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -221,8 +221,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "delete".to_string(),
-                description: "test_description".to_string(),
+                bucket: "delete".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -261,8 +261,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "purge".to_string(),
-                description: "test_description".to_string(),
+                bucket: "purge".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -301,8 +301,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history".to_string(),
-                description: "test_description".to_string(),
+                bucket: "history".into(),
+                description: "test_description".into(),
                 history: 15,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -398,8 +398,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history".to_string(),
-                description: "test_description".to_string(),
+                bucket: "history".into(),
+                description: "test_description".into(),
                 history: 15,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -417,7 +417,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("foo", i.to_string().into()).await.unwrap();
+                    kv.put("foo", i.into().into()).await.unwrap();
                 }
             }
         });
@@ -427,13 +427,13 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("var", i.to_string().into()).await.unwrap();
+                    kv.put("var", i.into().into()).await.unwrap();
                 }
             }
         });
         while let Some((i, entry)) = watch.next().await {
             let entry = entry.unwrap();
-            assert_eq!(entry.key, "foo".to_string());
+            assert_eq!(entry.key, "foo".into());
             assert_eq!(
                 i,
                 from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
@@ -457,8 +457,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history".to_string(),
-                description: "test_description".to_string(),
+                bucket: "history".into(),
+                description: "test_description".into(),
                 history: 15,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -476,7 +476,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put(format!("foo.{i}"), i.to_string().into())
+                    kv.put(format!("foo.{i}"), i.into().into())
                         .await
                         .unwrap();
                 }
@@ -488,7 +488,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("var", i.to_string().into()).await.unwrap();
+                    kv.put("var", i.into().into()).await.unwrap();
                 }
             }
         });
@@ -532,8 +532,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history".to_string(),
-                description: "test_description".to_string(),
+                bucket: "history".into(),
+                description: "test_description".into(),
                 history: 15,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -559,7 +559,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("foo", i.to_string().into()).await.unwrap();
+                    kv.put("foo", i.into().into()).await.unwrap();
                 }
             }
         });
@@ -585,8 +585,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history".to_string(),
-                description: "test_description".to_string(),
+                bucket: "history".into(),
+                description: "test_description".into(),
                 history: 15,
                 storage: StorageType::File,
                 num_replicas: 1,
@@ -596,10 +596,10 @@ mod kv {
             .unwrap();
 
         for i in 0..10 {
-            kv.put("bar", i.to_string().into()).await.unwrap();
+            kv.put("bar", i.into().into()).await.unwrap();
         }
         for i in 0..10 {
-            kv.put("foo", i.to_string().into()).await.unwrap();
+            kv.put("foo", i.into().into()).await.unwrap();
         }
 
         let mut keys = kv
@@ -625,7 +625,7 @@ mod kv {
 
         // Put the key back, and then purge and make sure the key doesn't show up
         for i in 0..10 {
-            kv.put("bar", i.to_string().into()).await.unwrap();
+            kv.put("bar", i.into().into()).await.unwrap();
         }
         kv.purge("foo").await.unwrap();
         let keys = kv
@@ -639,8 +639,8 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history2".to_string(),
-                description: "test_description".to_string(),
+                bucket: "history2".into(),
+                description: "test_description".into(),
                 history: 15,
                 max_age: Duration::from_millis(100),
                 storage: StorageType::File,
@@ -677,14 +677,14 @@ mod kv {
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "test".to_string(),
-                description: "test_description".to_string(),
+                bucket: "test".into(),
+                description: "test_description".into(),
                 history: 10,
                 storage: StorageType::File,
                 num_replicas: 1,
                 republish: Some(Republish {
-                    source: ">".to_string(),
-                    destination: "bar.>".to_string(),
+                    source: ">".into(),
+                    destination: "bar.>".into(),
                     headers_only: false,
                 }),
                 ..Default::default()
@@ -692,9 +692,9 @@ mod kv {
             .await
             .unwrap();
 
-        let mut subscribe = client.subscribe("bar.>".to_string()).await.unwrap();
+        let mut subscribe = client.subscribe("bar.>".into()).await.unwrap();
 
-        kv.put("key".to_string(), "data".into()).await.unwrap();
+        kv.put("key".into(), "data".into()).await.unwrap();
 
         let message = subscribe.next().await.unwrap();
         assert_eq!("bar.$KV.test.key", message.subject);
@@ -712,7 +712,7 @@ mod kv {
         // create the bucket on the HUB.
         let hub_kv = hub_js
             .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "TEST".to_string(),
+                bucket: "TEST".into(),
                 ..Default::default()
             })
             .await
@@ -721,10 +721,10 @@ mod kv {
         hub_kv.put("age", "22".into()).await.unwrap();
 
         let mirror_bucket = async_nats::jetstream::kv::Config {
-            bucket: "MIRROR".to_string(),
+            bucket: "MIRROR".into(),
             mirror: Some(Source {
-                name: "TEST".to_string(),
-                domain: Some("HUB".to_string()),
+                name: "TEST".into(),
+                domain: Some("HUB".into()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -746,7 +746,7 @@ mod kv {
         local_kv.put("name", "rip".into()).await.unwrap();
 
         let name = local_kv.get("name").await.unwrap();
-        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip".to_string());
+        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip".into());
 
         // Bind through leafnode connection but to origin KV.
         let leaf_hub_js = async_nats::jetstream::with_domain(leaf, "HUB");
@@ -755,7 +755,7 @@ mod kv {
 
         test.put("name", "ivan".into()).await.unwrap();
         let name = test.get("name").await.unwrap();
-        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan".to_string());
+        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan".into());
 
         // Shutdown HUB and test get still work.
         drop(hub_server);

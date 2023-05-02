@@ -22,13 +22,13 @@ async fn main() -> Result<(), async_nats::Error> {
     let consumer: PullConsumer = jetstream
         .create_stream(jetstream::stream::Config {
             name: stream_name,
-            subjects: vec!["events.>".to_string()],
+            subjects: vec!["events.>".into()],
             ..Default::default()
         })
         .await?
         // Then, on that `Stream` use method to create Consumer and bind to it too.
         .create_consumer(jetstream::consumer::pull::Config {
-            durable_name: Some("consumer".to_string()),
+            durable_name: Some("consumer".into()),
             ..Default::default()
         })
         .await?;
@@ -36,7 +36,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish a few messages for the example.
     for i in 0..10 {
         jetstream
-            .publish(format!("events.{i}"), "data".into())
+            .publish(format!("events.{i}").into(), "data".into())
             // The first `await` sends the publish
             .await?
             // The second `await` awaits a publish acknowledgement.

@@ -9,7 +9,7 @@ async fn main() -> Result<(), async_nats::Error> {
     tokio::task::spawn({
         let client = client.clone();
         async move {
-            let mut subscriber = client.subscribe("foo".to_string()).await?;
+            let mut subscriber = client.subscribe("foo".into()).await?;
 
             println!("Awaiting messages on foo");
             while let Some(message) = subscriber.next().await {
@@ -24,7 +24,7 @@ async fn main() -> Result<(), async_nats::Error> {
     tokio::task::spawn({
         let client = client.clone();
         async move {
-            let mut subscriber = client.subscribe("bar".to_string()).await?;
+            let mut subscriber = client.subscribe("bar".into()).await?;
 
             println!("Awaiting messages on bar");
             while let Some(message) = subscriber.next().await {
@@ -42,7 +42,7 @@ async fn main() -> Result<(), async_nats::Error> {
         async move {
             let now = Instant::now();
             for _ in 0..10_000 {
-                client.publish("foo".to_string(), "data".into()).await?;
+                client.publish("foo".into(), "data".into()).await?;
             }
             Ok::<std::time::Duration, async_nats::Error>(now.elapsed())
         }
@@ -54,7 +54,7 @@ async fn main() -> Result<(), async_nats::Error> {
         async move {
             let now = Instant::now();
             for _ in 0..10_000 {
-                client.publish("bar".to_string(), "data".into()).await?;
+                client.publish("bar".into(), "data".into()).await?;
             }
             Ok::<std::time::Duration, async_nats::Error>(now.elapsed())
         }

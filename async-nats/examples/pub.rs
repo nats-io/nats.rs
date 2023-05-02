@@ -13,10 +13,11 @@
 
 use bytes::Bytes;
 use std::time::Instant;
+use async_nats::{Subject, Error, connect};
 
 #[tokio::main]
-async fn main() -> Result<(), async_nats::Error> {
-    let client = async_nats::connect("nats://localhost:4222").await?;
+async fn main() -> Result<(), Error> {
+    let client = connect("nats://localhost:4222").await?;
 
     let now = Instant::now();
     let subject = Subject::from("foo");

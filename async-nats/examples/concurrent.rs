@@ -19,19 +19,19 @@ use std::{env, str::from_utf8, time::Duration};
 async fn main() -> Result<(), async_nats::Error> {
     // Use the NATS_URL env variable if defined, otherwise fallback
     // to the default.
-    let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
 
     let client = async_nats::connect(nats_url).await?;
 
     // `Subscriber` implements Rust iterator, so we can leverage
     // combinators like `take()` to limit the messages intended
     // to be consumed for this interaction.
-    let subscription = client.subscribe("greet.*".to_string()).await?.take(50);
+    let subscription = client.subscribe("greet.*".into()).await?.take(50);
 
     // Publish set of messages, each with order identifier.
     for i in 0..50 {
         client
-            .publish("greet.joe".to_string(), format!("hello {i}").into())
+            .publish("greet.joe".into(), format!("hello {i}").into())
             .await?;
     }
 
