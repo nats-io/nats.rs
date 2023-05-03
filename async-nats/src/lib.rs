@@ -237,7 +237,7 @@ pub(crate) enum ServerOp {
 }
 
 #[derive(Debug)]
-pub enum Command {
+pub(crate) enum Command {
     Publish {
         subject: String,
         payload: Bytes,
@@ -254,12 +254,10 @@ pub enum Command {
         sid: u64,
         max: Option<u64>,
     },
-    Ping,
     Flush {
         result: oneshot::Sender<Result<(), io::Error>>,
     },
     TryFlush,
-    Connect(ConnectInfo),
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -300,7 +298,6 @@ pub(crate) struct ConnectionHandler {
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
     pending_pings: usize,
-    max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
     flush_interval: Interval,
@@ -325,7 +322,6 @@ impl ConnectionHandler {
             connector,
             subscriptions: HashMap::new(),
             pending_pings: 0,
-            max_pings: 2,
             info_sender,
             ping_interval,
             flush_interval,
@@ -511,28 +507,6 @@ impl ConnectionHandler {
                     }
                 }
             }
-            Command::Ping => {
-                debug!(
-                    "PING command. Pending pings {}, max pings {}",
-                    self.pending_pings, self.max_pings
-                );
-                self.pending_pings += 1;
-                self.ping_interval.reset();
-
-                if self.pending_pings > self.max_pings {
-                    debug!(
-                        "pending pings {}, max pings {}. disconnecting",
-                        self.pending_pings, self.max_pings
-                    );
-                    self.handle_disconnect().await?;
-                }
-
-                if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
-                    self.handle_disconnect().await?;
-                }
-
-                self.handle_flush().await?;
-            }
             Command::Flush { result } => {
                 if let Err(_err) = self.handle_flush().await {
                     if let Err(err) = self.handle_disconnect().await {
@@ -600,15 +574,6 @@ impl ConnectionHandler {
                 while let Err(err) = self.connection.write_op(&pub_op).await {
                     self.handle_disconnect().await?;
                     error!("Sending Publish failed with {:?}", err);
-                }
-            }
-            Command::Connect(connect_info) => {
-                while let Err(_err) = self
-                    .connection
-                    .write_op(&ClientOp::Connect(connect_info.clone()))
-                    .await
-                {
-                    self.handle_disconnect().await?;
                 }
             }
         }
