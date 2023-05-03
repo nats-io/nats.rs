@@ -264,7 +264,7 @@ pub enum Command {
 
 /// `ClientOp` represents all actions of `Client`.
 #[derive(Debug)]
-pub enum ClientOp {
+pub(crate) enum ClientOp {
     Publish {
         subject: String,
         payload: Bytes,
