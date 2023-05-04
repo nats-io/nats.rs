@@ -340,6 +340,15 @@ impl ConnectionHandler {
             select! {
                 _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
+
+                    if self.pending_pings > self.max_pings {
+                        debug!(
+                            "pending pings {}, max pings {}. disconnecting",
+                            self.pending_pings, self.max_pings
+                        );
+                        self.handle_disconnect().await?;
+                    }
+
                     if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
                         self.handle_disconnect().await?;
                     }
