@@ -767,7 +767,9 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let consumer: PullConsumer = jetstream.get_consumer_from_stream("consumer", "stream").await?;
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_consumer_from_stream("consumer", "stream")
+    ///     .await?;
     ///
     /// # Ok(())
     /// # }
