@@ -131,6 +131,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
+const MAX_PENDING_PINGS: usize = 2;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -337,10 +338,10 @@ impl ConnectionHandler {
                 _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
 
-                    if self.pending_pings > self.max_pings {
+                    if self.pending_pings > MAX_PENDING_PINGS {
                         debug!(
                             "pending pings {}, max pings {}. disconnecting",
-                            self.pending_pings, self.max_pings
+                            self.pending_pings, MAX_PENDING_PINGS
                         );
                         self.handle_disconnect().await?;
                     }
