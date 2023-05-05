@@ -345,15 +345,17 @@ impl Acker {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use async_nats::jetstream::Message;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use async_nats::jetstream::Message;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
@@ -390,16 +392,18 @@ impl Acker {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use async_nats::jetstream::consumer::PullConsumer;
     /// use async_nats::jetstream::AckKind;
     /// use async_nats::jetstream::Message;
-    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
@@ -441,14 +445,16 @@ impl Acker {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::Message;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
