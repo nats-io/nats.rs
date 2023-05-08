@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use std::ops::Deref;
 use std::str::{from_utf8, Utf8Error};
+use std::fmt;
 
 /// A `Subject` is an immutable string type that guarantees valid UTF-8 contents.
 ///
@@ -52,6 +53,22 @@ impl Subject {
             bytes,
         })
     }
+
+    /// Extracts a string slice containing the entire `Subject`.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// let s = Subject::from("foo");
+    ///
+    /// assert_eq!("foo", s.as_str());
+    /// ```
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        self
+    }
 }
 
 impl<'a> From<&'a str> for Subject {
@@ -86,5 +103,11 @@ impl Deref for Subject {
         // and `from_utf8` methods. In both cases, the input is either checked for UTF-8 validity or
         // known to be valid UTF-8 as a static string.
         unsafe { std::str::from_utf8_unchecked(&self.bytes) }
+    }
+}
+
+impl fmt::Display for Subject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
