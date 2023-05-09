@@ -15,6 +15,7 @@ use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures::Future;
+use std::cmp;
 use std::fmt::Formatter;
 use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 use tokio::io;
@@ -58,6 +59,7 @@ pub struct ConnectOptions {
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
+    pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -114,6 +116,15 @@ impl Default for ConnectOptions {
             ignore_discovered_servers: false,
             retain_servers_order: false,
             read_buffer_capacity: 65535,
+            reconnect_delay_callback: Box::new(|attempts| {
+                if attempts <= 1 {
+                    Duration::from_millis(0)
+                } else {
+                    let exp: u32 = (attempts - 1).try_into().unwrap_or(std::u32::MAX);
+                    let max = Duration::from_secs(4);
+                    cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+                }
+            }),
         }
     }
 }
@@ -565,6 +576,30 @@ impl ConnectOptions {
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
         self.event_callback = CallbackArg1::<Event, ()>(Box::new(move |event| Box::pin(cb(event))));
+        self
+    }
+
+    /// Registers a callback for a custom reconnect delay handler that can be used to define a backoff duration strategy.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .reconnect_delay_callback(|attempts| {
+    ///         println!("no of attempts: {attempts}");
+    ///         std::time::Duration::from_millis(std::cmp::min((attempts * 100) as u64, 8000))
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reconnect_delay_callback<F>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn(usize) -> Duration + Send + Sync + 'static,
+    {
+        self.reconnect_delay_callback = Box::new(cb);
         self
     }
 

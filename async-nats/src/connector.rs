@@ -34,7 +34,6 @@ use base64::engine::Engine;
 use bytes::BytesMut;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use std::cmp;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -58,6 +57,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
+    pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -113,15 +113,10 @@ impl Connector {
         }
 
         for (server_addr, _) in servers {
-            let duration = if self.attempts == 0 {
-                Duration::from_millis(0)
-            } else {
-                let exp: u32 = (self.attempts - 1).try_into().unwrap_or(std::u32::MAX);
-                let max = Duration::from_secs(4);
-                cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
-            };
-
             self.attempts += 1;
+
+            let duration = (self.options.reconnect_delay_callback)(self.attempts);
+
             sleep(duration).await;
 
             let socket_addrs = server_addr
