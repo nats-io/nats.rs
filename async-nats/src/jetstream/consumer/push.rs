@@ -36,7 +36,7 @@ use std::{
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 impl Consumer<Config> {
     /// Returns a stream of messages for Push Consumer.
@@ -551,6 +551,9 @@ impl<'a> futures::Stream for Ordered<'a> {
             if self.subscriber.is_none() {
                 match self.subscriber_future.as_mut() {
                     None => {
+                        trace!(
+                            "subscriber and subscriber future are None. Recreating the consumer"
+                        );
                         let context = self.context.clone();
                         let sequence = self.stream_sequence.clone();
                         let config = self.consumer.config.clone();
@@ -597,7 +600,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         debug!("received idle heartbeats");
                                         if let Some(headers) = message.headers.as_ref() {
                                             if let Some(sequence) =
-                                                headers.get(crate::header::NATS_LAST_STREAM)
+                                                headers.get(crate::header::NATS_LAST_CONSUMER)
                                             {
                                                 let sequence: u64 = sequence
                                                     .iter().next().unwrap()
@@ -609,13 +612,17 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                                ))?;
 
                                                 if sequence
-                                                    != self.stream_sequence.load(Ordering::Relaxed)
+                                                    != self
+                                                        .consumer_sequence
+                                                        .load(Ordering::Relaxed)
                                                 {
+                                                    debug!("hearbeats sequence mismatch. resetting consumer");
                                                     self.subscriber = None;
                                                 }
                                             }
                                         }
                                         if let Some(subject) = message.reply {
+                                            warn!("got message with reply subject for ordered consumer");
                                             // TODO store pending_publish as a future and return errors from it
                                             let client = self.context.client.clone();
                                             tokio::task::spawn(async move {
@@ -627,10 +634,12 @@ impl<'a> futures::Stream for Ordered<'a> {
                                         }
                                         continue;
                                     }
-                                    Some(_) => {
+                                    Some(status) => {
+                                        debug!("received status message: {}", status);
                                         continue;
                                     }
                                     None => {
+                                        trace!("received a message");
                                         let jetstream_message = jetstream::message::Message {
                                             message,
                                             context: self.context.clone(),
@@ -644,8 +653,6 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                info.stream_sequence);
                                         if info.consumer_sequence
                                             != self.consumer_sequence.load(Ordering::Relaxed) + 1
-                                            && info.stream_sequence
-                                                != self.stream_sequence.load(Ordering::Relaxed) + 1
                                         {
                                             debug!(
                                                 "ordered consumer mismatch. current {}, info: {}",
@@ -653,6 +660,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                 info.consumer_sequence
                                             );
                                             self.subscriber = None;
+                                            self.consumer_sequence.store(0, Ordering::Relaxed);
                                             continue;
                                         }
                                         self.stream_sequence
@@ -664,7 +672,6 @@ impl<'a> futures::Stream for Ordered<'a> {
                                 }
                             }
                             None => {
-                                debug!("received None from subscription");
                                 return Poll::Ready(None);
                             }
                         }

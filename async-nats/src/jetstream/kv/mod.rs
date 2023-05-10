@@ -24,6 +24,7 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use tracing::debug;
 
 use crate::{header, jetstream::response, Error, Message};
 
@@ -435,6 +436,7 @@ impl Store {
     ) -> Result<Watch<'_>, Error> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
+        debug!("initial consumer creation");
         let consumer = self
             .stream
             .create_consumer(super::consumer::push::OrderedConfig {
