@@ -119,6 +119,8 @@ pub struct Info {
     pub version: String,
     /// All service endpoints.
     pub subjects: Vec<String>,
+    /// Additional metadata
+    pub metadata: HashMap<String, String>,
 }
 
 /// Schema of requests and responses.
@@ -145,6 +147,8 @@ pub struct Config {
     pub schema: Option<Schema>,
     /// Custom handler for providing the `EndpointStats.data` value.
     pub stats_handler: Option<StatsHandler>,
+    /// Additional service metadata
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 pub struct ServiceBuilder {
@@ -152,6 +156,7 @@ pub struct ServiceBuilder {
     description: Option<String>,
     schema: Option<Schema>,
     stats_handler: Option<StatsHandler>,
+    metadata: Option<HashMap<String, String>>,
 }
 
 impl ServiceBuilder {
@@ -161,6 +166,7 @@ impl ServiceBuilder {
             description: None,
             schema: None,
             stats_handler: None,
+            metadata: None,
         }
     }
 
@@ -185,6 +191,12 @@ impl ServiceBuilder {
         self
     }
 
+    /// Adds additional metadata.
+    pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
     /// Stats the service with configured options.
     pub async fn start<S: ToString>(self, name: S, version: S) -> Result<Service, Error> {
         Service::add(
@@ -195,6 +207,7 @@ impl ServiceBuilder {
                 description: self.description,
                 schema: self.schema,
                 stats_handler: self.stats_handler,
+                metadata: self.metadata,
             },
         )
         .await
@@ -240,6 +253,7 @@ pub trait ServiceExt {
     ///         schema: None,
     ///         description: None,
     ///         stats_handler: None,
+    ///         metadata: None,
     ///     })
     ///     .await?;
     ///
@@ -312,6 +326,7 @@ impl ServiceExt for crate::Client {
 ///         schema: None,
 ///         description: None,
 ///         stats_handler: None,
+///         metadata: None,
 ///     })
 ///     .await?;
 ///
@@ -416,6 +431,7 @@ impl Service {
             description: config.description.clone(),
             version: config.version.clone(),
             subjects: Vec::default(),
+            metadata: config.metadata.clone().unwrap_or_default(),
         };
 
         let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
@@ -450,6 +466,7 @@ impl Service {
                 "name": config.name.clone(),
                 "id": id.clone(),
                 "version": config.version.clone(),
+                "metadata": config.metadata.clone(),
             }))
             .map(Bytes::from)?;
             async move {
@@ -698,15 +715,16 @@ impl Request {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::service::ServiceExt;
+    /// use futures::StreamExt;
     /// # let client = async_nats::connect("demo.nats.io").await?;
     /// # let mut service = client.add_service(async_nats::service::Config {
     /// #     name: "generator".to_string(),
     /// #     version: "1.0.0".to_string(),
     /// #     schema: None,
     /// #     description: None,
-    ///     stats_handler: None,
+    /// #    stats_handler: None,
+    /// #    metadata: None,
     /// # }).await?;
     ///
     /// let mut endpoint = service.endpoint("endpoint").await?;

@@ -13,9 +13,9 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::str::from_utf8;
+    use std::{collections::HashMap, str::from_utf8};
 
-    use async_nats::service::{Info, ServiceExt, StatsResponse};
+    use async_nats::service::{self, Info, ServiceExt, StatsResponse};
     use futures::StreamExt;
     use tracing::debug;
 
@@ -31,6 +31,7 @@ mod service {
                 version: "1.0.0.1".to_string(),
                 schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap_err()
@@ -47,6 +48,7 @@ mod service {
                 version: "beta-1.0.0".to_string(),
                 schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap_err()
@@ -63,6 +65,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap_err()
@@ -79,6 +82,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap_err()
@@ -86,6 +90,44 @@ mod service {
             .unwrap()
             .kind();
         assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
+    }
+
+    #[tokio::test]
+    async fn metadata() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let metadata = HashMap::from([
+            ("key".to_string(), "value".to_string()),
+            ("other".to_string(), "value".to_string()),
+        ]);
+        client
+            .add_service(async_nats::service::Config {
+                name: "serviceA".to_string(),
+                description: None,
+                version: "1.0.0".to_string(),
+                schema: None,
+                stats_handler: None,
+                metadata: Some(metadata.clone()),
+            })
+            .await
+            .unwrap();
+
+        let reply = client.new_inbox();
+        let mut responses = client.subscribe(reply.clone()).await.unwrap();
+        client
+            .publish_with_reply("$SRV.INFO".to_string(), reply, "".into())
+            .await
+            .unwrap();
+        let response = responses
+            .next()
+            .await
+            .map(|message| {
+                serde_json::from_slice::<service::Info>(&message.payload)
+                    .unwrap()
+                    .metadata
+            })
+            .unwrap();
+        assert_eq!(metadata, response);
     }
 
     #[tokio::test]
@@ -99,6 +141,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -110,6 +153,7 @@ mod service {
                 version: "2.0.0".to_string(),
                 schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -136,6 +180,7 @@ mod service {
                 schema: None,
                 description: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -175,6 +220,7 @@ mod service {
                 schema: None,
                 description: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
