@@ -134,3 +134,4 @@ DNS
 RequestErrorKind
 rustls
 Acker
+EndpointSchema

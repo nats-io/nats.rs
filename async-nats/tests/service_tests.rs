@@ -15,9 +15,10 @@
 mod service {
     use std::{collections::HashMap, str::from_utf8};
 
-    use async_nats::service::{self, Info, ServiceExt, StatsResponse};
+    use async_nats::service::{self, Info, Schema, ServiceExt, StatsResponse};
     use futures::StreamExt;
     use tracing::debug;
+    use url::Url;
 
     #[tokio::test]
     async fn service_config_validations() {
@@ -25,14 +26,8 @@ mod service {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         // not semver compatible version string.
         let err_kind = client
-            .add_service(async_nats::service::Config {
-                name: "serviceA".to_string(),
-                description: None,
-                version: "1.0.0.1".to_string(),
-                schema: None,
-                stats_handler: None,
-                metadata: None,
-            })
+            .service_builder()
+            .start("serviceA", "1.0.0.1")
             .await
             .unwrap_err()
             .downcast::<std::io::Error>()
@@ -42,14 +37,8 @@ mod service {
 
         // not semver compatible version string.
         let err_kind = client
-            .add_service(async_nats::service::Config {
-                name: "serviceB".to_string(),
-                description: None,
-                version: "beta-1.0.0".to_string(),
-                schema: None,
-                stats_handler: None,
-                metadata: None,
-            })
+            .service_builder()
+            .start("serviceB", "beta-1.0.0")
             .await
             .unwrap_err()
             .downcast::<std::io::Error>()
@@ -66,6 +55,7 @@ mod service {
                 schema: None,
                 stats_handler: None,
                 metadata: None,
+                api_url: None,
             })
             .await
             .unwrap_err()
@@ -83,6 +73,7 @@ mod service {
                 schema: None,
                 stats_handler: None,
                 metadata: None,
+                api_url: None,
             })
             .await
             .unwrap_err()
@@ -93,41 +84,82 @@ mod service {
     }
 
     #[tokio::test]
-    async fn metadata() {
+    async fn options() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let metadata = HashMap::from([
             ("key".to_string(), "value".to_string()),
             ("other".to_string(), "value".to_string()),
         ]);
+        let endpoint_metadata = HashMap::from([("endpoint".to_string(), "endpoint".to_string())]);
+
         client
-            .add_service(async_nats::service::Config {
-                name: "serviceA".to_string(),
-                description: None,
-                version: "1.0.0".to_string(),
-                schema: None,
-                stats_handler: None,
-                metadata: Some(metadata.clone()),
-            })
+            .service_builder()
+            .metadata(metadata.clone())
+            .api_url(Url::try_from("http://example.com").unwrap())
+            .start("serviceA", "1.0.0")
+            .await
+            .unwrap()
+            .endpoint_builder()
+            .name("name")
+            .metadata(endpoint_metadata.clone())
+            .schema("request", "response")
+            .add("products")
             .await
             .unwrap();
+
+        let info_reply = client.new_inbox();
+        let mut infos = client.subscribe(info_reply.clone()).await.unwrap();
+        client
+            .publish_with_reply("$SRV.INFO".to_string(), info_reply, "".into())
+            .await
+            .unwrap();
+        let info = infos
+            .next()
+            .await
+            .map(|message| serde_json::from_slice::<service::Info>(&message.payload).unwrap())
+            .unwrap();
+        assert_eq!(metadata, info.metadata);
+        //TODO: test rest of fields
+
+        let schema_reply = client.new_inbox();
+        let mut schemas = client.subscribe(schema_reply.clone()).await.unwrap();
+        client
+            .publish_with_reply("$SRV.SCHEMA".to_string(), schema_reply, "".into())
+            .await
+            .unwrap();
+        let schema = schemas
+            .next()
+            .await
+            .map(|message| {
+                serde_json::from_slice::<service::SchemaResponse>(&message.payload).unwrap()
+            })
+            .unwrap();
+        assert_eq!(
+            schema.endpoints.first().unwrap().schema.clone().unwrap(),
+            Schema {
+                request: "request".to_string(),
+                response: "response".to_string(),
+            }
+        );
 
         let reply = client.new_inbox();
         let mut responses = client.subscribe(reply.clone()).await.unwrap();
         client
-            .publish_with_reply("$SRV.INFO".to_string(), reply, "".into())
+            .publish_with_reply("$SRV.STATS".to_string(), reply, "".into())
             .await
             .unwrap();
-        let response = responses
+
+        let mut stats = responses
             .next()
             .await
             .map(|message| {
-                serde_json::from_slice::<service::Info>(&message.payload)
-                    .unwrap()
-                    .metadata
+                serde_json::from_slice::<service::StatsResponse>(&message.payload).unwrap()
             })
             .unwrap();
-        assert_eq!(metadata, response);
+
+        let endpoint_stats = stats.endpoints.pop().unwrap();
+        assert_eq!(endpoint_stats.metadata, endpoint_metadata);
     }
 
     #[tokio::test]
@@ -142,6 +174,7 @@ mod service {
                 schema: None,
                 stats_handler: None,
                 metadata: None,
+                api_url: None,
             })
             .await
             .unwrap();
@@ -154,6 +187,7 @@ mod service {
                 schema: None,
                 stats_handler: None,
                 metadata: None,
+                api_url: None,
             })
             .await
             .unwrap();
@@ -181,6 +215,7 @@ mod service {
                 description: None,
                 stats_handler: None,
                 metadata: None,
+                api_url: None,
             })
             .await
             .unwrap();
@@ -221,6 +256,7 @@ mod service {
                 description: None,
                 stats_handler: None,
                 metadata: None,
+                api_url: None,
             })
             .await
             .unwrap();
