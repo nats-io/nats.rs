@@ -33,8 +33,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
 use time::OffsetDateTime;
-use tokio::task::JoinHandle;
+use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::{debug, trace};
+use url::Url;
 
 use crate::{Client, Error, HeaderMap, Message, PublishError, Subscriber};
 
@@ -72,6 +73,7 @@ pub struct StatsResponse {
     pub version: String,
     #[serde(with = "rfc3339")]
     pub started: OffsetDateTime,
+    /// Statistics of all endpoints.
     pub endpoints: Vec<EndpointStats>,
 }
 
@@ -82,8 +84,12 @@ pub struct EndpointStats {
     // Response type.
     #[serde(rename = "type")]
     pub response_type: String,
-    /// Service name.
+    /// Endpoint name.
     pub name: String,
+    /// The subject on which the endpoint is registered
+    pub subject: String,
+    /// Endpoint specific metadata
+    pub metadata: HashMap<String, String>,
     /// Number of requests handled.
     #[serde(rename = "num_requests")]
     pub requests: usize,
@@ -100,6 +106,9 @@ pub struct EndpointStats {
     pub last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
     pub data: String,
+    /// EndpointSchema
+    #[serde(skip)]
+    pub schema: Option<Schema>,
 }
 
 /// Information about service instance.
@@ -125,7 +134,7 @@ pub struct Info {
 
 /// Schema of requests and responses.
 /// Currently, it does not do anything except providing information.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Schema {
     /// A string/url describing the format of the request payload can be JSON schema etc.
     pub request: String,
@@ -149,6 +158,8 @@ pub struct Config {
     pub stats_handler: Option<StatsHandler>,
     /// Additional service metadata
     pub metadata: Option<HashMap<String, String>>,
+    /// A valid URL pointing to API specification (may contain schemas, paths etc.)
+    pub api_url: Option<url::Url>,
 }
 
 pub struct ServiceBuilder {
@@ -157,6 +168,7 @@ pub struct ServiceBuilder {
     schema: Option<Schema>,
     stats_handler: Option<StatsHandler>,
     metadata: Option<HashMap<String, String>>,
+    api_url: Option<Url>,
 }
 
 impl ServiceBuilder {
@@ -167,6 +179,7 @@ impl ServiceBuilder {
             schema: None,
             stats_handler: None,
             metadata: None,
+            api_url: None,
         }
     }
 
@@ -197,6 +210,12 @@ impl ServiceBuilder {
         self
     }
 
+    /// Adds API URL.
+    pub fn api_url(mut self, api_url: Url) -> Self {
+        self.api_url = Some(api_url);
+        self
+    }
+
     /// Stats the service with configured options.
     pub async fn start<S: ToString>(self, name: S, version: S) -> Result<Service, Error> {
         Service::add(
@@ -208,6 +227,7 @@ impl ServiceBuilder {
                 schema: self.schema,
                 stats_handler: self.stats_handler,
                 metadata: self.metadata,
+                api_url: self.api_url,
             },
         )
         .await
@@ -254,6 +274,7 @@ pub trait ServiceExt {
     ///         description: None,
     ///         stats_handler: None,
     ///         metadata: None,
+    ///         api_url: None,
     ///     })
     ///     .await?;
     ///
@@ -327,6 +348,7 @@ impl ServiceExt for crate::Client {
 ///         description: None,
 ///         stats_handler: None,
 ///         metadata: None,
+///         api_url: None,
 ///     })
 ///     .await?;
 ///
@@ -362,6 +384,7 @@ pub struct Group {
     stats: Arc<Mutex<Stats>>,
     client: Client,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    subjects: Arc<Mutex<Vec<String>>>,
 }
 
 impl Group {
@@ -371,37 +394,27 @@ impl Group {
             stats: self.stats.clone(),
             client: self.client.clone(),
             shutdown_tx: self.shutdown_tx.clone(),
+            subjects: self.subjects.clone(),
         }
     }
     pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
-        let subject = subject.to_string();
-        let requests = self
-            .client
-            .queue_subscribe(
-                format!("{}.{subject}", self.prefix),
-                QUEUE_GROUP.to_string(),
-            )
-            .await?;
-        debug!("created service for endpoint {}.{subject}", self.prefix);
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.stats.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
+        .add(format!("{}.{}", self.prefix, subject.to_string()))
+        .await
+    }
 
-        let shutdown_rx = self.shutdown_tx.subscribe();
-
-        let mut stats = self.stats.lock().unwrap();
-        stats
-            .endpoints
-            .entry(subject.clone())
-            .or_insert(EndpointStats {
-                name: subject.clone(),
-                ..Default::default()
-            });
-        Ok(Endpoint {
-            requests,
-            stats: self.stats.clone(),
-            client: self.client.clone(),
-            endpoint: subject,
-            shutdown: Some(shutdown_rx),
-            shutdown_future: None,
-        })
+    pub fn endpoint_builder<S: ToString>(&self) -> EndpointBuilder {
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.stats.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
     }
 }
 
@@ -461,14 +474,7 @@ impl Service {
             let subjects = subjects.clone();
             let endpoint_stats = endpoint_stats.clone();
             let client = client.clone();
-            let schema_json = serde_json::to_vec(&json!({
-                "type": "io.nats.micro.v1.schema_response",
-                "name": config.name.clone(),
-                "id": id.clone(),
-                "version": config.version.clone(),
-                "metadata": config.metadata.clone(),
-            }))
-            .map(Bytes::from)?;
+            let api_url = config.api_url;
             async move {
                 loop {
                     tokio::select! {
@@ -492,8 +498,29 @@ impl Service {
                             client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
                         },
                         Some(schema_request) = schemas.next() => {
-                            client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
-                        },
+                            let endpoints_schema: Vec<EndpointSchema> = endpoint_stats
+                                .lock()
+                                .unwrap()
+                                .endpoints
+                                .iter_mut()
+                                .map(|(k, v)| EndpointSchema {
+                                    name: k.to_owned(),
+                                    subject: v.subject.to_owned(),
+                                    metadata: v.metadata.clone(),
+                                    schema: v.schema.clone(),
+                                })
+                                .collect();
+                            let schema_json = serde_json::to_vec(&SchemaResponse {
+                                response_type: "io.nats.micro.v1.schema".to_string(),
+                                name: info.name.clone(),
+                                id: info.id.clone(),
+                                version: info.version.clone(),
+                                api_url: api_url.clone(),
+                                endpoints: endpoints_schema,
+                            })
+                            .map(Bytes::from)?;
+                                            client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
+                                        },
                         Some(stats_request) = stats.next() => {
                             if let Some(stats_callback) = stats_callback.as_mut() {
 
@@ -503,7 +530,6 @@ impl Service {
                                     value.data = data;
                                 }
                             }
-
                             let stats = serde_json::to_vec(&StatsResponse {
                                 response_type: "io.nats.micro.v1.stats_response".to_string(),
                                 name: info.name.clone(),
@@ -661,39 +687,31 @@ impl Service {
 
     pub fn group<S: ToString>(&self, prefix: S) -> Group {
         Group {
+            subjects: self.subjects.clone(),
             prefix: prefix.to_string(),
             stats: self.stats.clone(),
             client: self.client.clone(),
             shutdown_tx: self.shutdown_tx.clone(),
         }
     }
+    pub fn endpoint_builder(&self) -> EndpointBuilder {
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.stats.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
+    }
+
     pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
-        let subject = subject.to_string();
-        let requests = self
-            .client
-            .queue_subscribe(subject.clone(), QUEUE_GROUP.to_string())
-            .await?;
-        debug!("created service for endpoint {subject}");
-
-        let shutdown_rx = self.shutdown_tx.subscribe();
-
-        let mut stats = self.stats.lock().unwrap();
-        stats
-            .endpoints
-            .entry(subject.clone())
-            .or_insert(EndpointStats {
-                name: subject.clone(),
-                ..Default::default()
-            });
-        self.subjects.lock().unwrap().push(subject.clone());
-        Ok(Endpoint {
-            requests,
-            stats: self.stats.clone(),
-            client: self.client.clone(),
-            endpoint: subject,
-            shutdown: Some(shutdown_rx),
-            shutdown_future: None,
-        })
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.stats.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
+        .add(subject)
+        .await
     }
 }
 
@@ -725,6 +743,7 @@ impl Request {
     /// #     description: None,
     /// #    stats_handler: None,
     /// #    metadata: None,
+    ///         api_url: None,
     /// # }).await?;
     ///
     /// let mut endpoint = service.endpoint("endpoint").await?;
@@ -765,4 +784,102 @@ impl Request {
         stats.average_processing_time = stats.processing_time.checked_div(2).unwrap();
         result
     }
+}
+
+#[derive(Debug)]
+pub struct EndpointBuilder {
+    client: Client,
+    stats: Arc<Mutex<Stats>>,
+    shutdown_tx: Sender<()>,
+    name: Option<String>,
+    metadata: Option<HashMap<String, String>>,
+    schema: Option<Schema>,
+    subjects: Arc<Mutex<Vec<String>>>,
+}
+
+impl EndpointBuilder {
+    fn new(
+        client: Client,
+        stats: Arc<Mutex<Stats>>,
+        shutdown_tx: Sender<()>,
+        subjects: Arc<Mutex<Vec<String>>>,
+    ) -> EndpointBuilder {
+        EndpointBuilder {
+            client,
+            stats,
+            subjects,
+            shutdown_tx,
+            name: None,
+            metadata: None,
+            schema: None,
+        }
+    }
+
+    pub fn name<S: ToString>(mut self, name: S) -> EndpointBuilder {
+        self.name = Some(name.to_string());
+        self
+    }
+    pub fn metadata(mut self, metadata: HashMap<String, String>) -> EndpointBuilder {
+        self.metadata = Some(metadata);
+        self
+    }
+    pub fn schema<S: ToString>(mut self, request: S, response: S) -> EndpointBuilder {
+        self.schema = Some(Schema {
+            request: request.to_string(),
+            response: response.to_string(),
+        });
+        self
+    }
+
+    pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, Error> {
+        let subject = subject.to_string();
+        let name = self.name.clone().unwrap_or_else(|| subject.clone());
+        let requests = self
+            .client
+            .queue_subscribe(subject.clone(), QUEUE_GROUP.to_string())
+            .await?;
+        debug!("created service for endpoint {subject}");
+
+        let shutdown_rx = self.shutdown_tx.subscribe();
+
+        let mut stats = self.stats.lock().unwrap();
+        stats
+            .endpoints
+            .entry(subject.clone())
+            .or_insert(EndpointStats {
+                name,
+                metadata: self.metadata.unwrap_or_default(),
+                schema: self.schema,
+                ..Default::default()
+            });
+        self.subjects.lock().unwrap().push(subject.clone());
+        Ok(Endpoint {
+            requests,
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            endpoint: subject.clone(),
+            shutdown: Some(shutdown_rx),
+            shutdown_future: None,
+        })
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SchemaResponse {
+    #[serde(rename = "type")]
+    pub response_type: String,
+    pub name: String,
+    pub id: String,
+    pub version: String,
+    #[serde(default)]
+    pub api_url: Option<Url>,
+    pub endpoints: Vec<EndpointSchema>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct EndpointSchema {
+    pub name: String,
+    pub subject: String,
+    pub metadata: HashMap<String, String>,
+    pub schema: Option<Schema>,
 }
