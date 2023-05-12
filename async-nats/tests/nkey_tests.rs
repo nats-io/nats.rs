@@ -22,7 +22,6 @@ mod client {
 
         let nc = async_nats::ConnectOptions::new()
             .with_nkey(SECRET_SEED.into())
-            .unwrap()
             .connect(s.client_url())
             .await
             .unwrap();
@@ -45,7 +44,6 @@ mod client {
 
         let client = async_nats::ConnectOptions::new()
             .with_nkey(SECRET_SEED.into())
-            .unwrap()
             .connect(
                 servers
                     .iter()

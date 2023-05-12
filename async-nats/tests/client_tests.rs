@@ -391,7 +391,6 @@ mod client {
         let server = nats_server::run_server("tests/configs/token.conf");
         let client = async_nats::ConnectOptions::new()
             .with_token("s3cr3t".into())
-            .unwrap()
             .connect(server.client_url())
             .await
             .unwrap();
@@ -407,7 +406,6 @@ mod client {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
         let client = async_nats::ConnectOptions::new()
             .with_user_and_password("derek".into(), "s3cr3t".into())
-            .unwrap()
             .connect(server.client_url())
             .await
             .unwrap();
@@ -434,7 +432,6 @@ mod client {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
         let err = async_nats::ConnectOptions::new()
             .with_user_and_password("derek".into(), "bad_password".into())
-            .unwrap()
             .connect(server.client_url())
             .await
             .unwrap_err();
@@ -796,7 +793,6 @@ mod client {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let _ = ConnectOptions::new()
             .with_user_and_password("js".into(), "js".into())
-            .unwrap()
             .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
@@ -833,9 +829,7 @@ mod client {
         // multiple auth methods
         let client = async_nats::ConnectOptions::new()
             .with_user_and_password("js".into(), "js".into())
-            .unwrap()
             .with_token("s3cr3t".into())
-            .unwrap()
             .with_credentials_file(path.join("tests/configs/TestUser.creds"))
             .await
             .unwrap()
@@ -858,22 +852,5 @@ mod client {
             drop(servers.remove(0));
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
-    }
-
-    #[tokio::test]
-    async fn multiple_auth_methods_mutually_exclusive() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-        let nkey_secret_seed: &str = "SUACH75SWCM5D2JMJM6EKLR2WDARVGZT4QC6LX3AGHSWOMVAKERABBBRWM";
-
-        // multiple auth methods that are mutually exclusive - you shouldn't be able to mix nkey and jwt
-        let client = async_nats::ConnectOptions::new()
-            .with_credentials_file(path.join("tests/configs/TestUser.creds"))
-            .await
-            .unwrap()
-            .with_nkey(nkey_secret_seed.into());
-
-        // we should get back an error
-        assert!(client.is_err());
     }
 }

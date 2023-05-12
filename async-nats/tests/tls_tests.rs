@@ -34,7 +34,6 @@ mod client {
 
         async_nats::ConnectOptions::new()
             .with_user_and_password("derek".into(), "porkchop".into())
-            .unwrap()
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
             .add_client_certificate(
                 path.join("tests/configs/certs/client-cert.pem"),
@@ -54,7 +53,6 @@ mod client {
 
         async_nats::ConnectOptions::new()
             .with_user_and_password("derek".into(), "porkchop".into())
-            .unwrap()
             .add_root_certificates(path.join("tests/configs/certs/ip-ca.pem"))
             .require_tls(true)
             .connect(format!("tls://127.0.0.1:{}", server.client_port()))
@@ -68,7 +66,6 @@ mod client {
 
         async_nats::ConnectOptions::new()
             .with_user_and_password("derek".into(), "porkchop".into())
-            .unwrap()
             .require_tls(true)
             .connect(server.client_url())
             .await
@@ -85,7 +82,6 @@ mod client {
             tokio::time::Duration::from_secs(10),
             async_nats::ConnectOptions::new()
                 .with_user_and_password("derek".into(), "porkchop".into())
-                .unwrap()
                 .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
                 .add_client_certificate(
                     path.join("tests/configs/certs/client-all.pem"),

@@ -887,12 +887,6 @@ impl From<std::io::Error> for ConnectError {
     }
 }
 
-impl From<AuthError> for ConnectError {
-    fn from(err: AuthError) -> Self {
-        ConnectError::with_source(ConnectErrorKind::Authentication, err)
-    }
-}
-
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
 /// Implements [futures::stream::Stream] for ergonomic async message processing.

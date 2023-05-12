@@ -181,15 +181,15 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_token("t0k3n!".into())?
+    ///     .with_token("t0k3n!".into())
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_token(mut self, token: String) -> Result<Self, AuthError> {
+    pub fn with_token(mut self, token: String) -> Self {
         self.authorizations.push(Authorization::Token(token));
-        Ok(self)
+        self
     }
 
     /// Auth against NATS Server with provided username and password.
@@ -199,16 +199,16 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_user_and_password("derek".into(), "s3cr3t!".into())?
+    ///     .with_user_and_password("derek".into(), "s3cr3t!".into())
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_user_and_password(mut self, user: String, pass: String) -> Result<Self, AuthError> {
+    pub fn with_user_and_password(mut self, user: String, pass: String) -> Self {
         self.authorizations
             .push(Authorization::UserAndPassword(user, pass));
-        Ok(self)
+        self
     }
 
     /// Authenticate with a NKey. Requires NKey Seed secret.
@@ -219,26 +219,15 @@ impl ConnectOptions {
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_nkey(seed.into())?
+    ///     .with_nkey(seed.into())
     ///     .connect("localhost")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_nkey(mut self, seed: String) -> Result<Self, AuthError> {
-        // make sure that NKey is not used together with JWT
-        if self
-            .authorizations
-            .iter()
-            .any(|x| matches!(x, Authorization::Jwt(_, _)))
-        {
-            return Err(AuthError::new(
-                "cannot mix NKey with JWT as authorization methods",
-            ));
-        }
-
+    pub fn with_nkey(mut self, seed: String) -> Self {
         self.authorizations.push(Authorization::NKey(seed));
-        Ok(self)
+        self
     }
 
     /// Authenticate with a JWT. Requires function to sign the server nonce.
@@ -259,31 +248,20 @@ impl ConnectOptions {
     ///     .with_jwt(jwt, move |nonce| {
     ///         let key_pair = key_pair.clone();
     ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
-    ///     })?
+    ///     })
     ///     .connect("localhost")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Result<Self, AuthError>
+    pub fn with_jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Self
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
     {
-        // make sure that JWT is not used together with NKey
-        if self
-            .authorizations
-            .iter()
-            .any(|x| matches!(x, Authorization::NKey(_)))
-        {
-            return Err(AuthError::new(
-                "cannot mix JWT with NKey as authorization methods",
-            ));
-        }
-
         let jwt_auth = Self::generate_jwt_auth(jwt, sign_cb);
         self.authorizations.push(jwt_auth);
-        Ok(self)
+        self
     }
 
     fn generate_jwt_auth<F, Fut>(jwt: String, sign_cb: F) -> Authorization
