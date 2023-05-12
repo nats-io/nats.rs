@@ -142,7 +142,7 @@ use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) mod auth_utils;
-mod client;
+pub mod client;
 pub mod connection;
 mod connector;
 mod options;
