@@ -57,7 +57,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_initial_connect: bool,
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
-    pub(crate) receive_buffer_capacity: usize,
+    pub(crate) read_buffer_capacity: u16,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -79,7 +79,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
-            .entry(&"receive_buffer_capacity", &self.receive_buffer_capacity)
+            .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
             .finish()
     }
 }
@@ -113,7 +113,7 @@ impl Default for ConnectOptions {
             retry_on_initial_connect: false,
             ignore_discovered_servers: false,
             retain_servers_order: false,
-            receive_buffer_capacity: 65535,
+            read_buffer_capacity: 65535,
         }
     }
 }
@@ -631,12 +631,12 @@ impl ConnectOptions {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    /// async_nats::ConnectOptions::new().receive_buffer_capacity(65535).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new().read_buffer_capacity(65535).connect("demo.nats.io").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn receive_buffer_capacity(mut self, size: usize) -> ConnectOptions {
-        self.receive_buffer_capacity = size;
+    pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
+        self.read_buffer_capacity = size;
         self
     }
 }

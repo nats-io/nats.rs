@@ -689,7 +689,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             name: options.name,
             ignore_discovered_servers: options.ignore_discovered_servers,
             retain_servers_order: options.retain_servers_order,
-            receive_buffer_capacity: options.receive_buffer_capacity,
+            read_buffer_capacity: options.read_buffer_capacity,
         },
         events_tx,
         state_tx,

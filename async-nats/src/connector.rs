@@ -57,7 +57,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) name: Option<String>,
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
-    pub(crate) receive_buffer_capacity: usize,
+    pub(crate) read_buffer_capacity: u16,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -278,7 +278,7 @@ impl Connector {
 
         let mut connection = Connection {
             stream: Box::new(BufWriter::new(tcp_stream)),
-            buffer: BytesMut::with_capacity(self.options.receive_buffer_capacity),
+            buffer: BytesMut::with_capacity(self.options.read_buffer_capacity.into()),
         };
 
         let op = connection.read_op().await?;
