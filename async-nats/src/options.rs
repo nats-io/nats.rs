@@ -631,7 +631,10 @@ impl ConnectOptions {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    /// async_nats::ConnectOptions::new().read_buffer_capacity(65535).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .read_buffer_capacity(65535)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
