@@ -58,6 +58,7 @@ pub struct ConnectOptions {
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
+    pub(crate) write_buffer_capacity: u16,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -80,6 +81,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
             .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
+            .entry(&"write_buffer_capacity", &self.write_buffer_capacity)
             .finish()
     }
 }
@@ -114,6 +116,7 @@ impl Default for ConnectOptions {
             ignore_discovered_servers: false,
             retain_servers_order: false,
             read_buffer_capacity: 65535,
+            write_buffer_capacity: 65535,
         }
     }
 }
@@ -693,6 +696,25 @@ impl ConnectOptions {
     /// ```
     pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
         self.read_buffer_capacity = size;
+        self
+    }
+
+    /// Sets the capacity of the write buffer, this is the number of bytes that are buffered before a
+    /// network flush is forced.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new()
+    ///     .write_buffer_capacity(65535)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn write_buffer_capacity(mut self, size: u16) -> ConnectOptions {
+        self.write_buffer_capacity = size;
         self
     }
 }

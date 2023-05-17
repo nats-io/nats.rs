@@ -58,6 +58,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
+    pub(crate) write_buffer_capacity: u16,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -277,7 +278,10 @@ impl Connector {
         tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection {
-            stream: Box::new(BufWriter::new(tcp_stream)),
+            stream: Box::new(BufWriter::with_capacity(
+                self.options.write_buffer_capacity.into(),
+                tcp_stream,
+            )),
             buffer: BytesMut::with_capacity(self.options.read_buffer_capacity.into()),
         };
 
