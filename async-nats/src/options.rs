@@ -625,7 +625,8 @@ impl ConnectOptions {
         self
     }
 
-    /// Sets default receive buffer capacity.
+    /// Sets the initial capacity of the read buffer. Which is a buffer used to gather partial
+    /// protocol messages.
     ///
     /// # Examples
     /// ```
