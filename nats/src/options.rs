@@ -145,8 +145,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_token("t0k3n!")
-    ///     .connect("demo.nats.io")?;
+    /// let nc = nats::Options::with_token("t0k3n!").connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -162,8 +161,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!")
-    ///     .connect("demo.nats.io")?;
+    /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!").connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -183,8 +181,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_credentials("path/to/my.creds")
-    ///     .connect("connect.ngs.global")?;
+    /// let nc = nats::Options::with_credentials("path/to/my.creds").connect("connect.ngs.global")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -220,8 +217,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let creds =
-    /// "-----BEGIN NATS USER JWT-----
+    /// let creds = "-----BEGIN NATS USER JWT-----
     /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
     /// ------END NATS USER JWT------
     ///
@@ -347,11 +343,10 @@ impl Options {
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let mut tls_client_config = nats::rustls::ClientConfig::default();
-    /// tls_client_config
-    ///     .set_single_client_cert(
-    ///         vec![nats::rustls::Certificate(b"MY_CERT".to_vec())],
-    ///         nats::rustls::PrivateKey(b"MY_KEY".to_vec()),
-    ///     );
+    /// tls_client_config.set_single_client_cert(
+    ///     vec![nats::rustls::Certificate(b"MY_CERT".to_vec())],
+    ///     nats::rustls::PrivateKey(b"MY_KEY".to_vec()),
+    /// );
     /// let nc = nats::Options::new()
     ///     .tls_client_config(tls_client_config)
     ///     .connect("nats://localhost:4443")?;
@@ -384,9 +379,7 @@ impl Options {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
-    ///     .no_echo()
-    ///     .connect("demo.nats.io")?;
+    /// let nc = nats::Options::new().no_echo().connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```

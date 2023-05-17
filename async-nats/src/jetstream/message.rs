@@ -41,6 +41,19 @@ impl From<Message> for crate::Message {
 }
 
 impl Message {
+    /// Splits [Message] into [Acker] and [crate::Message].
+    /// This can help reduce memory footprint if [Message] can be dropped before acking,
+    /// for example when it's transformed into another structure and acked later
+    pub fn split(self) -> (crate::Message, Acker) {
+        let reply = self.message.reply.clone();
+        (
+            self.message,
+            Acker {
+                context: self.context,
+                reply,
+            },
+        )
+    }
     /// Acknowledges a message delivery by sending `+ACK` to the server.
     ///
     /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
@@ -51,14 +64,16 @@ impl Message {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
@@ -90,15 +105,17 @@ impl Message {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use async_nats::jetstream::AckKind;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use async_nats::jetstream::AckKind;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
@@ -140,8 +157,10 @@ impl Message {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
@@ -306,6 +325,180 @@ impl Message {
     }
 }
 
+/// A lightweight struct useful for decoupling message contents and the ability to ack it.
+pub struct Acker {
+    context: Context,
+    reply: Option<String>,
+}
+
+// TODO(tp): This should be async trait to avoid duplication of code. Will be refactored into one when async traits are available.
+// The async-trait crate is not a solution here, as it would mean we're allocating at every ack.
+// Creating separate function to ack just to avoid one duplication is not worth it either.
+impl Acker {
+    /// Acknowledges a message delivery by sending `+ACK` to the server.
+    ///
+    /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
+    /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use async_nats::jetstream::Message;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let (message, acker) = message.map(Message::split)?;
+    ///     // Do something with the message. Ownership can be taken over `Message`
+    ///     // while retaining ability to ack later.
+    ///     println!("message: {:?}", message);
+    ///     // Ack it. `Message` may be dropped already.
+    ///     acker.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn ack(&self) -> Result<(), Error> {
+        if let Some(ref reply) = self.reply {
+            self.context
+                .client
+                .publish(reply.to_string(), "".into())
+                .map_err(Error::from)
+                .await
+        } else {
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No reply subject, not a JetStream message",
+            )))
+        }
+    }
+
+    /// Acknowledges a message delivery by sending a chosen [AckKind] variant to the server.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use async_nats::jetstream::AckKind;
+    /// use async_nats::jetstream::Message;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let (message, acker) = message.map(Message::split)?;
+    ///     // Do something with the message. Ownership can be taken over `Message`.
+    ///     // while retaining ability to ack later.
+    ///     println!("message: {:?}", message);
+    ///     // Ack it. `Message` may be dropped already.
+    ///     acker.ack_with(AckKind::Nak(None)).await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn ack_with(&self, kind: AckKind) -> Result<(), Error> {
+        if let Some(ref reply) = self.reply {
+            self.context
+                .client
+                .publish(reply.to_string(), kind.into())
+                .map_err(Error::from)
+                .await
+        } else {
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No reply subject, not a JetStream message",
+            )))
+        }
+    }
+
+    /// Acknowledges a message delivery by sending `+ACK` to the server
+    /// and awaits for confirmation for the server that it received the message.
+    /// Useful if user wants to ensure `exactly once` semantics.
+    ///
+    /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
+    /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::Message;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let (message, acker) = message.map(Message::split)?;
+    ///     // Do something with the message. Ownership can be taken over `Message`.
+    ///     // while retaining ability to ack later.
+    ///     println!("message: {:?}", message);
+    ///     // Ack it. `Message` may be dropped already.
+    ///     acker.double_ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn double_ack(&self) -> Result<(), Error> {
+        if let Some(ref reply) = self.reply {
+            let inbox = self.context.client.new_inbox();
+            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
+            self.context
+                .client
+                .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
+                .await?;
+            match tokio::time::timeout(self.context.timeout, subscription.next())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "double ack response timed out",
+                    )
+                })? {
+                Some(_) => Ok(()),
+                None => Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "subscription dropped",
+                ))),
+            }
+        } else {
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No reply subject, not a JetStream message",
+            )))
+        }
+    }
+}
 /// The kinds of response used for acknowledging a processed message.
 #[derive(Debug, Clone, Copy)]
 pub enum AckKind {

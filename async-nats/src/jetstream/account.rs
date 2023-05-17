@@ -26,7 +26,7 @@ where
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     /// The maximum amount of Memory storage Stream Messages may consume
     #[serde(deserialize_with = "negative_as_none")]
@@ -59,7 +59,7 @@ pub struct Requests {
     pub errors: u64,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Tier {
     /// Memory Storage being used for Stream Message storage
     pub memory: u64,
@@ -76,7 +76,7 @@ pub struct Tier {
     pub requests: Requests,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
 pub struct Account {
     /// Memory storage being used for Stream Message storage
     pub memory: u64,

@@ -60,10 +60,10 @@ mod object_store {
             }
         }
         assert_eq!(
-            format!(
+            Some(format!(
                 "SHA-256={}",
                 base64::engine::general_purpose::URL_SAFE.encode(digest)
-            ),
+            )),
             object.info.digest
         );
         assert_eq!(result, bytes);
@@ -108,6 +108,44 @@ mod object_store {
         let object = watcher.next().await.unwrap().unwrap();
         assert_eq!(object.name, "BAR".to_string());
         assert!(object.deleted);
+    }
+
+    #[tokio::test]
+    async fn info() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket
+            .put("FOO", &mut io::Cursor::new(vec![2, 3, 4, 5]))
+            .await
+            .unwrap();
+
+        let info = bucket.info("FOO").await.unwrap();
+
+        assert_ne!(info.nuid, "");
+        assert_eq!(info.name, "FOO");
+        assert_eq!(info.bucket, "bucket");
+        assert_eq!(info.size, 4);
+        assert!(!info.deleted);
+
+        let modified = info.modified;
+        bucket
+            .put("FOO", &mut io::Cursor::new(vec![2, 3, 4, 5]))
+            .await
+            .unwrap();
+
+        let info = bucket.info("FOO").await.unwrap();
+        assert_ne!(info.modified, modified);
     }
 
     #[tokio::test]
@@ -217,7 +255,7 @@ mod object_store {
             bucket.put(filename, &mut file.as_slice()).await.unwrap();
 
             let mut object = bucket.get(filename).await.unwrap();
-            assert_eq!(object.info.digest, format!("SHA-256={digest}"));
+            assert_eq!(object.info.digest, Some(format!("SHA-256={digest}")));
 
             let mut result = Vec::new();
             object.read_to_end(&mut result).await.unwrap();

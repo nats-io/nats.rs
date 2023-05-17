@@ -60,8 +60,7 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let mut stream = jetstream
-    ///     .get_stream("events").await?;
+    /// let mut stream = jetstream.get_stream("events").await?;
     ///
     /// let info = stream.info().await?;
     /// # Ok(())
@@ -97,8 +96,7 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream
-    ///     .get_stream("events").await?;
+    /// let stream = jetstream.get_stream("events").await?;
     ///
     /// let info = stream.cached_info();
     /// # Ok(())
@@ -123,18 +121,25 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events.data".into(), "data".into()).await?;
-    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
+    /// let pub_ack = jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream
-    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.await?.sequence)).await?;
+    /// let message = stream
+    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.await?.sequence))
+    ///     .await?;
     ///
     /// # Ok(())
     /// # }
@@ -198,16 +203,20 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    /// let pub_ack = jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream.direct_get_first_for_subject("events.data").await?;
+    /// let message = stream.direct_get_first_for_subject("events.data").await?;
     ///
     /// # Ok(())
     /// # }
@@ -262,16 +271,20 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    /// let pub_ack = jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream.direct_get(pub_ack.await?.sequence).await?;
+    /// let message = stream.direct_get(pub_ack.await?.sequence).await?;
     ///
     /// # Ok(())
     /// # }
@@ -321,16 +334,20 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events.data".into(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream.direct_get_last_for_subject("events.data").await?;
+    /// let message = stream.direct_get_last_for_subject("events.data").await?;
     ///
     /// # Ok(())
     /// # }
@@ -395,11 +412,13 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let context = async_nats::jetstream::new(client);
     ///
-    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = context
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.await?.sequence).await?;
@@ -439,11 +458,13 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let context = async_nats::jetstream::new(client);
     ///
-    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = context
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
@@ -477,11 +498,13 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let context = async_nats::jetstream::new(client);
     ///
-    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = context
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// stream.delete_message(publish_ack.await?.sequence).await?;
@@ -567,10 +590,12 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let info = stream.create_consumer(consumer::pull::Config {
-    ///     durable_name: Some("pull".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let info = stream
+    ///     .create_consumer(consumer::pull::Config {
+    ///         durable_name: Some("pull".to_string()),
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -715,10 +740,15 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
-    ///     durable_name: Some("pull".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "pull",
+    ///         consumer::pull::Config {
+    ///             durable_name: Some("pull".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -758,8 +788,11 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// jetstream.get_stream("events").await?
-    ///     .delete_consumer("pull").await?;
+    /// jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .delete_consumer("pull")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -888,8 +921,8 @@ pub struct Config {
     /// Indicates the stream is sealed and cannot be modified in any way
     #[serde(default, skip_serializing_if = "is_default")]
     pub sealed: bool,
-    #[serde(default, skip_serializing_if = "is_default")]
     /// A short description of the purpose of this stream.
+    #[serde(default, skip_serializing_if = "is_default")]
     pub description: Option<String>,
     #[serde(
         default,
@@ -1021,7 +1054,7 @@ pub enum StorageType {
 }
 
 /// Shows config and current state for this stream.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Info {
     /// The configuration associated with this stream
     pub config: Config,
@@ -1032,7 +1065,6 @@ pub struct Info {
     pub state: State,
 
     ///information about leader and replicas
-    #[serde(default)]
     pub cluster: Option<ClusterInfo>,
 }
 
@@ -1042,7 +1074,7 @@ pub struct DeleteStatus {
 }
 
 /// information about the given stream.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -1217,13 +1249,11 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
 /// Information about the stream's, consumer's associated `JetStream` cluster
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterInfo {
     /// The cluster name.
-    #[serde(default)]
     pub name: Option<String>,
     /// The server name of the RAFT leader.
-    #[serde(default)]
     pub leader: Option<String>,
     /// The members of the RAFT cluster.
     #[serde(default)]
@@ -1231,7 +1261,7 @@ pub struct ClusterInfo {
 }
 
 /// The members of the RAFT cluster
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
 pub struct PeerInfo {
     /// The server name of the peer.
     pub name: String,
@@ -1248,7 +1278,7 @@ pub struct PeerInfo {
 }
 
 /// The response generated by trying to purge a stream.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct PurgeResponse {
     /// Whether the purge request was successful.
     pub success: bool,
@@ -1256,7 +1286,7 @@ pub struct PurgeResponse {
     pub purged: u64,
 }
 /// The payload used to generate a purge request.
-#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+#[derive(Default, Debug, Serialize, Clone)]
 pub struct PurgeRequest {
     /// Purge up to but not including sequence.
     #[serde(default, rename = "seq", skip_serializing_if = "is_default")]

@@ -65,8 +65,10 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let mut consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let info = consumer.info().await?;
     /// # Ok(())
@@ -119,8 +121,10 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let info = consumer.cached_info();
     /// # Ok(())
@@ -146,7 +150,7 @@ pub type PushConsumer = Consumer<self::push::Config>;
 pub type OrderedPushConsumer = Consumer<self::push::OrderedConfig>;
 
 /// Information about a consumer
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct Info {
     /// The stream being consumed
     pub stream_name: String,
@@ -171,15 +175,15 @@ pub struct Info {
     /// The number of pending
     pub num_pending: u64,
     /// Information about the consumer's cluster
-    #[serde(default)]
+    #[serde(skip_serializing_if = "is_default")]
     pub cluster: Option<ClusterInfo>,
     /// Indicates if any client is connected and receiving messages from a push consumer
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub push_bound: bool,
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SequenceInfo {
     /// How far along the consumer has progressed
     #[serde(rename = "consumer_seq")]
@@ -188,7 +192,11 @@ pub struct SequenceInfo {
     #[serde(rename = "stream_seq")]
     pub stream_sequence: u64,
     // Last activity for the sequence
-    #[serde(default, with = "rfc3339::option")]
+    #[serde(
+        default,
+        with = "rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_active: Option<time::OffsetDateTime>,
 }
 
@@ -254,8 +262,8 @@ pub struct Config {
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Deliver group to use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deliver_group: Option<String>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     #[serde(flatten)]

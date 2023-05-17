@@ -24,6 +24,7 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use tracing::debug;
 
 use crate::{header, jetstream::response, Error, Message};
 
@@ -137,11 +138,13 @@ impl Store {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let status = kv.status().await?;
     /// println!("status: {:?}", status);
     /// # Ok(())
@@ -168,11 +171,13 @@ impl Store {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let status = kv.put("key", "value".into()).await?;
     /// # Ok(())
     /// # }
@@ -207,11 +212,13 @@ impl Store {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let status = kv.put("key", "value".into()).await?;
     /// let entry = kv.entry("key").await?;
     /// println!("entry: {:?}", entry);
@@ -349,7 +356,7 @@ impl Store {
                 let entry = Entry {
                     bucket: self.name.clone(),
                     key,
-                    value: message.payload.to_vec(),
+                    value: message.payload,
                     revision,
                     created,
                     operation,
@@ -373,11 +380,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut entries = kv.watch("kv").await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
@@ -401,12 +410,14 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
-    /// let mut entries = kv.watch_with_history("kv") .await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let mut entries = kv.watch_with_history("kv").await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
     /// }
@@ -425,6 +436,7 @@ impl Store {
     ) -> Result<Watch<'_>, Error> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
+        debug!("initial consumer creation");
         let consumer = self
             .stream
             .create_consumer(super::consumer::push::OrderedConfig {
@@ -455,11 +467,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut entries = kv.watch_all().await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
@@ -471,7 +485,7 @@ impl Store {
         self.watch(ALL_KEYS).await
     }
 
-    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Vec<u8>>, Error> {
+    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Bytes>, Error> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
                 Operation::Put => Ok(Some(entry.value)),
@@ -493,11 +507,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let revision = kv.put("key", "value".into()).await?;
     /// kv.update("key", "updated".into(), revision).await?;
     /// # Ok(())
@@ -541,11 +557,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// kv.delete("key").await?;
     /// # Ok(())
@@ -588,11 +606,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// kv.put("key", "another".into()).await?;
     /// kv.purge("key").await?;
@@ -632,11 +652,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut entries = kv.history("kv").await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
@@ -684,11 +706,13 @@ impl Store {
     /// use futures::{StreamExt, TryStreamExt};
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut keys = kv.keys().await?.boxed();
     /// while let Some(key) = keys.try_next().await? {
     ///     println!("key: {:?}", key);
@@ -705,11 +729,13 @@ impl Store {
     /// use futures::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let keys = kv.keys().await?.try_collect::<Vec<String>>().await?;
     /// println!("Keys: {:?}", keys);
     /// # Ok(())
@@ -787,7 +813,7 @@ impl<'a> futures::Stream for Watch<'a> {
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.to_vec(),
+                        value: message.payload.clone(),
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,
@@ -855,7 +881,7 @@ impl<'a> futures::Stream for History<'a> {
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.to_vec(),
+                        value: message.payload.clone(),
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,
@@ -912,8 +938,7 @@ pub struct Entry {
     /// The key that was retrieved.
     pub key: String,
     /// The value that was retrieved.
-    // TODO: should we use Bytes?
-    pub value: Vec<u8>,
+    pub value: Bytes,
     /// A unique sequence for this value.
     pub revision: u64,
     /// Distance from the latest value.

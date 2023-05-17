@@ -33,6 +33,7 @@ use std::task::Poll;
 use std::time::Duration;
 use tracing::debug;
 
+use super::consumer::{Consumer, FromConsumer, IntoConsumerConfig};
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{self, Config, DeleteStatus, DiscardPolicy, External, Info, Stream};
@@ -91,9 +92,12 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let ack = jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     /// ack.await?;
-    /// jetstream.publish("events".to_string(), "data".into())
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
     ///     .await?
     ///     .await?;
     /// # Ok(())
@@ -109,8 +113,12 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let first_ack = jetstream.publish("events".to_string(), "data".into()).await?;
-    /// let second_ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let first_ack = jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
+    /// let second_ack = jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     /// first_ack.await?;
     /// second_ack.await?;
     /// # Ok(())
@@ -140,7 +148,9 @@ impl Context {
     ///
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", "Value");
-    /// let ack = jetstream.publish_with_headers("events".to_string(), headers, "data".into()).await?;
+    /// let ack = jetstream
+    ///     .publish_with_headers("events".to_string(), headers, "data".into())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -167,10 +177,12 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack =
-    /// jetstream.send_publish("events".to_string(),
-    ///     Publish::build().payload("data".into()).message_id("uuid")
-    /// ).await?;
+    /// let ack = jetstream
+    ///     .send_publish(
+    ///         "events".to_string(),
+    ///         Publish::build().payload("data".into()).message_id("uuid"),
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -237,12 +249,14 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 100_000,
-    ///     discard: DiscardPolicy::Old,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 100_000,
+    ///         discard: DiscardPolicy::Old,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -360,11 +374,13 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_or_create_stream(Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .get_or_create_stream(Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -441,12 +457,14 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.update_stream(&Config {
-    ///     name: "events".to_string(),
-    ///     discard: DiscardPolicy::New,
-    ///     max_messages: 50_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .update_stream(&Config {
+    ///         name: "events".to_string(),
+    ///         discard: DiscardPolicy::New,
+    ///         max_messages: 50_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -585,11 +603,13 @@ impl Context {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -695,11 +715,13 @@ impl Context {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -730,6 +752,60 @@ impl Context {
     //         .and_then(|info| Ok(()))
     // }
 
+    /// Get a [crate::jetstream::consumer::Consumer] straight from [Context], without binding to a [Stream] first.
+    ///
+    /// It has one less interaction with the server when binding to only one
+    /// [crate::jetstream::consumer::Consumer].
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_consumer_from_stream("consumer", "stream")
+    ///     .await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_consumer_from_stream<T, C, S>(
+        &self,
+        consumer: C,
+        stream: S,
+    ) -> Result<Consumer<T>, Error>
+    where
+        T: FromConsumer + IntoConsumerConfig,
+        S: AsRef<str>,
+        C: AsRef<str>,
+    {
+        let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
+
+        let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
+            Response::Ok(info) => info,
+            Response::Err { error } => {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!(
+                        "nats: error while getting consumer info: {}, {}, {}",
+                        error.code, error.status, error.description
+                    ),
+                )))
+            }
+        };
+
+        Ok(Consumer::new(
+            T::try_from_consumer_config(info.config.clone())?,
+            info,
+            self.clone(),
+        ))
+    }
+
     /// Send a request to the jetstream JSON API.
     ///
     /// This is a low level API used mostly internally, that should be used only in
@@ -746,7 +822,8 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let response: Response<Info> = jetstream
-    /// .request("STREAM.INFO.events".to_string(), &()).await?;
+    ///     .request("STREAM.INFO.events".to_string(), &())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -781,10 +858,12 @@ impl Context {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let bucket = jetstream.create_object_store(async_nats::jetstream::object_store::Config {
-    ///     bucket: "bucket".to_string(),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let bucket = jetstream
+    ///     .create_object_store(async_nats::jetstream::object_store::Config {
+    ///         bucket: "bucket".to_string(),
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```

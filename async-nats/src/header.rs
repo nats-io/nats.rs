@@ -11,14 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! NATS [Message][crate::Message] headers, leveraging [http::header] crate.
-// pub use http::header::{HeaderMap, HeaderName, HeaderValue};
+//! NATS [Message][crate::Message] headers, modeled loosely after the [http::header] crate.
 
-use std::{collections::HashMap, slice, str::FromStr};
+use std::{collections::HashMap, fmt, slice, str::FromStr};
 
 use serde::Serialize;
 
-pub const NATS_LAST_STREAM: &str = "nats-last-stream";
+pub const NATS_LAST_STREAM: &str = "Nats-Last-Stream";
 pub const NATS_LAST_CONSUMER: &str = "Nats-Last-Consumer";
 
 /// Direct Get headers
@@ -51,7 +50,9 @@ pub const NATS_EXPECTED_STREAM: &str = "Nats-Expected-Stream";
 /// let client = async_nats::connect("demo.nats.io").await?;
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
-/// client.publish_with_headers("subject".to_string(), headers, "payload".into()).await?;
+/// client
+///     .publish_with_headers("subject".to_string(), headers, "payload".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -175,7 +176,10 @@ impl HeaderMap {
 /// use std::str::FromStr;
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
-/// headers.insert("Another", async_nats::HeaderValue::from_str("AnotherValue")?);
+/// headers.insert(
+///     "Another",
+///     async_nats::HeaderValue::from_str("AnotherValue")?,
+/// );
 /// # Ok(())
 /// # }
 /// ```
@@ -311,9 +315,21 @@ impl FromStr for HeaderName {
     }
 }
 
+impl fmt::Display for HeaderName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.value, f)
+    }
+}
+
 impl AsRef<[u8]> for HeaderName {
     fn as_ref(&self) -> &[u8] {
         self.value.as_bytes()
+    }
+}
+
+impl AsRef<str> for HeaderName {
+    fn as_ref(&self) -> &str {
+        self.value.as_ref()
     }
 }
 

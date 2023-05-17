@@ -47,12 +47,11 @@
 //!     }
 //!
 //!     while let Some(message) = subscriber.next().await {
-//!       println!("Received message {:?}", message);
+//!         println!("Received message {:?}", message);
 //!     }
 //!
 //!     Ok(())
 //! }
-//!
 //! ```
 //!
 //! ### Publish
@@ -132,6 +131,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
+const MAX_PENDING_PINGS: usize = 2;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -143,7 +143,7 @@ use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) mod auth_utils;
-mod client;
+pub mod client;
 pub mod connection;
 mod connector;
 mod options;
@@ -238,7 +238,7 @@ pub(crate) enum ServerOp {
 }
 
 #[derive(Debug)]
-pub enum Command {
+pub(crate) enum Command {
     Publish {
         subject: String,
         payload: Bytes,
@@ -255,17 +255,15 @@ pub enum Command {
         sid: u64,
         max: Option<u64>,
     },
-    Ping,
     Flush {
         result: oneshot::Sender<Result<(), io::Error>>,
     },
     TryFlush,
-    Connect(ConnectInfo),
 }
 
 /// `ClientOp` represents all actions of `Client`.
 #[derive(Debug)]
-pub enum ClientOp {
+pub(crate) enum ClientOp {
     Publish {
         subject: String,
         payload: Bytes,
@@ -301,7 +299,6 @@ pub(crate) struct ConnectionHandler {
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
     pending_pings: usize,
-    max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
     flush_interval: Interval,
@@ -326,7 +323,6 @@ impl ConnectionHandler {
             connector,
             subscriptions: HashMap::new(),
             pending_pings: 0,
-            max_pings: 2,
             info_sender,
             ping_interval,
             flush_interval,
@@ -341,6 +337,15 @@ impl ConnectionHandler {
             select! {
                 _ = self.ping_interval.tick().fuse() => {
                     self.pending_pings += 1;
+
+                    if self.pending_pings > MAX_PENDING_PINGS {
+                        debug!(
+                            "pending pings {}, max pings {}. disconnecting",
+                            self.pending_pings, MAX_PENDING_PINGS
+                        );
+                        self.handle_disconnect().await?;
+                    }
+
                     if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
                         self.handle_disconnect().await?;
                     }
@@ -390,6 +395,8 @@ impl ConnectionHandler {
     }
 
     async fn handle_server_op(&mut self, server_op: ServerOp) -> Result<(), io::Error> {
+        self.ping_interval.reset();
+
         match server_op {
             ServerOp::Ping => {
                 self.connection.write_op(&ClientOp::Pong).await?;
@@ -484,6 +491,8 @@ impl ConnectionHandler {
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
+        self.ping_interval.reset();
+
         match command {
             Command::Unsubscribe { sid, max } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
@@ -507,28 +516,6 @@ impl ConnectionHandler {
                         error!("Send failed with {:?}", err);
                     }
                 }
-            }
-            Command::Ping => {
-                debug!(
-                    "PING command. Pending pings {}, max pings {}",
-                    self.pending_pings, self.max_pings
-                );
-                self.pending_pings += 1;
-                self.ping_interval.reset();
-
-                if self.pending_pings > self.max_pings {
-                    debug!(
-                        "pending pings {}, max pings {}. disconnecting",
-                        self.pending_pings, self.max_pings
-                    );
-                    self.handle_disconnect().await?;
-                }
-
-                if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
-                    self.handle_disconnect().await?;
-                }
-
-                self.handle_flush().await?;
             }
             Command::Flush { result } => {
                 if let Err(_err) = self.handle_flush().await {
@@ -599,15 +586,6 @@ impl ConnectionHandler {
                     error!("Sending Publish failed with {:?}", err);
                 }
             }
-            Command::Connect(connect_info) => {
-                while let Err(_err) = self
-                    .connection
-                    .write_op(&ClientOp::Connect(connect_info.clone()))
-                    .await
-                {
-                    self.handle_disconnect().await?;
-                }
-            }
         }
 
         Ok(())
@@ -660,7 +638,8 @@ impl ConnectionHandler {
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
-/// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
+/// let mut nc =
+///     async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
@@ -786,53 +765,52 @@ impl fmt::Display for Event {
 ///
 /// ## Connect with [Vec] of [ServerAddr].
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let client = async_nats::connect(vec![
-///    "demo.nats.io".parse::<ServerAddr>()?,
-///    "other.nats.io".parse::<ServerAddr>()?,
-///])
-///.await
-///.unwrap();
-///# Ok(())
-///# }
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let client = async_nats::connect(vec![
+///     "demo.nats.io".parse::<ServerAddr>()?,
+///     "other.nats.io".parse::<ServerAddr>()?,
+/// ])
+/// .await
+/// .unwrap();
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## with [Vec], but parse URLs inside [crate::connect()]
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let servers = vec!["demo.nats.io", "other.nats.io"];
-///let client = async_nats::connect(
-///    servers
-///        .iter()
-///        .map(|url| url.parse())
-///        .collect::<Result<Vec<ServerAddr>, _>>()?
-///)
-///.await?;
-///# Ok(())
-///# }
-///```
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let servers = vec!["demo.nats.io", "other.nats.io"];
+/// let client = async_nats::connect(
+///     servers
+///         .iter()
+///         .map(|url| url.parse())
+///         .collect::<Result<Vec<ServerAddr>, _>>()?,
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
+/// ```
 ///
 ///
 /// ## with slice.
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let client = async_nats::connect(
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let client = async_nats::connect(
 ///    [
 ///        "demo.nats.io".parse::<ServerAddr>()?,
 ///        "other.nats.io".parse::<ServerAddr>()?,
 ///    ]
 ///    .as_slice(),
-///)
-///.await?;
-///# Ok(())
-///# }
-///
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
@@ -951,7 +929,7 @@ impl Subscriber {
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
-    ///  subscriber.unsubscribe().await?;
+    /// subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
     /// ```

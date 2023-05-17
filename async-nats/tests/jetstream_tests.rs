@@ -1073,6 +1073,34 @@ mod jetstream {
         let consumer = stream.get_consumer("pull").await.unwrap();
         consumer.fetch().max_messages(10).messages().await.unwrap();
     }
+    #[tokio::test]
+    async fn get_consumer_from_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("stream").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream
+            .create_consumer(consumer::push::Config {
+                durable_name: Some("push".to_string()),
+                deliver_subject: "subject".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let _consumer: PullConsumer = context
+            .get_consumer_from_stream("pull", "stream")
+            .await
+            .unwrap();
+    }
 
     #[tokio::test]
     async fn get_or_create_consumer() {
@@ -3098,5 +3126,45 @@ mod jetstream {
         let message = messages.next().await.unwrap().unwrap();
 
         assert_eq!(message.subject, "fromtest.transformed.test");
+    }
+
+    #[tokio::test]
+    async fn acker() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            context.publish("test".into(), "data".into()).await.unwrap();
+        }
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap().take(10);
+
+        while let Some((message, acker)) = messages
+            .try_next()
+            .await
+            .unwrap()
+            .map(|message| message.split())
+        {
+            println!("message: {:?}", message);
+            acker.ack().await.unwrap();
+        }
     }
 }

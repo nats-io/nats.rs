@@ -233,7 +233,6 @@ impl Deref for HeaderMap {
 
 impl HeaderMap {
     /// Creates a new header map
-    ///
     pub fn new() -> HeaderMap {
         HeaderMap::default()
     }
@@ -275,7 +274,6 @@ impl HeaderMap {
     }
 
     /// Returns `true` if the map contains a value for the specified key.
-    ///
     pub fn contains_key(&self, key: &str) -> bool {
         self.inner.contains_key(key)
     }
@@ -329,7 +327,6 @@ impl HeaderMap {
     /// let mut map = HeaderMap::new();
     /// map.append(STATUS, "200");
     /// assert!(!map.is_empty());
-    ///
     /// ```
     pub fn append<K, V>(&mut self, key: K, value: V) -> bool
     where
@@ -387,10 +384,9 @@ impl HeaderMap {
     ///
     /// // Will print in an arbitrary order.
     /// for x in values {
-    ///   println!("{}", x);
+    ///     println!("{}", x);
     /// }
     /// ```
-    ///
     pub fn get_all<K: ToString + ?Sized>(&self, key: &K) -> GetAll<'_> {
         GetAll {
             map: self,
@@ -442,7 +438,7 @@ impl<'a> GetAll<'a> {
     ///
     /// // Will print in an arbitrary order.
     /// for x in values {
-    ///   println!("{}", x);
+    ///     println!("{}", x);
     /// }
     /// ```
     pub fn iter(&self) -> ValueIter<'a> {

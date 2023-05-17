@@ -59,7 +59,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Set up go
+      - name: Setup Rust
+        run: |
+          rustup install stable
+
+      - name: Set up Go
         uses: actions/setup-go@v2
         with:
           go-version: '1.19'
@@ -77,7 +81,6 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          rustup update
           nats-server --jetstream --port=4222 &
           cargo test --features=${{ matrix.features }} --features slow_tests -- --nocapture
 
@@ -88,17 +91,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v2
 
-      - name: Set up rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+      - name: Set up Rust
+        run: |
+          rustup install nightly
+          rustup default nightly
+          rustup component add rustfmt
 
-      - name: Check format
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: -- --check
+      - name: Run the check
+        run: cargo fmt -- --check
 
   check_lint:
     name: check (lint)
@@ -118,17 +118,11 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set up rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: clippy
-          override: true
+        run: |
+          rustup install stable
 
       - name: Check lint
-        uses: actions-rs/cargo@v1
-        with:
-          args: --benches --tests --examples --all-features -- --deny clippy::all
-          command: clippy
+        run: cargo clippy --benches --tests --examples --all-features -- --deny clippy::all
   
   check_docs:
     name: check (docs)
@@ -148,16 +142,12 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set up rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: clippy
-          override: true
+        run: |
+          rustup install stable
+          rustup component add clippy
 
-      - name: Check docs
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
+      - name: Check lint
+        run: cargo doc
 
   check_licenses:
     name: check (licenses)
@@ -193,8 +183,8 @@ jobs:
         run: |
           set -eo pipefail
           echo "msrv check"
-          rustup install 1.64.0
-          cargo +1.64.0 check
+          rustup install 1.65.0
+          cargo +1.65.0 check
 
   check_examples:
     name: check (examples)
@@ -218,14 +208,17 @@ jobs:
         with:
           go-version: '1.19'
 
+      - name: Set up rust
+        run: |
+          rustup install stable
+
       - name: Install nats-server
         run: go install github.com/nats-io/nats-server/v2@dev
       - name: Check examples
         env:
           RUST_LOG: trace
-        run: |
-          rustup update
-          cargo check --examples
+        run: cargo check --examples
+
   check_spelling:
       name: check (spelling)
       runs-on: ubuntu-latest
@@ -243,22 +236,14 @@ jobs:
           uses: actions/checkout@v2
 
         - name: Set up rust
-          uses: actions-rs/toolchain@v1
-          with:
-            toolchain: nightly
-            override: true
+          run: |
+            rustup install nightly
 
         - name: Install llvm-config
           run: sudo apt-get install -y libclang-dev
 
         - name: Install cargo spellcheck
-          uses: actions-rs/cargo@v1
-          with:
-            args: cargo-spellcheck
-            command: install
+          run: cargo install cargo-spellcheck
 
         - name: Check spelling
-          uses: actions-rs/cargo@v1
-          with:
-            command: spellcheck
-            args: --code 1
+          run: cargo spellcheck --code 1
