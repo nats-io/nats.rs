@@ -57,6 +57,7 @@ pub struct ConnectOptions {
     pub(crate) retry_on_initial_connect: bool,
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
+    pub(crate) read_buffer_capacity: u16,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -78,6 +79,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
+            .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
             .finish()
     }
 }
@@ -111,6 +113,7 @@ impl Default for ConnectOptions {
             retry_on_initial_connect: false,
             ignore_discovered_servers: false,
             retain_servers_order: false,
+            read_buffer_capacity: 65535,
         }
     }
 }
@@ -671,6 +674,25 @@ impl ConnectOptions {
     /// ```
     pub fn tls_client_config(mut self, config: rustls::ClientConfig) -> ConnectOptions {
         self.tls_client_config = Some(config);
+        self
+    }
+
+    /// Sets the initial capacity of the read buffer. Which is a buffer used to gather partial
+    /// protocol messages.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new()
+    ///     .read_buffer_capacity(65535)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
+        self.read_buffer_capacity = size;
         self
     }
 }
