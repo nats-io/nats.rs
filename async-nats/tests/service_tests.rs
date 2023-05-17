@@ -15,7 +15,7 @@
 mod service {
     use std::{collections::HashMap, str::from_utf8};
 
-    use async_nats::service::{self, Info, Schema, ServiceExt, StatsResponse};
+    use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures::StreamExt;
     use tracing::debug;
     use url::Url;
@@ -52,7 +52,6 @@ mod service {
                 name: "service.B".to_string(),
                 description: None,
                 version: "1.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
                 metadata: None,
                 api_url: None,
@@ -70,7 +69,6 @@ mod service {
                 name: "service B".to_string(),
                 description: None,
                 version: "1.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
                 metadata: None,
                 api_url: None,
@@ -131,13 +129,11 @@ mod service {
         let schema = schemas
             .next()
             .await
-            .map(|message| {
-                serde_json::from_slice::<service::SchemaResponse>(&message.payload).unwrap()
-            })
+            .map(|message| serde_json::from_slice::<service::Schema>(&message.payload).unwrap())
             .unwrap();
         assert_eq!(
             schema.endpoints.first().unwrap().schema.clone().unwrap(),
-            Schema {
+            service::endpoint::Schema {
                 request: "request".to_string(),
                 response: "response".to_string(),
             }
@@ -153,9 +149,7 @@ mod service {
         let mut stats = responses
             .next()
             .await
-            .map(|message| {
-                serde_json::from_slice::<service::StatsResponse>(&message.payload).unwrap()
-            })
+            .map(|message| serde_json::from_slice::<service::Stats>(&message.payload).unwrap())
             .unwrap();
 
         let endpoint_stats = stats.endpoints.pop().unwrap();
@@ -171,7 +165,6 @@ mod service {
                 name: "serviceA".to_string(),
                 description: None,
                 version: "1.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
                 metadata: None,
                 api_url: None,
@@ -184,7 +177,6 @@ mod service {
                 name: "serviceB".to_string(),
                 description: None,
                 version: "2.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
                 metadata: None,
                 api_url: None,
@@ -211,7 +203,6 @@ mod service {
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                schema: None,
                 description: None,
                 stats_handler: None,
                 metadata: None,
@@ -252,7 +243,6 @@ mod service {
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                schema: None,
                 description: None,
                 stats_handler: None,
                 metadata: None,
@@ -311,7 +301,7 @@ mod service {
         let stats = client
             .request("$SRV.STATS".into(), "".into())
             .await
-            .map(|message| serde_json::from_slice::<StatsResponse>(&message.payload))
+            .map(|message| serde_json::from_slice::<Stats>(&message.payload))
             .unwrap()
             .unwrap();
         let requests = stats
@@ -327,7 +317,6 @@ mod service {
         assert!(service
             .stats()
             .await
-            .endpoints
             .get("products")
             .unwrap()
             .last_error
