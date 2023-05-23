@@ -340,7 +340,7 @@ impl Connection {
                 payload,
                 respond,
                 headers,
-                require_flush,
+                with_flush,
             } => {
                 if headers.is_some() {
                     self.stream.write_all(b"HPUB ").await?;
@@ -388,7 +388,7 @@ impl Connection {
                 self.stream.write_all(&payload).await?;
                 self.stream.write_all(b"\r\n").await?;
 
-                if require_flush {
+                if with_flush {
                     self.flush().await?;
                 }
             }
@@ -761,7 +761,7 @@ mod write_op {
                 payload: "Hello World".into(),
                 respond: None,
                 headers: None,
-                require_flush: true,
+                with_flush: true,
             })
             .await
             .unwrap();
@@ -778,7 +778,7 @@ mod write_op {
                 payload: "Hello World".into(),
                 respond: Some("INBOX.67".into()),
                 headers: None,
-                require_flush: true,
+                with_flush: true,
             })
             .await
             .unwrap();
@@ -797,7 +797,7 @@ mod write_op {
                     "Header".parse().unwrap(),
                     "X".parse().unwrap(),
                 )])),
-                require_flush: true,
+                with_flush: true,
             })
             .await
             .unwrap();

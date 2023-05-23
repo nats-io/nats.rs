@@ -138,7 +138,7 @@ mod client {
         client
             .publish("test".into(), b"".as_ref().into())
             .headers(headers.clone())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -172,7 +172,7 @@ mod client {
         client
             .publish("test".into(), b"".as_ref().into())
             .headers(headers.clone())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -300,7 +300,7 @@ mod client {
 
                 client
                     .publish(reply, "ok".into())
-                    .require_flush()
+                    .with_flush()
                     .await
                     .unwrap();
             }
@@ -322,7 +322,7 @@ mod client {
 
         client
             .publish("test".into(), "data".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -333,7 +333,7 @@ mod client {
         let mut sub2 = client.subscribe("test2".into()).await.unwrap();
         client
             .publish("test2".into(), "data".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -354,7 +354,7 @@ mod client {
         sub.unsubscribe_after(3).await.unwrap();
         client
             .publish("test".into(), "data".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -426,7 +426,7 @@ mod client {
             assert_eq!(State::Connected, client.connection_state());
             client
                 .publish("test".into(), "data".into())
-                .require_flush()
+                .with_flush()
                 .await
                 .unwrap();
             assert!(subscriber.next().await.is_some());
@@ -447,7 +447,7 @@ mod client {
         let mut sub = client.subscribe("test".into()).await.unwrap();
         client
             .publish("test".into(), "test".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -466,7 +466,7 @@ mod client {
         let mut sub = client.subscribe("test".into()).await.unwrap();
         client
             .publish("test".into(), "test".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
@@ -587,12 +587,12 @@ mod client {
             .unwrap();
         client
             .publish("data".to_string(), "data".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
         client
             .publish("data".to_string(), "data".into())
-            .require_flush()
+            .with_flush()
             .await
             .unwrap();
 
