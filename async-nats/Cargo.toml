@@ -26,7 +26,7 @@ serde_repr = "0.1.10"
 http = "0.2.9"
 tokio = { version = "1.25.0", features = ["macros", "rt", "fs", "net", "sync", "time", "io-util"] }
 itoa = "1"
-url = { version = "2", features = ["serde"] }
+url = { version = "2"}
 tokio-rustls = "0.24"
 rustls-pemfile = "1.0.2"
 nuid = "0.3.2"
