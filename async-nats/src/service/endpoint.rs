@@ -131,8 +131,6 @@ pub(crate) struct Inner {
     pub(crate) last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
     pub(crate) data: String,
-    /// EndpointSchema
-    pub(crate) schema: Option<Schema>,
 }
 
 impl From<Inner> for Stats {
@@ -150,16 +148,6 @@ impl From<Inner> for Stats {
             data: inner.data,
         }
     }
-}
-
-/// Schema of requests and responses.
-/// Currently, it does not do anything except providing information.
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct Schema {
-    /// A string/url describing the format of the request payload can be JSON schema etc.
-    pub request: String,
-    /// A string/url describing the format of the request payload can be JSON schema etc.
-    pub response: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]

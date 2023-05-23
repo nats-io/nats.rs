@@ -35,7 +35,6 @@ use time::serde::rfc3339;
 use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::debug;
-use url::Url;
 
 use crate::{Client, Error, HeaderMap, Message, PublishError, Subscriber};
 
@@ -114,8 +113,6 @@ pub struct Config {
     pub stats_handler: Option<StatsHandler>,
     /// Additional service metadata
     pub metadata: Option<HashMap<String, String>>,
-    /// A valid URL pointing to API specification (may contain schemas, paths etc.)
-    pub api_url: Option<url::Url>,
 }
 
 pub struct ServiceBuilder {
@@ -123,7 +120,6 @@ pub struct ServiceBuilder {
     description: Option<String>,
     stats_handler: Option<StatsHandler>,
     metadata: Option<HashMap<String, String>>,
-    api_url: Option<Url>,
 }
 
 impl ServiceBuilder {
@@ -133,7 +129,6 @@ impl ServiceBuilder {
             description: None,
             stats_handler: None,
             metadata: None,
-            api_url: None,
         }
     }
 
@@ -158,12 +153,6 @@ impl ServiceBuilder {
         self
     }
 
-    /// API URL.
-    pub fn api_url(mut self, api_url: Url) -> Self {
-        self.api_url = Some(api_url);
-        self
-    }
-
     /// Stats the service with configured options.
     pub async fn start<S: ToString>(self, name: S, version: S) -> Result<Service, Error> {
         Service::add(
@@ -174,7 +163,6 @@ impl ServiceBuilder {
                 description: self.description,
                 stats_handler: self.stats_handler,
                 metadata: self.metadata,
-                api_url: self.api_url,
             },
         )
         .await
@@ -220,7 +208,6 @@ pub trait ServiceExt {
     ///         description: None,
     ///         stats_handler: None,
     ///         metadata: None,
-    ///         api_url: None,
     ///     })
     ///     .await?;
     ///
@@ -293,7 +280,6 @@ impl ServiceExt for crate::Client {
 ///         description: None,
 ///         stats_handler: None,
 ///         metadata: None,
-///         api_url: None,
 ///     })
 ///     .await?;
 ///
@@ -355,13 +341,6 @@ impl Service {
             verb_subscription(client.clone(), Verb::Ping, config.name.clone(), id.clone()).await?;
         let mut infos =
             verb_subscription(client.clone(), Verb::Info, config.name.clone(), id.clone()).await?;
-        let mut schemas = verb_subscription(
-            client.clone(),
-            Verb::Schema,
-            config.name.clone(),
-            id.clone(),
-        )
-        .await?;
         let mut stats =
             verb_subscription(client.clone(), Verb::Stats, config.name.clone(), id.clone()).await?;
 
@@ -372,7 +351,6 @@ impl Service {
             let subjects = subjects.clone();
             let endpoints_state = endpoints_state.clone();
             let client = client.clone();
-            let api_url = config.api_url;
             async move {
                 loop {
                     tokio::select! {
@@ -395,30 +373,6 @@ impl Service {
                             let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
                             client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
                         },
-                        Some(schema_request) = schemas.next() => {
-                            let endpoints_schema: Vec<EndpointSchema> = endpoints_state
-                                .lock()
-                                .unwrap()
-                                .endpoints
-                                .iter_mut()
-                                .map(|(k, v)| EndpointSchema {
-                                    name: k.to_owned(),
-                                    subject: v.subject.to_owned(),
-                                    metadata: v.metadata.clone(),
-                                    schema: v.schema.clone(),
-                                })
-                                .collect();
-                            let schema_json = serde_json::to_vec(&Schema {
-                                kind: "io.nats.micro.v1.schema".to_string(),
-                                name: info.name.clone(),
-                                id: info.id.clone(),
-                                version: info.version.clone(),
-                                api_url: api_url.clone(),
-                                endpoints: endpoints_schema,
-                            })
-                            .map(Bytes::from)?;
-                                            client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
-                                        },
                         Some(stats_request) = stats.next() => {
                             if let Some(stats_callback) = stats_callback.as_mut() {
                                 let mut endpoint_stats_locked = endpoints_state.lock().unwrap();
@@ -706,7 +660,6 @@ impl Request {
     /// #     description: None,
     /// #    stats_handler: None,
     /// #    metadata: None,
-    ///         api_url: None,
     /// # }).await?;
     ///
     /// let mut endpoint = service.endpoint("endpoint").await?;
@@ -756,7 +709,6 @@ pub struct EndpointBuilder {
     shutdown_tx: Sender<()>,
     name: Option<String>,
     metadata: Option<HashMap<String, String>>,
-    schema: Option<endpoint::Schema>,
     subjects: Arc<Mutex<Vec<String>>>,
 }
 
@@ -774,7 +726,6 @@ impl EndpointBuilder {
             shutdown_tx,
             name: None,
             metadata: None,
-            schema: None,
         }
     }
 
@@ -787,15 +738,6 @@ impl EndpointBuilder {
     /// Metadata specific for the [Endpoint].
     pub fn metadata(mut self, metadata: HashMap<String, String>) -> EndpointBuilder {
         self.metadata = Some(metadata);
-        self
-    }
-
-    /// [Schema] for the [Endpoint].
-    pub fn schema<S: ToString>(mut self, request: S, response: S) -> EndpointBuilder {
-        self.schema = Some(endpoint::Schema {
-            request: request.to_string(),
-            response: response.to_string(),
-        });
         self
     }
 
@@ -818,7 +760,6 @@ impl EndpointBuilder {
             .or_insert(endpoint::Inner {
                 name,
                 metadata: self.metadata.unwrap_or_default(),
-                schema: self.schema,
                 ..Default::default()
             });
         self.subjects.lock().unwrap().push(subject.clone());
@@ -831,26 +772,6 @@ impl EndpointBuilder {
             shutdown_future: None,
         })
     }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Schema {
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub name: String,
-    pub id: String,
-    pub version: String,
-    #[serde(default)]
-    pub api_url: Option<Url>,
-    pub endpoints: Vec<EndpointSchema>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct EndpointSchema {
-    pub name: String,
-    pub subject: String,
-    pub metadata: HashMap<String, String>,
-    pub schema: Option<endpoint::Schema>,
 }
 
 pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> String + Send>);
