@@ -18,7 +18,6 @@ mod service {
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures::StreamExt;
     use tracing::debug;
-    use url::Url;
 
     #[tokio::test]
     async fn service_config_validations() {
@@ -54,7 +53,6 @@ mod service {
                 version: "1.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
-                api_url: None,
             })
             .await
             .unwrap_err()
@@ -71,7 +69,6 @@ mod service {
                 version: "1.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
-                api_url: None,
             })
             .await
             .unwrap_err()
@@ -94,14 +91,12 @@ mod service {
         client
             .service_builder()
             .metadata(metadata.clone())
-            .api_url(Url::try_from("http://example.com").unwrap())
             .start("serviceA", "1.0.0")
             .await
             .unwrap()
             .endpoint_builder()
             .name("name")
             .metadata(endpoint_metadata.clone())
-            .schema("request", "response")
             .add("products")
             .await
             .unwrap();
@@ -119,25 +114,6 @@ mod service {
             .unwrap();
         assert_eq!(metadata, info.metadata);
         //TODO: test rest of fields
-
-        let schema_reply = client.new_inbox();
-        let mut schemas = client.subscribe(schema_reply.clone()).await.unwrap();
-        client
-            .publish_with_reply("$SRV.SCHEMA".to_string(), schema_reply, "".into())
-            .await
-            .unwrap();
-        let schema = schemas
-            .next()
-            .await
-            .map(|message| serde_json::from_slice::<service::Schema>(&message.payload).unwrap())
-            .unwrap();
-        assert_eq!(
-            schema.endpoints.first().unwrap().schema.clone().unwrap(),
-            service::endpoint::Schema {
-                request: "request".to_string(),
-                response: "response".to_string(),
-            }
-        );
 
         let reply = client.new_inbox();
         let mut responses = client.subscribe(reply.clone()).await.unwrap();
@@ -167,7 +143,6 @@ mod service {
                 version: "1.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
-                api_url: None,
             })
             .await
             .unwrap();
@@ -179,7 +154,6 @@ mod service {
                 version: "2.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
-                api_url: None,
             })
             .await
             .unwrap();
@@ -206,7 +180,6 @@ mod service {
                 description: None,
                 stats_handler: None,
                 metadata: None,
-                api_url: None,
             })
             .await
             .unwrap();
@@ -246,7 +219,6 @@ mod service {
                 description: None,
                 stats_handler: None,
                 metadata: None,
-                api_url: None,
             })
             .await
             .unwrap();
