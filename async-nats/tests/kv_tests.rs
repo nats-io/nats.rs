@@ -328,9 +328,6 @@ mod kv {
 
     #[tokio::test]
     async fn watch_hearbeats_first() {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::TRACE)
-            .init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
