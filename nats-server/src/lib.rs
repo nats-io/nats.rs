@@ -355,7 +355,7 @@ mod tests {
 
         let jetstream = async_nats::jetstream::new(client);
 
-        let stream = jetstream
+        let mut stream = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
                 name: "replicated".to_string(),
                 num_replicas: 3,
@@ -363,7 +363,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(stream.info.config.num_replicas, 3);
+        assert_eq!(stream.info().await.unwrap().config.num_replicas, 3);
 
         jetstream
             .create_stream(async_nats::jetstream::stream::Config {
