@@ -15,6 +15,6 @@ nuid = "0.3.2"
 rand = "0.8"
 
 [dev-dependencies]
-async-nats = "0.16"
+async-nats = "0.29"
 tokio = { version = "1", features = ["full"]  }
 futures = "0.3"
