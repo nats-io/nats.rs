@@ -11,11 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::connector;
 use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures::Future;
-use std::cmp;
 use std::fmt::Formatter;
 use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 use tokio::io;
@@ -117,13 +117,7 @@ impl Default for ConnectOptions {
             retain_servers_order: false,
             read_buffer_capacity: 65535,
             reconnect_delay_callback: Box::new(|attempts| {
-                if attempts <= 1 {
-                    Duration::from_millis(0)
-                } else {
-                    let exp: u32 = (attempts - 1).try_into().unwrap_or(std::u32::MAX);
-                    let max = Duration::from_secs(4);
-                    cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
-                }
+                connector::reconnect_delay_callback_default(attempts)
             }),
         }
     }

@@ -668,51 +668,6 @@ mod client {
     }
 
     #[tokio::test]
-    async fn reconnect_delay_callback_default() {
-        let server = nats_server::run_basic_server();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let _client = ConnectOptions::new()
-            .event_callback(move |err| {
-                let tx = tx.clone();
-                async move {
-                    tx.send(err.to_string()).unwrap();
-                }
-            })
-            .connect(server.client_url())
-            .await
-            .unwrap();
-        drop(server);
-
-        // Ensure that default backoff works as expected
-        let duration = std::time::Instant::now();
-        rx.recv().await;
-
-        let elapsed = duration.elapsed().as_millis();
-        // Should attempt to reconnect immediately
-        assert_eq!(elapsed, 0);
-
-        for _ in 0..13 {
-            rx.recv().await;
-        }
-
-        let duration = std::time::Instant::now();
-        rx.recv().await;
-        // Should have reached the maximum duration (4s)
-        let elapsed = duration.elapsed().as_millis();
-        // Keep some tolerance of 200ms since the measurement could have some slight variation
-        assert!(elapsed >= 4000);
-        assert!(elapsed < 4100);
-        // assert!((3900..4100).contains(&elapsed));
-
-        let duration = std::time::Instant::now();
-        rx.recv().await;
-        let elapsed = duration.elapsed().as_millis();
-        // Should remain the same, we're at maximum
-        assert!(elapsed >= 4000);
-        assert!(elapsed < 4100);
-    }
-
-    #[tokio::test]
     async fn connect_timeout() {
         // create the notifiers we'll use to synchronize readiness state
         let startup_listener = std::sync::Arc::new(tokio::sync::Notify::new());

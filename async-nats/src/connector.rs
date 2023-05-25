@@ -34,6 +34,7 @@ use base64::engine::Engine;
 use bytes::BytesMut;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use std::cmp;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +69,16 @@ pub(crate) struct Connector {
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
+}
+
+pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
+    if attempts <= 1 {
+        Duration::from_millis(0)
+    } else {
+        let exp: u32 = (attempts - 1).try_into().unwrap_or(std::u32::MAX);
+        let max = Duration::from_secs(4);
+        cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
+    }
 }
 
 impl Connector {
@@ -318,5 +329,32 @@ impl Connector {
         };
 
         Ok((*info, connection))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_delay_callback_duration() {
+        let duration = reconnect_delay_callback_default(0);
+        assert_eq!(duration.as_millis(), 0);
+
+        let duration = reconnect_delay_callback_default(1);
+        assert_eq!(duration.as_millis(), 0);
+
+        let duration = reconnect_delay_callback_default(4);
+        assert_eq!(duration.as_millis(), 8);
+
+        let duration = reconnect_delay_callback_default(12);
+        assert_eq!(duration.as_millis(), 2048);
+
+        let duration = reconnect_delay_callback_default(13);
+        assert_eq!(duration.as_millis(), 4000);
+
+        // The max (4s) was reached and we shouldn't exceed it, regardless of the no of attempts
+        let duration = reconnect_delay_callback_default(50);
+        assert_eq!(duration.as_millis(), 4000);
     }
 }
