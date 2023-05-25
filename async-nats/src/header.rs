@@ -172,14 +172,10 @@ impl HeaderMap {
 ///
 /// ```
 /// # #[tokio::main]
-/// # async fn main() -> Result<(), async_nats::header::ParseError> {
-/// use std::str::FromStr;
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
-/// headers.insert(
-///     "Another",
-///     async_nats::HeaderValue::from_str("AnotherValue")?,
-/// );
+/// headers.insert("Another", "AnotherValue");
 /// # Ok(())
 /// # }
 /// ```
@@ -219,11 +215,11 @@ impl<'a> From<&'a HeaderValue> for &'a str {
 }
 
 impl FromStr for HeaderValue {
-    type Err = ParseError;
+    type Err = ParseHeaderValueError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.contains(['\r', '\n']) {
-            return Err(ParseError);
+            return Err(ParseHeaderValueError);
         }
 
         let mut set = HeaderValue::new();
@@ -271,9 +267,24 @@ impl HeaderValue {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ParseHeaderValueError;
+
+impl fmt::Display for ParseHeaderValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"invalid character found in header value (value cannot contain '\r' or '\n')"#
+        )
+    }
+}
+
+impl std::error::Error for ParseHeaderValueError {}
+
 pub trait IntoHeaderName {
     fn into_header_name(self) -> HeaderName;
 }
+
 impl IntoHeaderName for &str {
     fn into_header_name(self) -> HeaderName {
         HeaderName {
@@ -350,16 +361,15 @@ impl std::error::Error for ParseError {}
 
 #[cfg(test)]
 mod tests {
-    use std::str::{from_utf8, FromStr};
+    use std::str::from_utf8;
 
     use crate::{HeaderMap, HeaderValue};
 
     #[test]
-    fn try_from() -> Result<(), super::ParseError> {
+    fn try_from() {
         let mut headers = HeaderMap::new();
-        headers.insert("name", HeaderValue::from_str("something")?);
+        headers.insert("name", "something".parse::<HeaderValue>().unwrap());
         headers.insert("name", "something2");
-        Ok(())
     }
 
     #[test]
