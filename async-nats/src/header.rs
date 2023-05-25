@@ -321,11 +321,11 @@ pub struct HeaderName {
     value: String,
 }
 impl FromStr for HeaderName {
-    type Err = ParseError;
+    type Err = ParseHeaderNameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
-            return Err(ParseError);
+            return Err(ParseHeaderNameError);
         }
 
         Ok(HeaderName {
@@ -353,20 +353,20 @@ impl AsRef<str> for HeaderName {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParseError;
+pub struct ParseHeaderNameError;
 
-impl std::fmt::Display for ParseError {
+impl std::fmt::Display for ParseHeaderNameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "failed to parse header")
+        write!(f, "invalid header name (name cannot contain non-ascii alphanumeric characters other than '-')")
     }
 }
 
-impl std::error::Error for ParseError {}
+impl std::error::Error for ParseHeaderNameError {}
 
 #[cfg(test)]
 mod tests {
-    use std::str::from_utf8;
     use super::{HeaderMap, HeaderName, HeaderValue};
+    use std::str::{from_utf8, FromStr};
 
     #[test]
     fn try_from() {
