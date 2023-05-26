@@ -619,6 +619,55 @@ mod client {
     }
 
     #[tokio::test]
+    async fn reconnect_delay_callback_custom() {
+        let server = nats_server::run_basic_server();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let _ = ConnectOptions::new()
+            .retry_on_initial_connect()
+            .reconnect_delay_callback(move |attempts| {
+                let tx = tx.clone();
+
+                let duration = std::time::Duration::from_millis(std::cmp::min(
+                    ((attempts - 1) * 500) as u64,
+                    1500,
+                ));
+
+                // report back the number of attempts
+                tx.send((attempts, duration)).unwrap();
+
+                duration
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        drop(server);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 1);
+        assert_eq!(duration.as_millis(), 0);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 2);
+        assert_eq!(duration.as_millis(), 500);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 3);
+        assert_eq!(duration.as_millis(), 1000);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 4);
+        assert_eq!(duration.as_millis(), 1500);
+
+        // we don't exceed 1500ms
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 5);
+        assert_eq!(duration.as_millis(), 1500);
+    }
+
+    #[tokio::test]
     async fn connect_timeout() {
         // create the notifiers we'll use to synchronize readiness state
         let startup_listener = std::sync::Arc::new(tokio::sync::Notify::new());
