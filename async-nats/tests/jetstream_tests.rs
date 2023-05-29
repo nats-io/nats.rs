@@ -31,7 +31,7 @@ mod jetstream {
 
     use super::*;
     use async_nats::connection::State;
-    use async_nats::header::{HeaderMap, NATS_MESSAGE_ID};
+    use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
         self, AckPolicy, DeliverPolicy, Info, OrderedPushConsumer, PullConsumer, PushConsumer,
     };
@@ -680,7 +680,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -739,7 +739,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -813,7 +813,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -882,7 +882,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
