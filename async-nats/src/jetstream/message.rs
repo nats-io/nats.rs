@@ -20,7 +20,7 @@ use futures::StreamExt;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Message {
     pub message: crate::Message,
     pub context: Context,

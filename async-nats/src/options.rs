@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::connector;
 use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
@@ -57,6 +58,8 @@ pub struct ConnectOptions {
     pub(crate) retry_on_initial_connect: bool,
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
+    pub(crate) read_buffer_capacity: u16,
+    pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -78,6 +81,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
+            .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
             .finish()
     }
 }
@@ -111,6 +115,10 @@ impl Default for ConnectOptions {
             retry_on_initial_connect: false,
             ignore_discovered_servers: false,
             retain_servers_order: false,
+            read_buffer_capacity: 65535,
+            reconnect_delay_callback: Box::new(|attempts| {
+                connector::reconnect_delay_callback_default(attempts)
+            }),
         }
     }
 }
@@ -565,6 +573,30 @@ impl ConnectOptions {
         self
     }
 
+    /// Registers a callback for a custom reconnect delay handler that can be used to define a backoff duration strategy.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .reconnect_delay_callback(|attempts| {
+    ///         println!("no of attempts: {attempts}");
+    ///         std::time::Duration::from_millis(std::cmp::min((attempts * 100) as u64, 8000))
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reconnect_delay_callback<F>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn(usize) -> Duration + Send + Sync + 'static,
+    {
+        self.reconnect_delay_callback = Box::new(cb);
+        self
+    }
+
     /// By default, Client dispatches op's to the Client onto the channel with capacity of 128.
     /// This option enables overriding it.
     ///
@@ -671,6 +703,25 @@ impl ConnectOptions {
     /// ```
     pub fn tls_client_config(mut self, config: rustls::ClientConfig) -> ConnectOptions {
         self.tls_client_config = Some(config);
+        self
+    }
+
+    /// Sets the initial capacity of the read buffer. Which is a buffer used to gather partial
+    /// protocol messages.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new()
+    ///     .read_buffer_capacity(65535)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
+        self.read_buffer_capacity = size;
         self
     }
 }

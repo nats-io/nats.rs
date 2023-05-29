@@ -149,14 +149,10 @@ impl HeaderMap {
 ///
 /// ```
 /// # #[tokio::main]
-/// # async fn main() -> Result<(), async_nats::header::ParseError> {
-/// use std::str::FromStr;
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
-/// headers.insert(
-///     "Another",
-///     async_nats::HeaderValue::from_str("AnotherValue")?,
-/// );
+/// headers.insert("Another", "AnotherValue");
 /// # Ok(())
 /// # }
 /// ```
@@ -196,9 +192,13 @@ impl<'a> From<&'a HeaderValue> for &'a str {
 }
 
 impl FromStr for HeaderValue {
-    type Err = ParseError;
+    type Err = ParseHeaderValueError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains(['\r', '\n']) {
+            return Err(ParseHeaderValueError);
+        }
+
         let mut set = HeaderValue::new();
         set.value.push(s.to_string());
         Ok(set)
@@ -244,9 +244,24 @@ impl HeaderValue {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ParseHeaderValueError;
+
+impl fmt::Display for ParseHeaderValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"invalid character found in header value (value cannot contain '\r' or '\n')"#
+        )
+    }
+}
+
+impl std::error::Error for ParseHeaderValueError {}
+
 pub trait IntoHeaderName {
     fn into_header_name(self) -> HeaderName;
 }
+
 impl IntoHeaderName for &str {
     fn into_header_name(self) -> HeaderName {
         HeaderName {
@@ -393,9 +408,13 @@ impl HeaderName {
 }
 
 impl FromStr for HeaderName {
-    type Err = ParseError;
+    type Err = ParseHeaderNameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
+            return Err(ParseHeaderNameError);
+        }
+
         match StandardHeader::from_bytes(s.as_ref()) {
             Some(v) => Ok(HeaderName {
                 inner: HeaderRepr::Standard(v),
@@ -426,28 +445,26 @@ impl AsRef<str> for HeaderName {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParseError;
+pub struct ParseHeaderNameError;
 
-impl std::fmt::Display for ParseError {
+impl std::fmt::Display for ParseHeaderNameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "failed to parse header")
+        write!(f, "invalid header name (name cannot contain non-ascii alphanumeric characters other than '-')")
     }
 }
 
-impl std::error::Error for ParseError {}
+impl std::error::Error for ParseHeaderNameError {}
 
 #[cfg(test)]
 mod tests {
+    use super::{HeaderMap, HeaderName, HeaderValue};
     use std::str::{from_utf8, FromStr};
 
-    use crate::{HeaderMap, HeaderValue};
-
     #[test]
-    fn try_from() -> Result<(), super::ParseError> {
+    fn try_from() {
         let mut headers = HeaderMap::new();
-        headers.insert("name", HeaderValue::from_str("something")?);
+        headers.insert("name", "something".parse::<HeaderValue>().unwrap());
         headers.insert("name", "something2");
-        Ok(())
     }
 
     #[test]
@@ -511,5 +528,48 @@ mod tests {
         headers.append("Key", "second_value");
         headers.insert("Second", "SecondValue");
         assert!(!headers.is_empty());
+    }
+
+    #[test]
+    fn parse_value() {
+        assert!("Foo\r".parse::<HeaderValue>().is_err());
+        assert!("Foo\n".parse::<HeaderValue>().is_err());
+        assert!("Foo\r\n".parse::<HeaderValue>().is_err());
+    }
+
+    #[test]
+    fn valid_header_name() {
+        let valid_header_name = "X-Custom-Header";
+        let parsed_header = HeaderName::from_str(valid_header_name);
+
+        assert!(
+            parsed_header.is_ok(),
+            "Expected Ok(HeaderName), but got an error: {:?}",
+            parsed_header.err()
+        );
+    }
+
+    #[test]
+    fn invalid_header_name_with_space() {
+        let invalid_header_name = "X Custom Header";
+        let parsed_header = HeaderName::from_str(invalid_header_name);
+
+        assert!(
+            parsed_header.is_err(),
+            "Expected Err(InvalidHeaderNameError), but got Ok: {:?}",
+            parsed_header.ok()
+        );
+    }
+
+    #[test]
+    fn invalid_header_name_with_special_chars() {
+        let invalid_header_name = "X-Header!@#";
+        let parsed_header = HeaderName::from_str(invalid_header_name);
+
+        assert!(
+            parsed_header.is_err(),
+            "Expected Err(InvalidHeaderNameError), but got Ok: {:?}",
+            parsed_header.ok()
+        );
     }
 }
