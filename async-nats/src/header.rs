@@ -86,12 +86,10 @@ impl HeaderMap {
     /// # Examples
     ///
     /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let mut headers = async_nats::HeaderMap::new();
+    /// use async_nats::HeaderMap;
+    ///
+    /// let mut headers = HeaderMap::new();
     /// headers.insert("Key", "Value");
-    /// # Ok(())
-    /// # }
     /// ```
     pub fn insert<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         self.inner
@@ -104,13 +102,11 @@ impl HeaderMap {
     /// # Examples
     ///
     /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let mut headers = async_nats::HeaderMap::new();
+    /// use async_nats::HeaderMap;
+    ///
+    /// let mut headers = HeaderMap::new();
     /// headers.append("Key", "Value");
     /// headers.append("Key", "Another");
-    /// # Ok(())
-    /// # }
     /// ```
     pub fn append<K: IntoHeaderName, V: ToString>(&mut self, name: K, value: V) {
         let key = name.into_header_name();
@@ -130,13 +126,11 @@ impl HeaderMap {
     /// # Examples
     ///
     /// ```
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let mut headers = async_nats::HeaderMap::new();
+    /// # use async_nats::HeaderMap;
+    ///
+    /// let mut headers = HeaderMap::new();
     /// headers.append("Key", "Value");
     /// let key = headers.get("Key").unwrap();
-    /// # Ok(())
-    /// # }
     /// ```
     pub fn get<T: IntoHeaderName>(&self, name: T) -> Option<&HeaderValue> {
         self.inner.get(&name.into_header_name())
@@ -164,13 +158,11 @@ impl HeaderMap {
 /// # Examples
 ///
 /// ```
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let mut headers = async_nats::HeaderMap::new();
+/// # use async_nats::HeaderMap;
+///
+/// let mut headers = HeaderMap::new();
 /// headers.insert("Key", "Value");
 /// headers.insert("Another", "AnotherValue");
-/// # Ok(())
-/// # }
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct HeaderValue {
