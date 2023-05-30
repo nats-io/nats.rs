@@ -60,6 +60,21 @@ impl HeaderMap {
         HeaderMap::default()
     }
 
+    /// Returns true if the map contains no elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use async_nats::HeaderMap;
+    /// # use async_nats::header::NATS_SUBJECT;
+    /// let mut map = HeaderMap::new();
+    ///
+    /// assert!(map.is_empty());
+    ///
+    /// map.insert(NATS_SUBJECT, "FOO.BAR");
+    ///
+    /// assert!(!map.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
