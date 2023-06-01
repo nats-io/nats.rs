@@ -14,6 +14,7 @@
 use lazy_static::__Deref;
 use parking_lot::{Mutex, MutexGuard};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Error, ErrorKind};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
@@ -23,11 +24,9 @@ use std::thread;
 use std::time::Duration;
 use url::{Host, Url};
 
-use webpki::DNSNameRef;
-
 use crate::auth_utils;
 use crate::proto::{self, ClientOp, ServerOp};
-use crate::rustls::{ClientConfig, ClientSession, Session};
+use crate::rustls::{ClientConfig, ClientConnection};
 use crate::secure_wipe::SecureString;
 use crate::{connect::ConnectInfo, inject_io_failure, AuthStyle, Options, ServerInfo};
 
@@ -47,52 +46,49 @@ pub(crate) struct Connector {
     tls_config: Arc<ClientConfig>,
 }
 
+fn configure_tls(options: Arc<Options>) -> Result<ClientConfig, io::Error> {
+    let mut root_store = rustls::RootCertStore::empty();
+    let native_certs = rustls_native_certs::load_native_certs()?;
+
+    for cert in native_certs {
+        root_store
+            .add(&rustls::Certificate(cert.0))
+            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+    }
+
+    // Include user-provided certificates.
+    for path in &options.certificates {
+        let contents = std::fs::read(path)?;
+        root_store.add_parsable_certificates(&[contents]);
+    }
+
+    let builder = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store);
+
+    if let Some(cert) = &options.client_cert {
+        if let Some(key) = &options.client_key {
+            let cert = auth_utils::load_certs(cert)?;
+            let key = auth_utils::load_key(key)?;
+
+            return builder
+                .with_single_cert(cert, key)
+                .map_err(|err| io::Error::new(ErrorKind::Other, err));
+        } else {
+            return Err(io::Error::new(ErrorKind::Other, "key was not given"));
+        }
+    }
+
+    Ok(builder.with_no_client_auth())
+}
 impl Connector {
     /// Creates a new connector with the URLs and options.
     pub(crate) fn new(urls: Vec<ServerAddress>, options: Arc<Options>) -> io::Result<Connector> {
-        let mut tls_config = options.tls_client_config.clone();
-
-        // Include system root certificates.
-        //
-        // On Windows, some certificates cannot be loaded by rustls
-        // for whatever reason, so we simply skip them.
-        // See https://github.com/ctz/rustls-native-certs/issues/5
-        let roots = match rustls_native_certs::load_native_certs() {
-            Ok(store) | Err((Some(store), _)) => store.roots,
-            Err((None, _)) => Vec::new(),
-        };
-        for root in roots {
-            tls_config.root_store.roots.push(root);
-        }
-
-        // Include user-provided certificates.
-        for path in &options.certificates {
-            let contents = std::fs::read(path)?;
-            let mut cursor = std::io::Cursor::new(contents);
-
-            tls_config
-                .root_store
-                .add_pem_file(&mut cursor)
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid certificate file")
-                })?;
-        }
-
-        if let Some(cert) = &options.client_cert {
-            if let Some(key) = &options.client_key {
-                tls_config
-                    .set_single_client_cert(
-                        auth_utils::load_certs(cert)?,
-                        auth_utils::load_key(key)?,
-                    )
-                    .map_err(|err| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!("invalid client certificate and key pair: {err}"),
-                        )
-                    })?;
-            }
-        }
+        let tls_config = options
+            .tls_client_config
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| configure_tls(options.clone()))?;
 
         let connector = Connector {
             attempts: urls.into_iter().map(|url| (url, 0)).collect(),
@@ -252,15 +248,19 @@ impl Connector {
             inject_io_failure()?;
 
             // Connect using TLS.
-            let dns_name = DNSNameRef::try_from_ascii_str(&server_info.host)
-                .or_else(|_| DNSNameRef::try_from_ascii_str(server.host()))
+            let server_name = rustls::client::ServerName::try_from(server_info.host.as_str())
+                .or_else(|_| rustls::client::ServerName::try_from(server.host()))
                 .map_err(|_| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "cannot determine hostname for TLS connection",
                     )
                 })?;
-            Some(ClientSession::new(&self.tls_config, dns_name))
+
+            Some(
+                ClientConnection::new(self.tls_config.clone(), server_name)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?,
+            )
         } else {
             None
         };
@@ -374,12 +374,12 @@ enum Flavor {
 
 struct TlsStream {
     tcp: TcpStream,
-    session: ClientSession,
+    session: ClientConnection,
 }
 
 impl NatsStream {
     /// Creates a NATS stream from a TCP stream and an optional TLS session.
-    fn new(tcp: TcpStream, session: Option<ClientSession>) -> io::Result<NatsStream> {
+    fn new(tcp: TcpStream, session: Option<ClientConnection>) -> io::Result<NatsStream> {
         let flavor = match session {
             None => Flavor::Tcp(tcp),
             Some(session) => {
@@ -418,7 +418,7 @@ impl Read for &NatsStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => (tcp.deref()).read(buf),
-            Flavor::Tls(tls) => tls_op(tls, |session, eof| match session.read(buf) {
+            Flavor::Tls(tls) => tls_op(tls, |session, eof| match session.reader().read(buf) {
                 Ok(0) if !eof => Err(io::ErrorKind::WouldBlock.into()),
                 res => res,
             }),
@@ -440,14 +440,14 @@ impl Write for &NatsStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => (tcp.deref()).write(buf),
-            Flavor::Tls(tls) => tls_op(tls, |session, _| session.write(buf)),
+            Flavor::Tls(tls) => tls_op(tls, |session, _| session.writer().write(buf)),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match &*self.flavor {
             Flavor::Tcp(tcp) => (tcp.deref()).flush(),
-            Flavor::Tls(tls) => tls_op(tls, |session, _| session.flush()),
+            Flavor::Tls(tls) => tls_op(tls, |session, _| session.writer().flush()),
         }
     }
 }
@@ -457,7 +457,7 @@ impl Write for &NatsStream {
 /// However, note that the inner TCP stream is in non-blocking mode.
 fn tls_op<T: std::fmt::Debug>(
     tls: &Mutex<TlsStream>,
-    mut op: impl FnMut(&mut ClientSession, bool) -> io::Result<T>,
+    mut op: impl FnMut(&mut ClientConnection, bool) -> io::Result<T>,
 ) -> io::Result<T> {
     loop {
         let mut tls = tls.lock();
@@ -468,9 +468,11 @@ fn tls_op<T: std::fmt::Debug>(
         if session.wants_read() {
             match session.read_tls(tcp) {
                 Ok(0) => eof = true,
-                Ok(_) => session
-                    .process_new_packets()
-                    .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {err}")))?,
+                Ok(_) => {
+                    session
+                        .process_new_packets()
+                        .map_err(|err| Error::new(ErrorKind::Other, format!("TLS error: {err}")))?;
+                }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {}
                 Err(err) => return Err(err),
             }

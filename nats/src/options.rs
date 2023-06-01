@@ -38,7 +38,7 @@ pub struct Options {
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
-    pub(crate) tls_client_config: crate::rustls::ClientConfig,
+    pub(crate) tls_client_config: Option<crate::rustls::ClientConfig>,
 
     pub(crate) error_callback: ErrorCallback,
     pub(crate) disconnect_callback: Callback,
@@ -91,7 +91,7 @@ impl Default for Options {
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
             lame_duck_callback: Callback(None),
-            tls_client_config: crate::rustls::ClientConfig::default(),
+            tls_client_config: None,
         }
     }
 }
@@ -354,7 +354,7 @@ impl Options {
     /// # }
     /// ```
     pub fn tls_client_config(mut self, tls_client_config: crate::rustls::ClientConfig) -> Options {
-        self.tls_client_config = tls_client_config;
+        self.tls_client_config = Some(tls_client_config);
         self
     }
 

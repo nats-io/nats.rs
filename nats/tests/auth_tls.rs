@@ -11,11 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
 use std::path::PathBuf;
 
 #[test]
-fn basic_tls() -> io::Result<()> {
+fn basic_tls() {
     let server = nats_server::run_server("tests/configs/tls.conf");
     assert!(nats::connect(server.client_url()).is_err());
 
@@ -27,7 +26,8 @@ fn basic_tls() -> io::Result<()> {
             path.join("tests/configs/certs/client-cert.pem"),
             path.join("tests/configs/certs/client-key.pem"),
         )
-        .connect(server.client_url())?;
+        .connect(server.client_url())
+        .unwrap();
 
     // test scenario where rootCA, client certificate and client key are all in one .pem file
     nats::Options::with_user_pass("derek", "porkchop")
@@ -36,7 +36,6 @@ fn basic_tls() -> io::Result<()> {
             path.join("tests/configs/certs/client-all.pem"),
             path.join("tests/configs/certs/client-all.pem"),
         )
-        .connect(server.client_url())?;
-
-    Ok(())
+        .connect(server.client_url())
+        .unwrap();
 }
