@@ -446,6 +446,15 @@ enum HeaderRepr {
     Custom(CustomHeader),
 }
 
+/// Represents a NATS header field name
+///
+/// Header field names identify the header. Header sets may include multiple
+/// headers with the same name.
+///
+/// # Representation
+///
+/// `HeaderName` represents standard header names using an `enum`, as such they
+/// will not require an allocation for storage.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct HeaderName {
     inner: HeaderRepr,
