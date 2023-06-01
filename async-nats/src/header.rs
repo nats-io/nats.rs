@@ -56,6 +56,16 @@ impl HeaderMap {
 }
 
 impl HeaderMap {
+    /// Create an empty `HeaderMap`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use async_nats::HeaderMap;
+    /// let map = HeaderMap::new();
+    ///
+    /// assert!(map.is_empty());
+    /// ```
     pub fn new() -> Self {
         HeaderMap::default()
     }
