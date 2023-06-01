@@ -48,47 +48,76 @@ pub(crate) struct Connector {
 
 fn configure_tls(options: Arc<Options>) -> Result<ClientConfig, io::Error> {
     let mut root_store = rustls::RootCertStore::empty();
-    let native_certs = rustls_native_certs::load_native_certs()?;
 
-    for cert in native_certs {
-        root_store
-            .add(&rustls::Certificate(cert.0))
-            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+    if options.tls_client_config.is_some() || options.certificates.is_empty() {
+        let native_certs = rustls_native_certs::load_native_certs()
+            .map_err(|err| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    format!("could not load platform certs: {err}"),
+                )
+            })?
+            .into_iter()
+            .map(|cert| cert.0)
+            .collect::<Vec<Vec<u8>>>();
+
+        root_store.add_parsable_certificates(&native_certs);
     }
 
-    // Include user-provided certificates.
-    for path in &options.certificates {
-        let contents = std::fs::read(path)?;
-        root_store.add_parsable_certificates(&[contents]);
-    }
-
-    let builder = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(root_store);
-
-    if let Some(cert) = &options.client_cert {
-        if let Some(key) = &options.client_key {
-            let cert = auth_utils::load_certs(cert)?;
-            let key = auth_utils::load_key(key)?;
-
-            return builder
-                .with_single_cert(cert, key)
-                .map_err(|err| io::Error::new(ErrorKind::Other, err));
-        } else {
-            return Err(io::Error::new(ErrorKind::Other, "key was not given"));
+    if let Some(config) = &options.tls_client_config {
+        Ok(config.to_owned())
+    } else {
+        // Include user-provided certificates
+        for path in &options.certificates {
+            let mut pem = BufReader::new(std::fs::File::open(path)?);
+            let certs = rustls_pemfile::certs(&mut pem)?;
+            let trust_anchors = certs.iter().map(|cert| {
+                let trust_anchor = webpki::TrustAnchor::try_from_cert_der(&cert[..])
+                    .map_err(|err| {
+                        io::Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("could not load certs: {err}"),
+                        )
+                    })
+                    .unwrap();
+                rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
+                    trust_anchor.subject,
+                    trust_anchor.spki,
+                    trust_anchor.name_constraints,
+                )
+            });
+            root_store.add_server_trust_anchors(trust_anchors);
         }
-    }
 
-    Ok(builder.with_no_client_auth())
+        let builder = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_store);
+
+        if let Some(cert) = &options.client_cert {
+            if let Some(key) = &options.client_key {
+                let cert = auth_utils::load_certs(cert)?;
+                let key = auth_utils::load_key(key)?;
+
+                return builder.with_single_cert(cert, key).map_err(|_| {
+                    io::Error::new(ErrorKind::Other, "could not add certificate or key")
+                });
+            } else {
+                return Err(io::Error::new(
+                    ErrorKind::Other,
+                    "found certificate, but no key",
+                ));
+            }
+        }
+
+        // if there are no client certs provided, connect with just TLS.
+        Ok(builder.with_no_client_auth())
+    }
 }
+
 impl Connector {
     /// Creates a new connector with the URLs and options.
     pub(crate) fn new(urls: Vec<ServerAddress>, options: Arc<Options>) -> io::Result<Connector> {
-        let tls_config = options
-            .tls_client_config
-            .clone()
-            .map(Ok)
-            .unwrap_or_else(|| configure_tls(options.clone()))?;
+        let tls_config = configure_tls(options.clone())?;
 
         let connector = Connector {
             attempts: urls.into_iter().map(|url| (url, 0)).collect(),
