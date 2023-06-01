@@ -46,7 +46,7 @@ pub(crate) struct Connector {
     tls_config: Arc<ClientConfig>,
 }
 
-fn configure_tls(options: Arc<Options>) -> Result<ClientConfig, io::Error> {
+fn configure_tls(options: &Arc<Options>) -> Result<ClientConfig, Error> {
     let mut root_store = rustls::RootCertStore::empty();
 
     if options.tls_client_config.is_some() || options.certificates.is_empty() {
@@ -117,7 +117,7 @@ fn configure_tls(options: Arc<Options>) -> Result<ClientConfig, io::Error> {
 impl Connector {
     /// Creates a new connector with the URLs and options.
     pub(crate) fn new(urls: Vec<ServerAddress>, options: Arc<Options>) -> io::Result<Connector> {
-        let tls_config = configure_tls(options.clone())?;
+        let tls_config = configure_tls(&options)?;
 
         let connector = Connector {
             attempts: urls.into_iter().map(|url| (url, 0)).collect(),
@@ -277,9 +277,8 @@ impl Connector {
             inject_io_failure()?;
 
             // Connect using TLS.
-            let server_name = rustls::client::ServerName::try_from(server_info.host.as_str())
-                .or_else(|_| rustls::client::ServerName::try_from(server.host()))
-                .map_err(|_| {
+            let server_name =
+                rustls::client::ServerName::try_from(server.host()).map_err(|_| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "cannot determine hostname for TLS connection",

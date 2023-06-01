@@ -342,14 +342,25 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let mut tls_client_config = nats::rustls::ClientConfig::default();
-    /// tls_client_config.set_single_client_cert(
-    ///     vec![nats::rustls::Certificate(b"MY_CERT".to_vec())],
-    ///     nats::rustls::PrivateKey(b"MY_KEY".to_vec()),
+    /// let mut root_store = nats::rustls::RootCertStore::empty();
+    ///
+    /// root_store.add_parsable_certificates(
+    ///     rustls_native_certs::load_native_certs()?
+    ///         .into_iter()
+    ///         .map(|cert| cert.0)
+    ///         .collect::<Vec<Vec<u8>>>()
+    ///         .as_ref(),
     /// );
+    ///
+    /// let tls_client_config = nats::rustls::ClientConfig::builder()
+    ///     .with_safe_defaults()
+    ///     .with_root_certificates(root_store)
+    ///     .with_no_client_auth();
+    ///
     /// let nc = nats::Options::new()
     ///     .tls_client_config(tls_client_config)
     ///     .connect("nats://localhost:4443")?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
