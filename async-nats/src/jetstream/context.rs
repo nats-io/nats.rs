@@ -893,6 +893,7 @@ impl Context {
                 num_replicas: config.num_replicas,
                 discard: DiscardPolicy::New,
                 allow_rollup: true,
+                allow_direct: true,
                 ..Default::default()
             })
             .await?;
