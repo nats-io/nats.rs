@@ -11,41 +11,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A Rust async bleeding edge client for the NATS.io ecosystem.
+//! A Rust asynchronous client for the NATS.io ecosystem.
 //!
-//! `git clone https://github.com/nats-io/nats.rs`
+//! To access the repository, you can clone it by running:
 //!
-//! NATS.io is a simple, secure and high performance open source messaging
-//! system for cloud native applications, `IoT` messaging, and microservices
+//! ```bash
+//! git clone https://github.com/nats-io/nats.rs
+//! ````
+//! NATS.io is a simple, secure, and high-performance open-source messaging
+//! system designed for cloud-native applications, IoT messaging, and microservices
 //! architectures.
 //!
-//! For sync API refer <https://crates.io/crates/nats>
+//! **Note**: The synchronous NATS API is deprecated and no longer actively maintained. If you need to use the deprecated synchronous API, you can refer to:
+//! <https://crates.io/crates/nats>
 //!
-//! For more information see [https://nats.io/].
-//!
-//! [https://nats.io/]: https://nats.io/
+//! For more information on NATS.io visit: <https://nats.io>
 //!
 //! ## Examples
 //!
-//! Below you can find some basic examples how to use this library.
+//! Below, you can find some basic examples on how to use this library.
 //!
-//! For details, refer docs for specific method/struct.
+//! For more details, please refer to the specific methods and structures documentation.
 //!
 //! ### Complete example
 //!
-//! ```
+//! Connect to the NATS server, publish messages and subscribe to receive messages.
+//!
+//! ```no_run
 //! use bytes::Bytes;
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), async_nats::Error> {
+//!     // Connect to the NATS server
 //!     let client = async_nats::connect("demo.nats.io").await?;
-//!     let mut subscriber = client.subscribe("messages".into()).await?.take(10);
 //!
+//!     // Subscribe to the "messages" subject
+//!     let mut subscriber = client.subscribe("messages".into()).await?;
+//!
+//!     // Publish messages to the "messages" subject
 //!     for _ in 0..10 {
 //!         client.publish("messages".into(), "data".into()).await?;
 //!     }
 //!
+//!     // Receive and process messages
 //!     while let Some(message) = subscriber.next().await {
 //!         println!("Received message {:?}", message);
 //!     }
@@ -56,24 +65,32 @@
 //!
 //! ### Publish
 //!
+//! Connect to the NATS server and publish messages to a subject.
+//!
 //! ```
 //! # use bytes::Bytes;
 //! # use std::error::Error;
 //! # use std::time::Instant;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
+//! // Prepare the subject and data
 //! let subject = String::from("foo");
 //! let data = Bytes::from("bar");
+//!
+//! // Publish messages to the NATS server
 //! for _ in 0..10 {
-//!     client.publish("subject".into(), "data".into()).await?;
+//!     client.publish(subject.clone(), data.clone()).await?;
 //! }
 //! #    Ok(())
 //! # }
 //! ```
 //!
 //! ### Subscribe
+//!
+//! Connect to the NATS server, subscribe to a subject and receive messages.
 //!
 //! ```no_run
 //! # use bytes::Bytes;
@@ -82,10 +99,13 @@
 //! # use std::time::Instant;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
+//! // Subscribe to the "foo" subject
 //! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
+//! // Receive and process messages
 //! while let Some(message) = subscriber.next().await {
 //!     println!("Received message {:?}", message);
 //! }
