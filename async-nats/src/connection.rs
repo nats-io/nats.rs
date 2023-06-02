@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module provides a connection implementation for communicating with a NATS server.
+
 use std::fmt::Display;
 use std::str::{self, FromStr};
 
@@ -30,6 +32,7 @@ pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
 /// Blanked implementation that applies to both TLS and non-TLS `TcpStream`.
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
+/// An enum representing the state of the connection.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum State {
     Pending,
@@ -56,6 +59,8 @@ pub(crate) struct Connection {
 /// Internal representation of the connection.
 /// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
+    /// Attempts to read a server operation from the read buffer.
+    /// Returns `None` if there is not enough data to parse an entire operation.
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         let maybe_len = memchr::memmem::find(&self.buffer, b"\r\n");
         if maybe_len.is_none() {
@@ -316,6 +321,8 @@ impl Connection {
     }
 
     // TODO: do we want an custom error here?
+    /// Read a server operation from read buffer.
+    /// Blocks until an operation ca be parsed.
     pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         loop {
             if let Some(op) = self.try_read_op()? {
@@ -332,6 +339,7 @@ impl Connection {
         }
     }
 
+    /// Writes a client operation to the write buffer.
     pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> Result<(), io::Error> {
         match item {
             ClientOp::Connect(connect_info) => {
@@ -438,6 +446,7 @@ impl Connection {
         Ok(())
     }
 
+    /// Flush the write buffer, sending all pending data down the current write stream.
     pub(crate) async fn flush(&mut self) -> Result<(), io::Error> {
         self.stream.flush().await
     }
