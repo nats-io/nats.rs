@@ -358,16 +358,18 @@ mod jetstream {
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let mut stream = context
-            .create_stream(&stream::Config {
+        let retry_strategy = tokio_retry::strategy::FibonacciBackoff::from_millis(500).take(5);
+        let mut stream = Retry::spawn(retry_strategy, || {
+            context.create_stream(stream::Config {
                 name: "events2".to_string(),
                 num_replicas: 3,
                 max_bytes: 1024,
                 storage: StorageType::Memory,
                 ..Default::default()
             })
-            .await
-            .unwrap();
+        })
+        .await
+        .unwrap();
 
         assert_eq!(stream.cached_info().config.num_replicas, 3);
         assert!(stream.cached_info().cluster.is_some());
