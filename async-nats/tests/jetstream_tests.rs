@@ -1774,6 +1774,46 @@ mod jetstream {
         }
     }
 
+    #[cfg(feature = "server_2_10")]
+    #[tokio::test]
+    async fn update_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        stream
+            .create_consumer(consumer::pull::Config {
+                name: Some("CONSUMER".into()),
+                filter_subjects: vec!["one".into(), "two".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(consumer::pull::Config {
+                name: Some("CONSUMER".into()),
+                filter_subjects: vec!["one".into(), "three".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            consumer.cached_info().config.filter_subjects,
+            vec!["one".to_string(), "three".to_string()]
+        );
+    }
+
     #[tokio::test]
     async fn pull_stream_error() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
