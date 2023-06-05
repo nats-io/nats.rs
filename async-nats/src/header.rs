@@ -446,7 +446,7 @@ enum HeaderRepr {
     Custom(CustomHeader),
 }
 
-/// Represents a NATS header field name
+/// Defines a NATS header field name
 ///
 /// Header field names identify the header. Header sets may include multiple
 /// headers with the same name.
