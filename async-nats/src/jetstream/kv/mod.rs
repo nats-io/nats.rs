@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A Key-Value store built on top of JetStream, allowing you to store and retrieve data using simple key-value pairs.
+
 pub mod bucket;
 
 use std::{
@@ -120,11 +122,17 @@ pub enum Operation {
 /// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
 pub struct Store {
+    /// The name of the Store.
     pub name: String,
+    /// The name of the stream associated with the Store.
     pub stream_name: String,
+    /// The prefix for keys in the Store.
     pub prefix: String,
+    /// The optional prefix to use when putting new key-value pairs.
     pub put_prefix: Option<String>,
+    /// Indicates whether to use the JetStream prefix.
     pub use_jetstream_prefix: bool,
+    /// The stream associated with the Store.
     pub stream: Stream,
 }
 
@@ -485,6 +493,35 @@ impl Store {
         self.watch(ALL_KEYS).await
     }
 
+    /// Retrieves the [Entry] for a given key from a bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let value = kv.get("key").await?;
+    /// match value {
+    ///     Some(bytes) => {
+    ///         let value_str = std::str::from_utf8(&bytes)?;
+    ///         println!("Value: {}", value_str);
+    ///     }
+    ///     None => {
+    ///         println!("Key not found or value not set");
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Bytes>, Error> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
@@ -769,6 +806,7 @@ impl Store {
     }
 }
 
+/// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
 pub struct Watch<'a> {
     subscription: super::consumer::push::Ordered<'a>,
     prefix: String,
@@ -830,6 +868,7 @@ impl<'a> futures::Stream for Watch<'a> {
     }
 }
 
+/// A structure representing the history of a key-value bucket, yielding past values.
 pub struct History<'a> {
     subscription: super::consumer::push::Ordered<'a>,
     done: bool,
