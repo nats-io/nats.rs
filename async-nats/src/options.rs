@@ -174,7 +174,7 @@ impl ConnectOptions {
         crate::connect_with_options(addrs, self).await
     }
 
-    /// Auth against NATS Server with provided token.
+    /// Authenticate against NATS Server with the provided token.
     ///
     /// # Examples
     /// ```no_run
@@ -193,7 +193,26 @@ impl ConnectOptions {
         }
     }
 
-    /// Auth against NATS Server with provided username and password.
+    /// Use a builder to specify a token, to be used when authenticating against the NATS Server.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .token("t0k3n!".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn token(mut self, token: String) -> Self {
+        self.authorizations.push(Authorization::Token(token));
+        self
+    }
+
+    /// Authenticate against NATS Server with the provided username and password.
     ///
     /// # Examples
     /// ```no_run
@@ -212,7 +231,27 @@ impl ConnectOptions {
         }
     }
 
-    /// Authenticate with a NKey. Requires NKey Seed secret.
+    /// Use a builder to specify a username and password, to be used when authenticating against the NATS Server.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .user_and_password("derek".into(), "s3cr3t!".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn user_and_password(mut self, user: String, pass: String) -> Self {
+        self.authorizations
+            .push(Authorization::UserAndPassword(user, pass));
+        self
+    }
+
+    /// Authenticate with an NKey. Requires an NKey Seed secret.
     ///
     /// # Example
     /// ```no_run
@@ -232,8 +271,29 @@ impl ConnectOptions {
         }
     }
 
+    /// Use a builder to specify an NKey, to be used when authenticating against the NATS Server.
+    /// Requires an NKey Seed Secret.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .nkey(seed.into())
+    ///     .connect("localhost")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn nkey(mut self, seed: String) -> Self {
+        self.authorizations.push(Authorization::NKey(seed));
+        self
+    }
+
     /// Authenticate with a JWT. Requires function to sign the server nonce.
-    /// The signing function is asynchronous
+    /// The signing function is asynchronous.
     ///
     /// # Example
     /// ```no_run
@@ -265,6 +325,42 @@ impl ConnectOptions {
             authorizations: vec![jwt_auth],
             ..Default::default()
         }
+    }
+
+    /// Use a builder to specify a JWT, to be used when authenticating against the NATS Server.
+    /// Requires an asynchronous function to sign the server nonce.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let key_pair = std::sync::Arc::new(nkeys::KeyPair::from_seed(seed).unwrap());
+    /// // load jwt from creds file or other secure source
+    /// async fn load_jwt() -> std::io::Result<String> {
+    ///     todo!();
+    /// }
+    /// let jwt = load_jwt().await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .jwt(jwt, move |nonce| {
+    ///         let key_pair = key_pair.clone();
+    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    ///     })
+    ///     .connect("localhost")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Self
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
+    {
+        let jwt_auth = Self::generate_jwt_auth(jwt, sign_cb);
+        self.authorizations.push(jwt_auth);
+        self
     }
 
     fn generate_jwt_auth<F, Fut>(jwt: String, sign_cb: F) -> Authorization
@@ -307,6 +403,27 @@ impl ConnectOptions {
         Self::with_credentials(&cred_file_contents)
     }
 
+    /// Use a builder to specify a credentials file, to be used when authenticating against the NATS Server.
+    /// This will open the credentials file and load its credentials.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .credentials_file("path/to/my.creds".into())
+    ///     .await?
+    ///     .connect("connect.ngs.global")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn credentials_file(self, path: PathBuf) -> io::Result<Self> {
+        let cred_file_contents = crate::auth_utils::load_creds(path).await?;
+        self.credentials(&cred_file_contents)
+    }
+
     /// Authenticate with NATS using a credential str, in the creds file format.
     ///
     /// # Example
@@ -345,6 +462,47 @@ impl ConnectOptions {
             authorizations: vec![jwt_auth],
             ..Default::default()
         })
+    }
+
+    /// Use a builder to specify a credentials string, to be used when authenticating against the NATS Server.
+    /// The string should be in the credentials file format.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let creds = "-----BEGIN NATS USER JWT-----
+    /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
+    /// ------END NATS USER JWT------
+    ///
+    /// ************************* IMPORTANT *************************
+    /// NKEY Seed printed below can be used sign and prove identity.
+    /// NKEYs are sensitive and should be treated as secrets.
+    ///
+    /// -----BEGIN USER NKEY SEED-----
+    /// SUAIO3FHUX5PNV2LQIIP7TZ3N4L7TX3W53MQGEIVYFIGA635OZCKEYHFLM
+    /// ------END USER NKEY SEED------
+    /// ";
+    ///
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .credentials(creds)
+    ///     .expect("failed to parse static creds")
+    ///     .connect("connect.ngs.global")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn credentials(mut self, creds: &str) -> io::Result<Self> {
+        let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
+        let key_pair = std::sync::Arc::new(key_pair);
+        let jwt_auth = Self::generate_jwt_auth(jwt.to_owned(), move |nonce| {
+            let key_pair = key_pair.clone();
+            async move { key_pair.sign(&nonce).map_err(AuthError::new) }
+        });
+
+        self.authorizations.push(jwt_auth);
+        Ok(self)
     }
 
     /// Loads root certificates by providing the path to them.

@@ -826,32 +826,30 @@ mod client {
             nats_server::run_server("tests/configs/token.conf"),
         ];
 
-        todo!();
-        // TODO: Instead of repurposing the existing `with_..` funcs, we create a builder with the new options (and pass multiple auth methods)
-        // multiple auth methods
-        // let client = async_nats::ConnectOptions::with_user_and_password("js".into(), "js".into())
-        //     .with_token("s3cr3t".into())
-        //     .with_credentials_file(path.join("tests/configs/TestUser.creds"))
-        //     .await
-        //     .unwrap()
-        //     .connect(
-        //         servers
-        //             .iter()
-        //             .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
-        //             .collect::<Vec<ServerAddr>>()
-        //             .as_slice(),
-        //     )
-        //     .await
-        //     .unwrap();
-        //
-        // let mut subscriber = client.subscribe("test".into()).await.unwrap();
-        // while !servers.is_empty() {
-        //     client.publish("test".into(), "data".into()).await.unwrap();
-        //     client.flush().await.unwrap();
-        //     assert!(subscriber.next().await.is_some());
-        //
-        //     drop(servers.remove(0));
-        //     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        // }
+        let client = async_nats::ConnectOptions::new()
+            .user_and_password("js".into(), "js".into())
+            .token("s3cr3t".into())
+            .credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .unwrap()
+            .connect(
+                servers
+                    .iter()
+                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>()
+                    .as_slice(),
+            )
+            .await
+            .unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        while !servers.is_empty() {
+            client.publish("test".into(), "data".into()).await.unwrap();
+            client.flush().await.unwrap();
+            assert!(subscriber.next().await.is_some());
+
+            drop(servers.remove(0));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
     }
 }
