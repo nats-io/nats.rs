@@ -852,4 +852,24 @@ mod client {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     }
+
+    #[tokio::test]
+    async fn multiple_auth_methods_with_conflicts() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let server = nats_server::run_basic_server();
+
+        let client = async_nats::ConnectOptions::new()
+            .nkey("SUACH75SWCM5D2JMJM6EKLR2WDARVGZT4QC6LX3AGHSWOMVAKERABBBRWM".into())
+            .credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .unwrap()
+            .connect(server.client_url())
+            .await;
+
+        // An error is expected - mixing NKey and JWT is not allowed
+        let err = client.unwrap_err();
+        // Ensure we're getting the correct error
+        assert_eq!(format!("{err}"), "authorization methods conflict");
+    }
 }

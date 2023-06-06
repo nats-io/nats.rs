@@ -826,6 +826,8 @@ pub enum ConnectErrorKind {
     Authentication,
     /// Server returned authorization violation error.
     AuthorizationViolation,
+    /// Incompatible authorization methods in used.
+    AuthorizationMethodsConflict,
     /// Connect timed out.
     TimedOut,
     /// Erroneous TLS setup.
@@ -856,6 +858,9 @@ impl Display for ConnectError {
             ConnectErrorKind::Dns => write!(f, "DNS error: {}", source_info),
             ConnectErrorKind::Authentication => write!(f, "failed signing nonce"),
             ConnectErrorKind::AuthorizationViolation => write!(f, "authorization violation"),
+            ConnectErrorKind::AuthorizationMethodsConflict => {
+                write!(f, "authorization methods conflict")
+            }
             ConnectErrorKind::TimedOut => write!(f, "timed out"),
             ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
             ConnectErrorKind::Io => write!(f, "{}", source_info),

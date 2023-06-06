@@ -81,6 +81,16 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
     }
 }
 
+pub(crate) fn has_conflicting_auth_methods(authorizations: &[Authorization]) -> bool {
+    let count = authorizations
+        .iter()
+        .filter(|x| matches!(x, Authorization::Jwt(..)) || matches!(x, Authorization::NKey(..)))
+        .count();
+
+    // If we have more than one of these, we must have conflicts (i.e. we've mixed Jwt with NKey)
+    count > 1
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -172,6 +182,13 @@ impl Connector {
                             headers: true,
                             no_responders: true,
                         };
+
+                        // Ensure that there are no conflicting authorization methods
+                        if has_conflicting_auth_methods(&self.options.authorizations) {
+                            return Err(ConnectError::new(
+                                crate::ConnectErrorKind::AuthorizationMethodsConflict,
+                            ));
+                        }
 
                         for auth in &self.options.authorizations {
                             match auth {
