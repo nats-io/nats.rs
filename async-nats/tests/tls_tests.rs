@@ -32,8 +32,7 @@ mod client {
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-        async_nats::ConnectOptions::new()
-            .with_user_and_password("derek".into(), "porkchop".into())
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
             .add_client_certificate(
                 path.join("tests/configs/certs/client-cert.pem"),
@@ -51,8 +50,7 @@ mod client {
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-        async_nats::ConnectOptions::new()
-            .with_user_and_password("derek".into(), "porkchop".into())
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .add_root_certificates(path.join("tests/configs/certs/ip-ca.pem"))
             .require_tls(true)
             .connect(format!("tls://127.0.0.1:{}", server.client_port()))
@@ -64,8 +62,7 @@ mod client {
         let server = nats_server::run_server("tests/configs/tls.conf");
         assert!(async_nats::connect(&server.client_url()).await.is_err());
 
-        async_nats::ConnectOptions::new()
-            .with_user_and_password("derek".into(), "porkchop".into())
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .require_tls(true)
             .connect(server.client_url())
             .await
@@ -80,8 +77,7 @@ mod client {
         // test scenario where rootCA, client certificate and client key are all in one .pem file
         tokio::time::timeout(
             tokio::time::Duration::from_secs(10),
-            async_nats::ConnectOptions::new()
-                .with_user_and_password("derek".into(), "porkchop".into())
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
                 .add_root_certificates(path.join("tests/configs/certs/client-all.pem"))
                 .add_client_certificate(
                     path.join("tests/configs/certs/client-all.pem"),

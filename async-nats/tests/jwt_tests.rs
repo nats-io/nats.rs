@@ -20,13 +20,14 @@ mod client {
         let s = nats_server::run_server("tests/configs/jwt.conf");
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let nc = async_nats::ConnectOptions::new()
-            .with_credentials_file(path.join("tests/configs/TestUser.creds"))
-            .await
-            .expect("loaded user creds file")
-            .connect(s.client_url())
-            .await
-            .unwrap();
+        let nc = async_nats::ConnectOptions::with_credentials_file(
+            path.join("tests/configs/TestUser.creds"),
+        )
+        .await
+        .expect("loaded user creds file")
+        .connect(s.client_url())
+        .await
+        .unwrap();
 
         // publish something
         nc.publish("hello".into(), "world".into())
@@ -44,19 +45,20 @@ mod client {
             nats_server::run_server("tests/configs/jwt.conf"),
         ];
 
-        let client = async_nats::ConnectOptions::new()
-            .with_credentials_file(path.join("tests/configs/TestUser.creds"))
-            .await
-            .unwrap()
-            .connect(
-                servers
-                    .iter()
-                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
-                    .collect::<Vec<ServerAddr>>()
-                    .as_slice(),
-            )
-            .await
-            .unwrap();
+        let client = async_nats::ConnectOptions::with_credentials_file(
+            path.join("tests/configs/TestUser.creds"),
+        )
+        .await
+        .unwrap()
+        .connect(
+            servers
+                .iter()
+                .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                .collect::<Vec<ServerAddr>>()
+                .as_slice(),
+        )
+        .await
+        .unwrap();
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {

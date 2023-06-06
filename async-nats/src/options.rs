@@ -180,16 +180,17 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_token("t0k3n!".into())
+    /// let nc = async_nats::ConnectOptions::with_token("t0k3n!".into())
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_token(mut self, token: String) -> Self {
-        self.authorizations.push(Authorization::Token(token));
-        self
+    pub fn with_token(token: String) -> Self {
+        ConnectOptions {
+            authorizations: vec![Authorization::Token(token)],
+            ..Default::default()
+        }
     }
 
     /// Auth against NATS Server with provided username and password.
@@ -198,17 +199,17 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_user_and_password("derek".into(), "s3cr3t!".into())
+    /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_user_and_password(mut self, user: String, pass: String) -> Self {
-        self.authorizations
-            .push(Authorization::UserAndPassword(user, pass));
-        self
+    pub fn with_user_and_password(user: String, pass: String) -> Self {
+        ConnectOptions {
+            authorizations: vec![Authorization::UserAndPassword(user, pass)],
+            ..Default::default()
+        }
     }
 
     /// Authenticate with a NKey. Requires NKey Seed secret.
@@ -218,16 +219,17 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
-    /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_nkey(seed.into())
+    /// let nc = async_nats::ConnectOptions::with_nkey(seed.into())
     ///     .connect("localhost")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_nkey(mut self, seed: String) -> Self {
-        self.authorizations.push(Authorization::NKey(seed));
-        self
+    pub fn with_nkey(seed: String) -> Self {
+        ConnectOptions {
+            authorizations: vec![Authorization::NKey(seed)],
+            ..Default::default()
+        }
     }
 
     /// Authenticate with a JWT. Requires function to sign the server nonce.
@@ -244,24 +246,25 @@ impl ConnectOptions {
     ///     todo!();
     /// }
     /// let jwt = load_jwt().await?;
-    /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_jwt(jwt, move |nonce| {
-    ///         let key_pair = key_pair.clone();
-    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
-    ///     })
-    ///     .connect("localhost")
-    ///     .await?;
+    /// let nc = async_nats::ConnectOptions::with_jwt(jwt, move |nonce| {
+    ///     let key_pair = key_pair.clone();
+    ///     async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    /// })
+    /// .connect("localhost")
+    /// .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Self
+    pub fn with_jwt<F, Fut>(jwt: String, sign_cb: F) -> Self
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
     {
         let jwt_auth = Self::generate_jwt_auth(jwt, sign_cb);
-        self.authorizations.push(jwt_auth);
-        self
+        ConnectOptions {
+            authorizations: vec![jwt_auth],
+            ..Default::default()
+        }
     }
 
     fn generate_jwt_auth<F, Fut>(jwt: String, sign_cb: F) -> Authorization
@@ -292,18 +295,16 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_credentials_file("path/to/my.creds".into())
+    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds".into())
     ///     .await?
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn with_credentials_file(self, path: PathBuf) -> io::Result<Self> {
+    pub async fn with_credentials_file(path: PathBuf) -> io::Result<Self> {
         let cred_file_contents = crate::auth_utils::load_creds(path).await?;
-
-        self.with_credentials(&cred_file_contents)
+        Self::with_credentials(&cred_file_contents)
     }
 
     /// Authenticate with NATS using a credential str, in the creds file format.
@@ -325,15 +326,14 @@ impl ConnectOptions {
     /// ------END USER NKEY SEED------
     /// ";
     ///
-    /// let nc = async_nats::ConnectOptions::new()
-    ///     .with_credentials(creds)
+    /// let nc = async_nats::ConnectOptions::with_credentials(creds)
     ///     .expect("failed to parse static creds")
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_credentials(mut self, creds: &str) -> io::Result<Self> {
+    pub fn with_credentials(creds: &str) -> io::Result<Self> {
         let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
         let key_pair = std::sync::Arc::new(key_pair);
         let jwt_auth = Self::generate_jwt_auth(jwt.to_owned(), move |nonce| {
@@ -341,8 +341,10 @@ impl ConnectOptions {
             async move { key_pair.sign(&nonce).map_err(AuthError::new) }
         });
 
-        self.authorizations.push(jwt_auth);
-        Ok(self)
+        Ok(ConnectOptions {
+            authorizations: vec![jwt_auth],
+            ..Default::default()
+        })
     }
 
     /// Loads root certificates by providing the path to them.

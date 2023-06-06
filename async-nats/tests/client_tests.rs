@@ -389,8 +389,7 @@ mod client {
     #[tokio::test]
     async fn token_auth() {
         let server = nats_server::run_server("tests/configs/token.conf");
-        let client = async_nats::ConnectOptions::new()
-            .with_token("s3cr3t".into())
+        let client = async_nats::ConnectOptions::with_token("s3cr3t".into())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -404,11 +403,11 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let client = async_nats::ConnectOptions::new()
-            .with_user_and_password("derek".into(), "s3cr3t".into())
-            .connect(server.client_url())
-            .await
-            .unwrap();
+        let client =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t".into())
+                .connect(server.client_url())
+                .await
+                .unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
         client.publish("test".into(), "test".into()).await.unwrap();
@@ -430,11 +429,13 @@ mod client {
     #[tokio::test]
     async fn user_pass_auth_wrong_pass() {
         let server = nats_server::run_server("tests/configs/user_pass.conf");
-        let err = async_nats::ConnectOptions::new()
-            .with_user_and_password("derek".into(), "bad_password".into())
-            .connect(server.client_url())
-            .await
-            .unwrap_err();
+        let err = async_nats::ConnectOptions::with_user_and_password(
+            "derek".into(),
+            "bad_password".into(),
+        )
+        .connect(server.client_url())
+        .await
+        .unwrap_err();
         assert_eq!(ConnectErrorKind::AuthorizationViolation, err.kind());
     }
 
@@ -791,8 +792,7 @@ mod client {
             nats_server::run_basic_server(),
         ];
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let _ = ConnectOptions::new()
-            .with_user_and_password("js".into(), "js".into())
+        let _ = ConnectOptions::with_user_and_password("js".into(), "js".into())
             .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
@@ -826,31 +826,32 @@ mod client {
             nats_server::run_server("tests/configs/token.conf"),
         ];
 
+        todo!();
+        // TODO: Instead of repurposing the existing `with_..` funcs, we create a builder with the new options (and pass multiple auth methods)
         // multiple auth methods
-        let client = async_nats::ConnectOptions::new()
-            .with_user_and_password("js".into(), "js".into())
-            .with_token("s3cr3t".into())
-            .with_credentials_file(path.join("tests/configs/TestUser.creds"))
-            .await
-            .unwrap()
-            .connect(
-                servers
-                    .iter()
-                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
-                    .collect::<Vec<ServerAddr>>()
-                    .as_slice(),
-            )
-            .await
-            .unwrap();
-
-        let mut subscriber = client.subscribe("test".into()).await.unwrap();
-        while !servers.is_empty() {
-            client.publish("test".into(), "data".into()).await.unwrap();
-            client.flush().await.unwrap();
-            assert!(subscriber.next().await.is_some());
-
-            drop(servers.remove(0));
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        }
+        // let client = async_nats::ConnectOptions::with_user_and_password("js".into(), "js".into())
+        //     .with_token("s3cr3t".into())
+        //     .with_credentials_file(path.join("tests/configs/TestUser.creds"))
+        //     .await
+        //     .unwrap()
+        //     .connect(
+        //         servers
+        //             .iter()
+        //             .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+        //             .collect::<Vec<ServerAddr>>()
+        //             .as_slice(),
+        //     )
+        //     .await
+        //     .unwrap();
+        //
+        // let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        // while !servers.is_empty() {
+        //     client.publish("test".into(), "data".into()).await.unwrap();
+        //     client.flush().await.unwrap();
+        //     assert!(subscriber.next().await.is_some());
+        //
+        //     drop(servers.remove(0));
+        //     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // }
     }
 }
