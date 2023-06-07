@@ -12,7 +12,7 @@ This file lists the dependencies used in this repository.
 | itoa 0.4.8                | Apache-2.0 OR MIT        |
 | itoa 1.0.1                | Apache-2.0 OR MIT        |
 | lazy_static 1.4.0         | Apache-2.0 OR MIT        |
-| nkeys 0.2.0               | Apache-2.0               |
+| nkeys 0.3.0               | Apache-2.0               |
 | nuid 0.3.2                | Apache-2.0               |
 | once_cell 1.10.0          | Apache-2.0 OR MIT        |
 | rand 0.8.5                | Apache-2.0 OR MIT        |

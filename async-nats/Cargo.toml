@@ -17,7 +17,7 @@ categories = ["network-programming", "api-bindings"]
 memchr = "2.4"
 bytes = "1.4.0"
 futures = { version = "0.3.26", default-features = false, features = ["std", "async-await"] }
-nkeys = "0.2.0"
+nkeys = "0.3.0"
 once_cell = "1.17.1"
 regex = "1.7.1"
 serde = { version = "1.0.152", features = ["derive"] }
