@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::auth::Auth;
 use crate::connector;
-use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
+use crate::{Client, ConnectError, Event, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures::Future;
@@ -42,7 +43,7 @@ pub struct ConnectOptions {
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
     pub(crate) connection_timeout: Duration,
-    pub(crate) authorizations: Vec<Authorization>,
+    pub(crate) auth: Auth,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
@@ -95,7 +96,6 @@ impl Default for ConnectOptions {
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
             connection_timeout: Duration::from_secs(5),
-            authorizations: Vec::new(),
             tls_required: false,
             certificates: Vec::new(),
             client_cert: None,
@@ -119,6 +119,7 @@ impl Default for ConnectOptions {
             reconnect_delay_callback: Box::new(|attempts| {
                 connector::reconnect_delay_callback_default(attempts)
             }),
+            auth: Default::default(),
         }
     }
 }
@@ -187,10 +188,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn with_token(token: String) -> Self {
-        ConnectOptions {
-            authorizations: vec![Authorization::Token(token)],
-            ..Default::default()
-        }
+        ConnectOptions::default().token(token)
     }
 
     /// Use a builder to specify a token, to be used when authenticating against the NATS Server.
@@ -208,7 +206,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn token(mut self, token: String) -> Self {
-        self.authorizations.push(Authorization::Token(token));
+        self.auth.token = Some(token);
         self
     }
 
@@ -225,10 +223,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn with_user_and_password(user: String, pass: String) -> Self {
-        ConnectOptions {
-            authorizations: vec![Authorization::UserAndPassword(user, pass)],
-            ..Default::default()
-        }
+        ConnectOptions::default().user_and_password(user, pass)
     }
 
     /// Use a builder to specify a username and password, to be used when authenticating against the NATS Server.
@@ -246,8 +241,8 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn user_and_password(mut self, user: String, pass: String) -> Self {
-        self.authorizations
-            .push(Authorization::UserAndPassword(user, pass));
+        self.auth.username = Some(user);
+        self.auth.password = Some(pass);
         self
     }
 
@@ -265,10 +260,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn with_nkey(seed: String) -> Self {
-        ConnectOptions {
-            authorizations: vec![Authorization::NKey(seed)],
-            ..Default::default()
-        }
+        ConnectOptions::default().nkey(seed)
     }
 
     /// Use a builder to specify an NKey, to be used when authenticating against the NATS Server.
@@ -288,7 +280,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn nkey(mut self, seed: String) -> Self {
-        self.authorizations.push(Authorization::NKey(seed));
+        self.auth.nkey = Some(seed);
         self
     }
 
@@ -320,11 +312,7 @@ impl ConnectOptions {
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
     {
-        let jwt_auth = Self::generate_jwt_auth(jwt, sign_cb);
-        ConnectOptions {
-            authorizations: vec![jwt_auth],
-            ..Default::default()
-        }
+        ConnectOptions::default().jwt(jwt, sign_cb)
     }
 
     /// Use a builder to specify a JWT, to be used when authenticating against the NATS Server.
@@ -358,29 +346,21 @@ impl ConnectOptions {
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
     {
-        let jwt_auth = Self::generate_jwt_auth(jwt, sign_cb);
-        self.authorizations.push(jwt_auth);
-        self
-    }
-
-    fn generate_jwt_auth<F, Fut>(jwt: String, sign_cb: F) -> Authorization
-    where
-        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
-    {
         let sign_cb = Arc::new(sign_cb);
-        Authorization::Jwt(
-            jwt,
-            CallbackArg1(Box::new(move |nonce: String| {
-                let sign_cb = sign_cb.clone();
-                Box::pin(async move {
-                    let sig = sign_cb(nonce.as_bytes().to_vec())
-                        .await
-                        .map_err(AuthError::new)?;
-                    Ok(URL_SAFE_NO_PAD.encode(sig))
-                })
-            })),
-        )
+
+        let jwt_sign_callback = CallbackArg1(Box::new(move |nonce: String| {
+            let sign_cb = sign_cb.clone();
+            Box::pin(async move {
+                let sig = sign_cb(nonce.as_bytes().to_vec())
+                    .await
+                    .map_err(AuthError::new)?;
+                Ok(URL_SAFE_NO_PAD.encode(sig))
+            })
+        }));
+
+        self.auth.jwt = Some(jwt);
+        self.auth.signature = Some(jwt_sign_callback);
+        self
     }
 
     /// Authenticate with NATS using a `.creds` file.
@@ -451,17 +431,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     pub fn with_credentials(creds: &str) -> io::Result<Self> {
-        let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
-        let key_pair = std::sync::Arc::new(key_pair);
-        let jwt_auth = Self::generate_jwt_auth(jwt.to_owned(), move |nonce| {
-            let key_pair = key_pair.clone();
-            async move { key_pair.sign(&nonce).map_err(AuthError::new) }
-        });
-
-        Ok(ConnectOptions {
-            authorizations: vec![jwt_auth],
-            ..Default::default()
-        })
+        ConnectOptions::default().credentials(creds)
     }
 
     /// Use a builder to specify a credentials string, to be used when authenticating against the NATS Server.
@@ -493,16 +463,14 @@ impl ConnectOptions {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn credentials(mut self, creds: &str) -> io::Result<Self> {
+    pub fn credentials(self, creds: &str) -> io::Result<Self> {
         let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
         let key_pair = std::sync::Arc::new(key_pair);
-        let jwt_auth = Self::generate_jwt_auth(jwt.to_owned(), move |nonce| {
+
+        Ok(self.jwt(jwt.to_owned(), move |nonce| {
             let key_pair = key_pair.clone();
             async move { key_pair.sign(&nonce).map_err(AuthError::new) }
-        });
-
-        self.authorizations.push(jwt_auth);
-        Ok(self)
+        }))
     }
 
     /// Loads root certificates by providing the path to them.

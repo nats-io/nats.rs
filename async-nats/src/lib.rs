@@ -142,13 +142,13 @@ use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 
+mod auth;
 pub(crate) mod auth_utils;
 pub mod client;
 pub mod connection;
 mod connector;
 mod options;
 
-use crate::options::CallbackArg1;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
@@ -662,7 +662,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             client_key: options.client_key,
             client_cert: options.client_cert,
             tls_client_config: options.tls_client_config,
-            authorizations: options.authorizations,
+            auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
             name: options.name,
@@ -826,8 +826,6 @@ pub enum ConnectErrorKind {
     Authentication,
     /// Server returned authorization violation error.
     AuthorizationViolation,
-    /// Incompatible authorization methods in used.
-    AuthorizationMethodsConflict,
     /// Connect timed out.
     TimedOut,
     /// Erroneous TLS setup.
@@ -858,9 +856,6 @@ impl Display for ConnectError {
             ConnectErrorKind::Dns => write!(f, "DNS error: {}", source_info),
             ConnectErrorKind::Authentication => write!(f, "failed signing nonce"),
             ConnectErrorKind::AuthorizationViolation => write!(f, "authorization violation"),
-            ConnectErrorKind::AuthorizationMethodsConflict => {
-                write!(f, "authorization methods conflict")
-            }
             ConnectErrorKind::TimedOut => write!(f, "timed out"),
             ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
             ConnectErrorKind::Io => write!(f, "{}", source_info),
@@ -1306,23 +1301,6 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         (**self).to_server_addrs()
     }
-}
-
-pub(crate) enum Authorization {
-    /// Authenticate using a token.
-    Token(String),
-
-    /// Authenticate using a username and password.
-    UserAndPassword(String, String),
-
-    /// Authenticate using nkey seed
-    NKey(String),
-
-    /// Authenticate using a jwt and signing function.
-    Jwt(
-        String,
-        CallbackArg1<String, std::result::Result<String, AuthError>>,
-    ),
 }
 
 #[cfg(test)]

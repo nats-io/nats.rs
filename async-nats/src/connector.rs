@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::auth::Auth;
 use crate::connection::Connection;
 use crate::connection::State;
 use crate::tls;
-use crate::Authorization;
 use crate::ClientError;
 use crate::ClientOp;
 use crate::ConnectError;
@@ -51,7 +51,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
-    pub(crate) authorizations: Vec<Authorization>,
+    pub(crate) auth: Auth,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
     pub(crate) name: Option<String>,
@@ -79,16 +79,6 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
         let max = Duration::from_secs(4);
         cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
     }
-}
-
-pub(crate) fn has_conflicting_auth_methods(authorizations: &[Authorization]) -> bool {
-    let count = authorizations
-        .iter()
-        .filter(|x| matches!(x, Authorization::Jwt(..)) || matches!(x, Authorization::NKey(..)))
-        .count();
-
-    // If we have more than one of these, we must have conflicts (i.e. we've mixed Jwt with NKey)
-    count > 1
 }
 
 impl Connector {
@@ -172,9 +162,9 @@ impl Connector {
                             lang: LANG.to_string(),
                             version: VERSION.to_string(),
                             protocol: Protocol::Dynamic,
-                            user: None,
-                            pass: None,
-                            auth_token: None,
+                            user: self.options.auth.username.to_owned(),
+                            pass: self.options.auth.password.to_owned(),
+                            auth_token: self.options.auth.token.to_owned(),
                             user_jwt: None,
                             nkey: None,
                             signature: None,
@@ -183,59 +173,42 @@ impl Connector {
                             no_responders: true,
                         };
 
-                        // Ensure that there are no conflicting authorization methods
-                        if has_conflicting_auth_methods(&self.options.authorizations) {
-                            return Err(ConnectError::new(
-                                crate::ConnectErrorKind::AuthorizationMethodsConflict,
-                            ));
+                        if let Some(nkey) = self.options.auth.nkey.as_ref() {
+                            match nkeys::KeyPair::from_seed(nkey.as_str()) {
+                                Ok(key_pair) => {
+                                    let nonce = server_info.nonce.clone();
+                                    match key_pair.sign(nonce.as_bytes()) {
+                                        Ok(signed) => {
+                                            connect_info.nkey = Some(key_pair.public_key());
+                                            connect_info.signature =
+                                                Some(URL_SAFE_NO_PAD.encode(signed));
+                                        }
+                                        Err(_) => {
+                                            return Err(ConnectError::new(
+                                                crate::ConnectErrorKind::Authentication,
+                                            ))
+                                        }
+                                    };
+                                }
+                                Err(_) => {
+                                    return Err(ConnectError::new(
+                                        crate::ConnectErrorKind::Authentication,
+                                    ))
+                                }
+                            }
                         }
 
-                        for auth in &self.options.authorizations {
-                            match auth {
-                                // We don't want to early return here,
-                                // as server might require auth that we did not provide.
-                                Authorization::Token(token) => {
-                                    connect_info.auth_token = Some(token.clone())
-                                }
-                                Authorization::UserAndPassword(user, pass) => {
-                                    connect_info.user = Some(user.clone());
-                                    connect_info.pass = Some(pass.clone());
-                                }
-                                Authorization::NKey(ref seed) => {
-                                    match nkeys::KeyPair::from_seed(seed.as_str()) {
-                                        Ok(key_pair) => {
-                                            let nonce = server_info.nonce.clone();
-                                            match key_pair.sign(nonce.as_bytes()) {
-                                                Ok(signed) => {
-                                                    connect_info.nkey = Some(key_pair.public_key());
-                                                    connect_info.signature =
-                                                        Some(URL_SAFE_NO_PAD.encode(signed));
-                                                }
-                                                Err(_) => {
-                                                    return Err(ConnectError::new(
-                                                        crate::ConnectErrorKind::Authentication,
-                                                    ))
-                                                }
-                                            };
-                                        }
-                                        Err(_) => {
-                                            return Err(ConnectError::new(
-                                                crate::ConnectErrorKind::Authentication,
-                                            ))
-                                        }
+                        if let Some(jwt) = self.options.auth.jwt.as_ref() {
+                            if let Some(sign_fn) = self.options.auth.signature.as_ref() {
+                                match sign_fn.call(server_info.nonce.clone()).await {
+                                    Ok(sig) => {
+                                        connect_info.user_jwt = Some(jwt.clone());
+                                        connect_info.signature = Some(sig);
                                     }
-                                }
-                                Authorization::Jwt(jwt, sign_fn) => {
-                                    match sign_fn.call(server_info.nonce.clone()).await {
-                                        Ok(sig) => {
-                                            connect_info.user_jwt = Some(jwt.clone());
-                                            connect_info.signature = Some(sig);
-                                        }
-                                        Err(_) => {
-                                            return Err(ConnectError::new(
-                                                crate::ConnectErrorKind::Authentication,
-                                            ))
-                                        }
+                                    Err(_) => {
+                                        return Err(ConnectError::new(
+                                            crate::ConnectErrorKind::Authentication,
+                                        ))
                                     }
                                 }
                             }
