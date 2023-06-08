@@ -1,6 +1,6 @@
-use std::{env, str::from_utf8, time::Duration};
 use async_nats::jetstream::{self, consumer::PushConsumer};
 use futures::StreamExt;
+use std::{env, str::from_utf8, time::Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
