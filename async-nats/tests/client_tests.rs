@@ -20,6 +20,7 @@ mod client {
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::path::PathBuf;
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -812,5 +813,43 @@ mod client {
 
         drop(servers.remove(0));
         rx.recv().await;
+    }
+
+    #[tokio::test]
+    async fn multiple_auth_methods() {
+        use async_nats::ServerAddr;
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let mut servers = vec![
+            nats_server::run_basic_server(),
+            nats_server::run_server("tests/configs/jwt.conf"),
+            nats_server::run_server("tests/configs/token.conf"),
+        ];
+
+        let client = async_nats::ConnectOptions::new()
+            .user_and_password("js".into(), "js".into())
+            .token("s3cr3t".into())
+            .credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .unwrap()
+            .connect(
+                servers
+                    .iter()
+                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>()
+                    .as_slice(),
+            )
+            .await
+            .unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        while !servers.is_empty() {
+            client.publish("test".into(), "data".into()).await.unwrap();
+            client.flush().await.unwrap();
+            assert!(subscriber.next().await.is_some());
+
+            drop(servers.remove(0));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
     }
 }

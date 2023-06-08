@@ -142,13 +142,13 @@ use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 
+mod auth;
 pub(crate) mod auth_utils;
 pub mod client;
 pub mod connection;
 mod connector;
 mod options;
 
-use crate::options::CallbackArg1;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
@@ -1301,26 +1301,6 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     fn to_server_addrs(&self) -> io::Result<Self::Iter> {
         (**self).to_server_addrs()
     }
-}
-
-pub(crate) enum Authorization {
-    /// No authentication.
-    None,
-
-    /// Authenticate using a token.
-    Token(String),
-
-    /// Authenticate using a username and password.
-    UserAndPassword(String, String),
-
-    /// Authenticate using nkey seed
-    NKey(String),
-
-    /// Authenticate using a jwt and signing function.
-    Jwt(
-        String,
-        CallbackArg1<String, std::result::Result<String, AuthError>>,
-    ),
 }
 
 #[cfg(test)]
