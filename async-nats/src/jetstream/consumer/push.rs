@@ -238,6 +238,9 @@ pub struct Config {
     /// Custom backoff for missed acknowledgments.
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
+    /// Threshold for consumer inactivity
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub inactive_threshold: Duration,
 }
 
 impl FromConsumer for Config {
@@ -275,6 +278,7 @@ impl FromConsumer for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: config.backoff,
+            inactive_threshold: config.inactive_threshold,
         })
     }
 }
@@ -305,7 +309,7 @@ impl IntoConsumerConfig for Config {
             max_batch: 0,
             max_bytes: 0,
             max_expires: Duration::default(),
-            inactive_threshold: Duration::default(),
+            inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
             memory_storage: self.memory_storage,
             #[cfg(feature = "server_2_10")]

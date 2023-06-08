@@ -1992,7 +1992,7 @@ pub struct Config {
     /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer inactivity
+    /// Threshold for consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
     /// Number of consumer replicas
