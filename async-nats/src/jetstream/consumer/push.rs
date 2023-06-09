@@ -446,12 +446,13 @@ impl IntoConsumerConfig for OrderedConfig {
 }
 
 impl Consumer<OrderedConfig> {
-    pub async fn messages<'a>(self) -> Result<Ordered<'a>, Error> {
+    pub async fn messages<'a>(self) -> Result<Ordered<'a>, StreamError> {
         let subscriber = self
             .context
             .client
             .subscribe(self.info.config.deliver_subject.clone().unwrap())
-            .await?;
+            .await
+            .map_err(|err| StreamError::with_source(StreamErrorKind::Other, err))?;
 
         let last_seen = Arc::new(Mutex::new(Instant::now()));
         let last_sequence = Arc::new(AtomicU64::new(0));
@@ -548,17 +549,22 @@ impl<'a> Drop for Ordered<'a> {
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
-    type Item = Result<Message, Error>;
+    type Item = Result<Message, OrderedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             match self.shutdown.try_recv() {
-                Ok(err) => return Poll::Ready(Some(Err(Box::new(err)))),
+                Ok(err) => {
+                    return Poll::Ready(Some(Err(OrderedError::with_source(
+                        OrderedErrorKind::Other,
+                        err,
+                    ))))
+                }
                 Err(TryRecvError::Closed) => {
-                    return Poll::Ready(Some(Err(Box::from(io::Error::new(
-                        ErrorKind::Other,
-                        "push consumer task closed",
-                    )))))
+                    return Poll::Ready(Some(Err(OrderedError::with_source(
+                        OrderedErrorKind::Other,
+                        "consumer task closed",
+                    ))))
                 }
                 Err(TryRecvError::Empty) => {}
             }
@@ -584,7 +590,12 @@ impl<'a> futures::Stream for Ordered<'a> {
                         match self.subscriber_future.as_mut().unwrap().as_mut().poll(cx) {
                             Poll::Ready(subscriber) => {
                                 self.subscriber_future = None;
-                                self.subscriber = Some(subscriber?);
+                                self.subscriber = Some(subscriber.map_err(|err| {
+                                    OrderedError::with_source(
+                                        OrderedErrorKind::RecreationFailed,
+                                        err,
+                                    )
+                                })?);
                             }
                             Poll::Pending => {
                                 return Poll::Pending;
@@ -595,7 +606,9 @@ impl<'a> futures::Stream for Ordered<'a> {
                         Poll::Ready(subscriber) => {
                             self.subscriber_future = None;
                             self.consumer_sequence.store(0, Ordering::Relaxed);
-                            self.subscriber = Some(subscriber?);
+                            self.subscriber = Some(subscriber.map_err(|err| {
+                                OrderedError::with_source(OrderedErrorKind::RecreationFailed, err)
+                            })?);
                         }
                         Poll::Pending => {
                             return Poll::Pending;
@@ -617,13 +630,16 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                 headers.get(crate::header::NATS_LAST_CONSUMER)
                                             {
                                                 let sequence: u64 = sequence
-                                                    .iter().next().unwrap()
+                                                    .iter()
+                                                    .next()
+                                                    .unwrap()
                                                     .parse()
-                                                    .map_err(|err|
-                                                           Box::new(io::Error::new(
-                                                                   ErrorKind::Other,
-                                                                   format!("could not parse header into u64: {err}"))
-                                                               ))?;
+                                                    .map_err(|err| {
+                                                        OrderedError::with_source(
+                                                            OrderedErrorKind::Other,
+                                                            err,
+                                                        )
+                                                    })?;
 
                                                 if sequence
                                                     != self
@@ -659,7 +675,9 @@ impl<'a> futures::Stream for Ordered<'a> {
                                             context: self.context.clone(),
                                         };
 
-                                        let info = jetstream_message.info()?;
+                                        let info = jetstream_message.info().map_err(|err| {
+                                            OrderedError::with_source(OrderedErrorKind::Other, err)
+                                        })?;
                                         trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
                                                self.consumer_sequence,
                                                self.stream_sequence,
@@ -695,6 +713,54 @@ impl<'a> futures::Stream for Ordered<'a> {
             }
         }
     }
+}
+#[derive(Debug)]
+pub struct OrderedError {
+    kind: OrderedErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl std::fmt::Display for OrderedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
+            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            OrderedErrorKind::PullBasedConsumer => write!(f, "cannot use with push consumer"),
+            OrderedErrorKind::RecreationFailed => write!(f, "consumer recreation failed"),
+        }
+    }
+}
+
+crate::error_impls!(OrderedError, OrderedErrorKind);
+
+impl From<MessagesError> for OrderedError {
+    fn from(err: MessagesError) -> Self {
+        match err.kind() {
+            MessagesErrorKind::MissingHeartbeat => {
+                OrderedError::new(OrderedErrorKind::MissingHeartbeat)
+            }
+            MessagesErrorKind::ConsumerDeleted => {
+                OrderedError::new(OrderedErrorKind::ConsumerDeleted)
+            }
+            MessagesErrorKind::PullBasedConsumer => {
+                OrderedError::new(OrderedErrorKind::PullBasedConsumer)
+            }
+            MessagesErrorKind::Other => OrderedError {
+                kind: OrderedErrorKind::Other,
+                source: err.source,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    PullBasedConsumer,
+    RecreationFailed,
+    Other,
 }
 
 #[derive(Debug)]

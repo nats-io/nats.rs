@@ -1318,6 +1318,8 @@ macro_rules! error_impls {
             pub(crate) fn new(kind: $k) -> $t {
                 Self { kind, source: None }
             }
+            #[allow(dead_code)]
+            #[allow(unreachable_pub)]
             pub(crate) fn with_source<S>(kind: $k, source: S) -> $t
             where
                 S: Into<Box<dyn std::error::Error + Sync + Send>>,
