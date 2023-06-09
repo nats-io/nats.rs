@@ -1314,6 +1314,7 @@ macro_rules! error_impls {
     ($t:ty, $k:ty) => {
         impl $t {
             #[allow(dead_code)]
+            #[allow(unreachable_pub)]
             pub(crate) fn new(kind: $k) -> $t {
                 Self { kind, source: None }
             }
@@ -1327,6 +1328,7 @@ macro_rules! error_impls {
                 }
             }
             #[allow(dead_code)]
+            #[allow(unreachable_pub)]
             pub fn kind(&self) -> $k {
                 // ALmost all `kind` types implement `Copy`, so it's almost always copy.
                 // We need to clone, as some more complex one may have nested other errors, that
@@ -1334,6 +1336,7 @@ macro_rules! error_impls {
                 self.kind.clone()
             }
             #[allow(dead_code)]
+            #[allow(unreachable_pub)]
             pub(crate) fn format_source(&self) -> String {
                 self.source
                     .as_ref()

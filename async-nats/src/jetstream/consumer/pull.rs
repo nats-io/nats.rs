@@ -18,7 +18,6 @@ use futures::{future::BoxFuture, FutureExt, StreamExt, TryFutureExt};
 use std::collections::HashMap;
 use std::{
     future,
-    io::ErrorKind,
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
@@ -38,7 +37,10 @@ use crate::{
     Error, StatusCode, Subscriber,
 };
 
-use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
+use super::{
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    StreamError, StreamErrorKind,
+};
 use jetstream::consumer;
 
 impl Consumer<Config> {
@@ -141,20 +143,26 @@ impl Consumer<Config> {
         &self,
         batch: I,
         inbox: String,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BatchRequestError> {
         debug!("sending batch");
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             self.context.prefix, self.info.stream_name, self.info.name
         );
 
-        let payload = serde_json::to_vec(&batch.into())?;
+        let payload = serde_json::to_vec(&batch.into())
+            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Serialize, err))?;
 
         self.context
             .client
             .publish_with_reply(subject, inbox, payload.into())
-            .await?;
-        self.context.client.flush().await?;
+            .await
+            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Publish, err))?;
+        self.context
+            .client
+            .flush()
+            .await
+            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Flush, err))?;
         debug!("batch request sent");
         Ok(())
     }
@@ -538,7 +546,7 @@ impl<'a> Consumer<OrderedConfig> {
     /// Ok(())
     /// # }
     /// ```
-    pub async fn messages(self) -> Result<Ordered<'a>, Error> {
+    pub async fn messages(self) -> Result<Ordered<'a>, StreamError> {
         let config = Consumer {
             config: self.config.clone().into(),
             context: self.context.clone(),
@@ -732,7 +740,7 @@ pub struct Ordered<'a> {
 }
 
 impl<'a> futures::Stream for Ordered<'a> {
-    type Item = Result<jetstream::Message, Error>;
+    type Item = Result<jetstream::Message, OrderedError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -747,7 +755,9 @@ impl<'a> futures::Stream for Ordered<'a> {
                         // Do we bail out on all errors?
                         // Or we want to handle some? (like consumer deleted?)
                         let message = message?;
-                        let info = message.info()?;
+                        let info = message.info().map_err(|err| {
+                            OrderedError::with_source(OrderedErrorKind::Other, err)
+                        })?;
                         trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
                                            self.consumer_sequence,
                                            self.stream_sequence,
@@ -796,10 +806,10 @@ impl<'a> futures::Stream for Ordered<'a> {
                         return self.poll_next(cx);
                     }
                     Err(err) => {
-                        return Poll::Ready(Some(Err(Box::from(std::io::Error::new(
-                            ErrorKind::Other,
-                            format!("failed to recreate a consumer: {}", err),
-                        )))))
+                        return Poll::Ready(Some(Err(OrderedError::with_source(
+                            OrderedErrorKind::RecreationFailed,
+                            err,
+                        ))))
                     }
                 },
                 Poll::Pending => (),
@@ -832,28 +842,6 @@ impl Drop for Stream {
             handle.abort()
         }
     }
-}
-
-#[derive(Debug)]
-pub struct StreamError {
-    kind: StreamErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
-}
-crate::error_impls!(StreamError, StreamErrorKind);
-
-impl std::fmt::Display for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            StreamErrorKind::TimedOut => write!(f, "timed out"),
-            StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum StreamErrorKind {
-    TimedOut,
-    Other,
 }
 
 impl Stream {
@@ -998,6 +986,62 @@ impl Stream {
             terminated: false,
         })
     }
+}
+#[derive(Debug)]
+pub struct OrderedError {
+    kind: OrderedErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl std::fmt::Display for OrderedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
+            OrderedErrorKind::PullFailed => {
+                write!(f, "pull request failed: {}", self.format_source())
+            }
+            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            OrderedErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+            OrderedErrorKind::RecreationFailed => write!(f, "consumer recreation failed"),
+        }
+    }
+}
+
+crate::error_impls!(OrderedError, OrderedErrorKind);
+
+impl From<MessagesError> for OrderedError {
+    fn from(err: MessagesError) -> Self {
+        match err.kind() {
+            MessagesErrorKind::MissingHeartbeat => {
+                OrderedError::new(OrderedErrorKind::MissingHeartbeat)
+            }
+            MessagesErrorKind::ConsumerDeleted => {
+                OrderedError::new(OrderedErrorKind::ConsumerDeleted)
+            }
+            MessagesErrorKind::PullFailed => OrderedError {
+                kind: OrderedErrorKind::PullFailed,
+                source: err.source,
+            },
+            MessagesErrorKind::PushBasedConsumer => {
+                OrderedError::new(OrderedErrorKind::PushBasedConsumer)
+            }
+            MessagesErrorKind::Other => OrderedError {
+                kind: OrderedErrorKind::Other,
+                source: err.source,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    PullFailed,
+    PushBasedConsumer,
+    RecreationFailed,
+    Other,
 }
 
 #[derive(Debug)]
@@ -2155,6 +2199,36 @@ impl FromConsumer for Config {
             backoff: config.backoff,
         })
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct BatchRequestError {
+    kind: BatchRequestErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+crate::error_impls!(BatchRequestError, BatchRequestErrorKind);
+
+impl std::fmt::Display for BatchRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            BatchRequestErrorKind::Publish => {
+                write!(f, "publish failed: {}", self.format_source())
+            }
+            BatchRequestErrorKind::Flush => {
+                write!(f, "flush failed: {}", self.format_source())
+            }
+            BatchRequestErrorKind::Serialize => {
+                write!(f, "serialize failed: {}", self.format_source())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BatchRequestErrorKind {
+    Publish,
+    Flush,
+    Serialize,
 }
 
 #[derive(Debug)]

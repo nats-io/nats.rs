@@ -425,3 +425,25 @@ pub enum ReplayPolicy {
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
+
+#[derive(Debug)]
+pub struct StreamError {
+    kind: StreamErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+crate::error_impls!(StreamError, StreamErrorKind);
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            StreamErrorKind::TimedOut => write!(f, "timed out"),
+            StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StreamErrorKind {
+    TimedOut,
+    Other,
+}
