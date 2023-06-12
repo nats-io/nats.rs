@@ -39,3 +39,16 @@ fn basic_tls() {
         .connect(server.client_url())
         .unwrap();
 }
+
+#[test]
+fn ip_basic_tls() {
+    let server = nats_server::run_server("tests/configs/ip-tls.conf");
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    nats::Options::with_user_pass("derek", "porkchop")
+        .add_root_certificate(path.join("tests/configs/certs/ip-ca.pem"))
+        .tls_required(true)
+        .connect(format!("tls://127.0.0.1:{}", server.client_port()))
+        .unwrap();
+}
