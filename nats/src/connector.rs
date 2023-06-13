@@ -49,6 +49,7 @@ pub(crate) struct Connector {
 fn configure_tls(options: &Arc<Options>) -> Result<ClientConfig, Error> {
     let mut root_store = rustls::RootCertStore::empty();
 
+    // load native system certs only if user did not specify them
     if options.tls_client_config.is_some() || options.certificates.is_empty() {
         let native_certs = rustls_native_certs::load_native_certs()
             .map_err(|err| {

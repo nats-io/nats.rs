@@ -16,9 +16,14 @@ use std::path::PathBuf;
 #[test]
 fn basic_tls() {
     let server = nats_server::run_server("tests/configs/tls.conf");
+
+    // Should fail without certs.
     assert!(nats::connect(server.client_url()).is_err());
 
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Should fail with IP (cert doesn't have proper SAN entry)
+    assert!(nats::connect(format!("tls://127.0.0.1:{}", server.client_port())).is_err());
 
     nats::Options::with_user_pass("derek", "porkchop")
         .add_root_certificate(path.join("tests/configs/certs/rootCA.pem"))
