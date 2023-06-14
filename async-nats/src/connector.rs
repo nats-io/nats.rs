@@ -14,7 +14,9 @@
 use crate::auth::Auth;
 use crate::connection::Connection;
 use crate::connection::State;
+use crate::options::CallbackArg1;
 use crate::tls;
+use crate::AuthError;
 use crate::ClientError;
 use crate::ClientOp;
 use crate::ConnectError;
@@ -59,6 +61,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
+    pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -199,7 +202,7 @@ impl Connector {
                         }
 
                         if let Some(jwt) = self.options.auth.jwt.as_ref() {
-                            if let Some(sign_fn) = self.options.auth.signature.as_ref() {
+                            if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
                                 match sign_fn.call(server_info.nonce.clone()).await {
                                     Ok(sig) => {
                                         connect_info.user_jwt = Some(jwt.clone());
@@ -212,6 +215,26 @@ impl Connector {
                                     }
                                 }
                             }
+                        }
+
+                        if let Some(callback) = self.options.auth_callback.as_ref() {
+                            let auth = callback
+                                .call(server_info.nonce.as_bytes().to_vec())
+                                .await
+                                .map_err(|err| {
+                                ConnectError::with_source(
+                                    crate::ConnectErrorKind::Authentication,
+                                    err,
+                                )
+                            })?;
+                            connect_info.user = auth.username;
+                            connect_info.pass = auth.password;
+                            connect_info.user_jwt = auth.jwt;
+                            connect_info.signature = auth
+                                .signature
+                                .map(|signature| URL_SAFE_NO_PAD.encode(signature));
+                            connect_info.auth_token = auth.token;
+                            connect_info.nkey = auth.nkey;
                         }
 
                         connection

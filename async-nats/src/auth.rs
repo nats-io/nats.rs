@@ -1,11 +1,18 @@
 use crate::{options::CallbackArg1, AuthError};
 
 #[derive(Default)]
-pub(crate) struct Auth {
-    pub(crate) jwt: Option<String>,
-    pub(crate) nkey: Option<String>,
-    pub(crate) signature: Option<CallbackArg1<String, Result<String, AuthError>>>,
-    pub(crate) username: Option<String>,
-    pub(crate) password: Option<String>,
-    pub(crate) token: Option<String>,
+pub struct Auth {
+    pub jwt: Option<String>,
+    pub nkey: Option<String>,
+    pub(crate) signature_callback: Option<CallbackArg1<String, Result<String, AuthError>>>,
+    pub signature: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub token: Option<String>,
+}
+
+impl Auth {
+    pub fn new() -> Auth {
+        Auth::default()
+    }
 }
