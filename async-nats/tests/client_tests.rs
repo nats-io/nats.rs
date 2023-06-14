@@ -852,4 +852,19 @@ mod client {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     }
+
+    #[tokio::test]
+    async fn custom_auth_callback() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+
+        ConnectOptions::with_auth_callback(move |_| async move {
+            let mut auth = async_nats::Auth::new();
+            auth.username = Some("derek".to_string());
+            auth.password = Some("s3cr3t".to_string());
+            Ok(auth)
+        })
+        .connect(server.client_url())
+        .await
+        .unwrap();
+    }
 }

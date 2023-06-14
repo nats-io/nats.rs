@@ -149,6 +149,7 @@ pub mod connection;
 mod connector;
 mod options;
 
+pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
@@ -670,6 +671,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             retain_servers_order: options.retain_servers_order,
             read_buffer_capacity: options.read_buffer_capacity,
             reconnect_delay_callback: options.reconnect_delay_callback,
+            auth_callback: options.auth_callback,
         },
         events_tx,
         state_tx,

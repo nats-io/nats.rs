@@ -61,6 +61,7 @@ pub struct ConnectOptions {
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
+    pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -120,6 +121,7 @@ impl Default for ConnectOptions {
                 connector::reconnect_delay_callback_default(attempts)
             }),
             auth: Default::default(),
+            auth_callback: None,
         }
     }
 }
@@ -173,6 +175,38 @@ impl ConnectOptions {
     /// ```
     pub async fn connect<A: ToServerAddrs>(self, addrs: A) -> Result<Client, ConnectError> {
         crate::connect_with_options(addrs, self).await
+    }
+
+    /// Creates a builder with a custom auth callback to be used when authenticating against the NATS Server.
+    /// Requires an asynchronous function that accepts nonce and returns [Auth].
+    /// It will overwrite all other auth methods used.
+    ///
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::with_auth_callback(move |_| async move {
+    ///     let mut auth = async_nats::Auth::new();
+    ///     auth.username = Some("derek".to_string());
+    ///     auth.password = Some("s3cr3t".to_string());
+    ///     Ok(auth)
+    /// })
+    /// .connect("demo.nats.io")
+    /// .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_auth_callback<F, Fut>(callback: F) -> Self
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<Auth, AuthError>> + 'static + Send + Sync,
+    {
+        let mut options = ConnectOptions::new();
+        options.auth_callback = Some(CallbackArg1::<Vec<u8>, Result<Auth, AuthError>>(Box::new(
+            move |nonce| Box::pin(callback(nonce)),
+        )));
+        options
     }
 
     /// Authenticate against NATS Server with the provided token.
@@ -359,7 +393,7 @@ impl ConnectOptions {
         }));
 
         self.auth.jwt = Some(jwt);
-        self.auth.signature = Some(jwt_sign_callback);
+        self.auth.signature_callback = Some(jwt_sign_callback);
         self
     }
 
@@ -866,7 +900,7 @@ impl ConnectOptions {
     }
 }
 
-type AsyncCallbackArg1<A, T> =
+pub(crate) type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 
 pub(crate) struct CallbackArg1<A, T>(AsyncCallbackArg1<A, T>);
