@@ -510,7 +510,41 @@ impl Context {
             page_request: None,
             streams: Vec::new(),
             done: false,
+            subject: None,
         }
+    }
+
+    /// Looks for a stream name with a given subject.
+    /// Returns [Option::None] is stream was not found.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let mut name = jetstream.stream_name_by_subject("events.>").await?;
+    /// println!("stream found: {:?}", name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn stream_name_by_subject<T: ToString>(
+        &self,
+        subject: T,
+    ) -> Result<Option<String>, Error> {
+        StreamNames {
+            context: self.clone(),
+            offset: 0,
+            page_request: None,
+            streams: Vec::new(),
+            done: false,
+            subject: Some(subject.to_string()),
+        }
+        .next()
+        .await
+        .transpose()
     }
 
     /// Lists all streams info for current context.
@@ -1036,6 +1070,7 @@ pub struct StreamNames<'a> {
     page_request: Option<PageRequest<'a>>,
     streams: Vec<String>,
     done: bool,
+    subject: Option<String>,
 }
 
 impl futures::Stream for StreamNames<'_> {
@@ -1075,13 +1110,12 @@ impl futures::Stream for StreamNames<'_> {
                     }
                     let context = self.context.clone();
                     let offset = self.offset;
+                    let subject = self.subject.clone();
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
                                 "STREAM.NAMES".to_string(),
-                                &json!({
-                                    "offset": offset,
-                                }),
+                                &StreamRequest { offset, subject },
                             )
                             .await?
                         {
@@ -1096,6 +1130,12 @@ impl futures::Stream for StreamNames<'_> {
             }
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+struct StreamRequest {
+    offset: usize,
+    subject: Option<String>,
 }
 
 type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, Error>>;
