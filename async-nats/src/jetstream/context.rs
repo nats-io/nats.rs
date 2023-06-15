@@ -1010,7 +1010,7 @@ impl PublishAckFuture {
                     .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?;
                 match response {
                     Response::Err { error } => match error.error_code() {
-                        ErrorCode::STREAM_WRONG_LAST_MSG_ID => Err(PublishError::with_source(
+                        ErrorCode::STREAM_WRONG_LAST_MESSAGE_ID => Err(PublishError::with_source(
                             PublishErrorKind::WrongLastMessageId,
                             error,
                         )),

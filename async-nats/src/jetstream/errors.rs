@@ -26,7 +26,7 @@ impl ErrorCode {
     pub const CONSUMER_EPHEMERAL_WITH_DURABLE: ErrorCode = ErrorCode(10019);
 
     /// Stream external delivery prefix overlaps with stream subject
-    pub const STREAM_EXTERNAL_DEL_PREFIX_OVERLAPS: ErrorCode = ErrorCode(10022);
+    pub const STREAM_EXTERNAL_DELETE_PREFIX_OVERLAPS: ErrorCode = ErrorCode(10022);
 
     /// Resource limits exceeded for account
     pub const ACCOUNT_RESOURCES_EXCEEDED: ErrorCode = ErrorCode(10002);
@@ -125,7 +125,7 @@ impl ErrorCode {
     pub const STREAM_SEQUENCE_NOT_MATCH: ErrorCode = ErrorCode(10063);
 
     /// Wrong last msg id
-    pub const STREAM_WRONG_LAST_MSG_ID: ErrorCode = ErrorCode(10070);
+    pub const STREAM_WRONG_LAST_MESSAGE_ID: ErrorCode = ErrorCode(10070);
 
     /// Jetstream unable to open temp storage for restore
     pub const TEMP_STORAGE_FAILED: ErrorCode = ErrorCode(10072);

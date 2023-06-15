@@ -315,7 +315,6 @@ impl Store {
                         Some((message.message, operation, sequence, created))
                     }
                     Err(err) => {
-                        println!("ERROR FOR DIRECT GET: {:?}", err);
                         if err.kind() == DirectGetErrorKind::NotFound {
                             None
                         } else {
