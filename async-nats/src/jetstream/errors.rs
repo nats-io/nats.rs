@@ -197,7 +197,7 @@ impl ErrorCode {
     pub const MAXIMUM_STREAMS_LIMIT: ErrorCode = ErrorCode(10027);
 
     /// Stream mirrors can not have both start seq and start time configured
-    pub const MIRROR_WITH_START_SEQ_AND_TIME: ErrorCode = ErrorCode(10032);
+    pub const MIRROR_WITH_START_SEQUENCE_AND_TIME: ErrorCode = ErrorCode(10032);
 
     /// Stream snapshot failed
     pub const STREAM_SNAPSHOT: ErrorCode = ErrorCode(10064);
@@ -281,7 +281,7 @@ impl ErrorCode {
     pub const CONSUMER_HEARTBEAT_REQUIRES_PUSH: ErrorCode = ErrorCode(10088);
 
     /// Consumer flow control requires a push based consumer
-    pub const CONSUMER_FC_REQUIRES_PUSH: ErrorCode = ErrorCode(10089);
+    pub const CONSUMER_FLOW_CONTROL_REQUIRES_PUSH: ErrorCode = ErrorCode(10089);
 
     /// Consumer direct requires a push based consumer
     pub const CONSUMER_DIRECT_REQUIRES_PUSH: ErrorCode = ErrorCode(10090);

@@ -132,7 +132,7 @@ use crate::Client;
 pub mod account;
 pub mod consumer;
 pub mod context;
-pub mod errors;
+mod errors;
 pub mod kv;
 pub mod message;
 pub mod object_store;
@@ -141,6 +141,8 @@ pub mod response;
 pub mod stream;
 
 pub use context::Context;
+pub use errors::Error;
+pub use errors::ErrorCode;
 pub use message::{AckKind, Message};
 
 /// Creates a new JetStream [Context] that provides JetStream API for managing and using [Streams][crate::jetstream::stream::Stream],
