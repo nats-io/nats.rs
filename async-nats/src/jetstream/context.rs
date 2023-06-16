@@ -515,7 +515,7 @@ impl Context {
     }
 
     /// Looks for a stream name with a given subject.
-    /// Returns [Option::None] is stream was not found.
+    /// Returns [Option::None] if stream was not found.
     ///
     /// # Examples
     ///
