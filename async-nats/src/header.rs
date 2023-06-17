@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -11,10 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// NOTE(thomastaylor312): This clippy lint is coming from serialize and deserialize and is likely a
+// false positive due to the bytes crate, see
+// https://rust-lang.github.io/rust-clippy/master/index.html#/mutable_key_type for more details.
+// Sorry to make this global to this module, rather than on the `HeaderMap` struct, but because it
+// is coming from the derive, it didn't work to set it on the struct.
+#![allow(clippy::mutable_key_type)]
+
 //! NATS [Message][crate::Message] headers, modeled loosely after the [http::header] crate.
 
-use bytes::Bytes;
 use std::{collections::HashMap, fmt, slice, str::FromStr};
+
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 
 /// A struct for handling NATS headers.
 /// Has a similar API to [http::header], but properly serializes and deserializes
@@ -34,7 +43,8 @@ use std::{collections::HashMap, fmt, slice, str::FromStr};
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
 pub struct HeaderMap {
     inner: HashMap<HeaderName, HeaderValue>,
 }
@@ -174,7 +184,7 @@ impl HeaderMap {
 /// headers.insert("Key", "Value");
 /// headers.insert("Another", "AnotherValue");
 /// ```
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct HeaderValue {
     value: Vec<String>,
 }
@@ -319,7 +329,7 @@ macro_rules! standard_headers {
         )+
     ) => {
         #[allow(clippy::enum_variant_names)]
-        #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+        #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
         enum StandardHeader {
             $(
                 $variant,
@@ -403,7 +413,7 @@ standard_headers! {
     (NatsExpectedStream, NATS_EXPECTED_STREAM, b"Nats-Expected-Stream");
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
 struct CustomHeader {
     bytes: Bytes,
 }
@@ -440,7 +450,7 @@ impl<'a> From<&'a str> for CustomHeader {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
 enum HeaderRepr {
     Standard(StandardHeader),
     Custom(CustomHeader),
@@ -455,7 +465,7 @@ enum HeaderRepr {
 ///
 /// `HeaderName` represents standard header names using an `enum`, as such they
 /// will not require an allocation for storage.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct HeaderName {
     inner: HeaderRepr,
 }
