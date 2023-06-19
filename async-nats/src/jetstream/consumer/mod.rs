@@ -17,14 +17,13 @@ pub mod pull;
 pub mod push;
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
 
-use super::response::Response;
+use super::context::RequestError;
 use super::stream::ClusterInfo;
 use super::Context;
 use crate::jetstream::consumer;
@@ -74,37 +73,17 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn info(&mut self) -> Result<&consumer::Info, Error> {
+    pub async fn info(&mut self) -> Result<&consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
 
-        match self.context.request(subject, &json!({})).await? {
-            Response::Ok::<Info>(info) => {
-                self.info = info;
-                Ok(&self.info)
-            }
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting consumer info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-        }
+        let info = self.context.request(subject, &json!({})).await?;
+        self.info = info;
+        Ok(&self.info)
     }
 
-    async fn fetch_info(&self) -> Result<consumer::Info, Error> {
+    async fn fetch_info(&self) -> Result<consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
-
-        match self.context.request(subject, &json!({})).await? {
-            Response::Ok::<Info>(info) => Ok(info),
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting consumer info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-        }
+        self.context.request(subject, &json!({})).await
     }
 
     /// Returns cached [Info] for the [Consumer].
@@ -445,4 +424,26 @@ pub enum ReplayPolicy {
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
+}
+
+#[derive(Debug)]
+pub struct StreamError {
+    kind: StreamErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+crate::error_impls!(StreamError, StreamErrorKind);
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            StreamErrorKind::TimedOut => write!(f, "timed out"),
+            StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StreamErrorKind {
+    TimedOut,
+    Other,
 }

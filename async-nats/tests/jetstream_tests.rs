@@ -36,7 +36,7 @@ mod jetstream {
         self, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
         PullConsumer, PushConsumer,
     };
-    use async_nats::jetstream::context::Publish;
+    use async_nats::jetstream::context::{Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::jetstream::AckKind;
@@ -161,7 +161,7 @@ mod jetstream {
         assert_eq!(message.payload, bytes::Bytes::from("data"));
 
         // Publish message with different ID and expect error.
-        context
+        let err = context
             .send_publish(
                 "foo".to_string(),
                 Publish::build().expected_last_message_id("BAD_ID"),
@@ -169,7 +169,9 @@ mod jetstream {
             .await
             .unwrap()
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .kind();
+        assert_eq!(err, PublishErrorKind::WrongLastMessageId);
         // Publish a new message with expected ID.
         context
             .send_publish(
@@ -192,15 +194,19 @@ mod jetstream {
             .await
             .unwrap();
         // 3 messages should be there, so this should error.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_sequence(2),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
+        assert_eq!(
+            context
+                .send_publish(
+                    "foo".to_string(),
+                    Publish::build().expected_last_sequence(2),
+                )
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
         // 3 messages there, should be ok for this subject too.
         context
             .send_publish(
@@ -212,15 +218,19 @@ mod jetstream {
             .await
             .unwrap();
         // 4 messages there, should error.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_subject_sequence(3),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
+        assert_eq!(
+            context
+                .send_publish(
+                    "foo".to_string(),
+                    Publish::build().expected_last_subject_sequence(3),
+                )
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
 
         // Check if it works for the other subjects in the stream.
         context
@@ -2134,29 +2144,15 @@ mod jetstream {
         debug!("waiting for the first idle heartbeat timeout");
         let mut messages = consumer.messages().await.unwrap();
         assert_eq!(
-            messages
-                .next()
-                .await
-                .unwrap()
-                .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::TimedOut
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::MissingHeartbeat,
         );
         // But the consumer iterator should still be there.
         // We should get timeout again.
         debug!("waiting for the second idle heartbeat timeout");
         assert_eq!(
-            messages
-                .next()
-                .await
-                .unwrap()
-                .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::TimedOut
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::MissingHeartbeat,
         );
         // Now recreate the consumer and see if we can continue.
         // So recreate the consumer.
@@ -2222,15 +2218,8 @@ mod jetstream {
         let name = &consumer.cached_info().name;
         stream.delete_consumer(name).await.unwrap();
         assert_eq!(
-            messages
-                .next()
-                .await
-                .unwrap()
-                .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::NotFound
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::ConsumerDeleted,
         );
         messages.next().await;
         // after terminal error, consumer should always return none.
@@ -2448,23 +2437,16 @@ mod jetstream {
                 .unwrap();
         }
         drop(server);
-        let ack = jetstream
-            .publish("events".into(), "fail".into())
-            .await
-            .unwrap()
-            .await;
-        println!("ACK: {ack:?}");
-        println!(
-            "DOWNCAST: {:?}",
-            ack.unwrap_err().downcast::<std::io::Error>()
+        assert_eq!(
+            jetstream
+                .publish("events".into(), "fail".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::TimedOut
         );
-        // assert_eq!(
-        //     ack.unwrap_err()
-        //         .downcast::<std::io::Error>()
-        //         .unwrap()
-        //         .kind(),
-        //     ErrorKind::TimedOut
-        // )
     }
 
     #[tokio::test]
@@ -2957,10 +2939,8 @@ mod jetstream {
                 .unwrap()
                 .await
                 .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
                 .kind(),
-            std::io::ErrorKind::NotFound
+            PublishErrorKind::StreamNotFound
         );
     }
 

@@ -28,13 +28,13 @@ use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tracing::debug;
 
-use crate::{header, jetstream::response, Error, Message};
+use crate::{header, Error, Message};
 
 use self::bucket::Status;
 
 use super::{
     consumer::DeliverPolicy,
-    stream::{RawMessage, Republish, Source, StorageType, Stream},
+    stream::{DirectGetErrorKind, RawMessage, Republish, Source, StorageType, Stream},
 };
 
 // Helper to extract key value operation from message headers
@@ -315,11 +315,10 @@ impl Store {
                         Some((message.message, operation, sequence, created))
                     }
                     Err(err) => {
-                        let e: std::io::Error = *err.downcast().unwrap();
-                        if e.kind() == ErrorKind::NotFound {
+                        if err.kind() == DirectGetErrorKind::NotFound {
                             None
                         } else {
-                            return Err(Box::new(e));
+                            return Err(Box::new(err));
                         }
                     }
                 }
@@ -340,17 +339,13 @@ impl Store {
                             raw_message.time,
                         ))
                     }
-                    Err(err) => {
-                        let e: std::io::Error = *err.downcast().unwrap();
-                        let d = e.get_ref().unwrap();
-                        let de = d.downcast_ref::<response::Error>().unwrap();
-                        // 10037 is returned when there are no messages found.
-                        if de.code == 10037 {
-                            None
-                        } else {
-                            return Err(Box::new(e));
+                    Err(err) => match err.kind() {
+                        crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
+                        crate::jetstream::stream::LastRawMessageErrorKind::Other
+                        | crate::jetstream::stream::LastRawMessageErrorKind::JetStreamError => {
+                            return Err(Box::new(err))
                         }
-                    }
+                    },
                 }
             }
         };
@@ -588,6 +583,7 @@ impl Store {
             .await?
             .await
             .map(|publish_ack| publish_ack.sequence)
+            .map_err(|err| Box::from(std::io::Error::new(ErrorKind::Other, err)))
     }
 
     /// Deletes a given key. This is a non-destructive operation, which sets a `DELETE` marker.

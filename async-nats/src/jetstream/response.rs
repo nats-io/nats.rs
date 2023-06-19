@@ -13,41 +13,12 @@
 
 //! A low level `JetStream` responses.
 
-use core::fmt;
-
 use serde::Deserialize;
-
-/// An error description returned in a response to a jetstream request.
-#[derive(Debug, Deserialize)]
-pub struct Error {
-    /// Error code
-    #[serde(rename = "err_code")]
-    pub code: u64,
-
-    /// Status code
-    #[serde(rename = "code")]
-    pub status: u16,
-
-    /// Description
-    pub description: String,
-}
-
-impl std::error::Error for Error {}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "JetStream response error code: {}, status: {}, description: {}",
-            self.code, self.status, self.description
-        )
-    }
-}
 
 /// A response returned from a request to jetstream.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Response<T> {
-    Err { error: Error },
+    Err { error: super::errors::Error },
     Ok(T),
 }
