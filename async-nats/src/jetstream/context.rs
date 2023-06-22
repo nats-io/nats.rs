@@ -29,6 +29,7 @@ use std::borrow::Borrow;
 use std::fmt::Display;
 use std::future::IntoFuture;
 use std::io::ErrorKind;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::str::from_utf8;
 use std::task::Poll;
@@ -747,30 +748,12 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<V, RequestError>
+    pub fn request<T, V>(&self, subject: String, payload: T) -> Request<T, V>
     where
-        T: ?Sized + Serialize,
+        T: Sized + Serialize,
         V: DeserializeOwned,
     {
-        let request = serde_json::to_vec(&payload)
-            .map(Bytes::from)
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
-
-        debug!("JetStream request sent: {:?}", request);
-
-        let message = self
-            .client
-            .request(format!("{}.{}", self.prefix, subject), request)
-            .await;
-        let message = message?;
-        debug!(
-            "JetStream request response: {:?}",
-            from_utf8(&message.payload)
-        );
-        let response = serde_json::from_slice(message.payload.as_ref())
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
-
-        Ok(response)
+        Request::new(self.clone(), subject, payload)
     }
 
     /// Creates a new object store bucket.
@@ -1231,6 +1214,67 @@ impl IntoFuture for Publish {
                 timeout,
                 subscription,
             })
+        }))
+    }
+}
+
+#[derive(Debug)]
+pub struct Request<T: Sized + Serialize, V: DeserializeOwned> {
+    context: Context,
+    subject: String,
+    payload: T,
+    timeout: Option<Duration>,
+    response_type: PhantomData<V>,
+}
+
+impl<T: Sized + Serialize, V: DeserializeOwned> Request<T, V> {
+    pub fn new(context: Context, subject: String, payload: T) -> Self {
+        Self {
+            context,
+            subject,
+            payload,
+            timeout: None,
+            response_type: PhantomData,
+        }
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+}
+
+impl<T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<T, V> {
+    type Output = Result<Response<V>, RequestError>;
+
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, RequestError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let payload_result = serde_json::to_vec(&self.payload).map(Bytes::from);
+
+        let prefix = self.context.prefix;
+        let client = self.context.client;
+        let subject = self.subject;
+        let timeout = self.timeout;
+
+        Box::pin(std::future::IntoFuture::into_future(async move {
+            let payload = payload_result
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
+
+            debug!("JetStream request sent: {:?}", payload);
+
+            let request = client.request(format!("{}.{}", prefix, subject), payload);
+            let request = request.timeout(timeout);
+            let message = request.await?;
+
+            debug!(
+                "JetStream request response: {:?}",
+                from_utf8(&message.payload)
+            );
+            let response = serde_json::from_slice(message.payload.as_ref())
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
+
+            Ok(response)
         }))
     }
 }

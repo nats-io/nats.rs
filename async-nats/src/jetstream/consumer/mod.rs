@@ -17,13 +17,15 @@ pub mod pull;
 pub mod push;
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
+use std::future::IntoFuture;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
 
-use super::context::RequestError;
+use super::context::{RequestError, RequestErrorKind};
+use super::response::Response;
 use super::stream::ClusterInfo;
 use super::Context;
 use crate::error::Error;
@@ -76,14 +78,38 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     pub async fn info(&mut self) -> Result<&consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
 
-        let info = self.context.request(subject, &json!({})).await?;
-        self.info = info;
-        Ok(&self.info)
+        let response: Response<consumer::Info> = self
+            .context
+            .request(subject, &json!({}))
+            .into_future()
+            .await?;
+
+        match response {
+            Response::Ok(info) => {
+                self.info = info;
+                Ok(&self.info)
+            }
+            Response::Err { error } => {
+                Err(RequestError::with_source(RequestErrorKind::Other, error))
+            }
+        }
     }
 
     async fn fetch_info(&self) -> Result<consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
-        self.context.request(subject, &json!({})).await
+
+        let response: Response<consumer::Info> = self
+            .context
+            .request(subject, &json!({}))
+            .into_future()
+            .await?;
+
+        match response {
+            Response::Ok(info) => Ok(info),
+            Response::Err { error } => {
+                Err(RequestError::with_source(RequestErrorKind::Other, error))
+            }
+        }
     }
 
     /// Returns cached [Info] for the [Consumer].
