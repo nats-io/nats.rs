@@ -17,11 +17,13 @@ use crate::ServerInfo;
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
 use bytes::Bytes;
-use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
+use futures::{Future, TryFutureExt};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
+use std::future::IntoFuture;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +43,62 @@ pub struct PublishError(#[source] crate::Error);
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
         PublishError(Box::new(err))
+    }
+}
+
+pub struct Publish {
+    sender: mpsc::Sender<Command>,
+    subject: String,
+    payload: Bytes,
+    headers: Option<HeaderMap>,
+    respond: Option<String>,
+}
+
+impl Publish {
+    pub(crate) fn new(sender: mpsc::Sender<Command>, subject: String, payload: Bytes) -> Publish {
+        Publish {
+            sender,
+            subject,
+            payload,
+            headers: None,
+            respond: None,
+        }
+    }
+
+    pub fn headers(mut self, headers: HeaderMap) -> Publish {
+        self.headers = Some(headers);
+        self
+    }
+
+    pub fn reply(mut self, subject: String) -> Publish {
+        self.respond = Some(subject);
+        self
+    }
+}
+
+impl IntoFuture for Publish {
+    type Output = Result<(), PublishError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let sender = self.sender.clone();
+        let subject = self.subject;
+        let payload = self.payload;
+        let respond = self.respond;
+        let headers = self.headers;
+
+        Box::pin(async move {
+            sender
+                .send(Command::Publish {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                })
+                .await?;
+
+            Ok(())
+        })
     }
 }
 
@@ -149,16 +207,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: None,
-            })
-            .await?;
-        Ok(())
+    pub fn publish(&self, subject: String, payload: Bytes) -> Publish {
+        Publish::new(self.sender.clone(), subject, payload)
     }
 
     /// Publish a [Message] with headers to a given subject.
@@ -186,14 +236,7 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: Some(headers),
-            })
-            .await?;
+        self.publish(subject, payload).headers(headers).await?;
         Ok(())
     }
 
@@ -223,14 +266,7 @@ impl Client {
         reply: String,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: None,
-            })
-            .await?;
+        self.publish(subject, payload).reply(reply).await?;
         Ok(())
     }
 
@@ -264,13 +300,9 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: Some(headers),
-            })
+        self.publish(subject, payload)
+            .headers(headers)
+            .reply(reply)
             .await?;
         Ok(())
     }
