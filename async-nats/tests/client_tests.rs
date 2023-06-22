@@ -14,12 +14,11 @@
 mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
-    use async_nats::{
-        ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind, ServerAddr,
-    };
+    use async_nats::{ConnectErrorKind, ConnectOptions, Event, RequestErrorKind, ServerAddr};
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::future::IntoFuture;
     use std::path::PathBuf;
     use std::str::FromStr;
     use std::time::Duration;
@@ -239,7 +238,9 @@ mod client {
 
         let resp = tokio::time::timeout(
             tokio::time::Duration::from_millis(500),
-            client.request("test".into(), "request".into()),
+            client
+                .request("test".into(), "request".into())
+                .into_future(),
         )
         .await
         .unwrap();
@@ -268,7 +269,9 @@ mod client {
 
         let err = tokio::time::timeout(
             tokio::time::Duration::from_millis(300),
-            client.request("test".into(), "request".into()),
+            client
+                .request("test".into(), "request".into())
+                .into_future(),
         )
         .await
         .unwrap()
@@ -296,9 +299,9 @@ mod client {
             }
         });
 
-        let request = Request::new().inbox(inbox.clone());
         client
-            .send_request("service".into(), request)
+            .request("service".into(), "".into())
+            .inbox(inbox)
             .await
             .unwrap();
     }
@@ -770,10 +773,7 @@ mod client {
             }
         });
 
-        client
-            .request("request".into(), "data".into())
-            .await
-            .unwrap();
+        client.request("".into(), "data".into()).await.unwrap();
         inbox_wildcard_subscription.next().await.unwrap();
     }
 
