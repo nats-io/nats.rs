@@ -46,10 +46,10 @@ nuid = "0.3.1"
 once_cell = "1.8.0"
 parking_lot = "0.12.0"
 regex = { version = "1.5.5", default-features = false, features = ["std", "unicode-perl"] }
-rustls = "0.19.1"
-rustls-native-certs = "0.5.0"
-rustls-pemfile = "0.2.1"
-webpki = "0.21.0"
+rustls = "0.21"
+rustls-native-certs = "0.6"
+rustls-pemfile = "1.0.2"
+webpki = { package = "rustls-webpki", version = "0.100.0", features = ["alloc", "std"] }
 serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.64"
 serde_nanos = "0.1.1"

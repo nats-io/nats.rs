@@ -1154,7 +1154,6 @@ mod jetstream {
             .unwrap();
     }
 
-    #[ignore]
     #[tokio::test]
     async fn pull_sequence() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
