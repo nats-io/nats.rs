@@ -127,7 +127,7 @@ use tokio::io;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
