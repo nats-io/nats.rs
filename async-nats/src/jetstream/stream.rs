@@ -48,7 +48,7 @@ pub type InfoError = RequestError;
 #[derive(Debug)]
 pub struct DirectGetError {
     kind: DirectGetErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 crate::error_impls!(DirectGetError, DirectGetErrorKind);
 
@@ -101,7 +101,7 @@ impl From<serde_json::Error> for DirectGetError {
 #[derive(Debug)]
 pub struct DeleteMessageError {
     kind: DeleteMessageErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1541,7 +1541,7 @@ where
 #[derive(Debug)]
 pub struct PurgeError {
     kind: PurgeErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1761,7 +1761,7 @@ impl futures::Stream for Consumers<'_> {
 
 #[derive(Debug)]
 pub struct LastRawMessageError {
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
     kind: LastRawMessageErrorKind,
 }
 crate::error_impls!(LastRawMessageError, LastRawMessageErrorKind);
@@ -1807,7 +1807,7 @@ pub enum LastRawMessageErrorKind {
 #[derive(Debug)]
 pub struct ConsumerError {
     pub kind: ConsumerErrorKind,
-    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    pub source: Option<crate::Error>,
 }
 
 crate::error_impls!(ConsumerError, ConsumerErrorKind);

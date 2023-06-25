@@ -841,7 +841,7 @@ pub enum ConnectErrorKind {
 #[derive(Debug, Error)]
 pub struct ConnectError {
     kind: ConnectErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 impl Display for ConnectError {
@@ -868,7 +868,7 @@ impl Display for ConnectError {
 impl ConnectError {
     fn with_source<E>(kind: ConnectErrorKind, source: E) -> ConnectError
     where
-        E: Into<Box<dyn std::error::Error + Sync + Send>>,
+        E: Into<crate::Error>,
     {
         ConnectError {
             kind,
@@ -1322,7 +1322,7 @@ macro_rules! error_impls {
             #[allow(unreachable_pub)]
             pub(crate) fn with_source<S>(kind: $k, source: S) -> $t
             where
-                S: Into<Box<dyn std::error::Error + Sync + Send>>,
+                S: Into<crate::Error>,
             {
                 Self {
                     kind,

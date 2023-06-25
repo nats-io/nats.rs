@@ -35,7 +35,7 @@ static VERSION_RE: Lazy<Regex> =
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
 #[derive(Debug, Error)]
 #[error("failed to publish message: {0}")]
-pub struct PublishError(#[source] Box<dyn std::error::Error + Send + Sync>);
+pub struct PublishError(#[source] crate::Error);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
@@ -601,7 +601,7 @@ impl Request {
 
 #[derive(Error, Debug)]
 #[error("failed to send subscribe: {0}")]
-pub struct SubscribeError(#[source] Box<dyn std::error::Error + Sync + Send>);
+pub struct SubscribeError(#[source] crate::Error);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
@@ -625,7 +625,7 @@ pub enum RequestErrorKind {
 #[derive(Debug)]
 pub struct RequestError {
     kind: RequestErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(RequestError, RequestErrorKind);
@@ -645,7 +645,7 @@ impl Display for RequestError {
 #[derive(Debug)]
 pub struct FlushError {
     kind: FlushErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(FlushError, FlushErrorKind);

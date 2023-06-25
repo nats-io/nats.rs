@@ -429,7 +429,7 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
 #[derive(Debug)]
 pub struct StreamError {
     kind: StreamErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 crate::error_impls!(StreamError, StreamErrorKind);
 
