@@ -68,6 +68,7 @@ pub struct Config {
     /// A short description of the purpose of this storage bucket.
     pub description: Option<String>,
     /// Maximum age of any value in the bucket, expressed in nanoseconds
+    #[serde(with = "serde_nanos")]
     pub max_age: Duration,
     /// The type of storage backend, `File` (default) and `Memory`
     pub storage: StorageType,
