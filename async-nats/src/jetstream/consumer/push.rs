@@ -717,7 +717,7 @@ impl<'a> futures::Stream for Ordered<'a> {
 #[derive(Debug)]
 pub struct OrderedError {
     kind: OrderedErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 impl std::fmt::Display for OrderedError {
@@ -766,7 +766,7 @@ pub enum OrderedErrorKind {
 #[derive(Debug)]
 pub struct MessagesError {
     kind: MessagesErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 impl std::fmt::Display for MessagesError {
@@ -793,7 +793,7 @@ pub enum MessagesErrorKind {
 #[derive(Debug)]
 pub struct ConsumerRecreateError {
     kind: ConsumerRecreateErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);

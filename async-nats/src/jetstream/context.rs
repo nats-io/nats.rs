@@ -959,7 +959,7 @@ impl Context {
 #[derive(Debug)]
 pub struct PublishError {
     kind: PublishErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(PublishError, PublishErrorKind);
@@ -1126,7 +1126,7 @@ type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, RequestError>>;
 #[derive(Debug)]
 pub struct StreamsError {
     kind: RequestErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 crate::error_impls!(StreamsError, RequestErrorKind);
 
@@ -1274,7 +1274,7 @@ impl Publish {
 #[derive(Debug)]
 pub struct RequestError {
     kind: RequestErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(RequestError, RequestErrorKind);
@@ -1326,7 +1326,7 @@ pub enum RequestErrorKind {
 #[derive(Debug)]
 pub struct CreateStreamError {
     kind: CreateStreamErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(CreateStreamError, CreateStreamErrorKind);
@@ -1392,7 +1392,7 @@ pub enum CreateStreamErrorKind {
 #[derive(Debug)]
 pub struct GetStreamError {
     kind: GetStreamErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 crate::error_impls!(GetStreamError, GetStreamErrorKind);
@@ -1424,7 +1424,7 @@ pub type DeleteStreamErrorKind = GetStreamErrorKind;
 #[derive(Debug)]
 pub struct KeyValueError {
     kind: KeyValueErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1451,7 +1451,7 @@ impl Display for KeyValueError {
 #[derive(Debug)]
 pub struct CreateKeyValueError {
     kind: CreateKeyValueErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1488,7 +1488,7 @@ pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
 #[derive(Debug)]
 pub struct ObjectStoreError {
     kind: ObjectStoreErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 crate::error_impls!(ObjectStoreError, ObjectStoreErrorKind);
 
