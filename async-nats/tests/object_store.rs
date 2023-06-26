@@ -13,7 +13,7 @@
 
 mod object_store {
 
-    use std::{io, time::Duration};
+    use std::{io, str::from_utf8, time::Duration};
 
     use async_nats::jetstream::{
         object_store::{AddLinkErrorKind, ObjectMetadata, UpdateMetadata},
@@ -23,6 +23,7 @@ mod object_store {
     use futures::StreamExt;
     use rand::RngCore;
     use ring::digest::SHA256;
+    use serde::Deserialize;
     use tokio::io::AsyncReadExt;
 
     #[tokio::test]
