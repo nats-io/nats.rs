@@ -2249,7 +2249,7 @@ pub enum BatchRequestErrorKind {
 #[derive(Debug)]
 pub struct BatchError {
     kind: BatchErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 crate::error_impls!(BatchError, BatchErrorKind);
 
