@@ -651,7 +651,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                 }
                                             }
                                         }
-                                        if let Some(subject) = message.reply {
+                                        if let Some(subject) = message.reply.clone() {
                                             warn!("got message with reply subject for ordered consumer");
                                             // TODO store pending_publish as a future and return errors from it
                                             let client = self.context.client.clone();
