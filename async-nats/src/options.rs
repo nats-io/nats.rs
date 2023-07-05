@@ -18,7 +18,13 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures::Future;
 use std::fmt::Formatter;
-use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -405,15 +411,15 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds".into())
+    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds")
     ///     .await?
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn with_credentials_file(path: PathBuf) -> io::Result<Self> {
-        let cred_file_contents = crate::auth_utils::load_creds(path).await?;
+    pub async fn with_credentials_file(path: impl AsRef<Path>) -> io::Result<Self> {
+        let cred_file_contents = crate::auth_utils::load_creds(path.as_ref()).await?;
         Self::with_credentials(&cred_file_contents)
     }
 
@@ -426,15 +432,15 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::new()
-    ///     .credentials_file("path/to/my.creds".into())
+    ///     .credentials_file("path/to/my.creds")
     ///     .await?
     ///     .connect("connect.ngs.global")
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn credentials_file(self, path: PathBuf) -> io::Result<Self> {
-        let cred_file_contents = crate::auth_utils::load_creds(path).await?;
+    pub async fn credentials_file(self, path: impl AsRef<Path>) -> io::Result<Self> {
+        let cred_file_contents = crate::auth_utils::load_creds(path.as_ref()).await?;
         self.credentials(&cred_file_contents)
     }
 

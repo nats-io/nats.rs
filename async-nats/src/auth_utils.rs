@@ -14,12 +14,12 @@
 use nkeys::KeyPair;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::{io, path::PathBuf};
+use std::{io, path::Path};
 
 /// Loads user credentials file with jwt and key. Return file contents.
 /// Uses tokio non-blocking io
-pub(crate) async fn load_creds(path: PathBuf) -> io::Result<String> {
-    tokio::fs::read_to_string(&path).await.map_err(|err| {
+pub(crate) async fn load_creds(path: &Path) -> io::Result<String> {
+    tokio::fs::read_to_string(path).await.map_err(|err| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("loading creds file '{}': {}", path.display(), err),
