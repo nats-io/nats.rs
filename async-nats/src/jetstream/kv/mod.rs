@@ -33,8 +33,8 @@ use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
     context::{PublishError, PublishErrorKind},
     stream::{
-        ConsumerError, DirectGetError, DirectGetErrorKind, RawMessage, Republish, Source,
-        StorageType, Stream,
+        ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
+        Republish, Source, StorageType, Stream,
     },
 };
 
@@ -1084,6 +1084,12 @@ pub enum EntryErrorKind {
 }
 
 crate::error_impls!(EntryError, EntryErrorKind);
+crate::from_with_timeout!(
+    EntryError,
+    EntryErrorKind,
+    DirectGetError,
+    DirectGetErrorKind
+);
 
 impl Display for EntryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1091,18 +1097,6 @@ impl Display for EntryError {
             EntryErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
             EntryErrorKind::TimedOut => write!(f, "timed out"),
             EntryErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
-        }
-    }
-}
-
-impl From<DirectGetError> for EntryError {
-    fn from(err: DirectGetError) -> Self {
-        match err.kind() {
-            DirectGetErrorKind::TimedOut => EntryError {
-                kind: EntryErrorKind::TimedOut,
-                source: None,
-            },
-            _ => EntryError::with_source(EntryErrorKind::Other, err),
         }
     }
 }
@@ -1122,6 +1116,8 @@ pub enum WatchErrorKind {
 }
 
 crate::error_impls!(WatchError, WatchErrorKind);
+crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
+crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
 
 impl Display for WatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1140,23 +1136,6 @@ impl Display for WatchError {
     }
 }
 
-impl From<ConsumerError> for WatchError {
-    fn from(err: ConsumerError) -> Self {
-        match err.kind() {
-            super::stream::ConsumerErrorKind::TimedOut => WatchError::new(WatchErrorKind::TimedOut),
-            _ => WatchError::with_source(WatchErrorKind::Other, err),
-        }
-    }
-}
-impl From<StreamError> for WatchError {
-    fn from(err: StreamError) -> Self {
-        match err.kind() {
-            StreamErrorKind::TimedOut => WatchError::new(WatchErrorKind::TimedOut),
-            _ => WatchError::with_source(WatchErrorKind::Other, err),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct UpdateError {
     kind: UpdateErrorKind,
@@ -1171,6 +1150,7 @@ pub enum UpdateErrorKind {
 }
 
 crate::error_impls!(UpdateError, UpdateErrorKind);
+crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
 
 impl Display for UpdateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1178,18 +1158,6 @@ impl Display for UpdateError {
             UpdateErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
             UpdateErrorKind::TimedOut => write!(f, "timed out"),
             UpdateErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
-        }
-    }
-}
-
-impl From<PublishError> for UpdateError {
-    fn from(err: PublishError) -> Self {
-        match err.kind() {
-            PublishErrorKind::TimedOut => UpdateError {
-                kind: UpdateErrorKind::TimedOut,
-                source: None,
-            },
-            _ => UpdateError::with_source(UpdateErrorKind::Other, err),
         }
     }
 }
