@@ -15,10 +15,7 @@
 
 pub mod bucket;
 
-use std::{
-    io::{self, ErrorKind},
-    task::Poll,
-};
+use std::{fmt::Display, task::Poll};
 
 use crate::{HeaderValue, StatusCode};
 use bytes::Bytes;
@@ -28,13 +25,17 @@ use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tracing::debug;
 
-use crate::{header, Error, Message};
+use crate::{header, Message};
 
 use self::bucket::Status;
 
 use super::{
-    consumer::DeliverPolicy,
-    stream::{DirectGetErrorKind, RawMessage, Republish, Source, StorageType, Stream},
+    consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
+    context::{PublishError, PublishErrorKind},
+    stream::{
+        ConsumerError, DirectGetError, DirectGetErrorKind, RawMessage, Republish, Source,
+        StorageType, Stream,
+    },
 };
 
 // Helper to extract key value operation from message headers
@@ -158,7 +159,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn status(&self) -> Result<Status, Error> {
+    pub async fn status(&self) -> Result<Status, StatusError> {
         // TODO: should we poll for fresh info here? probably yes.
         let info = self.stream.info.clone();
 
@@ -190,12 +191,9 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn put<T: AsRef<str>>(&self, key: T, value: bytes::Bytes) -> Result<u64, Error> {
+    pub async fn put<T: AsRef<str>>(&self, key: T, value: bytes::Bytes) -> Result<u64, PutError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(PutError::new(PutErrorKind::InvalidKey));
         }
         let mut subject = String::new();
         if self.use_jetstream_prefix {
@@ -205,8 +203,15 @@ impl Store {
         subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
         subject.push_str(key.as_ref());
 
-        let publish_ack = self.stream.context.publish(subject, value).await?;
-        let ack = publish_ack.await?;
+        let publish_ack = self
+            .stream
+            .context
+            .publish(subject, value)
+            .await
+            .map_err(|err| PutError::with_source(PutErrorKind::PublishError, err))?;
+        let ack = publish_ack
+            .await
+            .map_err(|err| PutError::with_source(PutErrorKind::AckError, err))?;
 
         Ok(ack.sequence)
     }
@@ -233,13 +238,10 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn entry<T: Into<String>>(&self, key: T) -> Result<Option<Entry>, Error> {
+    pub async fn entry<T: Into<String>>(&self, key: T) -> Result<Option<Entry>, EntryError> {
         let key: String = key.into();
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(EntryError::new(EntryErrorKind::InvalidKey));
         }
 
         let subject = format!("{}{}", self.prefix.as_str(), &key);
@@ -254,7 +256,7 @@ impl Store {
                 match message {
                     Ok(message) => {
                         let headers = message.headers.as_ref().ok_or_else(|| {
-                            std::io::Error::new(io::ErrorKind::Other, "did not found headers")
+                            EntryError::with_source(EntryErrorKind::Other, "missing headers")
                         })?;
                         let operation = headers.get(KV_OPERATION).map_or_else(
                             || Operation::Put,
@@ -273,41 +275,50 @@ impl Store {
                         let sequence = headers
                             .get(header::NATS_SEQUENCE)
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
-                                    "did not found sequence header",
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
+                                    "missing sequence headers",
                                 )
                             })?
                             .iter()
                             .next()
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
                                     "did not found sequence header value",
                                 )
                             })?
-                            .parse()?;
+                            .parse()
+                            .map_err(|err| {
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
+                                    format!("failed to parse headers sequence value: {}", err),
+                                )
+                            })?;
                         let created = headers
                             .get(header::NATS_TIME_STAMP)
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
                                     "did not found timestamp header",
                                 )
                             })?
                             .iter()
                             .next()
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
                                     "did not found timestamp header value",
                                 )
                             })
                             .and_then(|created| {
                                 OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
-                                    std::io::Error::new(
-                                        io::ErrorKind::Other,
-                                        format!("failed to parse Nats-Time-Stamp: {err}"),
+                                    EntryError::with_source(
+                                        EntryErrorKind::Other,
+                                        format!(
+                                            "failed to parse headers timestampt value: {}",
+                                            err
+                                        ),
                                     )
                                 })
                             })?;
@@ -318,7 +329,7 @@ impl Store {
                         if err.kind() == DirectGetErrorKind::NotFound {
                             None
                         } else {
-                            return Err(Box::new(err));
+                            return Err(err.into());
                         }
                     }
                 }
@@ -331,7 +342,8 @@ impl Store {
                     Ok(raw_message) => {
                         let operation = kv_operation_from_stream_message(&raw_message);
                         // TODO: unnecessary expensive, cloning whole Message.
-                        let nats_message = Message::try_from(raw_message.clone())?;
+                        let nats_message = Message::try_from(raw_message.clone())
+                            .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))?;
                         Some((
                             nats_message,
                             operation,
@@ -343,7 +355,7 @@ impl Store {
                         crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
                         crate::jetstream::stream::LastRawMessageErrorKind::Other
                         | crate::jetstream::stream::LastRawMessageErrorKind::JetStreamError => {
-                            return Err(Box::new(err))
+                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
                         }
                     },
                 }
@@ -397,7 +409,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
+    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, WatchError> {
         self.watch_with_deliver_policy(key, DeliverPolicy::New)
             .await
     }
@@ -427,7 +439,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
+    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, WatchError> {
         self.watch_with_deliver_policy(key, DeliverPolicy::LastPerSubject)
             .await
     }
@@ -436,7 +448,7 @@ impl Store {
         &self,
         key: T,
         deliver_policy: DeliverPolicy,
-    ) -> Result<Watch<'_>, Error> {
+    ) -> Result<Watch<'_>, WatchError> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         debug!("initial consumer creation");
@@ -450,10 +462,23 @@ impl Store {
                 deliver_policy,
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|err| match err.kind() {
+                crate::jetstream::stream::ConsumerErrorKind::TimedOut => {
+                    WatchError::new(WatchErrorKind::TimedOut)
+                }
+                _ => WatchError::with_source(WatchErrorKind::Other, err),
+            })?;
 
         Ok(Watch {
-            subscription: consumer.messages().await?,
+            subscription: consumer.messages().await.map_err(|err| match err.kind() {
+                crate::jetstream::consumer::StreamErrorKind::TimedOut => {
+                    WatchError::new(WatchErrorKind::TimedOut)
+                }
+                crate::jetstream::consumer::StreamErrorKind::Other => {
+                    WatchError::with_source(WatchErrorKind::Other, err)
+                }
+            })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
         })
@@ -484,7 +509,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_all(&self) -> Result<Watch<'_>, Error> {
+    pub async fn watch_all(&self) -> Result<Watch<'_>, WatchError> {
         self.watch(ALL_KEYS).await
     }
 
@@ -517,7 +542,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Bytes>, Error> {
+    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Bytes>, EntryError> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
                 Operation::Put => Ok(Some(entry.value)),
@@ -556,12 +581,9 @@ impl Store {
         key: T,
         value: Bytes,
         revision: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, UpdateError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(UpdateError::new(UpdateErrorKind::InvalidKey));
         }
         let mut subject = String::new();
         if self.use_jetstream_prefix {
@@ -582,8 +604,8 @@ impl Store {
             .publish_with_headers(subject, headers, value)
             .await?
             .await
+            .map_err(|err| err.into())
             .map(|publish_ack| publish_ack.sequence)
-            .map_err(|err| Box::from(std::io::Error::new(ErrorKind::Other, err)))
     }
 
     /// Deletes a given key. This is a non-destructive operation, which sets a `DELETE` marker.
@@ -608,12 +630,9 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), Error> {
+    pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), DeleteError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(DeleteError::new(DeleteErrorKind::InvalidKey));
         }
         let mut subject = String::new();
         if self.use_jetstream_prefix {
@@ -625,7 +644,12 @@ impl Store {
 
         let mut headers = crate::HeaderMap::default();
         // TODO: figure out which headers k/v should be where.
-        headers.insert(KV_OPERATION, KV_OPERATION_DELETE.parse::<HeaderValue>()?);
+        headers.insert(
+            KV_OPERATION,
+            KV_OPERATION_DELETE
+                .parse::<HeaderValue>()
+                .map_err(|err| DeleteError::with_source(DeleteErrorKind::Other, err))?,
+        );
 
         self.stream
             .context
@@ -658,12 +682,9 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), Error> {
+    pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), PurgeError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
         }
 
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
@@ -705,12 +726,9 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, Error> {
+    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, HistoryError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(HistoryError::new(HistoryErrorKind::InvalidKey));
         }
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
@@ -780,7 +798,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn keys(&self) -> Result<Keys, Error> {
+    pub async fn keys(&self) -> Result<Keys, HistoryError> {
         let subject = format!("{}>", self.prefix.as_str());
 
         let consumer = self
@@ -816,7 +834,7 @@ pub struct Watch<'a> {
 }
 
 impl<'a> futures::Stream for Watch<'a> {
-    type Item = Result<Entry, Error>;
+    type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -827,7 +845,12 @@ impl<'a> futures::Stream for Watch<'a> {
                 None => Poll::Ready(None),
                 Some(message) => {
                     let message = message?;
-                    let info = message.info()?;
+                    let info = message.info().map_err(|err| {
+                        WatcherError::with_source(
+                            WatcherErrorKind::Other,
+                            format!("failed to parse message metadata: {}", err),
+                        )
+                    })?;
 
                     let operation = match message
                         .headers
@@ -879,7 +902,7 @@ pub struct History<'a> {
 }
 
 impl<'a> futures::Stream for History<'a> {
-    type Item = Result<Entry, Error>;
+    type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -893,7 +916,12 @@ impl<'a> futures::Stream for History<'a> {
                 None => Poll::Ready(None),
                 Some(message) => {
                     let message = message?;
-                    let info = message.info()?;
+                    let info = message.info().map_err(|err| {
+                        WatcherError::with_source(
+                            WatcherErrorKind::Other,
+                            format!("failed to parse message metadata: {}", err),
+                        )
+                    })?;
                     if info.pending == 0 {
                         self.done = true;
                     }
@@ -944,7 +972,7 @@ pub struct Keys<'a> {
 }
 
 impl<'a> futures::Stream for Keys<'a> {
-    type Item = Result<String, Error>;
+    type Item = Result<String, WatcherError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -989,3 +1017,219 @@ pub struct Entry {
     /// The kind of operation that caused this entry.
     pub operation: Operation,
 }
+
+#[derive(Debug)]
+pub struct StatusError {
+    kind: StatusErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StatusErrorKind {
+    JetStreamError(crate::jetstream::Error),
+    TimedOut,
+}
+
+crate::error_impls!(StatusError, StatusErrorKind);
+
+impl Display for StatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind.clone() {
+            StatusErrorKind::JetStreamError(err) => {
+                write!(f, "jetstream request failed: {}", err)
+            }
+            StatusErrorKind::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PutError {
+    kind: PutErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum PutErrorKind {
+    InvalidKey,
+    PublishError,
+    AckError,
+}
+
+crate::error_impls!(PutError, PutErrorKind);
+
+impl Display for PutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            PutErrorKind::PublishError => {
+                write!(f, "failed to put key into store: {}", self.format_source())
+            }
+            PutErrorKind::AckError => write!(f, "ack error: {}", self.format_source()),
+            PutErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EntryError {
+    kind: EntryErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum EntryErrorKind {
+    InvalidKey,
+    TimedOut,
+    Other,
+}
+
+crate::error_impls!(EntryError, EntryErrorKind);
+
+impl Display for EntryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            EntryErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            EntryErrorKind::TimedOut => write!(f, "timed out"),
+            EntryErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
+        }
+    }
+}
+
+impl From<DirectGetError> for EntryError {
+    fn from(err: DirectGetError) -> Self {
+        match err.kind() {
+            DirectGetErrorKind::TimedOut => EntryError {
+                kind: EntryErrorKind::TimedOut,
+                source: None,
+            },
+            _ => EntryError::with_source(EntryErrorKind::Other, err),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WatchError {
+    kind: WatchErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum WatchErrorKind {
+    InvalidKey,
+    TimedOut,
+    ConsumerCreate,
+    Other,
+}
+
+crate::error_impls!(WatchError, WatchErrorKind);
+
+impl Display for WatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            WatchErrorKind::ConsumerCreate => {
+                write!(
+                    f,
+                    "watch consumer creation failed: {}",
+                    self.format_source()
+                )
+            }
+            WatchErrorKind::Other => write!(f, "watch failed: {}", self.format_source()),
+            WatchErrorKind::TimedOut => write!(f, "timed out"),
+            WatchErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+        }
+    }
+}
+
+impl From<ConsumerError> for WatchError {
+    fn from(err: ConsumerError) -> Self {
+        match err.kind() {
+            super::stream::ConsumerErrorKind::TimedOut => WatchError::new(WatchErrorKind::TimedOut),
+            _ => WatchError::with_source(WatchErrorKind::Other, err),
+        }
+    }
+}
+impl From<StreamError> for WatchError {
+    fn from(err: StreamError) -> Self {
+        match err.kind() {
+            StreamErrorKind::TimedOut => WatchError::new(WatchErrorKind::TimedOut),
+            _ => WatchError::with_source(WatchErrorKind::Other, err),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UpdateError {
+    kind: UpdateErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateErrorKind {
+    InvalidKey,
+    TimedOut,
+    Other,
+}
+
+crate::error_impls!(UpdateError, UpdateErrorKind);
+
+impl Display for UpdateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            UpdateErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            UpdateErrorKind::TimedOut => write!(f, "timed out"),
+            UpdateErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
+        }
+    }
+}
+
+impl From<PublishError> for UpdateError {
+    fn from(err: PublishError) -> Self {
+        match err.kind() {
+            PublishErrorKind::TimedOut => UpdateError {
+                kind: UpdateErrorKind::TimedOut,
+                source: None,
+            },
+            _ => UpdateError::with_source(UpdateErrorKind::Other, err),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WatcherError {
+    kind: WatcherErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WatcherErrorKind {
+    ConsumerError,
+    Other,
+}
+
+impl Display for WatcherError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            WatcherErrorKind::ConsumerError => {
+                write!(f, "watcher consumer error: {}", self.format_source())
+            }
+            WatcherErrorKind::Other => write!(f, "watcher error: {}", self.format_source()),
+        }
+    }
+}
+
+crate::error_impls!(WatcherError, WatcherErrorKind);
+
+impl From<OrderedError> for WatcherError {
+    fn from(err: OrderedError) -> Self {
+        WatcherError::with_source(WatcherErrorKind::ConsumerError, err)
+    }
+}
+
+type DeleteError = UpdateError;
+type DeleteErrorKind = UpdateErrorKind;
+
+type PurgeError = UpdateError;
+type PurgeErrorKind = UpdateErrorKind;
+
+type HistoryError = WatchError;
+type HistoryErrorKind = WatchErrorKind;
