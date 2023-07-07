@@ -1329,6 +1329,20 @@ pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
     !subject.as_ref().contains([' ', '.', '\r', '\n'])
 }
 
+macro_rules! from_with_timeout {
+    ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {
+        impl From<$origin> for $t {
+            fn from(err: $origin) -> Self {
+                match err.kind() {
+                    <$origin_kind>::TimedOut => Self::new(<$k>::TimedOut),
+                    _ => Self::with_source(<$k>::Other, err),
+                }
+            }
+        }
+    };
+}
+pub(crate) use from_with_timeout;
+
 // TODO: rewrite into derivable proc macro.
 macro_rules! error_impls {
     ($t:ty, $k:ty) => {
