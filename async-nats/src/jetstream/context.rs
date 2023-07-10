@@ -340,11 +340,11 @@ impl Context {
         let request: Response<Info> = self
             .request(subject, &())
             .await
-            .map_err(|err| GetStreamError::with_source(GetStreamErrorKind::RequestError, err))?;
+            .map_err(|err| GetStreamError::with_source(GetStreamErrorKind::Request, err))?;
         match request {
-            Response::Err { error } => Err(GetStreamError::new(
-                GetStreamErrorKind::JetStreamError(error),
-            )),
+            Response::Err { error } => {
+                Err(GetStreamError::new(GetStreamErrorKind::JetStream(error)))
+            }
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
@@ -420,11 +420,13 @@ impl Context {
             return Err(DeleteStreamError::new(DeleteStreamErrorKind::EmptyName));
         }
         let subject = format!("STREAM.DELETE.{stream}");
-        match self.request(subject, &json!({})).await.map_err(|err| {
-            DeleteStreamError::with_source(DeleteStreamErrorKind::RequestError, err)
-        })? {
+        match self
+            .request(subject, &json!({}))
+            .await
+            .map_err(|err| DeleteStreamError::with_source(DeleteStreamErrorKind::Request, err))?
+        {
             Response::Err { error } => Err(DeleteStreamError::new(
-                DeleteStreamErrorKind::JetStreamError(error),
+                DeleteStreamErrorKind::JetStream(error),
             )),
             Response::Ok(delete_response) => Ok(delete_response),
         }
@@ -541,7 +543,7 @@ impl Context {
         let stream_name = format!("KV_{}", &bucket);
         let stream = self
             .get_stream(stream_name.clone())
-            .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::FailedGetBucket, err))
+            .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::GetBucket, err))
             .await?;
 
         if stream.info.config.max_messages_per_subject < 1 {
@@ -660,10 +662,7 @@ impl Context {
                 if err.kind() == CreateStreamErrorKind::TimedOut {
                     CreateKeyValueError::with_source(CreateKeyValueErrorKind::TimedOut, err)
                 } else {
-                    CreateKeyValueError::with_source(
-                        CreateKeyValueErrorKind::BucketCreationFailed,
-                        err,
-                    )
+                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
                 }
             })?;
 
@@ -720,7 +719,7 @@ impl Context {
 
         let stream_name = format!("KV_{}", bucket.as_ref());
         self.delete_stream(stream_name)
-            .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::JetStreamError, err))
+            .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::JetStream, err))
             .await
     }
 
@@ -885,10 +884,7 @@ impl Context {
             })
             .await
             .map_err(|err| {
-                CreateObjectStoreError::with_source(
-                    CreateKeyValueErrorKind::BucketCreationFailed,
-                    err,
-                )
+                CreateObjectStoreError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
             })?;
 
         Ok(ObjectStore {
@@ -921,9 +917,10 @@ impl Context {
             ));
         }
         let stream_name = format!("OBJ_{bucket_name}");
-        let stream = self.get_stream(stream_name).await.map_err(|err| {
-            ObjectStoreError::with_source(ObjectStoreErrorKind::FailedGetStore, err)
-        })?;
+        let stream = self
+            .get_stream(stream_name)
+            .await
+            .map_err(|err| ObjectStoreError::with_source(ObjectStoreErrorKind::GetStore, err))?;
 
         Ok(ObjectStore {
             name: bucket_name.to_string(),
@@ -949,9 +946,9 @@ impl Context {
         bucket_name: T,
     ) -> Result<(), DeleteObjectStore> {
         let stream_name = format!("OBJ_{}", bucket_name.as_ref());
-        self.delete_stream(stream_name).await.map_err(|err| {
-            ObjectStoreError::with_source(ObjectStoreErrorKind::FailedGetStore, err)
-        })?;
+        self.delete_stream(stream_name)
+            .await
+            .map_err(|err| ObjectStoreError::with_source(ObjectStoreErrorKind::GetStore, err))?;
         Ok(())
     }
 }
@@ -1341,13 +1338,13 @@ impl Display for CreateStreamError {
             CreateStreamErrorKind::DomainAndExternalSet => {
                 write!(f, "domain and external are both set")
             }
-            CreateStreamErrorKind::JetStreamError(err) => {
+            CreateStreamErrorKind::JetStream(err) => {
                 write!(f, "jetstream error: {}", err)
             }
             CreateStreamErrorKind::TimedOut => write!(f, "jetstream request timed out"),
             CreateStreamErrorKind::JetStreamUnavailable => write!(f, "jetstream unavailable"),
             CreateStreamErrorKind::ResponseParse => write!(f, "failed to parse server response"),
-            CreateStreamErrorKind::ResponseError => {
+            CreateStreamErrorKind::Response => {
                 write!(f, "response error: {}", self.format_source())
             }
         }
@@ -1356,7 +1353,7 @@ impl Display for CreateStreamError {
 
 impl From<super::errors::Error> for CreateStreamError {
     fn from(error: super::errors::Error) -> Self {
-        CreateStreamError::new(CreateStreamErrorKind::JetStreamError(error))
+        CreateStreamError::new(CreateStreamErrorKind::JetStream(error))
     }
 }
 
@@ -1368,10 +1365,10 @@ impl From<RequestError> for CreateStreamError {
             }
             RequestErrorKind::TimedOut => CreateStreamError::new(CreateStreamErrorKind::TimedOut),
             RequestErrorKind::Other => {
-                CreateStreamError::with_source(CreateStreamErrorKind::ResponseError, error)
+                CreateStreamError::with_source(CreateStreamErrorKind::Response, error)
             }
             RequestErrorKind::JetStream(err) => {
-                CreateStreamError::new(CreateStreamErrorKind::JetStreamError(err))
+                CreateStreamError::new(CreateStreamErrorKind::JetStream(err))
             }
         }
     }
@@ -1383,9 +1380,9 @@ pub enum CreateStreamErrorKind {
     InvalidStreamName,
     DomainAndExternalSet,
     JetStreamUnavailable,
-    JetStreamError(super::errors::Error),
+    JetStream(super::errors::Error),
     TimedOut,
-    ResponseError,
+    Response,
     ResponseParse,
 }
 
@@ -1401,10 +1398,10 @@ impl Display for GetStreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind() {
             GetStreamErrorKind::EmptyName => write!(f, "empty name cannot be empty"),
-            GetStreamErrorKind::RequestError => {
+            GetStreamErrorKind::Request => {
                 write!(f, "request error: {}", self.format_source())
             }
-            GetStreamErrorKind::JetStreamError(err) => write!(f, "jetstream error: {}", err),
+            GetStreamErrorKind::JetStream(err) => write!(f, "jetstream error: {}", err),
         }
     }
 }
@@ -1412,8 +1409,8 @@ impl Display for GetStreamError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetStreamErrorKind {
     EmptyName,
-    RequestError,
-    JetStreamError(super::errors::Error),
+    Request,
+    JetStream(super::errors::Error),
 }
 
 pub type UpdateStreamError = CreateStreamError;
@@ -1430,8 +1427,8 @@ pub struct KeyValueError {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KeyValueErrorKind {
     InvalidStoreName,
-    FailedGetBucket,
-    JetStreamError,
+    GetBucket,
+    JetStream,
 }
 
 crate::error_impls!(KeyValueError, KeyValueErrorKind);
@@ -1440,8 +1437,8 @@ impl Display for KeyValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind() {
             KeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
-            KeyValueErrorKind::FailedGetBucket => write!(f, "failed to get the bucket"),
-            KeyValueErrorKind::JetStreamError => {
+            KeyValueErrorKind::GetBucket => write!(f, "failed to get the bucket"),
+            KeyValueErrorKind::JetStream => {
                 write!(f, "JetStream error: {}", self.format_source())
             }
         }
@@ -1458,8 +1455,8 @@ pub struct CreateKeyValueError {
 pub enum CreateKeyValueErrorKind {
     InvalidStoreName,
     TooLongHistory,
-    JetStreamError,
-    BucketCreationFailed,
+    JetStream,
+    BucketCreate,
     TimedOut,
 }
 
@@ -1471,10 +1468,10 @@ impl Display for CreateKeyValueError {
         match self.kind() {
             CreateKeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
             CreateKeyValueErrorKind::TooLongHistory => write!(f, "too long history"),
-            CreateKeyValueErrorKind::JetStreamError => {
+            CreateKeyValueErrorKind::JetStream => {
                 write!(f, "JetStream error: {}", source)
             }
-            CreateKeyValueErrorKind::BucketCreationFailed => {
+            CreateKeyValueErrorKind::BucketCreate => {
                 write!(f, "bucket creation failed: {}", source)
             }
             CreateKeyValueErrorKind::TimedOut => write!(f, "timed out"),
@@ -1495,7 +1492,7 @@ crate::error_impls!(ObjectStoreError, ObjectStoreErrorKind);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ObjectStoreErrorKind {
     InvalidBucketName,
-    FailedGetStore,
+    GetStore,
 }
 
 impl Display for ObjectStoreError {
@@ -1504,7 +1501,7 @@ impl Display for ObjectStoreError {
             ObjectStoreErrorKind::InvalidBucketName => {
                 write!(f, "invalid Object Store bucket name")
             }
-            ObjectStoreErrorKind::FailedGetStore => write!(f, "failed to get Object Store"),
+            ObjectStoreErrorKind::GetStore => write!(f, "failed to get Object Store"),
         }
     }
 }

@@ -462,22 +462,17 @@ impl<'a> futures::Stream for Sequence<'a> {
 
                 self.next = Some(Box::pin(async move {
                     let inbox = context.client.new_inbox();
-                    let subscriber =
-                        context
-                            .client
-                            .subscribe(inbox.clone())
-                            .await
-                            .map_err(|err| {
-                                MessagesError::with_source(MessagesErrorKind::PullFailed, err)
-                            })?;
+                    let subscriber = context
+                        .client
+                        .subscribe(inbox.clone())
+                        .await
+                        .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
                     context
                         .client
                         .publish_with_reply(subject, inbox, request)
                         .await
-                        .map_err(|err| {
-                            MessagesError::with_source(MessagesErrorKind::PullFailed, err)
-                        })?;
+                        .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
                     // TODO(tp): Add timeout config and defaults.
                     Ok(Batch {
@@ -493,7 +488,7 @@ impl<'a> futures::Stream for Sequence<'a> {
                     Poll::Ready(result) => {
                         self.next = None;
                         Poll::Ready(Some(result.map_err(|err| {
-                            MessagesError::with_source(MessagesErrorKind::PullFailed, err)
+                            MessagesError::with_source(MessagesErrorKind::Pull, err)
                         })))
                     }
                     Poll::Pending => Poll::Pending,
@@ -504,7 +499,7 @@ impl<'a> futures::Stream for Sequence<'a> {
                 Poll::Ready(result) => {
                     self.next = None;
                     Poll::Ready(Some(result.map_err(|err| {
-                        MessagesError::with_source(MessagesErrorKind::PullFailed, err)
+                        MessagesError::with_source(MessagesErrorKind::Pull, err)
                     })))
                 }
                 Poll::Pending => Poll::Pending,
@@ -822,7 +817,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                     }
                     Err(err) => {
                         return Poll::Ready(Some(Err(OrderedError::with_source(
-                            OrderedErrorKind::RecreationFailed,
+                            OrderedErrorKind::Recreate,
                             err,
                         ))))
                     }
@@ -1013,12 +1008,12 @@ impl std::fmt::Display for OrderedError {
         match &self.kind() {
             OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
             OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            OrderedErrorKind::PullFailed => {
+            OrderedErrorKind::Pull => {
                 write!(f, "pull request failed: {}", self.format_source())
             }
             OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
             OrderedErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
-            OrderedErrorKind::RecreationFailed => write!(f, "consumer recreation failed"),
+            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
         }
     }
 }
@@ -1034,8 +1029,8 @@ impl From<MessagesError> for OrderedError {
             MessagesErrorKind::ConsumerDeleted => {
                 OrderedError::new(OrderedErrorKind::ConsumerDeleted)
             }
-            MessagesErrorKind::PullFailed => OrderedError {
-                kind: OrderedErrorKind::PullFailed,
+            MessagesErrorKind::Pull => OrderedError {
+                kind: OrderedErrorKind::Pull,
                 source: err.source,
             },
             MessagesErrorKind::PushBasedConsumer => {
@@ -1053,9 +1048,9 @@ impl From<MessagesError> for OrderedError {
 pub enum OrderedErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
-    PullFailed,
+    Pull,
     PushBasedConsumer,
-    RecreationFailed,
+    Recreate,
     Other,
 }
 
@@ -1070,7 +1065,7 @@ impl std::fmt::Display for MessagesError {
         match &self.kind() {
             MessagesErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
             MessagesErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            MessagesErrorKind::PullFailed => {
+            MessagesErrorKind::Pull => {
                 write!(f, "pull request failed: {}", self.format_source())
             }
             MessagesErrorKind::Other => write!(f, "error: {}", self.format_source()),
@@ -1085,7 +1080,7 @@ crate::error_impls!(MessagesError, MessagesErrorKind);
 pub enum MessagesErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
-    PullFailed,
+    Pull,
     PushBasedConsumer,
     Other,
 }
@@ -1151,7 +1146,7 @@ impl futures::Stream for Stream {
                         }
                         Err(err) => {
                             return Poll::Ready(Some(Err(MessagesError::with_source(
-                                MessagesErrorKind::PullFailed,
+                                MessagesErrorKind::Pull,
                                 err,
                             ))))
                         }
@@ -2256,7 +2251,7 @@ crate::error_impls!(BatchError, BatchErrorKind);
 impl std::fmt::Display for BatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind() {
-            BatchErrorKind::PullFailed => {
+            BatchErrorKind::Pull => {
                 write!(f, "pull request failed: {}", self.format_source())
             }
             BatchErrorKind::Flush => {
@@ -2278,14 +2273,14 @@ impl From<SubscribeError> for BatchError {
 
 impl From<BatchRequestError> for BatchError {
     fn from(err: BatchRequestError) -> Self {
-        BatchError::with_source(BatchErrorKind::PullFailed, err)
+        BatchError::with_source(BatchErrorKind::Pull, err)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BatchErrorKind {
     Subscribe,
-    PullFailed,
+    Pull,
     Flush,
     Serialize,
 }
@@ -2301,10 +2296,10 @@ crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
 impl std::fmt::Display for ConsumerRecreateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind() {
-            ConsumerRecreateErrorKind::StreamGetFailed => {
+            ConsumerRecreateErrorKind::GetStream => {
                 write!(f, "error getting stream: {}", self.format_source())
             }
-            ConsumerRecreateErrorKind::RecreationFailed => {
+            ConsumerRecreateErrorKind::Recreate => {
                 write!(f, "consumer creation failed: {}", self.format_source())
             }
             ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
@@ -2314,8 +2309,8 @@ impl std::fmt::Display for ConsumerRecreateError {
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum ConsumerRecreateErrorKind {
-    StreamGetFailed,
-    RecreationFailed,
+    GetStream,
+    Recreate,
     TimedOut,
 }
 
@@ -2331,13 +2326,13 @@ async fn recreate_consumer_stream(
         .get_stream(stream_name.clone())
         .await
         .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::StreamGetFailed, err)
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
         })?;
     stream
         .delete_consumer(&consumer_name)
         .await
         .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::RecreationFailed, err)
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
         })?;
 
     let deliver_policy = {
@@ -2358,12 +2353,8 @@ async fn recreate_consumer_stream(
     )
     .await
     .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
-    .map_err(|err| {
-        ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::RecreationFailed, err)
-    })?
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?
     .messages()
-    .map_err(|err| {
-        ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::RecreationFailed, err)
-    })
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))
     .await
 }

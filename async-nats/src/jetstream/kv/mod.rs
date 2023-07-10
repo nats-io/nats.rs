@@ -208,10 +208,10 @@ impl Store {
             .context
             .publish(subject, value)
             .await
-            .map_err(|err| PutError::with_source(PutErrorKind::PublishError, err))?;
+            .map_err(|err| PutError::with_source(PutErrorKind::Publish, err))?;
         let ack = publish_ack
             .await
-            .map_err(|err| PutError::with_source(PutErrorKind::AckError, err))?;
+            .map_err(|err| PutError::with_source(PutErrorKind::Ack, err))?;
 
         Ok(ack.sequence)
     }
@@ -354,7 +354,7 @@ impl Store {
                     Err(err) => match err.kind() {
                         crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
                         crate::jetstream::stream::LastRawMessageErrorKind::Other
-                        | crate::jetstream::stream::LastRawMessageErrorKind::JetStreamError => {
+                        | crate::jetstream::stream::LastRawMessageErrorKind::JetStream => {
                             return Err(EntryError::with_source(EntryErrorKind::Other, err))
                         }
                     },
@@ -1026,7 +1026,7 @@ pub struct StatusError {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum StatusErrorKind {
-    JetStreamError(crate::jetstream::Error),
+    JetStream(crate::jetstream::Error),
     TimedOut,
 }
 
@@ -1035,7 +1035,7 @@ crate::error_impls!(StatusError, StatusErrorKind);
 impl Display for StatusError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind.clone() {
-            StatusErrorKind::JetStreamError(err) => {
+            StatusErrorKind::JetStream(err) => {
                 write!(f, "jetstream request failed: {}", err)
             }
             StatusErrorKind::TimedOut => write!(f, "timed out"),
@@ -1052,8 +1052,8 @@ pub struct PutError {
 #[derive(Debug, PartialEq, Clone)]
 pub enum PutErrorKind {
     InvalidKey,
-    PublishError,
-    AckError,
+    Publish,
+    Ack,
 }
 
 crate::error_impls!(PutError, PutErrorKind);
@@ -1061,10 +1061,10 @@ crate::error_impls!(PutError, PutErrorKind);
 impl Display for PutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
-            PutErrorKind::PublishError => {
+            PutErrorKind::Publish => {
                 write!(f, "failed to put key into store: {}", self.format_source())
             }
-            PutErrorKind::AckError => write!(f, "ack error: {}", self.format_source()),
+            PutErrorKind::Ack => write!(f, "ack error: {}", self.format_source()),
             PutErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
         }
     }
@@ -1170,14 +1170,14 @@ pub struct WatcherError {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WatcherErrorKind {
-    ConsumerError,
+    Consumer,
     Other,
 }
 
 impl Display for WatcherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
-            WatcherErrorKind::ConsumerError => {
+            WatcherErrorKind::Consumer => {
                 write!(f, "watcher consumer error: {}", self.format_source())
             }
             WatcherErrorKind::Other => write!(f, "watcher error: {}", self.format_source()),
@@ -1189,7 +1189,7 @@ crate::error_impls!(WatcherError, WatcherErrorKind);
 
 impl From<OrderedError> for WatcherError {
     fn from(err: OrderedError) -> Self {
-        WatcherError::with_source(WatcherErrorKind::ConsumerError, err)
+        WatcherError::with_source(WatcherErrorKind::Consumer, err)
     }
 }
 

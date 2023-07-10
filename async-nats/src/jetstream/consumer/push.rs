@@ -591,10 +591,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                             Poll::Ready(subscriber) => {
                                 self.subscriber_future = None;
                                 self.subscriber = Some(subscriber.map_err(|err| {
-                                    OrderedError::with_source(
-                                        OrderedErrorKind::RecreationFailed,
-                                        err,
-                                    )
+                                    OrderedError::with_source(OrderedErrorKind::Recreate, err)
                                 })?);
                             }
                             Poll::Pending => {
@@ -607,7 +604,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                             self.subscriber_future = None;
                             self.consumer_sequence.store(0, Ordering::Relaxed);
                             self.subscriber = Some(subscriber.map_err(|err| {
-                                OrderedError::with_source(OrderedErrorKind::RecreationFailed, err)
+                                OrderedError::with_source(OrderedErrorKind::Recreate, err)
                             })?);
                         }
                         Poll::Pending => {
@@ -727,7 +724,7 @@ impl std::fmt::Display for OrderedError {
             OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
             OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
             OrderedErrorKind::PullBasedConsumer => write!(f, "cannot use with push consumer"),
-            OrderedErrorKind::RecreationFailed => write!(f, "consumer recreation failed"),
+            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
         }
     }
 }
@@ -759,7 +756,7 @@ pub enum OrderedErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
     PullBasedConsumer,
-    RecreationFailed,
+    Recreate,
     Other,
 }
 
@@ -801,23 +798,23 @@ crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
 impl std::fmt::Display for ConsumerRecreateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind() {
-            ConsumerRecreateErrorKind::StreamGetFailed => {
+            ConsumerRecreateErrorKind::GetStream => {
                 write!(f, "error getting stream: {}", self.format_source())
             }
-            ConsumerRecreateErrorKind::RecreationFailed => {
+            ConsumerRecreateErrorKind::Recreate => {
                 write!(f, "consumer creation failed: {}", self.format_source())
             }
             ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
-            ConsumerRecreateErrorKind::SubscriptionFailed => write!(f, "failed to resubscribe"),
+            ConsumerRecreateErrorKind::Subscription => write!(f, "failed to resubscribe"),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum ConsumerRecreateErrorKind {
-    StreamGetFailed,
-    SubscriptionFailed,
-    RecreationFailed,
+    GetStream,
+    Subscription,
+    Recreate,
     TimedOut,
 }
 
@@ -832,7 +829,7 @@ async fn recreate_consumer_and_subscription(
         .subscribe(config.deliver_subject.clone())
         .await
         .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::SubscriptionFailed, err)
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Subscription, err)
         })?;
 
     recreate_ephemeral_consumer(context, config, stream_name, sequence).await?;
@@ -848,7 +845,7 @@ async fn recreate_ephemeral_consumer(
         .get_stream(stream_name.clone())
         .await
         .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::StreamGetFailed, err)
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
         })?;
 
     let deliver_policy = {
@@ -869,8 +866,6 @@ async fn recreate_ephemeral_consumer(
     )
     .await
     .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
-    .map_err(|err| {
-        ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::RecreationFailed, err)
-    })?;
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
     Ok(())
 }
