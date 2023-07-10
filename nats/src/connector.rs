@@ -99,7 +99,7 @@ fn configure_tls(options: &Arc<Options>) -> Result<ClientConfig, Error> {
                 let cert = auth_utils::load_certs(cert)?;
                 let key = auth_utils::load_key(key)?;
 
-                return builder.with_single_cert(cert, key).map_err(|_| {
+                return builder.with_client_auth_cert(cert, key).map_err(|_| {
                     io::Error::new(ErrorKind::Other, "could not add certificate or key")
                 });
             } else {
