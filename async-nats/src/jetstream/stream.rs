@@ -1844,6 +1844,7 @@ impl From<super::errors::Error> for ConsumerError {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ConsumerErrorKind {
+    //TODO: get last should have timeout, which should be mapped here.
     TimedOut,
     RequestFailed,
     InvalidConsumerType,
