@@ -1154,6 +1154,7 @@ mod jetstream {
             .unwrap();
     }
 
+    #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_sequence() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
