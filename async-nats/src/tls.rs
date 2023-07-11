@@ -13,10 +13,10 @@
 
 use crate::connector::ConnectorOptions;
 use crate::tls;
-use rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
 use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
+use tokio_rustls::rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
 use webpki::TrustAnchor;
 
 /// Loads client certificates from a `.pem` file.
@@ -63,7 +63,7 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKey> {
 }
 
 pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls::ClientConfig> {
-    let mut root_store = rustls::RootCertStore::empty();
+    let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
     // load native system certs only if user did not specify them.
     if options.tls_client_config.is_some() || options.certificates.is_empty() {
         root_store.add_parsable_certificates(
