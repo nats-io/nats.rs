@@ -28,7 +28,6 @@ tokio = { version = "1.25.0", features = ["macros", "rt", "fs", "net", "sync", "
 itoa = "1"
 url = { version = "2"}
 tokio-rustls = "0.24"
-rustls = "0.21.5"
 rustls-pemfile = "1.0.2"
 nuid = "0.3.2"
 serde_nanos = "0.1.3"
