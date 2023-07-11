@@ -1018,8 +1018,8 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub no_ack: bool,
     /// The window within which to track duplicate messages.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub duplicate_window: i64,
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub duplicate_window: Duration,
     /// The owner of the template associated with this stream.
     #[serde(default, skip_serializing_if = "is_default")]
     pub template_owner: String,
