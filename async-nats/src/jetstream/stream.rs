@@ -599,7 +599,9 @@ impl Stream {
                         LastRawMessageErrorKind::NoMessageFound,
                     ))
                 } else {
-                    Err(LastRawMessageError::new(LastRawMessageErrorKind::JetStream))
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::JetStream(error),
+                    ))
                 }
             }
             Response::Ok(value) => Ok(value.message),
@@ -1760,41 +1762,26 @@ pub struct LastRawMessageError {
 }
 crate::error_impls!(LastRawMessageError, LastRawMessageErrorKind);
 
-impl LastRawMessageError {
-    fn jetstream_error(&self) -> Option<super::errors::Error> {
-        self.source
-            .as_ref()
-            .and_then(|err| err.downcast_ref::<super::errors::Error>())
-            .cloned()
-    }
-}
-
 impl fmt::Display for LastRawMessageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
+        match &self.kind {
             LastRawMessageErrorKind::NoMessageFound => write!(f, "no message found"),
             LastRawMessageErrorKind::Other => write!(
                 f,
                 "failed to get last raw message: {}",
                 self.format_source()
             ),
-            LastRawMessageErrorKind::JetStream => {
-                write!(
-                    f,
-                    "JetStream error: {}",
-                    self.jetstream_error()
-                        .map(|err| err.to_string())
-                        .unwrap_or("None".to_string())
-                )
+            LastRawMessageErrorKind::JetStream(err) => {
+                write!(f, "JetStream error: {}", err)
             }
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum LastRawMessageErrorKind {
     NoMessageFound,
-    JetStream,
+    JetStream(super::errors::Error),
     Other,
 }
 
