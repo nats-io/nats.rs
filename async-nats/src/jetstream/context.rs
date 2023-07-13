@@ -1514,6 +1514,7 @@ pub struct AccountError {
 pub enum AccountErrorKind {
     TimedOut,
     JetStream(super::errors::Error),
+    JetStreamUnavailable,
     Other,
 }
 
@@ -1525,6 +1526,7 @@ impl Display for AccountError {
             AccountErrorKind::TimedOut => write!(f, "timed out"),
             AccountErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
             AccountErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            AccountErrorKind::JetStreamUnavailable => write!(f, "JetStream unavailable"),
         }
     }
 }
@@ -1533,7 +1535,7 @@ impl From<RequestError> for AccountError {
     fn from(err: RequestError) -> Self {
         match err.kind {
             RequestErrorKind::NoResponders => {
-                AccountError::with_source(AccountErrorKind::Other, err)
+                AccountError::with_source(AccountErrorKind::JetStreamUnavailable, err)
             }
             RequestErrorKind::TimedOut => AccountError::new(AccountErrorKind::TimedOut),
             RequestErrorKind::Other => AccountError::with_source(AccountErrorKind::Other, err),
