@@ -353,8 +353,10 @@ impl Store {
                     }
                     Err(err) => match err.kind() {
                         crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
-                        crate::jetstream::stream::LastRawMessageErrorKind::Other
-                        | crate::jetstream::stream::LastRawMessageErrorKind::JetStream => {
+                        crate::jetstream::stream::LastRawMessageErrorKind::Other => {
+                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
+                        }
+                        crate::jetstream::stream::LastRawMessageErrorKind::JetStream(err) => {
                             return Err(EntryError::with_source(EntryErrorKind::Other, err))
                         }
                     },
