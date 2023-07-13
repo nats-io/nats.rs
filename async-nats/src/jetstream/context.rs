@@ -226,11 +226,11 @@ impl Context {
     }
 
     /// Query the server for account information
-    pub async fn query_account(&self) -> Result<Account, RequestError> {
+    pub async fn query_account(&self) -> Result<Account, AccountError> {
         let response: Response<Account> = self.request("INFO".into(), b"").await?;
 
         match response {
-            Response::Err { error } => Err(RequestError::new(RequestErrorKind::JetStream(error))),
+            Response::Err { error } => Err(AccountError::new(AccountErrorKind::JetStream(error))),
             Response::Ok(account) => Ok(account),
         }
     }
@@ -1285,7 +1285,6 @@ impl Display for RequestError {
             RequestErrorKind::NoResponders => {
                 write!(f, "requested JetStream resource does not exist: {}", source)
             }
-            RequestErrorKind::JetStream(err) => write!(f, "request failed: {}", err),
         }
     }
 }
@@ -1316,7 +1315,6 @@ impl From<super::errors::Error> for RequestError {
 pub enum RequestErrorKind {
     NoResponders,
     TimedOut,
-    JetStream(super::errors::Error),
     Other,
 }
 
@@ -1366,9 +1364,6 @@ impl From<RequestError> for CreateStreamError {
             RequestErrorKind::TimedOut => CreateStreamError::new(CreateStreamErrorKind::TimedOut),
             RequestErrorKind::Other => {
                 CreateStreamError::with_source(CreateStreamErrorKind::Response, error)
-            }
-            RequestErrorKind::JetStream(err) => {
-                CreateStreamError::new(CreateStreamErrorKind::JetStream(err))
             }
         }
     }
@@ -1508,3 +1503,40 @@ impl Display for ObjectStoreError {
 
 pub type DeleteObjectStore = ObjectStoreError;
 pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
+
+#[derive(Debug)]
+pub struct AccountError {
+    kind: AccountErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum AccountErrorKind {
+    TimedOut,
+    JetStream(super::errors::Error),
+    Other,
+}
+
+crate::error_impls!(AccountError, AccountErrorKind);
+
+impl Display for AccountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            AccountErrorKind::TimedOut => write!(f, "timed out"),
+            AccountErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+            AccountErrorKind::Other => write!(f, "error: {}", self.format_source()),
+        }
+    }
+}
+
+impl From<RequestError> for AccountError {
+    fn from(err: RequestError) -> Self {
+        match err.kind {
+            RequestErrorKind::NoResponders => {
+                AccountError::with_source(AccountErrorKind::Other, err)
+            }
+            RequestErrorKind::TimedOut => AccountError::new(AccountErrorKind::TimedOut),
+            RequestErrorKind::Other => AccountError::with_source(AccountErrorKind::Other, err),
+        }
+    }
+}
