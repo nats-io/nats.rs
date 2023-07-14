@@ -694,7 +694,7 @@ impl Request {
         let elapsed = self.issued.elapsed();
         let mut stats = self.stats.lock().unwrap();
         // let mut stats = stats.endpoints.entry(key)
-        let mut stats = stats.endpoints.get_mut(self.endpoint.as_str()).unwrap();
+        let stats = stats.endpoints.get_mut(self.endpoint.as_str()).unwrap();
         stats.requests += 1;
         stats.processing_time += elapsed;
         stats.average_processing_time = stats.processing_time.checked_div(2).unwrap();
