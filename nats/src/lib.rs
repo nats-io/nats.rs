@@ -187,7 +187,9 @@
     clippy::wildcard_enum_match_arm,
     clippy::module_name_repetitions
 )]
-
+// As this is a deprecated client, we don't want warnings from new lints to make CI red.
+#![allow(clippy::all)]
+#![allow(warnings)]
 /// Async-enabled NATS client.
 pub mod asynk;
 
