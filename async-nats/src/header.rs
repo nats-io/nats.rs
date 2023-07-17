@@ -499,7 +499,7 @@ impl FromStr for HeaderName {
     type Err = ParseHeaderNameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
+        if s.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
             return Err(ParseHeaderNameError);
         }
 
@@ -638,6 +638,18 @@ mod tests {
     }
 
     #[test]
+    fn dollar_header_name() {
+        let valid_header_name = "$X_Custom_Header";
+        let parsed_header = HeaderName::from_str(valid_header_name);
+
+        assert!(
+            parsed_header.is_ok(),
+            "Expected Ok(HeaderName), but got an error: {:?}",
+            parsed_header.err()
+        );
+    }
+
+    #[test]
     fn invalid_header_name_with_space() {
         let invalid_header_name = "X Custom Header";
         let parsed_header = HeaderName::from_str(invalid_header_name);
@@ -651,7 +663,7 @@ mod tests {
 
     #[test]
     fn invalid_header_name_with_special_chars() {
-        let invalid_header_name = "X-Header!@#";
+        let invalid_header_name = "X-Header:";
         let parsed_header = HeaderName::from_str(invalid_header_name);
 
         assert!(
