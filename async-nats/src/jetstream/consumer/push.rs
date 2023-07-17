@@ -578,16 +578,17 @@ impl<'a> futures::Stream for Ordered<'a> {
                         let sequence = self.stream_sequence.clone();
                         let config = self.consumer.config.clone();
                         let stream_name = self.consumer.info.stream_name.clone();
-                        self.subscriber_future = Some(Box::pin(async move {
-                            recreate_consumer_and_subscription(
-                                context,
-                                config,
-                                stream_name,
-                                sequence.load(Ordering::Relaxed),
-                            )
-                            .await
-                        }));
-                        match self.subscriber_future.as_mut().unwrap().as_mut().poll(cx) {
+                        let subscriber_future =
+                            self.subscriber_future.insert(Box::pin(async move {
+                                recreate_consumer_and_subscription(
+                                    context,
+                                    config,
+                                    stream_name,
+                                    sequence.load(Ordering::Relaxed),
+                                )
+                                .await
+                            }));
+                        match subscriber_future.as_mut().poll(cx) {
                             Poll::Ready(subscriber) => {
                                 self.subscriber_future = None;
                                 self.subscriber = Some(subscriber.map_err(|err| {
