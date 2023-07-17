@@ -469,27 +469,33 @@ impl Consumer<OrderedConfig> {
             async move {
                 loop {
                     let current_state = state.borrow().to_owned();
-                    tokio::select! {
-                        _ = context.client.state.changed() => {
-                            if state.borrow().to_owned() != State::Connected || current_state == State::Connected {
-                               continue;
+
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        context.client.state.changed(),
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            // State change notification received within the timeout
+                            if state.borrow().to_owned() != State::Connected
+                                || current_state == State::Connected
+                            {
+                                continue;
                             }
                             debug!("reconnected. trigger consumer recreation");
-                        },
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        }
+                        Err(_) => {
                             debug!("heartbeat check");
 
-                            if !last_seen
-                                .lock()
-                                .unwrap()
-                                .elapsed()
-                                .gt(&Duration::from_secs(10)) {
-                                    trace!("last seen ok. wait");
-                                    continue;
-                                    }
+                            if last_seen.lock().unwrap().elapsed() <= Duration::from_secs(10) {
+                                trace!("last seen ok. wait");
+                                continue;
+                            }
                             debug!("last seen not ok");
                         }
                     }
+
                     debug!(
                         "idle heartbeats expired. recreating consumer s: {},  {:?}",
                         stream_name, config
