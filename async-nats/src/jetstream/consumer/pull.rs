@@ -460,7 +460,7 @@ impl<'a> futures::Stream for Sequence<'a> {
                 let request = self.request.clone();
                 let pending_messages = self.pending_messages;
 
-                self.next = Some(Box::pin(async move {
+                let next = self.next.insert(Box::pin(async move {
                     let inbox = context.client.new_inbox();
                     let subscriber = context
                         .client
@@ -484,7 +484,7 @@ impl<'a> futures::Stream for Sequence<'a> {
                     })
                 }));
 
-                match self.next.as_mut().unwrap().as_mut().poll(cx) {
+                match next.as_mut().poll(cx) {
                     Poll::Ready(result) => {
                         self.next = None;
                         Poll::Ready(Some(result.map_err(|err| {
