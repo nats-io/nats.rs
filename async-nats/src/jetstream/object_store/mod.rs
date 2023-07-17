@@ -12,6 +12,7 @@
 // limitations under the License.
 
 //! Object Store module
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::{cmp, str::FromStr, task::Poll, time::Duration};
 
@@ -568,7 +569,7 @@ impl Stream for List<'_> {
 /// Represents an object stored in a bucket.
 pub struct Object<'a> {
     pub info: ObjectInfo,
-    remaining_bytes: Vec<u8>,
+    remaining_bytes: VecDeque<u8>,
     has_pending_messages: bool,
     digest: Option<ring::digest::Context>,
     subscription: Option<crate::jetstream::consumer::push::Ordered<'a>>,
@@ -579,7 +580,7 @@ impl<'a> Object<'a> {
         Object {
             subscription: Some(subscription),
             info,
-            remaining_bytes: Vec::new(),
+            remaining_bytes: VecDeque::new(),
             has_pending_messages: true,
             digest: Some(ring::digest::Context::new(&SHA256)),
         }
@@ -597,10 +598,11 @@ impl tokio::io::AsyncRead for Object<'_> {
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        if !self.remaining_bytes.is_empty() {
-            let len = cmp::min(buf.remaining(), self.remaining_bytes.len());
-            buf.put_slice(&self.remaining_bytes[..len]);
-            self.remaining_bytes = self.remaining_bytes[len..].to_vec();
+        let (buf1, _buf2) = self.remaining_bytes.as_slices();
+        if !buf1.is_empty() {
+            let len = cmp::min(buf.remaining(), buf1.len());
+            buf.put_slice(&buf1[..len]);
+            self.remaining_bytes.drain(..len);
             return Poll::Ready(Ok(()));
         }
 
@@ -620,8 +622,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                             if let Some(context) = &mut self.digest {
                                 context.update(&message.payload);
                             }
-                            self.remaining_bytes
-                                .extend_from_slice(&message.payload[len..]);
+                            self.remaining_bytes.extend(&message.payload[len..]);
 
                             let info = message.info().map_err(|err| {
                                 std::io::Error::new(
