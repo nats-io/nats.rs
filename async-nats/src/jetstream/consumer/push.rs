@@ -590,6 +590,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                         match self.subscriber_future.as_mut().unwrap().as_mut().poll(cx) {
                             Poll::Ready(subscriber) => {
                                 self.subscriber_future = None;
+                                self.consumer_sequence.store(0, Ordering::Relaxed);
                                 self.subscriber = Some(subscriber.map_err(|err| {
                                     OrderedError::with_source(OrderedErrorKind::Recreate, err)
                                 })?);
