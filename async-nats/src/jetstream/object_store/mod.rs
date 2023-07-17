@@ -18,6 +18,7 @@ use std::{cmp, str::FromStr, task::Poll, time::Duration};
 use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use base64::engine::Engine;
+use bytes::BytesMut;
 use once_cell::sync::Lazy;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
@@ -276,25 +277,24 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
-        let mut buffer = Box::new([0; DEFAULT_CHUNK_SIZE]);
+        let mut buffer = BytesMut::with_capacity(DEFAULT_CHUNK_SIZE);
         let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
             let n = data
-                .read(&mut *buffer)
+                .read_buf(&mut buffer)
                 .await
                 .map_err(|err| PutError::with_source(PutErrorKind::ReadChunks, err))?;
 
             if n == 0 {
                 break;
             }
-            context.update(&buffer[..n]);
 
-            object_size += n;
+            let payload = buffer.split().freeze();
+            context.update(&payload);
+
+            object_size += payload.len();
             object_chunks += 1;
-
-            // FIXME: this is ugly
-            let payload = bytes::Bytes::from(buffer[..n].to_vec());
 
             self.stream
                 .context
