@@ -324,7 +324,7 @@ impl Consumer<Config> {
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
-            expires: Some(Duration::from_secs(60).as_millis().try_into().unwrap()),
+            expires: Some(Duration::from_secs(60).as_nanos().try_into().unwrap()),
             ..Default::default()
         })
         .map(Bytes::from)
