@@ -292,7 +292,10 @@ impl Connection {
                     value.push_str(v);
                 }
 
-                headers.append(HeaderName::from_str(key).unwrap(), value.trim().to_string());
+                let name = HeaderName::from_str(key)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+
+                headers.append(name, value.trim().to_string());
             }
 
             return Ok(Some(ServerOp::Message {
