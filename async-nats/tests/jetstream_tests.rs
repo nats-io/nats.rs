@@ -33,8 +33,8 @@ mod jetstream {
     use async_nats::connection::State;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
-        self, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
-        PullConsumer, PushConsumer,
+        self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
+        PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
@@ -45,6 +45,7 @@ mod jetstream {
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tokio_retry::Retry;
+    use tracing::debug;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -3239,5 +3240,56 @@ mod jetstream {
         {
             acker.ack().await.unwrap();
         }
+    }
+
+    // This test was added to make sure that in case of slow consumers client can properly recreate
+    // ordered consumer.
+    #[tokio::test]
+    async fn ordered_recreate() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .read_buffer_capacity(1000)
+            .subscription_capacity(1000)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        debug!("start publishing");
+        for _ in 0..5000 {
+            context.publish("test".into(), "data".into()).await.unwrap();
+        }
+        debug!("finished publishing");
+
+        let mut messages = stream
+            .create_consumer(push::OrderedConfig {
+                deliver_subject: "deliver".to_string(),
+                deliver_policy: DeliverPolicy::All,
+                replay_policy: ReplayPolicy::Instant,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap()
+            .take(5000);
+
+        tokio::time::timeout(Duration::from_secs(30), async move {
+            while let Some(message) = messages.next().await {
+                message.unwrap();
+            }
+        })
+        .await
+        .unwrap();
     }
 }

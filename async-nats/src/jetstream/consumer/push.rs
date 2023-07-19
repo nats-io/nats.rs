@@ -39,7 +39,7 @@ use std::{
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
-use tracing::{debug, field::debug, trace, warn};
+use tracing::{debug, trace};
 
 impl Consumer<Config> {
     /// Returns a stream of messages for Push Consumer.
