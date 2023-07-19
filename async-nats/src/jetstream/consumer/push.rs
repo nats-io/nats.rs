@@ -419,7 +419,7 @@ impl IntoConsumerConfig for OrderedConfig {
             deliver_group: None,
             deliver_policy: self.deliver_policy,
             ack_policy: AckPolicy::None,
-            ack_wait: Duration::from_secs(60 * 60 * 22),
+            ack_wait: Duration::default(),
             max_deliver: 1,
             filter_subject: self.filter_subject,
             #[cfg(feature = "server_2_10")]
