@@ -176,6 +176,7 @@ pub use options::{AuthError, ConnectOptions};
 pub mod header;
 pub mod jetstream;
 pub mod message;
+pub mod nats_error;
 #[cfg(feature = "service")]
 pub mod service;
 pub mod status;
