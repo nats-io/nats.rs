@@ -106,7 +106,9 @@ impl Consumer<Config> {
 
         Ok(Messages {
             context: self.context.clone(),
+            config: self.config.clone(),
             subscriber,
+            heartbeat_sleep: None,
         })
     }
 }
@@ -114,42 +116,62 @@ impl Consumer<Config> {
 pub struct Messages {
     context: Context,
     subscriber: Subscriber,
+    config: Config,
+    heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl futures::Stream for Messages {
     type Item = Result<Message, MessagesError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        if !self.config.idle_heartbeat.is_zero() {
+            let heartbeat_sleep = self.config.idle_heartbeat.saturating_mul(2);
+            match self
+                .heartbeat_sleep
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(heartbeat_sleep)))
+                .poll_unpin(cx)
+            {
+                Poll::Ready(_) => {
+                    return Poll::Ready(Some(Err(MessagesError::new(
+                        MessagesErrorKind::MissingHeartbeat,
+                    ))))
+                }
+                Poll::Pending => (),
+            }
+        }
         loop {
             match self.subscriber.receiver.poll_recv(cx) {
-                Poll::Ready(maybe_message) => match maybe_message {
-                    Some(message) => match message.status {
-                        Some(StatusCode::IDLE_HEARTBEAT) => {
-                            if let Some(subject) = message.reply {
-                                // TODO store pending_publish as a future and return errors from it
-                                let client = self.context.client.clone();
-                                tokio::task::spawn(async move {
-                                    client
-                                        .publish(subject, Bytes::from_static(b""))
-                                        .await
-                                        .unwrap();
-                                });
-                            }
+                Poll::Ready(maybe_message) => {
+                    self.heartbeat_sleep = None;
+                    match maybe_message {
+                        Some(message) => match message.status {
+                            Some(StatusCode::IDLE_HEARTBEAT) => {
+                                if let Some(subject) = message.reply {
+                                    // TODO store pending_publish as a future and return errors from it
+                                    let client = self.context.client.clone();
+                                    tokio::task::spawn(async move {
+                                        client
+                                            .publish(subject, Bytes::from_static(b""))
+                                            .await
+                                            .unwrap();
+                                    });
+                                }
 
-                            continue;
-                        }
-                        Some(_) => {
-                            continue;
-                        }
-                        None => {
-                            return Poll::Ready(Some(Ok(jetstream::Message {
-                                context: self.context.clone(),
-                                message,
-                            })))
-                        }
-                    },
-                    None => return Poll::Ready(None),
-                },
+                                continue;
+                            }
+                            Some(_) => {
+                                continue;
+                            }
+                            None => {
+                                return Poll::Ready(Some(Ok(jetstream::Message {
+                                    context: self.context.clone(),
+                                    message,
+                                })))
+                            }
+                        },
+                        None => return Poll::Ready(None),
+                    }
+                }
                 Poll::Pending => return Poll::Pending,
             }
         }
