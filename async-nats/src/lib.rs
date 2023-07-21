@@ -1323,49 +1323,6 @@ macro_rules! from_with_timeout {
 use crate::nats_error::NatsError;
 pub(crate) use from_with_timeout;
 
-// TODO: rewrite into derivable proc macro.
-macro_rules! error_impls {
-    ($t:ty, $k:ty) => {
-        impl $t {
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub(crate) fn new(kind: $k) -> $t {
-                Self { kind, source: None }
-            }
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub(crate) fn with_source<S>(kind: $k, source: S) -> $t
-            where
-                S: Into<crate::Error>,
-            {
-                Self {
-                    kind,
-                    source: Some(source.into()),
-                }
-            }
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub fn kind(&self) -> $k {
-                // ALmost all `kind` types implement `Copy`, so it's almost always copy.
-                // We need to clone, as some more complex one may have nested other errors, that
-                // implement Clone only.
-                self.kind.clone()
-            }
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub(crate) fn format_source(&self) -> String {
-                self.source
-                    .as_ref()
-                    .map(|err| err.to_string())
-                    .unwrap_or("unknown".to_string())
-            }
-        }
-        impl std::error::Error for $t {}
-    };
-}
-
-pub(crate) use error_impls;
-
 #[cfg(test)]
 mod tests {
     use super::*;
