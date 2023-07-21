@@ -859,11 +859,7 @@ pub enum ConnectErrorKind {
 
 /// Returned when initial connection fails.
 /// To be enumerate over the variants, call [ConnectError::kind].
-#[derive(Debug, Error)]
-pub struct ConnectError {
-    kind: ConnectErrorKind,
-    source: Option<crate::Error>,
-}
+pub type ConnectError = NatsError<ConnectErrorKind>;
 
 impl Display for ConnectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -883,24 +879,6 @@ impl Display for ConnectError {
             ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
             ConnectErrorKind::Io => write!(f, "{}", source_info),
         }
-    }
-}
-
-impl ConnectError {
-    fn with_source<E>(kind: ConnectErrorKind, source: E) -> ConnectError
-    where
-        E: Into<crate::Error>,
-    {
-        ConnectError {
-            kind,
-            source: Some(source.into()),
-        }
-    }
-    fn new(kind: ConnectErrorKind) -> ConnectError {
-        ConnectError { kind, source: None }
-    }
-    pub fn kind(&self) -> ConnectErrorKind {
-        self.kind
     }
 }
 
@@ -1342,6 +1320,7 @@ macro_rules! from_with_timeout {
         }
     };
 }
+use crate::nats_error::NatsError;
 pub(crate) use from_with_timeout;
 
 // TODO: rewrite into derivable proc macro.

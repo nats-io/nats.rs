@@ -15,6 +15,7 @@ use crate::connection::State;
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
+use crate::nats_error::NatsError;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
@@ -609,7 +610,7 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RequestErrorKind {
     /// There are services listening on requested subject, but they didn't respond
     /// in time.
@@ -622,13 +623,7 @@ pub enum RequestErrorKind {
 
 /// Error returned when a core NATS request fails.
 /// To be enumerate over the variants, call [RequestError::kind].
-#[derive(Debug)]
-pub struct RequestError {
-    kind: RequestErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(RequestError, RequestErrorKind);
+pub type RequestError = NatsError<RequestErrorKind>;
 
 impl Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -640,15 +635,29 @@ impl Display for RequestError {
     }
 }
 
-/// Error returned when flushing the messages buffered on the client fails.
-/// To be enumerate over the variants, call [FlushError::kind].
-#[derive(Debug)]
-pub struct FlushError {
-    kind: FlushErrorKind,
-    source: Option<crate::Error>,
+impl From<PublishError> for RequestError {
+    fn from(e: PublishError) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, e)
+    }
 }
 
-crate::error_impls!(FlushError, FlushErrorKind);
+impl From<SubscribeError> for RequestError {
+    fn from(e: SubscribeError) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, e)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FlushErrorKind {
+    /// Sending the flush failed client side.
+    SendError,
+    /// Flush failed.
+    /// This can happen mostly in case of connection issues
+    /// that cannot be resolved quickly.
+    FlushError,
+}
+
+pub type FlushError = NatsError<FlushErrorKind>;
 
 impl Display for FlushError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -661,26 +670,5 @@ impl Display for FlushError {
             FlushErrorKind::SendError => write!(f, "failed to send flush request: {}", source_info),
             FlushErrorKind::FlushError => write!(f, "flush failed: {}", source_info),
         }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum FlushErrorKind {
-    /// Sending the flush failed client side.
-    SendError,
-    /// Flush failed.
-    /// This can happen mostly in case of connection issues
-    /// that cannot be resolved quickly.
-    FlushError,
-}
-
-impl From<PublishError> for RequestError {
-    fn from(e: PublishError) -> Self {
-        RequestError::with_source(RequestErrorKind::Other, e)
-    }
-}
-impl From<SubscribeError> for RequestError {
-    fn from(e: SubscribeError) -> Self {
-        RequestError::with_source(RequestErrorKind::Other, e)
     }
 }

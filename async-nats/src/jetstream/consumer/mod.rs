@@ -27,6 +27,7 @@ use super::context::RequestError;
 use super::stream::ClusterInfo;
 use super::Context;
 use crate::jetstream::consumer;
+use crate::nats_error::NatsError;
 use crate::Error;
 
 pub trait IntoConsumerConfig {
@@ -426,12 +427,13 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
 
-#[derive(Debug)]
-pub struct StreamError {
-    kind: StreamErrorKind,
-    source: Option<crate::Error>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StreamErrorKind {
+    TimedOut,
+    Other,
 }
-crate::error_impls!(StreamError, StreamErrorKind);
+
+pub type StreamError = NatsError<StreamErrorKind>;
 
 impl std::fmt::Display for StreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -440,10 +442,4 @@ impl std::fmt::Display for StreamError {
             StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum StreamErrorKind {
-    TimedOut,
-    Other,
 }

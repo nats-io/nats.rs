@@ -17,6 +17,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
+use crate::nats_error::NatsError;
 use crate::{header, Client, Command, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -953,13 +954,17 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
-pub struct PublishError {
-    kind: PublishErrorKind,
-    source: Option<crate::Error>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PublishErrorKind {
+    StreamNotFound,
+    WrongLastMessageId,
+    WrongLastSequence,
+    TimedOut,
+    BrokenPipe,
+    Other,
 }
 
-crate::error_impls!(PublishError, PublishErrorKind);
+pub type PublishError = NatsError<PublishErrorKind>;
 
 impl Display for PublishError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -973,16 +978,6 @@ impl Display for PublishError {
             PublishErrorKind::WrongLastSequence => write!(f, "wrong last sequence"),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PublishErrorKind {
-    StreamNotFound,
-    WrongLastMessageId,
-    WrongLastSequence,
-    TimedOut,
-    BrokenPipe,
-    Other,
 }
 
 #[derive(Debug)]
@@ -1069,7 +1064,7 @@ impl futures::Stream for StreamNames<'_> {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
                     let page = page
-                        .map_err(|err| StreamsError::with_source(RequestErrorKind::Other, err))?;
+                        .map_err(|err| StreamsError::with_source(StreamsErrorKind::Other, err))?;
                     if let Some(streams) = page.streams {
                         self.offset += streams.len();
                         self.streams = streams;
@@ -1120,18 +1115,8 @@ impl futures::Stream for StreamNames<'_> {
 
 type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, RequestError>>;
 
-#[derive(Debug)]
-pub struct StreamsError {
-    kind: RequestErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(StreamsError, RequestErrorKind);
-
-impl Display for StreamsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self::Display::fmt(&self, f)
-    }
-}
+pub type StreamsErrorKind = RequestErrorKind;
+pub type StreamsError = RequestError;
 
 pub struct Streams<'a> {
     context: Context,
@@ -1153,7 +1138,7 @@ impl futures::Stream for Streams<'_> {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
                     let page = page
-                        .map_err(|err| StreamsError::with_source(RequestErrorKind::Other, err))?;
+                        .map_err(|err| StreamsError::with_source(StreamsErrorKind::Other, err))?;
                     if let Some(streams) = page.streams {
                         self.offset += streams.len();
                         self.streams = streams;
@@ -1268,13 +1253,14 @@ impl Publish {
     }
 }
 
-#[derive(Debug)]
-pub struct RequestError {
-    kind: RequestErrorKind,
-    source: Option<crate::Error>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RequestErrorKind {
+    NoResponders,
+    TimedOut,
+    Other,
 }
 
-crate::error_impls!(RequestError, RequestErrorKind);
+pub type RequestError = NatsError<RequestErrorKind>;
 
 impl Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1311,20 +1297,19 @@ impl From<super::errors::Error> for RequestError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum RequestErrorKind {
-    NoResponders,
+#[derive(Clone, Debug, PartialEq)]
+pub enum CreateStreamErrorKind {
+    EmptyStreamName,
+    InvalidStreamName,
+    DomainAndExternalSet,
+    JetStreamUnavailable,
+    JetStream(super::errors::Error),
     TimedOut,
-    Other,
+    Response,
+    ResponseParse,
 }
 
-#[derive(Debug)]
-pub struct CreateStreamError {
-    kind: CreateStreamErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(CreateStreamError, CreateStreamErrorKind);
+pub type CreateStreamError = NatsError<CreateStreamErrorKind>;
 
 impl Display for CreateStreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1369,25 +1354,14 @@ impl From<RequestError> for CreateStreamError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateStreamErrorKind {
-    EmptyStreamName,
-    InvalidStreamName,
-    DomainAndExternalSet,
-    JetStreamUnavailable,
+#[derive(Clone, Debug, PartialEq)]
+pub enum GetStreamErrorKind {
+    EmptyName,
+    Request,
     JetStream(super::errors::Error),
-    TimedOut,
-    Response,
-    ResponseParse,
 }
 
-#[derive(Debug)]
-pub struct GetStreamError {
-    kind: GetStreamErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(GetStreamError, GetStreamErrorKind);
+pub type GetStreamError = NatsError<GetStreamErrorKind>;
 
 impl Display for GetStreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1401,32 +1375,19 @@ impl Display for GetStreamError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetStreamErrorKind {
-    EmptyName,
-    Request,
-    JetStream(super::errors::Error),
-}
-
 pub type UpdateStreamError = CreateStreamError;
 pub type UpdateStreamErrorKind = CreateStreamErrorKind;
 pub type DeleteStreamError = GetStreamError;
 pub type DeleteStreamErrorKind = GetStreamErrorKind;
 
-#[derive(Debug)]
-pub struct KeyValueError {
-    kind: KeyValueErrorKind,
-    source: Option<crate::Error>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KeyValueErrorKind {
     InvalidStoreName,
     GetBucket,
     JetStream,
 }
 
-crate::error_impls!(KeyValueError, KeyValueErrorKind);
+pub type KeyValueError = NatsError<KeyValueErrorKind>;
 
 impl Display for KeyValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1440,13 +1401,7 @@ impl Display for KeyValueError {
     }
 }
 
-#[derive(Debug)]
-pub struct CreateKeyValueError {
-    kind: CreateKeyValueErrorKind,
-    source: Option<crate::Error>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CreateKeyValueErrorKind {
     InvalidStoreName,
     TooLongHistory,
@@ -1455,7 +1410,7 @@ pub enum CreateKeyValueErrorKind {
     TimedOut,
 }
 
-crate::error_impls!(CreateKeyValueError, CreateKeyValueErrorKind);
+pub type CreateKeyValueError = NatsError<CreateKeyValueErrorKind>;
 
 impl Display for CreateKeyValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1477,18 +1432,13 @@ impl Display for CreateKeyValueError {
 pub type CreateObjectStoreError = CreateKeyValueError;
 pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
 
-#[derive(Debug)]
-pub struct ObjectStoreError {
-    kind: ObjectStoreErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(ObjectStoreError, ObjectStoreErrorKind);
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ObjectStoreErrorKind {
     InvalidBucketName,
     GetStore,
 }
+
+pub type ObjectStoreError = NatsError<ObjectStoreErrorKind>;
 
 impl Display for ObjectStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1504,13 +1454,7 @@ impl Display for ObjectStoreError {
 pub type DeleteObjectStore = ObjectStoreError;
 pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
 
-#[derive(Debug)]
-pub struct AccountError {
-    kind: AccountErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AccountErrorKind {
     TimedOut,
     JetStream(super::errors::Error),
@@ -1518,7 +1462,7 @@ pub enum AccountErrorKind {
     Other,
 }
 
-crate::error_impls!(AccountError, AccountErrorKind);
+pub type AccountError = NatsError<AccountErrorKind>;
 
 impl Display for AccountError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

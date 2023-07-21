@@ -21,6 +21,7 @@ use crate::{
     Error, StatusCode, Subscriber,
 };
 
+use crate::nats_error::NatsError;
 use bytes::Bytes;
 use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
@@ -735,11 +736,17 @@ impl<'a> futures::Stream for Ordered<'a> {
         }
     }
 }
-#[derive(Debug)]
-pub struct OrderedError {
-    kind: OrderedErrorKind,
-    source: Option<crate::Error>,
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    PullBasedConsumer,
+    Recreate,
+    Other,
 }
+
+pub type OrderedError = NatsError<OrderedErrorKind>;
 
 impl std::fmt::Display for OrderedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -752,8 +759,6 @@ impl std::fmt::Display for OrderedError {
         }
     }
 }
-
-crate::error_impls!(OrderedError, OrderedErrorKind);
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -775,20 +780,15 @@ impl From<MessagesError> for OrderedError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum OrderedErrorKind {
+#[derive(Clone, Debug, PartialEq)]
+pub enum MessagesErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
     PullBasedConsumer,
-    Recreate,
     Other,
 }
 
-#[derive(Debug)]
-pub struct MessagesError {
-    kind: MessagesErrorKind,
-    source: Option<crate::Error>,
-}
+pub type MessagesError = NatsError<MessagesErrorKind>;
 
 impl std::fmt::Display for MessagesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -801,23 +801,15 @@ impl std::fmt::Display for MessagesError {
     }
 }
 
-crate::error_impls!(MessagesError, MessagesErrorKind);
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum MessagesErrorKind {
-    MissingHeartbeat,
-    ConsumerDeleted,
-    PullBasedConsumer,
-    Other,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConsumerRecreateErrorKind {
+    GetStream,
+    Subscription,
+    Recreate,
+    TimedOut,
 }
 
-#[derive(Debug)]
-pub struct ConsumerRecreateError {
-    kind: ConsumerRecreateErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
+pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
 
 impl std::fmt::Display for ConsumerRecreateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -832,14 +824,6 @@ impl std::fmt::Display for ConsumerRecreateError {
             ConsumerRecreateErrorKind::Subscription => write!(f, "failed to resubscribe"),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub enum ConsumerRecreateErrorKind {
-    GetStream,
-    Subscription,
-    Recreate,
-    TimedOut,
 }
 
 async fn recreate_consumer_and_subscription(

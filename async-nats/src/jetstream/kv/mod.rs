@@ -29,6 +29,7 @@ use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tracing::debug;
 
+use crate::nats_error::NatsError;
 use crate::{header, Message};
 
 use self::bucket::Status;
@@ -1023,19 +1024,13 @@ pub struct Entry {
     pub operation: Operation,
 }
 
-#[derive(Debug)]
-pub struct StatusError {
-    kind: StatusErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StatusErrorKind {
     JetStream(crate::jetstream::Error),
     TimedOut,
 }
 
-crate::error_impls!(StatusError, StatusErrorKind);
+pub type StatusError = NatsError<StatusErrorKind>;
 
 impl Display for StatusError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1048,20 +1043,14 @@ impl Display for StatusError {
     }
 }
 
-#[derive(Debug)]
-pub struct PutError {
-    kind: PutErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PutErrorKind {
     InvalidKey,
     Publish,
     Ack,
 }
 
-crate::error_impls!(PutError, PutErrorKind);
+pub type PutError = NatsError<PutErrorKind>;
 
 impl Display for PutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1075,20 +1064,15 @@ impl Display for PutError {
     }
 }
 
-#[derive(Debug)]
-pub struct EntryError {
-    kind: EntryErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntryErrorKind {
     InvalidKey,
     TimedOut,
     Other,
 }
 
-crate::error_impls!(EntryError, EntryErrorKind);
+pub type EntryError = NatsError<EntryErrorKind>;
+
 crate::from_with_timeout!(
     EntryError,
     EntryErrorKind,
@@ -1106,13 +1090,7 @@ impl Display for EntryError {
     }
 }
 
-#[derive(Debug)]
-pub struct WatchError {
-    kind: WatchErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {
     InvalidKey,
     TimedOut,
@@ -1120,7 +1098,8 @@ pub enum WatchErrorKind {
     Other,
 }
 
-crate::error_impls!(WatchError, WatchErrorKind);
+pub type WatchError = NatsError<WatchErrorKind>;
+
 crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
 crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
 
@@ -1141,20 +1120,15 @@ impl Display for WatchError {
     }
 }
 
-#[derive(Debug)]
-pub struct UpdateError {
-    kind: UpdateErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UpdateErrorKind {
     InvalidKey,
     TimedOut,
     Other,
 }
 
-crate::error_impls!(UpdateError, UpdateErrorKind);
+pub type UpdateError = NatsError<UpdateErrorKind>;
+
 crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
 
 impl Display for UpdateError {
@@ -1167,17 +1141,13 @@ impl Display for UpdateError {
     }
 }
 
-#[derive(Debug)]
-pub struct WatcherError {
-    kind: WatcherErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatcherErrorKind {
     Consumer,
     Other,
 }
+
+pub type WatcherError = NatsError<WatcherErrorKind>;
 
 impl Display for WatcherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1189,8 +1159,6 @@ impl Display for WatcherError {
         }
     }
 }
-
-crate::error_impls!(WatcherError, WatcherErrorKind);
 
 impl From<OrderedError> for WatcherError {
     fn from(err: OrderedError) -> Self {

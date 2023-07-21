@@ -35,6 +35,7 @@ use super::{
     AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
+use crate::nats_error::NatsError;
 use jetstream::consumer;
 
 impl Consumer<Config> {
@@ -952,11 +953,18 @@ impl Stream {
         })
     }
 }
-#[derive(Debug)]
-pub struct OrderedError {
-    kind: OrderedErrorKind,
-    source: Option<crate::Error>,
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    Pull,
+    PushBasedConsumer,
+    Recreate,
+    Other,
 }
+
+pub type OrderedError = NatsError<OrderedErrorKind>;
 
 impl std::fmt::Display for OrderedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -972,8 +980,6 @@ impl std::fmt::Display for OrderedError {
         }
     }
 }
-
-crate::error_impls!(OrderedError, OrderedErrorKind);
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -999,21 +1005,16 @@ impl From<MessagesError> for OrderedError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum OrderedErrorKind {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MessagesErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
     Pull,
     PushBasedConsumer,
-    Recreate,
     Other,
 }
 
-#[derive(Debug)]
-pub struct MessagesError {
-    kind: MessagesErrorKind,
-    source: Option<crate::Error>,
-}
+pub type MessagesError = NatsError<MessagesErrorKind>;
 
 impl std::fmt::Display for MessagesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1027,17 +1028,6 @@ impl std::fmt::Display for MessagesError {
             MessagesErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
         }
     }
-}
-
-crate::error_impls!(MessagesError, MessagesErrorKind);
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum MessagesErrorKind {
-    MissingHeartbeat,
-    ConsumerDeleted,
-    Pull,
-    PushBasedConsumer,
-    Other,
 }
 
 impl futures::Stream for Stream {
@@ -2157,12 +2147,14 @@ impl FromConsumer for Config {
     }
 }
 
-#[derive(Debug)]
-pub struct BatchRequestError {
-    kind: BatchRequestErrorKind,
-    source: Option<crate::Error>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BatchRequestErrorKind {
+    Publish,
+    Flush,
+    Serialize,
 }
-crate::error_impls!(BatchRequestError, BatchRequestErrorKind);
+
+pub type BatchRequestError = NatsError<BatchRequestErrorKind>;
 
 impl std::fmt::Display for BatchRequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2180,19 +2172,15 @@ impl std::fmt::Display for BatchRequestError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BatchRequestErrorKind {
-    Publish,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BatchErrorKind {
+    Subscribe,
+    Pull,
     Flush,
     Serialize,
 }
 
-#[derive(Debug)]
-pub struct BatchError {
-    kind: BatchErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(BatchError, BatchErrorKind);
+pub type BatchError = NatsError<BatchErrorKind>;
 
 impl std::fmt::Display for BatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2223,21 +2211,14 @@ impl From<BatchRequestError> for BatchError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BatchErrorKind {
-    Subscribe,
-    Pull,
-    Flush,
-    Serialize,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConsumerRecreateErrorKind {
+    GetStream,
+    Recreate,
+    TimedOut,
 }
 
-#[derive(Debug)]
-pub struct ConsumerRecreateError {
-    kind: ConsumerRecreateErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
+pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
 
 impl std::fmt::Display for ConsumerRecreateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2251,13 +2232,6 @@ impl std::fmt::Display for ConsumerRecreateError {
             ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub enum ConsumerRecreateErrorKind {
-    GetStream,
-    Recreate,
-    TimedOut,
 }
 
 async fn recreate_consumer_stream(
