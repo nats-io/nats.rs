@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_nats::{connect, Error, Subject};
 use bytes::Bytes;
 use std::time::Instant;
-use async_nats::{Subject, Error, connect};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

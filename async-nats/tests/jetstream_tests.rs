@@ -3019,7 +3019,7 @@ mod jetstream {
 
         while let Some((i, message)) = stream.next().await {
             let message = message.unwrap();
-            assert_eq!(from_utf8(&message.payload).unwrap(), i.into());
+            assert_eq!(from_utf8(&message.payload).unwrap(), i.to_string());
         }
     }
 
@@ -3215,7 +3215,7 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(1000);
         let message = messages.next().await.unwrap().unwrap();
 
-        assert_eq!(message.subject, "fromtest.transformed.test");
+        assert_eq!(message.subject.as_str(), "fromtest.transformed.test");
     }
 
     #[tokio::test]
