@@ -131,7 +131,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        let id = "UUID".into();
+        let id = "UUID".to_string();
         // Publish first message
         context
             .send_publish(
@@ -155,7 +155,7 @@ mod jetstream {
         let info = stream.info().await.unwrap();
         assert_eq!(1, info.state.messages);
         let message = stream
-            .direct_get_last_for_subject("foo".into())
+            .direct_get_last_for_subject("foo".to_string())
             .await
             .unwrap();
         assert_eq!(message.payload, bytes::Bytes::from("data"));
@@ -421,7 +421,7 @@ mod jetstream {
                 .unwrap()
                 .config
                 .name,
-            "events".into()
+            "events"
         );
     }
 
@@ -533,7 +533,7 @@ mod jetstream {
                 .cached_info()
                 .config
                 .name,
-            "events".into()
+            "events"
         );
 
         assert_eq!(
@@ -547,7 +547,7 @@ mod jetstream {
                 .cached_info()
                 .config
                 .name,
-            "events2".into()
+            "events2"
         );
     }
 
@@ -1014,7 +1014,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!("name".into(), consumer.cached_info().name);
+        assert_eq!("name", consumer.cached_info().name);
 
         context
             .get_or_create_stream("events")
@@ -1412,7 +1412,7 @@ mod jetstream {
                     }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     context
-                        .publish(format!("events.{i}"), i.into().into())
+                        .publish(format!("events.{i}").into(), i.to_string().into())
                         .await
                         .ok();
                 }
@@ -1974,7 +1974,7 @@ mod jetstream {
             let mut interval = tokio::time::interval(Duration::from_millis(20));
             for i in 0..=num_messages {
                 context
-                    .publish("events".into(), i.into().into())
+                    .publish("events".into(), i.to_string().into())
                     .await
                     .unwrap()
                     .await
@@ -2405,7 +2405,7 @@ mod jetstream {
 
         for i in 0..1000 {
             jetstream
-                .publish(format!("reconnect.{i}"), i.into().into())
+                .publish(format!("reconnect.{i}").into(), i.to_string().into())
                 .await
                 .unwrap()
                 .await
@@ -2512,15 +2512,15 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(100).enumerate();
         for i in 0..100 {
             jetstream
-                .publish(format!("source.{i}"), format!("{i}").into())
+                .publish(format!("source.{i}").into(), format!("{i}").into())
                 .await
                 .unwrap();
         }
 
         while let Some((i, message)) = messages.next().await {
             let message = message.unwrap();
-            assert_eq!(format!("dest.source.{i}"), message.subject);
-            assert_eq!(i.into(), from_utf8(&message.payload).unwrap());
+            assert_eq!(format!("dest.source.{i}"), message.subject.as_str());
+            assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
             message.ack().await.unwrap();
         }
     }
@@ -2622,7 +2622,7 @@ mod jetstream {
 
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".into(),
+            "data"
         )
     }
     #[tokio::test]
@@ -2713,15 +2713,15 @@ mod jetstream {
 
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".into(),
+            "data"
         );
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".into(),
+            "data"
         );
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".into(),
+            "data"
         );
     }
 
@@ -2788,8 +2788,8 @@ mod jetstream {
         for i in 0..235 {
             context
                 .create_stream(async_nats::jetstream::stream::Config {
-                    name: i.into(),
-                    subjects: vec![i.into()],
+                    name: i.to_string(),
+                    subjects: vec![i.to_string()],
                     ..Default::default()
                 })
                 .await
@@ -2808,8 +2808,8 @@ mod jetstream {
         for i in 0..235 {
             context
                 .create_stream(async_nats::jetstream::stream::Config {
-                    name: i.into(),
-                    subjects: vec![i.into()],
+                    name: i.to_string(),
+                    subjects: vec![i.to_string()],
                     ..Default::default()
                 })
                 .await
@@ -2837,7 +2837,7 @@ mod jetstream {
         for i in 0..235 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                    name: Some(format!("consumer_{i}").into()),
+                    name: Some(format!("consumer_{i}")),
                     ..Default::default()
                 })
                 .await
@@ -2878,7 +2878,7 @@ mod jetstream {
         for i in 0..1200 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                    durable_name: Some(format!("consumer_{i}").into()),
+                    durable_name: Some(format!("consumer_{i}")),
                     ..Default::default()
                 })
                 .await
@@ -2954,7 +2954,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client.clone());
         assert_eq!(
             context
-                .publish("test".to_owned(), "jghf".into())
+                .publish("test".into(), "jghf".into())
                 .await
                 .unwrap()
                 .await

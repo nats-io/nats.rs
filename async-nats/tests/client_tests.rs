@@ -15,7 +15,7 @@ mod client {
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
     use async_nats::{
-        ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind, ServerAddr,
+        ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind, ServerAddr, Subject,
     };
     use bytes::Bytes;
     use futures::future::join_all;
@@ -176,9 +176,9 @@ mod client {
             }
         });
         let inbox = client.new_inbox();
-        let mut insub = client.subscribe(inbox.clone()).await.unwrap();
+        let mut insub = client.subscribe(inbox.clone().into()).await.unwrap();
         client
-            .publish_with_reply("test".into(), inbox, "data".into())
+            .publish_with_reply("test".into(), inbox.into(), "data".into())
             .await
             .unwrap();
         assert!(insub.next().await.is_some());
@@ -246,7 +246,7 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let inbox = "CUSTOMIZED".into();
+        let inbox: Subject = "CUSTOMIZED".into();
         let mut sub = client.subscribe("service".into()).await.unwrap();
 
         tokio::task::spawn({
@@ -261,7 +261,7 @@ mod client {
             }
         });
 
-        let request = Request::new().inbox(inbox.clone());
+        let request = Request::new().inbox(inbox.to_string());
         client
             .send_request("service".into(), request)
             .await
@@ -442,7 +442,7 @@ mod client {
     #[tokio::test]
     async fn connection_callbacks() {
         let server = nats_server::run_basic_server();
-        let port = server.client_port().into();
+        let port = server.client_port().to_string();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         let (dc_tx, mut dc_rx) = tokio::sync::mpsc::channel(128);
@@ -505,10 +505,7 @@ mod client {
             .unwrap();
 
         let mut sub = client.subscribe("data".into()).await.unwrap();
-        client
-            .publish("data".into(), "data".into())
-            .await
-            .unwrap();
+        client.publish("data".into(), "data".into()).await.unwrap();
         sub.next().await.unwrap();
 
         nats_server::set_lame_duck_mode(&server);
@@ -538,19 +535,10 @@ mod client {
             .unwrap();
 
         let _sub = client.subscribe("data".into()).await.unwrap();
-        client
-            .publish("data".into(), "data".into())
-            .await
-            .unwrap();
-        client
-            .publish("data".into(), "data".into())
-            .await
-            .unwrap();
+        client.publish("data".into(), "data".into()).await.unwrap();
+        client.publish("data".into(), "data".into()).await.unwrap();
         client.flush().await.unwrap();
-        client
-            .publish("data".into(), "data".into())
-            .await
-            .unwrap();
+        client.publish("data".into(), "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -573,10 +561,7 @@ mod client {
             .await
             .unwrap();
         let mut subscription = client.subscribe("echo".into()).await.unwrap();
-        client
-            .publish("echo".into(), "data".into())
-            .await
-            .unwrap();
+        client.publish("echo".into(), "data".into()).await.unwrap();
         tokio::time::timeout(Duration::from_millis(500), subscription.next())
             .await
             .unwrap();
@@ -589,10 +574,7 @@ mod client {
             .await
             .unwrap();
         let mut subscription = client.subscribe("echo".into()).await.unwrap();
-        client
-            .publish("echo".into(), "data".into())
-            .await
-            .unwrap();
+        client.publish("echo".into(), "data".into()).await.unwrap();
         tokio::time::timeout(Duration::from_millis(50), subscription.next())
             .await
             .expect_err("should timeout");
@@ -606,7 +588,7 @@ mod client {
             .event_callback(move |err| {
                 let tx = tx.clone();
                 async move {
-                    tx.send(err.into()).unwrap();
+                    tx.send(err.to_string()).unwrap();
                 }
             })
             .connect(server.client_url())

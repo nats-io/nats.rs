@@ -1,7 +1,7 @@
 use bytes::Bytes;
+use std::fmt;
 use std::ops::Deref;
 use std::str::{from_utf8, Utf8Error};
-use std::fmt;
 
 /// A `Subject` is an immutable string type that guarantees valid UTF-8 contents.
 ///
@@ -42,16 +42,12 @@ impl Subject {
     /// ```
     pub fn from_utf8<T>(input: T) -> Result<Self, Utf8Error>
     where
-        T: Into<Bytes>
+        T: Into<Bytes>,
     {
         let bytes = input.into();
-        if let Err(err) = from_utf8(bytes.as_ref()) {
-            return Err(err);
-        }
+        from_utf8(bytes.as_ref())?;
 
-        Ok(Subject {
-            bytes,
-        })
+        Ok(Subject { bytes })
     }
 
     /// Extracts a string slice containing the entire `Subject`.
@@ -74,7 +70,9 @@ impl Subject {
 impl<'a> From<&'a str> for Subject {
     fn from(s: &'a str) -> Self {
         // Since &str is guaranteed to be valid UTF-8, we can create the Subject instance by copying the contents of the &str
-        Subject { bytes: Bytes::copy_from_slice(s.as_bytes()) }
+        Subject {
+            bytes: Bytes::copy_from_slice(s.as_bytes()),
+        }
     }
 }
 

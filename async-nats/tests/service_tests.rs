@@ -159,9 +159,9 @@ mod service {
             .unwrap();
 
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone()).await.unwrap();
+        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
         client
-            .publish_with_reply("$SRV.PING".into(), reply, "".into())
+            .publish_with_reply("$SRV.PING".into(), reply.into(), "".into())
             .await
             .unwrap();
         responses.next().await.unwrap();
@@ -186,9 +186,9 @@ mod service {
 
         let mut products = service.endpoint("products").await.unwrap();
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone()).await.unwrap();
+        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone(), "data".into())
+            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
             .await
             .unwrap();
         let request = products.next().await.unwrap();
@@ -198,13 +198,13 @@ mod service {
         let v2 = service.group("v2");
         let mut v2product = v2.endpoint("products").await.unwrap();
         client
-            .publish_with_reply("v2.products".into(), reply.clone(), "data".into())
+            .publish_with_reply("v2.products".into(), reply.into(), "data".into())
             .await
             .unwrap();
         let request = v2product.next().await.unwrap();
         request.respond(Ok("v2".into())).await.unwrap();
         let message = responses.next().await.unwrap();
-        assert_eq!(from_utf8(&message.payload).unwrap(), "v2".into());
+        assert_eq!(from_utf8(&message.payload).unwrap(), "v2");
     }
 
     #[tokio::test]
@@ -225,21 +225,21 @@ mod service {
 
         let mut endpoint = service.endpoint("products").await.unwrap().take(3);
         let reply = client.new_inbox();
-        let mut response = client.subscribe(reply.clone()).await.unwrap();
+        let mut response = client.subscribe(reply.clone().into()).await.unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone(), "data".into())
+            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone(), "data".into())
+            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone(), "data".into())
+            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone(), "data".into())
+            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
             .await
             .unwrap();
         client.flush().await.unwrap();
@@ -267,8 +267,8 @@ mod service {
             .map(|message| serde_json::from_slice::<Info>(&message.payload))
             .unwrap()
             .unwrap();
-        assert_eq!(info.version, "1.0.0".into());
-        assert_eq!(info.name, "serviceA".into());
+        assert_eq!(info.version, "1.0.0");
+        assert_eq!(info.name, "serviceA");
 
         let stats = client
             .request("$SRV.STATS".into(), "".into())
@@ -323,7 +323,7 @@ mod service {
                 .iter()
                 .next()
                 .unwrap(),
-            "error".into()
+            "error"
         );
 
         // service should not respond anymore, as its stopped.

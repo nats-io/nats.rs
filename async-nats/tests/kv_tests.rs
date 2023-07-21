@@ -417,7 +417,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("foo", i.into().into()).await.unwrap();
+                    kv.put("foo", i.to_string().into()).await.unwrap();
                 }
             }
         });
@@ -427,13 +427,13 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("var", i.into().into()).await.unwrap();
+                    kv.put("var", i.to_string().into()).await.unwrap();
                 }
             }
         });
         while let Some((i, entry)) = watch.next().await {
             let entry = entry.unwrap();
-            assert_eq!(entry.key, "foo".into());
+            assert_eq!(entry.key, "foo");
             assert_eq!(
                 i,
                 from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
@@ -476,7 +476,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put(format!("foo.{i}"), i.into().into())
+                    kv.put(format!("foo.{i}"), i.to_string().into())
                         .await
                         .unwrap();
                 }
@@ -488,7 +488,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("var", i.into().into()).await.unwrap();
+                    kv.put("var", i.to_string().into()).await.unwrap();
                 }
             }
         });
@@ -559,7 +559,7 @@ mod kv {
             async move {
                 for i in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    kv.put("foo", i.into().into()).await.unwrap();
+                    kv.put("foo", i.to_string().into()).await.unwrap();
                 }
             }
         });
@@ -596,10 +596,10 @@ mod kv {
             .unwrap();
 
         for i in 0..10 {
-            kv.put("bar", i.into().into()).await.unwrap();
+            kv.put("bar", i.to_string().into()).await.unwrap();
         }
         for i in 0..10 {
-            kv.put("foo", i.into().into()).await.unwrap();
+            kv.put("foo", i.to_string().into()).await.unwrap();
         }
 
         let mut keys = kv
@@ -625,7 +625,7 @@ mod kv {
 
         // Put the key back, and then purge and make sure the key doesn't show up
         for i in 0..10 {
-            kv.put("bar", i.into().into()).await.unwrap();
+            kv.put("bar", i.to_string().into()).await.unwrap();
         }
         kv.purge("foo").await.unwrap();
         let keys = kv
@@ -694,10 +694,10 @@ mod kv {
 
         let mut subscribe = client.subscribe("bar.>".into()).await.unwrap();
 
-        kv.put("key".into(), "data".into()).await.unwrap();
+        kv.put("key", "data".into()).await.unwrap();
 
         let message = subscribe.next().await.unwrap();
-        assert_eq!("bar.$KV.test.key", message.subject);
+        assert_eq!("bar.$KV.test.key", message.subject.as_str());
     }
 
     #[tokio::test]
@@ -746,7 +746,7 @@ mod kv {
         local_kv.put("name", "rip".into()).await.unwrap();
 
         let name = local_kv.get("name").await.unwrap();
-        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip".into());
+        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip");
 
         // Bind through leafnode connection but to origin KV.
         let leaf_hub_js = async_nats::jetstream::with_domain(leaf, "HUB");
@@ -755,7 +755,7 @@ mod kv {
 
         test.put("name", "ivan".into()).await.unwrap();
         let name = test.get("name").await.unwrap();
-        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan".into());
+        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan");
 
         // Shutdown HUB and test get still work.
         drop(hub_server);

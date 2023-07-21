@@ -42,7 +42,7 @@ pub fn publish(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
                     let nc = async_nats::connect(server.client_url()).await.unwrap();
-                    nc.publish("data".to_string(), "data".into()).await.unwrap();
+                    nc.publish("data".into(), "data".into()).await.unwrap();
                     nc.flush().await.unwrap();
                     nc
                 });
@@ -82,13 +82,13 @@ pub fn subscribe(c: &mut Criterion) {
                             let msg = &bmsg[0..*size].to_vec();
 
                             loop {
-                                nc.publish("bench".to_string(), msg.clone().into())
+                                nc.publish("bench".into(), msg.clone().into())
                                     .await
                                     .unwrap();
                             }
                         }
                     });
-                    nc.publish("data".to_string(), "data".into()).await.unwrap();
+                    nc.publish("data".into(), "data".into()).await.unwrap();
                     nc.flush().await.unwrap();
                     nc
                 });
