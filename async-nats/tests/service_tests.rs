@@ -102,9 +102,9 @@ mod service {
             .unwrap();
 
         let info_reply = client.new_inbox();
-        let mut infos = client.subscribe(info_reply.clone()).await.unwrap();
+        let mut infos = client.subscribe(info_reply.clone().into()).await.unwrap();
         client
-            .publish_with_reply("$SRV.INFO".to_string(), info_reply, "".into())
+            .publish_with_reply("$SRV.INFO".into(), info_reply.into(), "".into())
             .await
             .unwrap();
         let info = infos
@@ -116,9 +116,9 @@ mod service {
         //TODO: test rest of fields
 
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone()).await.unwrap();
+        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
         client
-            .publish_with_reply("$SRV.STATS".to_string(), reply, "".into())
+            .publish_with_reply("$SRV.STATS".into(), reply.into(), "".into())
             .await
             .unwrap();
 

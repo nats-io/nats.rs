@@ -82,7 +82,7 @@
 //!
 //! // Publish messages to the NATS server
 //! for _ in 0..10 {
-//!     client.publish(subject.clone(), data.clone()).await?;
+//!     client.publish(subject.clone().into(), data.clone()).await?;
 //! }
 //! #    Ok(())
 //! # }
@@ -161,7 +161,7 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
-pub use subject::{Subject};
+pub use subject::Subject;
 
 mod auth;
 pub(crate) mod auth_utils;

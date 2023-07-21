@@ -95,12 +95,10 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// let ack = jetstream.publish("events".into(), "data".into()).await?;
     /// ack.await?;
     /// jetstream
-    ///     .publish("events".to_string(), "data".into())
+    ///     .publish("events".into(), "data".into())
     ///     .await?
     ///     .await?;
     /// # Ok(())
@@ -116,12 +114,8 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let first_ack = jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
-    /// let second_ack = jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// let first_ack = jetstream.publish("events".into(), "data".into()).await?;
+    /// let second_ack = jetstream.publish("events".into(), "data".into()).await?;
     /// first_ack.await?;
     /// second_ack.await?;
     /// # Ok(())
@@ -152,7 +146,7 @@ impl Context {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", "Value");
     /// let ack = jetstream
-    ///     .publish_with_headers("events".to_string(), headers, "data".into())
+    ///     .publish_with_headers("events".into(), headers, "data".into())
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -182,7 +176,7 @@ impl Context {
     ///
     /// let ack = jetstream
     ///     .send_publish(
-    ///         "events".to_string(),
+    ///         "events".into(),
     ///         Publish::build().payload("data".into()).message_id("uuid"),
     ///     )
     ///     .await?;
@@ -800,9 +794,7 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let response: Response<Info> = jetstream
-    ///     .request("STREAM.INFO.events".to_string(), &())
-    ///     .await?;
+    /// let response: Response<Info> = jetstream.request("STREAM.INFO.events".into(), &()).await?;
     /// # Ok(())
     /// # }
     /// ```

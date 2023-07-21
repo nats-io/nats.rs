@@ -58,9 +58,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -182,9 +180,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -197,9 +193,7 @@ impl Consumer<Config> {
     ///     .await?;
     ///
     /// for _ in 0..100 {
-    ///     jetstream
-    ///         .publish("events".to_string(), "data".into())
-    ///         .await?;
+    ///     jetstream.publish("events".into(), "data".into()).await?;
     /// }
     ///
     /// let mut messages = consumer.fetch().max_messages(200).messages().await?;
@@ -237,9 +231,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -285,9 +277,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -463,7 +453,7 @@ impl<'a> futures::Stream for Sequence<'a> {
 
                     context
                         .client
-                        .publish_with_reply(subject.into(), inbox, request)
+                        .publish_with_reply(subject.into(), inbox.into(), request)
                         .await
                         .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
@@ -527,9 +517,7 @@ impl<'a> Consumer<OrderedConfig> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -914,7 +902,11 @@ impl Stream {
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
                     let result = context
                         .client
-                        .publish_with_reply(subject.clone().into(), inbox.clone().into(), request.clone())
+                        .publish_with_reply(
+                            subject.clone().into(),
+                            inbox.clone().into(),
+                            request.clone(),
+                        )
                         .await
                         .map(|_| pending_reset);
                     if let Err(err) = consumer.context.client.flush().await {

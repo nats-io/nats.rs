@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use crate::header::HeaderMap;
 use crate::status::StatusCode;
 use crate::subject::Subject;
-use bytes::Bytes;
 
 /// A Core NATS message.
 #[derive(Clone, Debug, Serialize, Deserialize)]

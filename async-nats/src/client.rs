@@ -14,7 +14,9 @@
 use crate::connection::State;
 use crate::ServerInfo;
 
-use super::{header::HeaderMap, subject::Subject, status::StatusCode, Command, Message, Subscriber};
+use super::{
+    header::HeaderMap, status::StatusCode, subject::Subject, Command, Message, Subscriber,
+};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
@@ -286,7 +288,11 @@ impl Client {
     /// # }
     /// ```
     pub async fn request(&self, subject: Subject, payload: Bytes) -> Result<Message, RequestError> {
-        trace!("request sent to subject: {} ({})", subject.as_ref(), payload.len());
+        trace!(
+            "request sent to subject: {} ({})",
+            subject.as_ref(),
+            payload.len()
+        );
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
@@ -382,7 +388,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// # let mut nc = async_nats::connect("demo.nats.io").await?;
     /// let reply = nc.new_inbox();
-    /// let rsub = nc.subscribe(reply).await?;
+    /// let rsub = nc.subscribe(reply.into()).await?;
     /// # Ok(())
     /// # }
     /// ```

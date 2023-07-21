@@ -13,6 +13,7 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
+use crate::subject::Subject;
 use crate::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
@@ -328,7 +329,7 @@ impl Message {
 /// A lightweight struct useful for decoupling message contents and the ability to ack it.
 pub struct Acker {
     context: Context,
-    reply: Option<String>,
+    reply: Option<Subject>,
 }
 
 // TODO(tp): This should be async trait to avoid duplication of code. Will be refactored into one when async traits are available.
@@ -374,7 +375,7 @@ impl Acker {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string(), "".into())
+                .publish(reply.to_string().into(), "".into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -422,7 +423,7 @@ impl Acker {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string(), kind.into())
+                .publish(reply.to_string().into(), kind.into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -472,10 +473,10 @@ impl Acker {
     pub async fn double_ack(&self) -> Result<(), Error> {
         if let Some(ref reply) = self.reply {
             let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
+            let mut subscription = self.context.client.subscribe(inbox.clone().into()).await?;
             self.context
                 .client
-                .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
+                .publish_with_reply(reply.to_string().into(), inbox.into(), AckKind::Ack.into())
                 .await?;
             match tokio::time::timeout(self.context.timeout, subscription.next())
                 .await

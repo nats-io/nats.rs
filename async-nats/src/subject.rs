@@ -1,11 +1,11 @@
 use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::str::{from_utf8, Utf8Error};
 
 /// A `Subject` is an immutable string type that guarantees valid UTF-8 contents.
-///
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Subject {
     bytes: Bytes,
 }
@@ -19,7 +19,7 @@ impl Subject {
     /// use async_nats::Subject;
     ///
     /// let subject = Subject::from_static("Static string");
-    /// assert_eq!(subject, "Static string");
+    /// assert_eq!(subject.as_str(), "Static string");
     /// ```
     pub fn from_static(input: &'static str) -> Self {
         Subject {
@@ -38,7 +38,7 @@ impl Subject {
     ///
     /// let utf8_input = vec![72, 101, 108, 108, 111]; // "Hello" in UTF-8
     /// let subject = Subject::from_utf8(utf8_input).unwrap();
-    /// assert_eq!(subject, "Hello");
+    /// assert_eq!(subject.as_ref(), "Hello");
     /// ```
     pub fn from_utf8<T>(input: T) -> Result<Self, Utf8Error>
     where
@@ -57,8 +57,9 @@ impl Subject {
     /// Basic usage:
     ///
     /// ```
-    /// let s = Subject::from("foo");
+    /// use async_nats::Subject;
     ///
+    /// let s = Subject::from("foo");
     /// assert_eq!("foo", s.as_str());
     /// ```
     #[inline]
@@ -87,7 +88,7 @@ impl From<String> for Subject {
 
 impl AsRef<str> for Subject {
     fn as_ref(&self) -> &str {
-        &*self
+        self
     }
 }
 

@@ -1355,7 +1355,7 @@ mod jetstream {
                         tokio::time::sleep(Duration::from_secs(6)).await
                     }
                     context
-                        .publish("events".to_string(), "dat".into())
+                        .publish("events".into(), "dat".into())
                         .await
                         .unwrap();
                 }

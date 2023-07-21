@@ -38,7 +38,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish a few messages for the example.
     for i in 0..10 {
         jetstream
-            .publish(format!("events.{i}"), "data".into())
+            .publish(format!("events.{i}").into(), "data".into())
             // The first `await` sends the publish
             .await?
             // The second `await` awaits a publish acknowledgement.

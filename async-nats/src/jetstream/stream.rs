@@ -532,7 +532,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".into(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.await?.sequence).await?;
     /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
@@ -576,7 +576,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".into(), "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
     /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
@@ -630,7 +630,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".into(), "data".into()).await?;
     /// stream.delete_message(publish_ack.await?.sequence).await?;
     /// # Ok(())
     /// # }

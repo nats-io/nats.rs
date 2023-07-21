@@ -47,9 +47,7 @@
 //!     .await?;
 //!
 //! // Publish a message to the stream
-//! jetstream
-//!     .publish("events".to_string(), "data".into())
-//!     .await?;
+//! jetstream.publish("events".into(), "data".into()).await?;
 //!
 //! // Get or create a pull-based consumer
 //! let consumer = stream
@@ -99,9 +97,7 @@
 //!     .await?;
 //!
 //! // Publish a message to the stream
-//! jetstream
-//!     .publish("events".to_string(), "data".into())
-//!     .await?;
+//! jetstream.publish("events".into(), "data".into()).await?;
 //!
 //! // Get or create a pull-based consumer
 //! let consumer = stream
@@ -157,9 +153,7 @@ pub use message::{AckKind, Message};
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
-/// jetstream
-///     .publish("subject".to_string(), "data".into())
-///     .await?;
+/// jetstream.publish("subject".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -178,9 +172,7 @@ pub fn new(client: Client) -> Context {
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::with_domain(client, "hub");
 ///
-/// jetstream
-///     .publish("subject".to_string(), "data".into())
-///     .await?;
+/// jetstream.publish("subject".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -199,9 +191,7 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::with_prefix(client, "JS.acc@hub.API");
 ///
-/// jetstream
-///     .publish("subject".to_string(), "data".into())
-///     .await?;
+/// jetstream.publish("subject".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
