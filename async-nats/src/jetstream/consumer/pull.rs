@@ -1046,22 +1046,20 @@ impl futures::Stream for Stream {
         }
 
         if !self.batch_config.idle_heartbeat.is_zero() {
-            trace!("setting hearbeats");
-            let timeout = self.batch_config.idle_heartbeat.saturating_mul(2);
-            self.heartbeat_timeout
-                .get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)));
-
             trace!("checking idle hearbeats");
-            if let Some(hearbeat) = self.heartbeat_timeout.as_mut() {
-                match hearbeat.poll_unpin(cx) {
-                    Poll::Ready(_) => {
-                        self.heartbeat_timeout = None;
-                        return Poll::Ready(Some(Err(MessagesError::new(
-                            MessagesErrorKind::MissingHeartbeat,
-                        ))));
-                    }
-                    Poll::Pending => (),
+            let timeout = self.batch_config.idle_heartbeat.saturating_mul(2);
+            match self
+                .heartbeat_timeout
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)))
+                .poll_unpin(cx)
+            {
+                Poll::Ready(_) => {
+                    self.heartbeat_timeout = None;
+                    return Poll::Ready(Some(Err(MessagesError::new(
+                        MessagesErrorKind::MissingHeartbeat,
+                    ))));
                 }
+                Poll::Pending => (),
             }
         }
 
