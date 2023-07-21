@@ -22,15 +22,14 @@ use crate::{
 };
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
+use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
     io::{self, ErrorKind},
     pin::Pin,
-    sync::{Arc, Mutex},
-    time::Instant,
+    sync::Arc,
 };
 use std::{
     sync::atomic::AtomicU64,
@@ -40,6 +39,8 @@ use std::{sync::atomic::Ordering, time::Duration};
 use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tracing::{debug, trace};
+
+const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
 
 impl Consumer<Config> {
     /// Returns a stream of messages for Push Consumer.
@@ -431,7 +432,7 @@ impl IntoConsumerConfig for OrderedConfig {
             max_ack_pending: 0,
             headers_only: self.headers_only,
             flow_control: true,
-            idle_heartbeat: Duration::from_secs(5),
+            idle_heartbeat: ORDERED_IDLE_HEARTBEAT,
             max_batch: 0,
             max_bytes: 0,
             max_expires: Duration::default(),
@@ -454,12 +455,10 @@ impl Consumer<OrderedConfig> {
             .await
             .map_err(|err| StreamError::with_source(StreamErrorKind::Other, err))?;
 
-        let last_seen = Arc::new(Mutex::new(Instant::now()));
         let last_sequence = Arc::new(AtomicU64::new(0));
         let consumer_sequence = Arc::new(AtomicU64::new(0));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::task::spawn({
-            let last_seen = last_seen.clone();
             let stream_name = self.info.stream_name.clone();
             let config = self.config.clone();
             let mut context = self.context.clone();
@@ -470,31 +469,14 @@ impl Consumer<OrderedConfig> {
                 loop {
                     let current_state = state.borrow().to_owned();
 
-                    match tokio::time::timeout(
-                        Duration::from_secs(5),
-                        context.client.state.changed(),
-                    )
-                    .await
+                    context.client.state.changed().await.unwrap();
+                    // State change notification received within the timeout
+                    if state.borrow().to_owned() != State::Connected
+                        || current_state == State::Connected
                     {
-                        Ok(_) => {
-                            // State change notification received within the timeout
-                            if state.borrow().to_owned() != State::Connected
-                                || current_state == State::Connected
-                            {
-                                continue;
-                            }
-                            debug!("reconnected. trigger consumer recreation");
-                        }
-                        Err(_) => {
-                            debug!("heartbeat check");
-
-                            if last_seen.lock().unwrap().elapsed() <= Duration::from_secs(10) {
-                                trace!("last seen ok. wait");
-                                continue;
-                            }
-                            debug!("last seen not ok");
-                        }
+                        continue;
                     }
+                    debug!("reconnected. trigger consumer recreation");
 
                     debug!(
                         "idle heartbeats expired. recreating consumer s: {},  {:?}",
@@ -514,7 +496,6 @@ impl Consumer<OrderedConfig> {
                         shutdown_tx.send(err).unwrap();
                         break;
                     }
-                    *last_seen.lock().unwrap() = Instant::now();
                     debug!("resetting consume sequence to 0");
                     consumer_sequence.store(0, Ordering::Relaxed);
                 }
@@ -528,9 +509,9 @@ impl Consumer<OrderedConfig> {
             subscriber_future: None,
             stream_sequence: last_sequence,
             consumer_sequence,
-            last_seen,
             shutdown: shutdown_rx,
             handle,
+            heartbeat_sleep: None,
         })
     }
 }
@@ -542,9 +523,9 @@ pub struct Ordered<'a> {
     subscriber_future: Option<BoxFuture<'a, Result<Subscriber, ConsumerRecreateError>>>,
     stream_sequence: Arc<AtomicU64>,
     consumer_sequence: Arc<AtomicU64>,
-    last_seen: Arc<Mutex<Instant>>,
     shutdown: tokio::sync::oneshot::Receiver<ConsumerRecreateError>,
     handle: JoinHandle<()>,
+    heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl<'a> Drop for Ordered<'a> {
@@ -558,6 +539,21 @@ impl<'a> futures::Stream for Ordered<'a> {
     type Item = Result<Message, OrderedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
+        self.heartbeat_sleep.get_or_insert_with(|| {
+            Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
+        });
+
+        if let Some(heartbeat_sleep) = self.heartbeat_sleep.as_mut() {
+            match heartbeat_sleep.poll_unpin(cx) {
+                Poll::Ready(_) => {
+                    return Poll::Ready(Some(Err(OrderedError::new(
+                        OrderedErrorKind::MissingHeartbeat,
+                    ))))
+                }
+                Poll::Pending => (),
+            }
+        }
+
         loop {
             match self.shutdown.try_recv() {
                 Ok(err) => {
@@ -625,7 +621,7 @@ impl<'a> futures::Stream for Ordered<'a> {
                 match subscriber.receiver.poll_recv(cx) {
                     Poll::Ready(maybe_message) => match maybe_message {
                         Some(message) => {
-                            *self.last_seen.lock().unwrap() = Instant::now();
+                            self.heartbeat_sleep = None;
                             match message.status {
                                 Some(StatusCode::IDLE_HEARTBEAT) => {
                                     debug!("received idle heartbeats");
