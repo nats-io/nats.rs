@@ -2109,7 +2109,11 @@ mod jetstream {
     #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
-        use tracing::debug;
+        tracing_subscriber::fmt()
+            .with_max_level(Level::DEBUG)
+            .init();
+
+        use tracing::{debug, Level};
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
@@ -2175,7 +2179,10 @@ mod jetstream {
             .unwrap();
         // and expect the message to be there.
         debug!("awaiting the message with recreated consumer");
-        messages.next().await.unwrap().unwrap();
+        let now = Instant::now();
+        let m = messages.next().await.unwrap();
+        println!("after: {:?}", now.elapsed());
+        m.unwrap();
     }
 
     #[tokio::test]
@@ -3219,7 +3226,12 @@ mod jetstream {
             .unwrap();
 
         for _ in 0..10 {
-            context.publish("test".into(), "data".into()).await.unwrap();
+            context
+                .publish("test".into(), "data".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
         }
 
         let consumer = stream
