@@ -561,19 +561,19 @@ impl<'a> futures::Stream for Ordered<'a> {
     type Item = Result<Message, OrderedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        self.heartbeat_sleep.get_or_insert_with(|| {
-            Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
-        });
-
-        if let Some(heartbeat_sleep) = self.heartbeat_sleep.as_mut() {
-            match heartbeat_sleep.poll_unpin(cx) {
-                Poll::Ready(_) => {
-                    return Poll::Ready(Some(Err(OrderedError::new(
-                        OrderedErrorKind::MissingHeartbeat,
-                    ))))
-                }
-                Poll::Pending => (),
+        match self
+            .heartbeat_sleep
+            .get_or_insert_with(|| {
+                Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
+            })
+            .poll_unpin(cx)
+        {
+            Poll::Ready(_) => {
+                return Poll::Ready(Some(Err(OrderedError::new(
+                    OrderedErrorKind::MissingHeartbeat,
+                ))))
             }
+            Poll::Pending => (),
         }
 
         loop {
