@@ -431,10 +431,7 @@ impl Connection {
                 respond,
                 headers,
             } => {
-                let verb = match headers.as_ref() {
-                    Some(headers) if !headers.is_empty() => "HPUB",
-                    _ => "PUB",
-                };
+                let verb = if !headers.is_empty() { "HPUB" } else { "PUB" };
 
                 small_write!("{verb} {subject} ");
 
@@ -442,19 +439,16 @@ impl Connection {
                     small_write!("{respond} ");
                 }
 
-                match headers {
-                    Some(headers) if !headers.is_empty() => {
-                        let headers = headers.to_bytes();
+                if !headers.is_empty() {
+                    let headers = headers.to_bytes();
 
-                        let headers_len = headers.len();
-                        let total_len = headers_len + payload.len();
-                        small_write!("{headers_len} {total_len}\r\n");
-                        self.write(headers);
-                    }
-                    _ => {
-                        let payload_len = payload.len();
-                        small_write!("{payload_len}\r\n");
-                    }
+                    let headers_len = headers.len();
+                    let total_len = headers_len + payload.len();
+                    small_write!("{headers_len} {total_len}\r\n");
+                    self.write(headers);
+                } else {
+                    let payload_len = payload.len();
+                    small_write!("{payload_len}\r\n");
                 }
 
                 self.write(Bytes::clone(payload));
@@ -954,7 +948,7 @@ mod write_op {
                     subject: "FOO.BAR".into(),
                     payload: "Hello World".into(),
                     respond: None,
-                    headers: None,
+                    headers: HeaderMap::new(),
                 }]
                 .iter(),
             )
@@ -973,7 +967,7 @@ mod write_op {
                     subject: "FOO.BAR".into(),
                     payload: "Hello World".into(),
                     respond: Some("INBOX.67".into()),
-                    headers: None,
+                    headers: HeaderMap::new(),
                 }]
                 .iter(),
             )
@@ -991,10 +985,10 @@ mod write_op {
                     subject: "FOO.BAR".into(),
                     payload: "Hello World".into(),
                     respond: Some("INBOX.67".into()),
-                    headers: Some(HeaderMap::from_iter([(
+                    headers: HeaderMap::from_iter([(
                         "Header".parse().unwrap(),
                         "X".parse().unwrap(),
-                    )])),
+                    )]),
                 }]
                 .iter(),
             )

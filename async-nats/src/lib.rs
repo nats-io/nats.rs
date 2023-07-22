@@ -270,13 +270,13 @@ pub(crate) enum Command {
         subject: Subject,
         payload: Bytes,
         respond: Option<Subject>,
-        headers: Option<HeaderMap>,
+        headers: HeaderMap,
     },
     Request {
         subject: Subject,
         payload: Bytes,
         respond: Subject,
-        headers: Option<HeaderMap>,
+        headers: HeaderMap,
         sender: oneshot::Sender<Message>,
     },
     Subscribe {
@@ -301,7 +301,7 @@ pub(crate) enum ClientOp {
         subject: Subject,
         payload: Bytes,
         respond: Option<Subject>,
-        headers: Option<HeaderMap>,
+        headers: HeaderMap,
     },
     Subscribe {
         sid: u64,

@@ -152,15 +152,8 @@ impl Client {
     /// # }
     /// ```
     pub async fn publish(&self, subject: Subject, payload: Bytes) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: None,
-            })
-            .await?;
-        Ok(())
+        self.publish_with_headers(subject, HeaderMap::new(), payload)
+            .await
     }
 
     /// Publish a [Message] with headers to a given subject.
@@ -193,7 +186,7 @@ impl Client {
                 subject,
                 payload,
                 respond: None,
-                headers: Some(headers),
+                headers,
             })
             .await?;
         Ok(())
@@ -225,15 +218,8 @@ impl Client {
         reply: Subject,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: None,
-            })
-            .await?;
-        Ok(())
+        self.publish_with_reply_and_headers(subject, reply, HeaderMap::new(), payload)
+            .await
     }
 
     /// Publish a [Message] to a given subject with headers and specified response subject
@@ -271,7 +257,7 @@ impl Client {
                 subject,
                 payload,
                 respond: Some(reply),
-                headers: Some(headers),
+                headers,
             })
             .await?;
         Ok(())
@@ -344,17 +330,14 @@ impl Client {
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
             let mut subscriber = self.subscribe(inbox.clone().into()).await?;
-            let payload: Bytes = request.payload.unwrap_or_default();
-            match request.headers {
-                Some(headers) => {
-                    self.publish_with_reply_and_headers(subject, inbox.into(), headers, payload)
-                        .await?
-                }
-                None => {
-                    self.publish_with_reply(subject, inbox.into(), payload)
-                        .await?
-                }
-            }
+            self.publish_with_reply_and_headers(
+                subject,
+                inbox.into(),
+                request.headers,
+                request.payload,
+            )
+            .await?;
+
             let request = match timeout {
                 Some(timeout) => {
                     tokio::time::timeout(timeout, subscriber.next())
@@ -381,9 +364,9 @@ impl Client {
         } else {
             let (sender, receiver) = oneshot::channel();
 
-            let payload = request.payload.unwrap_or_default();
             let respond = self.new_inbox().into();
             let headers = request.headers;
+            let payload = request.payload;
 
             self.sender
                 .send(Command::Request {
@@ -551,8 +534,8 @@ impl Client {
 /// Used for building customized requests.
 #[derive(Default)]
 pub struct Request {
-    payload: Option<Bytes>,
-    headers: Option<HeaderMap>,
+    payload: Bytes,
+    headers: HeaderMap,
     timeout: Option<Option<Duration>>,
     inbox: Option<String>,
 }
@@ -575,7 +558,7 @@ impl Request {
     /// # }
     /// ```
     pub fn payload(mut self, payload: Bytes) -> Request {
-        self.payload = Some(payload);
+        self.payload = payload;
         self
     }
 
@@ -600,7 +583,7 @@ impl Request {
     /// # }
     /// ```
     pub fn headers(mut self, headers: HeaderMap) -> Request {
-        self.headers = Some(headers);
+        self.headers = headers;
         self
     }
 
