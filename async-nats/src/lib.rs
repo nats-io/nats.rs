@@ -11,51 +11,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A Rust async bleeding edge client for the NATS.io ecosystem.
+//! A Rust asynchronous client for the NATS.io ecosystem.
 //!
-//! `git clone https://github.com/nats-io/nats.rs`
+//! To access the repository, you can clone it by running:
 //!
-//! NATS.io is a simple, secure and high performance open source messaging
-//! system for cloud native applications, `IoT` messaging, and microservices
+//! ```bash
+//! git clone https://github.com/nats-io/nats.rs
+//! ````
+//! NATS.io is a simple, secure, and high-performance open-source messaging
+//! system designed for cloud-native applications, IoT messaging, and microservices
 //! architectures.
 //!
-//! For sync API refer <https://crates.io/crates/nats>
+//! **Note**: The synchronous NATS API is deprecated and no longer actively maintained. If you need to use the deprecated synchronous API, you can refer to:
+//! <https://crates.io/crates/nats>
 //!
-//! For more information see [https://nats.io/].
-//!
-//! [https://nats.io/]: https://nats.io/
+//! For more information on NATS.io visit: <https://nats.io>
 //!
 //! ## Examples
 //!
-//! Below you can find some basic examples how to use this library.
+//! Below, you can find some basic examples on how to use this library.
 //!
-//! For details, refer docs for specific method/struct.
+//! For more details, please refer to the specific methods and structures documentation.
 //!
 //! ### Complete example
 //!
-//! ```
+//! Connect to the NATS server, publish messages and subscribe to receive messages.
+//!
+//! ```no_run
 //! use bytes::Bytes;
 //! use futures::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), async_nats::Error> {
+//!     // Connect to the NATS server
 //!     let client = async_nats::connect("demo.nats.io").await?;
-//!     let mut subscriber = client.subscribe("messages".into()).await?.take(10);
 //!
+//!     // Subscribe to the "messages" subject
+//!     let mut subscriber = client.subscribe("messages".into()).await?;
+//!
+//!     // Publish messages to the "messages" subject
 //!     for _ in 0..10 {
 //!         client.publish("messages".into(), "data".into()).await?;
 //!     }
 //!
+//!     // Receive and process messages
 //!     while let Some(message) = subscriber.next().await {
-//!       println!("Received message {:?}", message);
+//!         println!("Received message {:?}", message);
 //!     }
 //!
 //!     Ok(())
 //! }
-//!
 //! ```
 //!
 //! ### Publish
+//!
+//! Connect to the NATS server and publish messages to a subject.
 //!
 //! ```
 //! # use bytes::Bytes;
@@ -63,18 +73,24 @@
 //! # use std::time::Instant;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
+//! // Prepare the subject and data
 //! let subject = String::from("foo");
 //! let data = Bytes::from("bar");
+//!
+//! // Publish messages to the NATS server
 //! for _ in 0..10 {
-//!     client.publish("subject".into(), "data".into()).await?;
+//!     client.publish(subject.clone(), data.clone()).await?;
 //! }
 //! #    Ok(())
 //! # }
 //! ```
 //!
 //! ### Subscribe
+//!
+//! Connect to the NATS server, subscribe to a subject and receive messages.
 //!
 //! ```no_run
 //! # use bytes::Bytes;
@@ -83,10 +99,13 @@
 //! # use std::time::Instant;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
+//! // Subscribe to the "foo" subject
 //! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
+//! // Receive and process messages
 //! while let Some(message) = subscriber.next().await {
 //!     println!("Received message {:?}", message);
 //! }
@@ -127,10 +146,11 @@ use tokio::io;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
+const MAX_PENDING_PINGS: usize = 2;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -141,13 +161,14 @@ use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 
+mod auth;
 pub(crate) mod auth_utils;
-mod client;
+pub mod client;
 pub mod connection;
 mod connector;
 mod options;
 
-use crate::options::CallbackArg1;
+pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
@@ -237,7 +258,7 @@ pub(crate) enum ServerOp {
 }
 
 #[derive(Debug)]
-pub enum Command {
+pub(crate) enum Command {
     Publish {
         subject: String,
         payload: Bytes,
@@ -254,17 +275,15 @@ pub enum Command {
         sid: u64,
         max: Option<u64>,
     },
-    Ping,
     Flush {
         result: oneshot::Sender<Result<(), io::Error>>,
     },
     TryFlush,
-    Connect(ConnectInfo),
 }
 
 /// `ClientOp` represents all actions of `Client`.
 #[derive(Debug)]
-pub enum ClientOp {
+pub(crate) enum ClientOp {
     Publish {
         subject: String,
         payload: Bytes,
@@ -300,7 +319,6 @@ pub(crate) struct ConnectionHandler {
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
     pending_pings: usize,
-    max_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
     flush_interval: Interval,
@@ -325,7 +343,6 @@ impl ConnectionHandler {
             connector,
             subscriptions: HashMap::new(),
             pending_pings: 0,
-            max_pings: 2,
             info_sender,
             ping_interval,
             flush_interval,
@@ -340,6 +357,15 @@ impl ConnectionHandler {
             select! {
                 _ = self.ping_interval.tick() => {
                     self.pending_pings += 1;
+
+                    if self.pending_pings > MAX_PENDING_PINGS {
+                        debug!(
+                            "pending pings {}, max pings {}. disconnecting",
+                            self.pending_pings, MAX_PENDING_PINGS
+                        );
+                        self.handle_disconnect().await?;
+                    }
+
                     if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
                         self.handle_disconnect().await?;
                     }
@@ -511,28 +537,6 @@ impl ConnectionHandler {
                     }
                 }
             }
-            Command::Ping => {
-                debug!(
-                    "PING command. Pending pings {}, max pings {}",
-                    self.pending_pings, self.max_pings
-                );
-                self.pending_pings += 1;
-                self.ping_interval.reset();
-
-                if self.pending_pings > self.max_pings {
-                    debug!(
-                        "pending pings {}, max pings {}. disconnecting",
-                        self.pending_pings, self.max_pings
-                    );
-                    self.handle_disconnect().await?;
-                }
-
-                if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
-                    self.handle_disconnect().await?;
-                }
-
-                self.handle_flush().await?;
-            }
             Command::Flush { result } => {
                 if let Err(_err) = self.handle_flush().await {
                     if let Err(err) = self.handle_disconnect().await {
@@ -602,15 +606,6 @@ impl ConnectionHandler {
                     error!("Sending Publish failed with {:?}", err);
                 }
             }
-            Command::Connect(connect_info) => {
-                while let Err(_err) = self
-                    .connection
-                    .write_op(&ClientOp::Connect(connect_info.clone()))
-                    .await
-                {
-                    self.handle_disconnect().await?;
-                }
-            }
         }
 
         Ok(())
@@ -663,7 +658,8 @@ impl ConnectionHandler {
 /// ```
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
-/// let mut nc = async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
+/// let mut nc =
+///     async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
 /// nc.publish("test".into(), "data".into()).await?;
 /// # Ok(())
 /// # }
@@ -692,6 +688,9 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             name: options.name,
             ignore_discovered_servers: options.ignore_discovered_servers,
             retain_servers_order: options.retain_servers_order,
+            read_buffer_capacity: options.read_buffer_capacity,
+            reconnect_delay_callback: options.reconnect_delay_callback,
+            auth_callback: options.auth_callback,
         },
         events_tx,
         state_tx,
@@ -788,53 +787,52 @@ impl fmt::Display for Event {
 ///
 /// ## Connect with [Vec] of [ServerAddr].
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let client = async_nats::connect(vec![
-///    "demo.nats.io".parse::<ServerAddr>()?,
-///    "other.nats.io".parse::<ServerAddr>()?,
-///])
-///.await
-///.unwrap();
-///# Ok(())
-///# }
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let client = async_nats::connect(vec![
+///     "demo.nats.io".parse::<ServerAddr>()?,
+///     "other.nats.io".parse::<ServerAddr>()?,
+/// ])
+/// .await
+/// .unwrap();
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## with [Vec], but parse URLs inside [crate::connect()]
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let servers = vec!["demo.nats.io", "other.nats.io"];
-///let client = async_nats::connect(
-///    servers
-///        .iter()
-///        .map(|url| url.parse())
-///        .collect::<Result<Vec<ServerAddr>, _>>()?
-///)
-///.await?;
-///# Ok(())
-///# }
-///```
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let servers = vec!["demo.nats.io", "other.nats.io"];
+/// let client = async_nats::connect(
+///     servers
+///         .iter()
+///         .map(|url| url.parse())
+///         .collect::<Result<Vec<ServerAddr>, _>>()?,
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
+/// ```
 ///
 ///
 /// ## with slice.
 /// ```no_run
-///#[tokio::main]
-///# async fn main() -> Result<(), async_nats::Error> {
-///use async_nats::ServerAddr;
-///let client = async_nats::connect(
+/// #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// use async_nats::ServerAddr;
+/// let client = async_nats::connect(
 ///    [
 ///        "demo.nats.io".parse::<ServerAddr>()?,
 ///        "other.nats.io".parse::<ServerAddr>()?,
 ///    ]
 ///    .as_slice(),
-///)
-///.await?;
-///# Ok(())
-///# }
-///
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
@@ -862,7 +860,7 @@ pub enum ConnectErrorKind {
 #[derive(Debug, Error)]
 pub struct ConnectError {
     kind: ConnectErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
 
 impl Display for ConnectError {
@@ -889,7 +887,7 @@ impl Display for ConnectError {
 impl ConnectError {
     fn with_source<E>(kind: ConnectErrorKind, source: E) -> ConnectError
     where
-        E: Into<Box<dyn std::error::Error + Sync + Send>>,
+        E: Into<crate::Error>,
     {
         ConnectError {
             kind,
@@ -953,7 +951,7 @@ impl Subscriber {
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
-    ///  subscriber.unsubscribe().await?;
+    /// subscriber.unsubscribe().await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1326,25 +1324,66 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-pub(crate) enum Authorization {
-    /// No authentication.
-    None,
-
-    /// Authenticate using a token.
-    Token(String),
-
-    /// Authenticate using a username and password.
-    UserAndPassword(String, String),
-
-    /// Authenticate using nkey seed
-    NKey(String),
-
-    /// Authenticate using a jwt and signing function.
-    Jwt(
-        String,
-        CallbackArg1<String, std::result::Result<String, AuthError>>,
-    ),
+pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
+    !subject.as_ref().contains([' ', '.', '\r', '\n'])
 }
+
+macro_rules! from_with_timeout {
+    ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {
+        impl From<$origin> for $t {
+            fn from(err: $origin) -> Self {
+                match err.kind() {
+                    <$origin_kind>::TimedOut => Self::new(<$k>::TimedOut),
+                    _ => Self::with_source(<$k>::Other, err),
+                }
+            }
+        }
+    };
+}
+pub(crate) use from_with_timeout;
+
+// TODO: rewrite into derivable proc macro.
+macro_rules! error_impls {
+    ($t:ty, $k:ty) => {
+        impl $t {
+            #[allow(dead_code)]
+            #[allow(unreachable_pub)]
+            pub(crate) fn new(kind: $k) -> $t {
+                Self { kind, source: None }
+            }
+            #[allow(dead_code)]
+            #[allow(unreachable_pub)]
+            pub(crate) fn with_source<S>(kind: $k, source: S) -> $t
+            where
+                S: Into<crate::Error>,
+            {
+                Self {
+                    kind,
+                    source: Some(source.into()),
+                }
+            }
+            #[allow(dead_code)]
+            #[allow(unreachable_pub)]
+            pub fn kind(&self) -> $k {
+                // ALmost all `kind` types implement `Copy`, so it's almost always copy.
+                // We need to clone, as some more complex one may have nested other errors, that
+                // implement Clone only.
+                self.kind.clone()
+            }
+            #[allow(dead_code)]
+            #[allow(unreachable_pub)]
+            pub(crate) fn format_source(&self) -> String {
+                self.source
+                    .as_ref()
+                    .map(|err| err.to_string())
+                    .unwrap_or("unknown".to_string())
+            }
+        }
+        impl std::error::Error for $t {}
+    };
+}
+
+pub(crate) use error_impls;
 
 #[cfg(test)]
 mod tests {

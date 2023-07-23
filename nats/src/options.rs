@@ -38,7 +38,7 @@ pub struct Options {
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
-    pub(crate) tls_client_config: crate::rustls::ClientConfig,
+    pub(crate) tls_client_config: Option<crate::rustls::ClientConfig>,
 
     pub(crate) error_callback: ErrorCallback,
     pub(crate) disconnect_callback: Callback,
@@ -91,7 +91,7 @@ impl Default for Options {
             reconnect_delay_callback: ReconnectDelayCallback(Box::new(backoff)),
             close_callback: Callback(None),
             lame_duck_callback: Callback(None),
-            tls_client_config: crate::rustls::ClientConfig::default(),
+            tls_client_config: None,
         }
     }
 }
@@ -145,8 +145,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_token("t0k3n!")
-    ///     .connect("demo.nats.io")?;
+    /// let nc = nats::Options::with_token("t0k3n!").connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -162,8 +161,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!")
-    ///     .connect("demo.nats.io")?;
+    /// let nc = nats::Options::with_user_pass("derek", "s3cr3t!").connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -183,8 +181,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::with_credentials("path/to/my.creds")
-    ///     .connect("connect.ngs.global")?;
+    /// let nc = nats::Options::with_credentials("path/to/my.creds").connect("connect.ngs.global")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -220,8 +217,7 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let creds =
-    /// "-----BEGIN NATS USER JWT-----
+    /// let creds = "-----BEGIN NATS USER JWT-----
     /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
     /// ------END NATS USER JWT------
     ///
@@ -346,20 +342,30 @@ impl Options {
     /// # Example
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
-    /// let mut tls_client_config = nats::rustls::ClientConfig::default();
-    /// tls_client_config
-    ///     .set_single_client_cert(
-    ///         vec![nats::rustls::Certificate(b"MY_CERT".to_vec())],
-    ///         nats::rustls::PrivateKey(b"MY_KEY".to_vec()),
-    ///     );
+    /// let mut root_store = nats::rustls::RootCertStore::empty();
+    ///
+    /// root_store.add_parsable_certificates(
+    ///     rustls_native_certs::load_native_certs()?
+    ///         .into_iter()
+    ///         .map(|cert| cert.0)
+    ///         .collect::<Vec<Vec<u8>>>()
+    ///         .as_ref(),
+    /// );
+    ///
+    /// let tls_client_config = nats::rustls::ClientConfig::builder()
+    ///     .with_safe_defaults()
+    ///     .with_root_certificates(root_store)
+    ///     .with_no_client_auth();
+    ///
     /// let nc = nats::Options::new()
     ///     .tls_client_config(tls_client_config)
     ///     .connect("nats://localhost:4443")?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
     pub fn tls_client_config(mut self, tls_client_config: crate::rustls::ClientConfig) -> Options {
-        self.tls_client_config = tls_client_config;
+        self.tls_client_config = Some(tls_client_config);
         self
     }
 
@@ -384,9 +390,7 @@ impl Options {
     /// # Example
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let nc = nats::Options::new()
-    ///     .no_echo()
-    ///     .connect("demo.nats.io")?;
+    /// let nc = nats::Options::new().no_echo().connect("demo.nats.io")?;
     /// # Ok(())
     /// # }
     /// ```

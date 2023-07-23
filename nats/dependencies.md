@@ -16,7 +16,7 @@ This file lists the dependencies used in this repository.
 | log 0.4.14                | Apache-2.0 OR MIT        |
 | memchr 2.4.1              | MIT OR Unlicense         |
 | nats 0.23.0               | Apache-2.0               |
-| nkeys 0.2.0               | Apache-2.0               |
+| nkeys 0.3.0               | Apache-2.0               |
 | nuid 0.3.2                | Apache-2.0               |
 | once_cell 1.10.0          | Apache-2.0 OR MIT        |
 | parking_lot 0.12.0        | Apache-2.0 OR MIT        |

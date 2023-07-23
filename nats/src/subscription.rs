@@ -118,7 +118,7 @@ impl Subscription {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// # let sub = nc.subscribe("foo")?;
     /// if let Some(msg) = sub.try_next() {
-    ///   println!("Received {}", msg);
+    ///     println!("Received {}", msg);
     /// }
     /// # Ok(())
     /// # }
@@ -265,7 +265,7 @@ impl Subscription {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub =  nc.subscribe("bar")?;
+    /// let sub = nc.subscribe("bar")?;
     /// sub.set_message_limits(1000);
     /// # Ok(())
     /// # }
@@ -290,7 +290,7 @@ impl Subscription {
     /// ```
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
-    /// let sub =  nc.subscribe("bar")?;
+    /// let sub = nc.subscribe("bar")?;
     /// sub.set_message_limits(1000);
     /// println!("dropped messages: {}", sub.dropped_messages()?);
     /// # Ok(())

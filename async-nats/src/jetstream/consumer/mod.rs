@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,14 +17,13 @@ pub mod pull;
 pub mod push;
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
 
-use super::response::Response;
+use super::context::RequestError;
 use super::stream::ClusterInfo;
 use super::Context;
 use crate::jetstream::consumer;
@@ -65,44 +64,26 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let mut consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let info = consumer.info().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn info(&mut self) -> Result<&consumer::Info, Error> {
+    pub async fn info(&mut self) -> Result<&consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
 
-        match self.context.request(subject, &json!({})).await? {
-            Response::Ok::<Info>(info) => {
-                self.info = info;
-                Ok(&self.info)
-            }
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting consumer info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-        }
+        let info = self.context.request(subject, &json!({})).await?;
+        self.info = info;
+        Ok(&self.info)
     }
 
-    async fn fetch_info(&self) -> Result<consumer::Info, Error> {
+    async fn fetch_info(&self) -> Result<consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
-
-        match self.context.request(subject, &json!({})).await? {
-            Response::Ok::<Info>(info) => Ok(info),
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting consumer info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
-        }
+        self.context.request(subject, &json!({})).await
     }
 
     /// Returns cached [Info] for the [Consumer].
@@ -119,8 +100,10 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
     /// let info = consumer.cached_info();
     /// # Ok(())
@@ -143,10 +126,11 @@ pub trait FromConsumer {
 
 pub type PullConsumer = Consumer<self::pull::Config>;
 pub type PushConsumer = Consumer<self::push::Config>;
+pub type OrderedPullConsumer = Consumer<self::pull::OrderedConfig>;
 pub type OrderedPushConsumer = Consumer<self::push::OrderedConfig>;
 
 /// Information about a consumer
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct Info {
     /// The stream being consumed
     pub stream_name: String,
@@ -171,15 +155,15 @@ pub struct Info {
     /// The number of pending
     pub num_pending: u64,
     /// Information about the consumer's cluster
-    #[serde(default)]
+    #[serde(skip_serializing_if = "is_default")]
     pub cluster: Option<ClusterInfo>,
     /// Indicates if any client is connected and receiving messages from a push consumer
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub push_bound: bool,
 }
 
 /// Information about a consumer and the stream it is consuming
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SequenceInfo {
     /// How far along the consumer has progressed
     #[serde(rename = "consumer_seq")]
@@ -188,7 +172,11 @@ pub struct SequenceInfo {
     #[serde(rename = "stream_seq")]
     pub stream_sequence: u64,
     // Last activity for the sequence
-    #[serde(default, with = "rfc3339::option")]
+    #[serde(
+        default,
+        with = "rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_active: Option<time::OffsetDateTime>,
 }
 
@@ -254,8 +242,8 @@ pub struct Config {
     /// A short description of the purpose of this consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Deliver group to use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deliver_group: Option<String>,
     /// Allows for a variety of options that determine how this consumer will receive messages
     #[serde(flatten)]
@@ -303,6 +291,9 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
+    /// Maximum size of a request max_bytes
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_bytes: i64,
     /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
@@ -433,4 +424,26 @@ pub enum ReplayPolicy {
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
+}
+
+#[derive(Debug)]
+pub struct StreamError {
+    kind: StreamErrorKind,
+    source: Option<crate::Error>,
+}
+crate::error_impls!(StreamError, StreamErrorKind);
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            StreamErrorKind::TimedOut => write!(f, "timed out"),
+            StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StreamErrorKind {
+    TimedOut,
+    Other,
 }

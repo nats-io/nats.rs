@@ -123,7 +123,7 @@ pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
                 return Ok(PrivateKey(key))
             }
             // if public key is found, don't error, just skip it and hope to find client key next.
-            Some(rustls_pemfile::Item::X509Certificate(_)) => {}
+            Some(rustls_pemfile::Item::X509Certificate(_)) | Some(_) => {}
             None => break,
         }
     }

@@ -114,7 +114,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
                 if let Some(key) = options.client_key.clone() {
                     let key = tls::load_key(key).await?;
                     let cert = tls::load_certs(cert).await?;
-                    builder.with_single_cert(cert, key).map_err(|_| {
+                    builder.with_client_auth_cert(cert, key).map_err(|_| {
                         io::Error::new(ErrorKind::Other, "could not add certificate or key")
                     })
                 } else {

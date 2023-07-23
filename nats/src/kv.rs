@@ -116,8 +116,8 @@ impl JetStream {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// context.create_key_value(&Config {
-    ///   bucket: "key_value".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "key_value".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let key_value = context.key_value("key_value")?;
@@ -176,8 +176,8 @@ impl JetStream {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_key_value(&Config {
-    ///   bucket: "create_key_value".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "create_key_value".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// # context.delete_key_value("create_key_value")?;
@@ -274,7 +274,6 @@ impl JetStream {
     /// # Ok(())
     /// # }
     /// ```
-    ///
     pub fn delete_key_value(&self, bucket: &str) -> io::Result<()> {
         if !self.connection.is_server_compatible_version(2, 6, 2) {
             return Err(io::Error::new(
@@ -352,7 +351,7 @@ impl Store {
     /// bucket.put("foo", b"bar")?;
     /// let maybe_entry = bucket.entry("foo")?;
     /// if let Some(entry) = maybe_entry {
-    ///   println!("Found entry {:?}", entry);
+    ///     println!("Found entry {:?}", entry);
     /// }
     /// #
     /// # Ok(())
@@ -414,7 +413,7 @@ impl Store {
     /// bucket.put("foo", b"bar")?;
     /// let maybe_value = bucket.get("foo")?;
     /// if let Some(value) = maybe_value {
-    ///   println!("Found value {:?}", value);
+    ///     println!("Found value {:?}", value);
     /// }
     /// #
     /// # context.delete_key_value("get")?;
@@ -696,9 +695,9 @@ impl Store {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_key_value(&Config {
-    ///   bucket: "history_iter".to_string(),
-    ///   history: 2,
-    ///   ..Default::default()
+    ///     bucket: "history_iter".to_string(),
+    ///     history: 2,
+    ///     ..Default::default()
     /// })?;
     ///
     /// bucket.put("foo", b"fizz")?;

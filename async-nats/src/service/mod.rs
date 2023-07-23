@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,14 +18,14 @@ use std::{
     fmt::Display,
     pin::Pin,
     sync::{Arc, Mutex},
-    task::Poll,
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
+pub mod endpoint;
 use futures::{
     stream::{self, SelectAll},
-    Future, Stream, StreamExt,
+    Future, StreamExt,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -33,10 +33,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
 use time::OffsetDateTime;
-use tokio::task::JoinHandle;
-use tracing::{debug, trace};
+use tokio::{sync::broadcast::Sender, task::JoinHandle};
+use tracing::debug;
 
 use crate::{Client, Error, HeaderMap, Message, PublishError, Subscriber};
+
+use self::endpoint::Endpoint;
 
 const SERVICE_API_PREFIX: &str = "$SRV";
 const QUEUE_GROUP: &str = "q";
@@ -52,18 +54,18 @@ static SEMVER: Lazy<Regex> = Lazy::new(|| {
 // From ADR-33: Name can only have A-Z, a-z, 0-9, dash, underscore.
 static NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r#"^[A-Za-z0-9\-_]+$"#).unwrap());
 
-/// Represents stats for all endpoints.
+/// Represents state for all endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Stats {
-    pub endpoints: HashMap<String, EndpointStats>,
+pub(crate) struct Endpoints {
+    pub(crate) endpoints: HashMap<String, endpoint::Inner>,
 }
 
 /// Response for `STATS` requests.
 #[derive(Serialize, Deserialize)]
-pub struct StatsResponse {
+pub struct Stats {
     /// Response type.
     #[serde(rename = "type")]
-    pub response_type: String,
+    pub kind: String,
     /// Service name.
     pub name: String,
     /// Service id.
@@ -72,34 +74,8 @@ pub struct StatsResponse {
     pub version: String,
     #[serde(with = "rfc3339")]
     pub started: OffsetDateTime,
-    pub endpoints: Vec<EndpointStats>,
-}
-
-/// Stats of a single endpoint.
-/// Right now, there is only one business endpoint, all other are internals.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct EndpointStats {
-    // Response type.
-    #[serde(rename = "type")]
-    pub response_type: String,
-    /// Service name.
-    pub name: String,
-    /// Number of requests handled.
-    #[serde(rename = "num_requests")]
-    pub requests: usize,
-    /// Number of errors occurred.
-    #[serde(rename = "num_errors")]
-    pub errors: usize,
-    /// Total processing time for all requests.
-    #[serde(default, with = "serde_nanos")]
-    pub processing_time: std::time::Duration,
-    /// Average processing time for request.
-    #[serde(default, with = "serde_nanos")]
-    pub average_processing_time: std::time::Duration,
-    /// Last error that occurred.
-    pub last_error: Option<error::Error>,
-    /// Custom data added by [Config::stats_handler]
-    pub data: String,
+    /// Statistics of all endpoints.
+    pub endpoints: Vec<endpoint::Stats>,
 }
 
 /// Information about service instance.
@@ -108,7 +84,7 @@ pub struct EndpointStats {
 pub struct Info {
     /// Response type.
     #[serde(rename = "type")]
-    pub response_type: String,
+    pub kind: String,
     /// Service name.
     pub name: String,
     /// Service id.
@@ -119,16 +95,8 @@ pub struct Info {
     pub version: String,
     /// All service endpoints.
     pub subjects: Vec<String>,
-}
-
-/// Schema of requests and responses.
-/// Currently, it does not do anything except providing information.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Schema {
-    /// A string/url describing the format of the request payload can be JSON schema etc.
-    pub request: String,
-    /// A string/url describing the format of the request payload can be JSON schema etc.
-    pub response: String,
+    /// Additional metadata
+    pub metadata: HashMap<String, String>,
 }
 
 /// Configuration of the [Service].
@@ -141,17 +109,17 @@ pub struct Config {
     pub description: Option<String>,
     /// A SemVer valid service version.
     pub version: String,
-    /// Request / Response schemas.
-    pub schema: Option<Schema>,
     /// Custom handler for providing the `EndpointStats.data` value.
     pub stats_handler: Option<StatsHandler>,
+    /// Additional service metadata
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 pub struct ServiceBuilder {
     client: Client,
     description: Option<String>,
-    schema: Option<Schema>,
     stats_handler: Option<StatsHandler>,
+    metadata: Option<HashMap<String, String>>,
 }
 
 impl ServiceBuilder {
@@ -159,29 +127,29 @@ impl ServiceBuilder {
         Self {
             client,
             description: None,
-            schema: None,
             stats_handler: None,
+            metadata: None,
         }
     }
 
-    /// Adds description for the service.
+    /// Description for the service.
     pub fn description<S: ToString>(mut self, description: S) -> Self {
         self.description = Some(description.to_string());
         self
     }
 
-    /// Adds schema to the service.
-    pub fn schema(mut self, schema: Schema) -> Self {
-        self.schema = Some(schema);
+    /// Handler for custom service statistics.
+    pub fn stats_handler<F>(mut self, handler: F) -> Self
+    where
+        F: FnMut(String, endpoint::Stats) -> String + Send + Sync + 'static,
+    {
+        self.stats_handler = Some(StatsHandler(Box::new(handler)));
         self
     }
 
-    /// Adds handler for custom service statistics.
-    pub fn stats_handler<F>(mut self, handler: F) -> Self
-    where
-        F: FnMut(String, EndpointStats) -> String + Send + Sync + 'static,
-    {
-        self.stats_handler = Some(StatsHandler(Box::new(handler)));
+    /// Additional service metadata.
+    pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.metadata = Some(metadata);
         self
     }
 
@@ -193,8 +161,8 @@ impl ServiceBuilder {
                 name: name.to_string(),
                 version: version.to_string(),
                 description: self.description,
-                schema: self.schema,
                 stats_handler: self.stats_handler,
+                metadata: self.metadata,
             },
         )
         .await
@@ -230,16 +198,18 @@ pub trait ServiceExt {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::service::ServiceExt;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut service = client.add_service( async_nats::service::Config {
-    ///     name: "generator".to_string(),
-    ///     version: "1.0.0".to_string(),
-    ///     schema: None,
-    ///     description: None,
-    ///     stats_handler: None,
-    /// }).await?;
+    /// let mut service = client
+    ///     .add_service(async_nats::service::Config {
+    ///         name: "generator".to_string(),
+    ///         version: "1.0.0".to_string(),
+    ///         description: None,
+    ///         stats_handler: None,
+    ///         metadata: None,
+    ///     })
+    ///     .await?;
     ///
     /// let mut endpoint = service.endpoint("get").await?;
     ///
@@ -259,13 +229,15 @@ pub trait ServiceExt {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::service::ServiceExt;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut service = client.service_builder()
+    /// let mut service = client
+    ///     .service_builder()
     ///     .description("some service")
     ///     .stats_handler(|endpoint, stats| format!("customstats"))
-    ///     .start("products","1.0.0").await?;
+    ///     .start("products", "1.0.0")
+    ///     .await?;
     ///
     /// let mut endpoint = service.endpoint("get").await?;
     ///
@@ -298,16 +270,18 @@ impl ServiceExt for crate::Client {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
-/// use futures::StreamExt;
 /// use async_nats::service::ServiceExt;
+/// use futures::StreamExt;
 /// let client = async_nats::connect("demo.nats.io").await?;
-/// let mut service = client.add_service( async_nats::service::Config {
-///     name: "generator".to_string(),
-///     version: "1.0.0".to_string(),
-///     schema: None,
-///     description: None,
-///     stats_handler: None,
-/// }).await?;
+/// let mut service = client
+///     .add_service(async_nats::service::Config {
+///         name: "generator".to_string(),
+///         version: "1.0.0".to_string(),
+///         description: None,
+///         stats_handler: None,
+///         metadata: None,
+///     })
+///     .await?;
 ///
 /// let mut endpoint = service.endpoint("get").await?;
 ///
@@ -320,68 +294,12 @@ impl ServiceExt for crate::Client {
 /// ```
 #[derive(Debug)]
 pub struct Service {
-    stats: Arc<Mutex<Stats>>,
+    endpoints_state: Arc<Mutex<Endpoints>>,
     info: Info,
     client: Client,
     handle: JoinHandle<Result<(), Error>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     subjects: Arc<Mutex<Vec<String>>>,
-}
-
-pub struct StatsHandler(pub Box<dyn FnMut(String, EndpointStats) -> String + Send>);
-
-impl std::fmt::Debug for StatsHandler {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Stats handler")
-    }
-}
-
-pub struct Group {
-    prefix: String,
-    stats: Arc<Mutex<Stats>>,
-    client: Client,
-    shutdown_tx: tokio::sync::broadcast::Sender<()>,
-}
-
-impl Group {
-    pub fn group<S: ToString>(&self, prefix: S) -> Group {
-        Group {
-            prefix: prefix.to_string(),
-            stats: self.stats.clone(),
-            client: self.client.clone(),
-            shutdown_tx: self.shutdown_tx.clone(),
-        }
-    }
-    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
-        let subject = subject.to_string();
-        let requests = self
-            .client
-            .queue_subscribe(
-                format!("{}.{subject}", self.prefix),
-                QUEUE_GROUP.to_string(),
-            )
-            .await?;
-        debug!("created service for endpoint {}.{subject}", self.prefix);
-
-        let shutdown_rx = self.shutdown_tx.subscribe();
-
-        let mut stats = self.stats.lock().unwrap();
-        stats
-            .endpoints
-            .entry(subject.clone())
-            .or_insert(EndpointStats {
-                name: subject.clone(),
-                ..Default::default()
-            });
-        Ok(Endpoint {
-            requests,
-            stats: self.stats.clone(),
-            client: self.client.clone(),
-            endpoint: subject,
-            shutdown: Some(shutdown_rx),
-            shutdown_future: None,
-        })
-    }
 }
 
 impl Service {
@@ -404,31 +322,25 @@ impl Service {
         let started = time::OffsetDateTime::now_utc();
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
-            response_type: "io.nats.micro.v1.info_response".to_string(),
+            kind: "io.nats.micro.v1.info_response".to_string(),
             name: config.name.clone(),
             id: id.clone(),
             description: config.description.clone(),
             version: config.version.clone(),
             subjects: Vec::default(),
+            metadata: config.metadata.clone().unwrap_or_default(),
         };
 
         let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
 
         let endpoints = HashMap::new();
-        let endpoint_stats = Arc::new(Mutex::new(Stats { endpoints }));
+        let endpoints_state = Arc::new(Mutex::new(Endpoints { endpoints }));
 
         // create subscriptions for all verbs.
         let mut pings =
             verb_subscription(client.clone(), Verb::Ping, config.name.clone(), id.clone()).await?;
         let mut infos =
             verb_subscription(client.clone(), Verb::Info, config.name.clone(), id.clone()).await?;
-        let mut schemas = verb_subscription(
-            client.clone(),
-            Verb::Schema,
-            config.name.clone(),
-            id.clone(),
-        )
-        .await?;
         let mut stats =
             verb_subscription(client.clone(), Verb::Stats, config.name.clone(), id.clone()).await?;
 
@@ -437,15 +349,8 @@ impl Service {
             let mut stats_callback = config.stats_handler;
             let info = info.clone();
             let subjects = subjects.clone();
-            let endpoint_stats = endpoint_stats.clone();
+            let endpoints_state = endpoints_state.clone();
             let client = client.clone();
-            let schema_json = serde_json::to_vec(&json!({
-                "type": "io.nats.micro.v1.schema_response",
-                "name": config.name.clone(),
-                "id": id.clone(),
-                "version": config.version.clone(),
-            }))
-            .map(Bytes::from)?;
             async move {
                 loop {
                     tokio::select! {
@@ -468,26 +373,21 @@ impl Service {
                             let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
                             client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
                         },
-                        Some(schema_request) = schemas.next() => {
-                            client.publish(schema_request.reply.unwrap(), schema_json.clone()).await?;
-                        },
                         Some(stats_request) = stats.next() => {
                             if let Some(stats_callback) = stats_callback.as_mut() {
-
-                                let mut endpoint_stats_locked = endpoint_stats.lock().unwrap();
+                                let mut endpoint_stats_locked = endpoints_state.lock().unwrap();
                                 for (key, value) in &mut endpoint_stats_locked.endpoints {
-                                    let data = stats_callback.0(key.to_string(), value.clone());
+                                    let data = stats_callback.0(key.to_string(), value.clone().into());
                                     value.data = data;
                                 }
                             }
-
-                            let stats = serde_json::to_vec(&StatsResponse {
-                                response_type: "io.nats.micro.v1.stats_response".to_string(),
+                            let stats = serde_json::to_vec(&Stats {
+                                kind: "io.nats.micro.v1.stats_response".to_string(),
                                 name: info.name.clone(),
                                 id: info.id.clone(),
                                 version: info.version.clone(),
                                 started,
-                                endpoints: endpoint_stats.lock().unwrap().endpoints.values().cloned().collect(),
+                                endpoints: endpoints_state.lock().unwrap().endpoints.values().cloned().map(Into::into).collect(),
                             })?;
                             client.publish(stats_request.reply.unwrap(), stats.into()).await?;
                         },
@@ -498,13 +398,216 @@ impl Service {
             }
         });
         Ok(Service {
-            stats: endpoint_stats,
+            endpoints_state,
             info,
             client,
             handle,
             shutdown_tx,
             subjects,
         })
+    }
+    /// Stops this instance of the [Service].
+    /// If there are more instances of [Services][Service] with the same name, the [Service] will
+    /// be scaled down by one instance. If it was the only running instance, it will effectively
+    /// remove the service entirely.
+    pub async fn stop(self) -> Result<(), Error> {
+        self.shutdown_tx.send(())?;
+        self.handle.abort();
+        Ok(())
+    }
+
+    /// Resets [Stats] of the [Service] instance.
+    pub async fn reset(&mut self) {
+        for value in self.endpoints_state.lock().unwrap().endpoints.values_mut() {
+            value.errors = 0;
+            value.processing_time = Duration::default();
+            value.requests = 0;
+            value.average_processing_time = Duration::default();
+        }
+    }
+
+    /// Returns [Stats] for this service instance.
+    pub async fn stats(&self) -> HashMap<String, endpoint::Stats> {
+        self.endpoints_state
+            .lock()
+            .unwrap()
+            .endpoints
+            .iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned().into()))
+            .collect()
+    }
+
+    /// Returns [Info] for this service instance.
+    pub async fn info(&self) -> Info {
+        self.info.clone()
+    }
+
+    /// Creates a group for endpoints under common prefix prefix.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder().start("service", "1.0.0").await?;
+    ///
+    /// let v1 = service.group("v1");
+    /// let products = v1.endpoint("products").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn group<S: ToString>(&self, prefix: S) -> Group {
+        Group {
+            subjects: self.subjects.clone(),
+            prefix: prefix.to_string(),
+            stats: self.endpoints_state.clone(),
+            client: self.client.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+        }
+    }
+
+    /// Builder for customized [Endpoint] creation.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder().start("service", "1.0.0").await?;
+    ///
+    /// let products = service
+    ///     .endpoint_builder()
+    ///     .name("api")
+    ///     .add("products")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn endpoint_builder(&self) -> EndpointBuilder {
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.endpoints_state.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
+    }
+
+    /// Adds a new endpoint to the [Service].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder().start("service", "1.0.0").await?;
+    ///
+    /// let products = service.endpoint("products").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.endpoints_state.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
+        .add(subject)
+        .await
+    }
+}
+
+pub struct Group {
+    prefix: String,
+    stats: Arc<Mutex<Endpoints>>,
+    client: Client,
+    shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    subjects: Arc<Mutex<Vec<String>>>,
+}
+
+impl Group {
+    /// Creates a group for endpoints under common prefix prefix.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder().start("service", "1.0.0").await?;
+    ///
+    /// let v1 = service.group("v1");
+    /// let products = v1.endpoint("products").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn group<S: ToString>(&self, prefix: S) -> Group {
+        Group {
+            prefix: prefix.to_string(),
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+            subjects: self.subjects.clone(),
+        }
+    }
+
+    /// Adds a new endpoint to the [Service] under current [Group]
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder().start("service", "1.0.0").await?;
+    /// let v1 = service.group("v1");
+    ///
+    /// let products = v1.endpoint("products").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.stats.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
+        .add(format!("{}.{}", self.prefix, subject.to_string()))
+        .await
+    }
+
+    /// Builder for customized [Endpoint] creation under current [Group]
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut service = client.service_builder().start("service", "1.0.0").await?;
+    /// let v1 = service.group("v1");
+    ///
+    /// let products = v1.endpoint_builder().name("api").add("products").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn endpoint_builder(&self) -> EndpointBuilder {
+        EndpointBuilder::new(
+            self.client.clone(),
+            self.stats.clone(),
+            self.shutdown_tx.clone(),
+            self.subjects.clone(),
+        )
     }
 }
 
@@ -530,150 +633,6 @@ type ShutdownReceiverFuture = Pin<
     Box<dyn Future<Output = Result<(), tokio::sync::broadcast::error::RecvError>> + Send + Sync>,
 >;
 
-pub struct Endpoint {
-    requests: Subscriber,
-    stats: Arc<Mutex<Stats>>,
-    client: Client,
-    endpoint: String,
-    shutdown: Option<tokio::sync::broadcast::Receiver<()>>,
-    shutdown_future: Option<ShutdownReceiverFuture>,
-}
-
-impl Stream for Endpoint {
-    type Item = Request;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        trace!("polling for next request");
-        match self.shutdown_future.as_mut() {
-            Some(shutdown) => match shutdown.as_mut().poll(cx) {
-                Poll::Ready(_result) => {
-                    debug!("got stop broadcast");
-                    self.requests
-                        .sender
-                        .try_send(crate::Command::Unsubscribe {
-                            sid: self.requests.sid,
-                            max: None,
-                        })
-                        .ok();
-                }
-                Poll::Pending => {
-                    trace!("stop broadcast still pending");
-                }
-            },
-            None => {
-                let mut receiver = self.shutdown.take().unwrap();
-                self.shutdown_future = Some(Box::pin(async move { receiver.recv().await }));
-            }
-        }
-        trace!("checking for new messages");
-        match self.requests.poll_next_unpin(cx) {
-            Poll::Ready(message) => {
-                debug!("got next message");
-                match message {
-                    Some(message) => Poll::Ready(Some(Request {
-                        issued: Instant::now(),
-                        stats: self.stats.clone(),
-                        client: self.client.clone(),
-                        message,
-                        endpoint: self.endpoint.clone(),
-                    })),
-                    None => Poll::Ready(None),
-                }
-            }
-
-            Poll::Pending => {
-                trace!("still pending for messages");
-                Poll::Pending
-            }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
-    }
-}
-
-impl Endpoint {
-    pub async fn stop(&mut self) -> Result<(), std::io::Error> {
-        self.requests
-            .unsubscribe()
-            .await
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "failed to unsubscribe"))
-    }
-}
-
-impl Service {
-    /// Stops this instance of the [Service].
-    /// If there are more instances of [Services][Service] with the same name, the [Service] will
-    /// be scaled down by one instance. If it was the only running instance, it will effectively
-    /// remove the service entirely.
-    pub async fn stop(self) -> Result<(), Error> {
-        self.shutdown_tx.send(())?;
-        self.handle.abort();
-        Ok(())
-    }
-
-    /// Resets [Stats] of the [Service] instance.
-    pub async fn reset(&mut self) {
-        for value in self.stats.lock().unwrap().endpoints.values_mut() {
-            value.errors = 0;
-            value.processing_time = Duration::default();
-            value.requests = 0;
-            value.average_processing_time = Duration::default();
-        }
-    }
-
-    /// Returns [Stats] for this service instance.
-    pub async fn stats(&self) -> Stats {
-        self.stats.lock().unwrap().clone()
-    }
-
-    /// Returns [Info] for this service instance.
-    pub async fn info(&self) -> Info {
-        self.info.clone()
-    }
-
-    pub fn group<S: ToString>(&self, prefix: S) -> Group {
-        Group {
-            prefix: prefix.to_string(),
-            stats: self.stats.clone(),
-            client: self.client.clone(),
-            shutdown_tx: self.shutdown_tx.clone(),
-        }
-    }
-    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
-        let subject = subject.to_string();
-        let requests = self
-            .client
-            .queue_subscribe(subject.clone(), QUEUE_GROUP.to_string())
-            .await?;
-        debug!("created service for endpoint {subject}");
-
-        let shutdown_rx = self.shutdown_tx.subscribe();
-
-        let mut stats = self.stats.lock().unwrap();
-        stats
-            .endpoints
-            .entry(subject.clone())
-            .or_insert(EndpointStats {
-                name: subject.clone(),
-                ..Default::default()
-            });
-        self.subjects.lock().unwrap().push(subject.clone());
-        Ok(Endpoint {
-            requests,
-            stats: self.stats.clone(),
-            client: self.client.clone(),
-            endpoint: subject,
-            shutdown: Some(shutdown_rx),
-            shutdown_future: None,
-        })
-    }
-}
-
 /// Request returned by [Service] [Stream][futures::Stream].
 #[derive(Debug)]
 pub struct Request {
@@ -681,7 +640,7 @@ pub struct Request {
     client: Client,
     pub message: Message,
     endpoint: String,
-    stats: Arc<Mutex<Stats>>,
+    stats: Arc<Mutex<Endpoints>>,
 }
 
 impl Request {
@@ -692,15 +651,15 @@ impl Request {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
     /// use async_nats::service::ServiceExt;
+    /// use futures::StreamExt;
     /// # let client = async_nats::connect("demo.nats.io").await?;
     /// # let mut service = client.add_service(async_nats::service::Config {
     /// #     name: "generator".to_string(),
     /// #     version: "1.0.0".to_string(),
-    /// #     schema: None,
     /// #     description: None,
-    ///     stats_handler: None,
+    /// #    stats_handler: None,
+    /// #    metadata: None,
     /// # }).await?;
     ///
     /// let mut endpoint = service.endpoint("endpoint").await?;
@@ -735,10 +694,90 @@ impl Request {
         let elapsed = self.issued.elapsed();
         let mut stats = self.stats.lock().unwrap();
         // let mut stats = stats.endpoints.entry(key)
-        let mut stats = stats.endpoints.get_mut(self.endpoint.as_str()).unwrap();
+        let stats = stats.endpoints.get_mut(self.endpoint.as_str()).unwrap();
         stats.requests += 1;
         stats.processing_time += elapsed;
         stats.average_processing_time = stats.processing_time.checked_div(2).unwrap();
         result
+    }
+}
+
+#[derive(Debug)]
+pub struct EndpointBuilder {
+    client: Client,
+    stats: Arc<Mutex<Endpoints>>,
+    shutdown_tx: Sender<()>,
+    name: Option<String>,
+    metadata: Option<HashMap<String, String>>,
+    subjects: Arc<Mutex<Vec<String>>>,
+}
+
+impl EndpointBuilder {
+    fn new(
+        client: Client,
+        stats: Arc<Mutex<Endpoints>>,
+        shutdown_tx: Sender<()>,
+        subjects: Arc<Mutex<Vec<String>>>,
+    ) -> EndpointBuilder {
+        EndpointBuilder {
+            client,
+            stats,
+            subjects,
+            shutdown_tx,
+            name: None,
+            metadata: None,
+        }
+    }
+
+    /// Name of the [Endpoint]. By default subject of the endpoint is used.
+    pub fn name<S: ToString>(mut self, name: S) -> EndpointBuilder {
+        self.name = Some(name.to_string());
+        self
+    }
+
+    /// Metadata specific for the [Endpoint].
+    pub fn metadata(mut self, metadata: HashMap<String, String>) -> EndpointBuilder {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Finalizes the builder and adds the [Endpoint].
+    pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, Error> {
+        let subject = subject.to_string();
+        let name = self.name.clone().unwrap_or_else(|| subject.clone());
+        let requests = self
+            .client
+            .queue_subscribe(subject.clone(), QUEUE_GROUP.to_string())
+            .await?;
+        debug!("created service for endpoint {subject}");
+
+        let shutdown_rx = self.shutdown_tx.subscribe();
+
+        let mut stats = self.stats.lock().unwrap();
+        stats
+            .endpoints
+            .entry(subject.clone())
+            .or_insert(endpoint::Inner {
+                name,
+                metadata: self.metadata.unwrap_or_default(),
+                ..Default::default()
+            });
+        self.subjects.lock().unwrap().push(subject.clone());
+        Ok(Endpoint {
+            requests,
+            stats: self.stats.clone(),
+            client: self.client.clone(),
+            endpoint: subject.clone(),
+            shutdown: Some(shutdown_rx),
+            shutdown_future: None,
+        })
+    }
+}
+
+pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> String + Send>);
+
+impl std::fmt::Debug for StatsHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Stats handler")
     }
 }

@@ -11,13 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! JetStream is a NATS built-in persistence layer providing
-//! [Streams][crate::jetstream::stream::Stream] with *at least once*
-//! and *exactly once* semantics.
+//! JetStream is a built-in persistence layer for NATS that provides powerful
+//! [stream][crate::jetstream::stream::Stream]-based messaging capabilities,
+//! with integrated support for both *at least once* and *exactly once* delivery semantics.
 //!
-//! To start, create a new [Context] which is an entrypoint to `JetStream` API.
+//! To begin using JetStream, you need to create a new [Context] object, which serves as the entry point to the JetStream API.
 //!
 //! # Examples
+//!
+//! Below are some examples that demonstrate how to use JetStream for publishing and consuming messages.
+//!
+//! ### Publishing and Consuming Messages
+//!
+//! This example demonstrates how to publish messages to a JetStream stream and consume them using a pull-based consumer.
 //!
 //! ```no_run
 //! # #[tokio::main]
@@ -25,53 +31,90 @@
 //! use futures::StreamExt;
 //! use futures::TryStreamExt;
 //!
+//! // Connect to NATS server
 //! let client = async_nats::connect("localhost:4222").await?;
+//!
+//! // Create a JetStream instance
 //! let jetstream = async_nats::jetstream::new(client);
 //!
-//! let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-//!     name: "events".to_string(),
-//!     max_messages: 10_000,
-//!     ..Default::default()
-//! }).await?;
+//! // Get or create a stream
+//! let stream = jetstream
+//!     .get_or_create_stream(async_nats::jetstream::stream::Config {
+//!         name: "events".to_string(),
+//!         max_messages: 10_000,
+//!         ..Default::default()
+//!     })
+//!     .await?;
 //!
-//! jetstream.publish("events".to_string(), "data".into()).await?;
+//! // Publish a message to the stream
+//! jetstream
+//!     .publish("events".to_string(), "data".into())
+//!     .await?;
 //!
-//! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-//!     durable_name: Some("consumer".to_string()),
-//!     ..Default::default()
-//! }).await?;
+//! // Get or create a pull-based consumer
+//! let consumer = stream
+//!     .get_or_create_consumer(
+//!         "consumer",
+//!         async_nats::jetstream::consumer::pull::Config {
+//!             durable_name: Some("consumer".to_string()),
+//!             ..Default::default()
+//!         },
+//!     )
+//!     .await?;
 //!
+//! // Consume messages from the consumer
 //! let mut messages = consumer.messages().await?.take(100);
 //! while let Ok(Some(message)) = messages.try_next().await {
-//!   println!("message receiver: {:?}", message);
-//!   message.ack().await?;
+//!     println!("message receiver: {:?}", message);
+//!     message.ack().await?;
 //! }
+//!
 //! Ok(())
 //! # }
 //! ```
 //!
+//! ### Consuming Messages in Batches
+//!
+//! This example demonstrates how to consume messages in batches from a JetStream stream using a sequence-based consumer.
+//!
 //! ```no_run
 //! # #[tokio::main]
 //! # async fn mains() -> Result<(), async_nats::Error> {
 //! use futures::StreamExt;
 //! use futures::TryStreamExt;
 //!
+//! // Connect to NATS server
 //! let client = async_nats::connect("localhost:4222").await?;
+//!
+//! // Create a JetStream instance
 //! let jetstream = async_nats::jetstream::new(client);
 //!
-//! let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-//!     name: "events".to_string(),
-//!     max_messages: 10_000,
-//!     ..Default::default()
-//! }).await?;
+//! // Get or create a stream
+//! let stream = jetstream
+//!     .get_or_create_stream(async_nats::jetstream::stream::Config {
+//!         name: "events".to_string(),
+//!         max_messages: 10_000,
+//!         ..Default::default()
+//!     })
+//!     .await?;
 //!
-//! jetstream.publish("events".to_string(), "data".into()).await?;
+//! // Publish a message to the stream
+//! jetstream
+//!     .publish("events".to_string(), "data".into())
+//!     .await?;
 //!
-//! let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-//!     durable_name: Some("consumer".to_string()),
-//!     ..Default::default()
-//! }).await?;
+//! // Get or create a pull-based consumer
+//! let consumer = stream
+//!     .get_or_create_consumer(
+//!         "consumer",
+//!         async_nats::jetstream::consumer::pull::Config {
+//!             durable_name: Some("consumer".to_string()),
+//!             ..Default::default()
+//!         },
+//!     )
+//!     .await?;
 //!
+//! // Consume messages from the consumer in batches
 //! let mut batches = consumer.sequence(50)?.take(10);
 //! while let Ok(Some(mut batch)) = batches.try_next().await {
 //!     while let Some(Ok(message)) = batch.next().await {
@@ -79,6 +122,7 @@
 //!         message.ack().await?;
 //!     }
 //! }
+//!
 //! Ok(())
 //! # }
 //! ```
@@ -88,6 +132,7 @@ use crate::Client;
 pub mod account;
 pub mod consumer;
 pub mod context;
+mod errors;
 pub mod kv;
 pub mod message;
 pub mod object_store;
@@ -96,6 +141,8 @@ pub mod response;
 pub mod stream;
 
 pub use context::Context;
+pub use errors::Error;
+pub use errors::ErrorCode;
 pub use message::{AckKind, Message};
 
 /// Creates a new JetStream [Context] that provides JetStream API for managing and using [Streams][crate::jetstream::stream::Stream],
@@ -110,7 +157,9 @@ pub use message::{AckKind, Message};
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream
+///     .publish("subject".to_string(), "data".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -129,7 +178,9 @@ pub fn new(client: Client) -> Context {
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::with_domain(client, "hub");
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream
+///     .publish("subject".to_string(), "data".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -148,7 +199,9 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::with_prefix(client, "JS.acc@hub.API");
 ///
-/// jetstream.publish("subject".to_string(), "data".into()).await?;
+/// jetstream
+///     .publish("subject".to_string(), "data".into())
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```

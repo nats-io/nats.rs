@@ -12,11 +12,10 @@
 // limitations under the License.
 //
 //! Publish `JetStream` messages.
-use serde::{Deserialize, Serialize};
-use std::ops::Not;
+use serde::Deserialize;
 
 /// `PublishAck` is an acknowledgment received after successfully publishing a message.
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
 pub struct PublishAck {
     /// Name of stream the message was published to.
     pub stream: String,
@@ -24,9 +23,9 @@ pub struct PublishAck {
     #[serde(rename = "seq")]
     pub sequence: u64,
     /// Domain the message was published to
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub domain: String,
     /// True if the published message was determined to be a duplicate, false otherwise.
-    #[serde(default, skip_serializing_if = "Not::not")]
+    #[serde(default)]
     pub duplicate: bool,
 }
