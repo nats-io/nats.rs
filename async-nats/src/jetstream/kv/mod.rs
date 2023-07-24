@@ -689,7 +689,13 @@ impl Store {
             return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
         }
 
-        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
+        let mut subject = String::new();
+        if self.use_jetstream_prefix {
+            subject.push_str(&self.stream.context.prefix);
+            subject.push('.');
+        }
+        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
+        subject.push_str(key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
