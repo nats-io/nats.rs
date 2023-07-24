@@ -132,9 +132,10 @@ impl futures::Stream for Messages {
                 .poll_unpin(cx)
             {
                 Poll::Ready(_) => {
+                    self.heartbeat_sleep = None;
                     return Poll::Ready(Some(Err(MessagesError::new(
                         MessagesErrorKind::MissingHeartbeat,
-                    ))))
+                    ))));
                 }
                 Poll::Pending => (),
             }
@@ -569,9 +570,10 @@ impl<'a> futures::Stream for Ordered<'a> {
             .poll_unpin(cx)
         {
             Poll::Ready(_) => {
+                self.heartbeat_sleep = None;
                 return Poll::Ready(Some(Err(OrderedError::new(
                     OrderedErrorKind::MissingHeartbeat,
-                ))))
+                ))));
             }
             Poll::Pending => (),
         }
