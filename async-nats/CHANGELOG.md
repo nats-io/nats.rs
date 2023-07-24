@@ -1,3 +1,28 @@
+# 0.31.0
+This release focuses on improvements of heartbeats in JetStream Consumers.
+
+Heartbeats are a tool that tells the user if the given consumer is healthy but does not get any messages or if the reason for no message is an actual problem.
+However, if the user was not polling the `Stream` future for the next messages for a long time (because it was slowly processing messages), that could trigger idle heartbeats, as the library could not see the heartbeat messages without messages being polled.
+
+This release fixes it by starting the idle heartbeat timer only after Stream future is polled (which usually means calling `messages.next().await`).
+
+## What's Changed
+* Fix unwrap from `HeaderName::from_str` call by @caspervonb in https://github.com/nats-io/nats.rs/pull/1032
+* Use idiomatic method for writing `Option` and accessing inner `T` by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1034
+* Add missing sequence number reset by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1035
+* Fix header name range validation by @caspervonb in https://github.com/nats-io/nats.rs/pull/1031
+* Simplify consumer checking logic by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1033
+* Fix millis -> nanos typo in `BatchConfig` `expiration` by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1037
+* Fix kv purge with prefix (thanks @brooksmtownsend for reporting it!) by @Jarema in https://github.com/nats-io/nats.rs/pull/1055
+* Remove memcpy in object store PUT by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1039
+* Drop subscription on list done by @Jarema in https://github.com/nats-io/nats.rs/pull/1041
+* Improve push consumer handling when encountering slow consumers by @Jarema in https://github.com/nats-io/nats.rs/pull/1044
+* Rework idle heartbeat for pull consumers by @Jarema in https://github.com/nats-io/nats.rs/pull/1046
+* Rework push consumer heartbeats handling by @Jarema in https://github.com/nats-io/nats.rs/pull/1048
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.30.0...async-nats/v0.30.1
+
 # 0.30.0
 ## Overview
 This is a big release that introduces almost all breaking changes and API refinements before 1.0.0.
