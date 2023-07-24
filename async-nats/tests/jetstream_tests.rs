@@ -1650,6 +1650,17 @@ mod jetstream {
             messages.next().await.unwrap().unwrap_err().kind(),
             async_nats::jetstream::consumer::push::MessagesErrorKind::MissingHeartbeat
         );
+        stream
+            .create_consumer(consumer::push::Config {
+                deliver_subject: "delivery".to_string(),
+                durable_name: Some("delete_me".to_string()),
+                idle_heartbeat: Duration::from_secs(5),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        messages.next().await.unwrap().unwrap();
     }
 
     #[tokio::test]
