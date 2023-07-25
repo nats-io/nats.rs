@@ -136,7 +136,7 @@ rustls
 Acker
 EndpointSchema
 auth
-filter_subject
 filter_subjects
 rollup
 IoT
+RttError

@@ -485,6 +485,35 @@ impl Client {
         Ok(())
     }
 
+    /// Calculates the round trip time between this client and the server,
+    /// if the server is currently connected.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let rtt = client.rtt().await?;
+    /// println!("server rtt: {:?}", rtt);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rtt(&self) -> Result<Duration, RttError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        self.sender.send(Command::Rtt { result: tx }).await?;
+
+        let rtt = rx
+            .await
+            // first handle rx error
+            .map_err(|err| RttError(Box::new(err)))?
+            // second handle the actual rtt error
+            .map_err(|err| RttError(Box::new(err)))?;
+
+        Ok(rtt)
+    }
+
     /// Returns the current state of the connection.
     ///
     /// # Examples
@@ -682,5 +711,16 @@ impl From<PublishError> for RequestError {
 impl From<SubscribeError> for RequestError {
     fn from(e: SubscribeError) -> Self {
         RequestError::with_source(RequestErrorKind::Other, e)
+    }
+}
+
+/// Error returned when doing a round-trip time measurement fails.
+#[derive(Debug, Error)]
+#[error("failed to measure round-trip time: {0}")]
+pub struct RttError(#[source] Box<dyn std::error::Error + Send + Sync>);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for RttError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        RttError(Box::new(err))
     }
 }

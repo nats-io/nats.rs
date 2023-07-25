@@ -124,6 +124,7 @@ use thiserror::Error;
 use futures::future::FutureExt;
 use futures::select;
 use futures::stream::Stream;
+use std::time::Instant;
 use tracing::{debug, error};
 
 use core::fmt;
@@ -280,6 +281,9 @@ pub(crate) enum Command {
         result: oneshot::Sender<Result<(), io::Error>>,
     },
     TryFlush,
+    Rtt {
+        result: oneshot::Sender<Result<Duration, io::Error>>,
+    },
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -323,6 +327,9 @@ pub(crate) struct ConnectionHandler {
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
     flush_interval: Interval,
+    last_ping_time: Option<Instant>,
+    last_pong_time: Option<Instant>,
+    rtt_senders: Vec<oneshot::Sender<Result<Duration, io::Error>>>,
 }
 
 impl ConnectionHandler {
@@ -347,6 +354,9 @@ impl ConnectionHandler {
             info_sender,
             ping_interval,
             flush_interval,
+            last_ping_time: None,
+            last_pong_time: None,
+            rtt_senders: Vec::new(),
         }
     }
 
@@ -425,6 +435,22 @@ impl ConnectionHandler {
             }
             ServerOp::Pong => {
                 debug!("received PONG");
+                if self.pending_pings == 1 {
+                    self.last_pong_time = Some(Instant::now());
+
+                    while let Some(sender) = self.rtt_senders.pop() {
+                        if let (Some(ping), Some(pong)) = (self.last_ping_time, self.last_pong_time)
+                        {
+                            let rtt = pong.duration_since(ping);
+                            sender.send(Ok(rtt)).map_err(|_| {
+                                io::Error::new(
+                                    io::ErrorKind::Other,
+                                    "one shot failed to be received",
+                                )
+                            })?;
+                        }
+                    }
+                }
                 self.pending_pings = self.pending_pings.saturating_sub(1);
             }
             ServerOp::Error(error) => {
@@ -538,6 +564,14 @@ impl ConnectionHandler {
                     }
                 }
             }
+            Command::Rtt { result } => {
+                self.rtt_senders.push(result);
+
+                if self.pending_pings == 0 {
+                    // do a ping and expect a pong - will calculate rtt when handling the pong
+                    self.handle_ping().await?;
+                }
+            }
             Command::Flush { result } => {
                 if let Err(_err) = self.handle_flush().await {
                     if let Err(err) = self.handle_disconnect().await {
@@ -612,8 +646,39 @@ impl ConnectionHandler {
         Ok(())
     }
 
+    async fn handle_ping(&mut self) -> Result<(), io::Error> {
+        debug!(
+            "PING command. Pending pings {}, max pings {}",
+            self.pending_pings, MAX_PENDING_PINGS
+        );
+        self.pending_pings += 1;
+        self.ping_interval.reset();
+
+        if self.pending_pings > MAX_PENDING_PINGS {
+            debug!(
+                "pending pings {}, max pings {}. disconnecting",
+                self.pending_pings, MAX_PENDING_PINGS
+            );
+            self.handle_disconnect().await?;
+        }
+
+        if self.pending_pings == 1 {
+            // start the clock for calculating round trip time
+            self.last_ping_time = Some(Instant::now());
+        }
+
+        if let Err(_err) = self.connection.write_op(&ClientOp::Ping).await {
+            self.handle_disconnect().await?;
+        }
+
+        self.handle_flush().await?;
+        Ok(())
+    }
+
     async fn handle_disconnect(&mut self) -> io::Result<()> {
         self.pending_pings = 0;
+        self.last_ping_time = None;
+        self.last_pong_time = None;
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
         self.handle_reconnect().await?;

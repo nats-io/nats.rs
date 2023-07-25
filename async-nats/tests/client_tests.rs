@@ -867,4 +867,15 @@ mod client {
         .await
         .unwrap();
     }
+
+    #[tokio::test]
+    async fn rtt() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let rtt = client.rtt().await.unwrap();
+
+        println!("rtt: {:?}", rtt);
+        assert!(rtt.as_nanos() > 0);
+    }
 }
