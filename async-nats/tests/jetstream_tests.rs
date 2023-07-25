@@ -156,13 +156,17 @@ mod jetstream {
         let info = stream.info().await.unwrap();
         assert_eq!(2, info.state.messages);
 
-        context
-            .publish("foo".to_string(), "data".into())
-            .expected_last_message_id("invalid")
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
+        assert_eq!(
+            context
+                .publish("foo".to_string(), "data".into())
+                .expected_last_message_id("invalid")
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastMessageId
+        );
 
         let info = stream.info().await.unwrap();
         assert_eq!(2, info.state.messages);
@@ -178,6 +182,19 @@ mod jetstream {
         let info = stream.info().await.unwrap();
         assert_eq!(3, info.state.messages);
 
+        // 3 messages should be there, so this should error
+        assert_eq!(
+            context
+                .publish("foo".into(), "data".into())
+                .expected_last_sequence(2)
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
+
         context
             .publish("bar".to_string(), "data".into())
             .expected_last_sequence(3)
@@ -189,38 +206,56 @@ mod jetstream {
         let info = stream.info().await.unwrap();
         assert_eq!(4, info.state.messages);
 
+        // 4 messages should be there, so this should error
+        assert_eq!(
+            context
+                .publish("foo".into(), "data".into())
+                .expected_last_sequence(3)
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
+
+        // check if it works for the other subjects in the stream.
         context
-            .publish("foo".to_string(), "data".into())
-            .expected_last_subject_sequence(3)
+            .publish("baz".into(), "data".into())
+            .expected_last_subject_sequence(0)
             .await
             .unwrap()
             .await
             .unwrap();
 
-        let info = stream.info().await.unwrap();
-        assert_eq!(5, info.state.messages);
-
-        context
-            .publish("foo".to_string(), "data".into())
-            .expected_last_sequence(1)
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
-
-        let info = stream.info().await.unwrap();
-        assert_eq!(5, info.state.messages);
-
-        context
-            .publish("foo".to_string(), "data".into())
-            .expected_last_subject_sequence(1)
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
+        // sequence is now 1, so this should error
+        assert_eq!(
+            context
+                .publish("baz".into(), "data".into())
+                .expected_last_subject_sequence(0)
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
 
         let info = stream.info().await.unwrap();
         assert_eq!(5, info.state.messages);
+
+        // 5 messages should be there, so this should error
+        assert_eq!(
+            context
+                .publish("foo".into(), "data".into())
+                .expected_last_sequence(4)
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
 
         let subjects = ["foo", "bar", "baz"];
         for subject in subjects {
@@ -232,13 +267,17 @@ mod jetstream {
                 .await
                 .unwrap();
 
-            context
-                .publish(subject.into(), "data".into())
-                .expected_stream("INVALID")
-                .await
-                .unwrap()
-                .await
-                .unwrap_err();
+            assert_eq!(
+                context
+                    .publish(subject.into(), "data".into())
+                    .expected_stream("INVALID")
+                    .await
+                    .unwrap()
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                PublishErrorKind::Other
+            );
         }
     }
 
