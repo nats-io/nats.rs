@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,12 +12,14 @@
 // limitations under the License.
 
 //! A Core NATS message.
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
+
 use crate::header::HeaderMap;
 use crate::status::StatusCode;
-use bytes::Bytes;
 
 /// A Core NATS message.
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     /// Subject to which message is published to.
     pub subject: String,

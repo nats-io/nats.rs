@@ -114,7 +114,6 @@
 //! ```
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(test, deny(warnings))]
 #![cfg_attr(
     feature = "fault_injection",
     deny(
@@ -188,7 +187,9 @@
     clippy::wildcard_enum_match_arm,
     clippy::module_name_repetitions
 )]
-
+// As this is a deprecated client, we don't want warnings from new lints to make CI red.
+#![allow(clippy::all)]
+#![allow(warnings)]
 /// Async-enabled NATS client.
 pub mod asynk;
 

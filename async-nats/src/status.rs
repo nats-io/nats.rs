@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -20,6 +20,8 @@ use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU16;
 use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
 
 /// A possible error value when converting a `StatusCode` from a `u16` or `&str`
 ///
@@ -63,7 +65,7 @@ impl InvalidStatusCode {
 /// assert_eq!(StatusCode::OK.as_u16(), 200);
 /// assert!(StatusCode::OK.is_success());
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct StatusCode(NonZeroU16);
 
 impl StatusCode {

@@ -13,9 +13,9 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::str::from_utf8;
+    use std::{collections::HashMap, str::from_utf8};
 
-    use async_nats::service::{Info, ServiceExt, StatsResponse};
+    use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures::StreamExt;
     use tracing::debug;
 
@@ -25,13 +25,8 @@ mod service {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         // not semver compatible version string.
         let err_kind = client
-            .add_service(async_nats::service::Config {
-                name: "serviceA".to_string(),
-                description: None,
-                version: "1.0.0.1".to_string(),
-                schema: None,
-                stats_handler: None,
-            })
+            .service_builder()
+            .start("serviceA", "1.0.0.1")
             .await
             .unwrap_err()
             .downcast::<std::io::Error>()
@@ -41,13 +36,8 @@ mod service {
 
         // not semver compatible version string.
         let err_kind = client
-            .add_service(async_nats::service::Config {
-                name: "serviceB".to_string(),
-                description: None,
-                version: "beta-1.0.0".to_string(),
-                schema: None,
-                stats_handler: None,
-            })
+            .service_builder()
+            .start("serviceB", "beta-1.0.0")
             .await
             .unwrap_err()
             .downcast::<std::io::Error>()
@@ -61,8 +51,8 @@ mod service {
                 name: "service.B".to_string(),
                 description: None,
                 version: "1.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap_err()
@@ -77,8 +67,8 @@ mod service {
                 name: "service B".to_string(),
                 description: None,
                 version: "1.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap_err()
@@ -86,6 +76,60 @@ mod service {
             .unwrap()
             .kind();
         assert_eq!(std::io::ErrorKind::InvalidInput, err_kind);
+    }
+
+    #[tokio::test]
+    async fn options() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let metadata = HashMap::from([
+            ("key".to_string(), "value".to_string()),
+            ("other".to_string(), "value".to_string()),
+        ]);
+        let endpoint_metadata = HashMap::from([("endpoint".to_string(), "endpoint".to_string())]);
+
+        client
+            .service_builder()
+            .metadata(metadata.clone())
+            .start("serviceA", "1.0.0")
+            .await
+            .unwrap()
+            .endpoint_builder()
+            .name("name")
+            .metadata(endpoint_metadata.clone())
+            .add("products")
+            .await
+            .unwrap();
+
+        let info_reply = client.new_inbox();
+        let mut infos = client.subscribe(info_reply.clone()).await.unwrap();
+        client
+            .publish_with_reply("$SRV.INFO".to_string(), info_reply, "".into())
+            .await
+            .unwrap();
+        let info = infos
+            .next()
+            .await
+            .map(|message| serde_json::from_slice::<service::Info>(&message.payload).unwrap())
+            .unwrap();
+        assert_eq!(metadata, info.metadata);
+        //TODO: test rest of fields
+
+        let reply = client.new_inbox();
+        let mut responses = client.subscribe(reply.clone()).await.unwrap();
+        client
+            .publish_with_reply("$SRV.STATS".to_string(), reply, "".into())
+            .await
+            .unwrap();
+
+        let mut stats = responses
+            .next()
+            .await
+            .map(|message| serde_json::from_slice::<service::Stats>(&message.payload).unwrap())
+            .unwrap();
+
+        let endpoint_stats = stats.endpoints.pop().unwrap();
+        assert_eq!(endpoint_stats.metadata, endpoint_metadata);
     }
 
     #[tokio::test]
@@ -97,8 +141,8 @@ mod service {
                 name: "serviceA".to_string(),
                 description: None,
                 version: "1.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -108,8 +152,8 @@ mod service {
                 name: "serviceB".to_string(),
                 description: None,
                 version: "2.0.0".to_string(),
-                schema: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -133,9 +177,9 @@ mod service {
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                schema: None,
                 description: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -172,9 +216,9 @@ mod service {
             .add_service(async_nats::service::Config {
                 name: "serviceA".to_string(),
                 version: "1.0.0".to_string(),
-                schema: None,
                 description: None,
                 stats_handler: None,
+                metadata: None,
             })
             .await
             .unwrap();
@@ -229,7 +273,7 @@ mod service {
         let stats = client
             .request("$SRV.STATS".into(), "".into())
             .await
-            .map(|message| serde_json::from_slice::<StatsResponse>(&message.payload))
+            .map(|message| serde_json::from_slice::<Stats>(&message.payload))
             .unwrap()
             .unwrap();
         let requests = stats
@@ -245,7 +289,6 @@ mod service {
         assert!(service
             .stats()
             .await
-            .endpoints
             .get("products")
             .unwrap()
             .last_error

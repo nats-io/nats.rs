@@ -1,3 +1,118 @@
+# 0.31.0
+This release focuses on improvements of heartbeats in JetStream Consumers.
+
+Heartbeats are a tool that tells the user if the given consumer is healthy but does not get any messages or if the reason for no message is an actual problem.
+However, if the user was not polling the `Stream` future for the next messages for a long time (because it was slowly processing messages), that could trigger idle heartbeats, as the library could not see the heartbeat messages without messages being polled.
+
+This release fixes it by starting the idle heartbeat timer only after Stream future is polled (which usually means calling `messages.next().await`).
+
+## What's Changed
+* Fix unwrap from `HeaderName::from_str` call by @caspervonb in https://github.com/nats-io/nats.rs/pull/1032
+* Use idiomatic method for writing `Option` and accessing inner `T` by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1034
+* Add missing sequence number reset by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1035
+* Fix header name range validation by @caspervonb in https://github.com/nats-io/nats.rs/pull/1031
+* Simplify consumer checking logic by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1033
+* Fix millis -> nanos typo in `BatchConfig` `expiration` by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1037
+* Fix kv purge with prefix (thanks @brooksmtownsend for reporting it!) by @Jarema in https://github.com/nats-io/nats.rs/pull/1055
+* Remove memcpy in object store PUT by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1039
+* Drop subscription on list done by @Jarema in https://github.com/nats-io/nats.rs/pull/1041
+* Improve push consumer handling when encountering slow consumers by @Jarema in https://github.com/nats-io/nats.rs/pull/1044
+* Rework idle heartbeat for pull consumers by @Jarema in https://github.com/nats-io/nats.rs/pull/1046
+* Rework push consumer heartbeats handling by @Jarema in https://github.com/nats-io/nats.rs/pull/1048
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.30.0...async-nats/v0.30.1
+
+# 0.30.0
+## Overview
+This is a big release that introduces almost all breaking changes and API refinements before 1.0.0.
+The last two pending breaking items are: 
+* Improved builders based on https://github.com/nats-io/nats.rs/discussions/828
+* Introduce a `Subject` type (still discussed)
+
+## Breaking Changes
+* Update Service for parity with ADR by @Jarema in https://github.com/nats-io/nats.rs/pull/965
+* Remove schema and api_url from Service API by @Jarema in https://github.com/nats-io/nats.rs/pull/972
+* Add concrete error types to JetStream by @Jarema in https://github.com/nats-io/nats.rs/pull/874
+* Add concrete errors to KV by @Jarema in https://github.com/nats-io/nats.rs/pull/1014
+* Add concrete errors to Object Store by @Jarema in https://github.com/nats-io/nats.rs/pull/1015
+* Add Pull Consumer concrete errors by @Jarema in https://github.com/nats-io/nats.rs/pull/1009
+* Use `Bytes` for key-value payloads by @caspervonb in https://github.com/nats-io/nats.rs/pull/939
+* Use u64 instead of usize for nanoseconds by @MJayat in https://github.com/nats-io/nats.rs/pull/901
+* Prefer returning `&str` over String where applicable by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/878
+* Change `stream::Config::duplicate_window` to `Duration` by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/1023
+
+## Added
+* Add ordered pull consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/916
+* Add `jetstream::Message` `Acker` by @Jarema in https://github.com/nats-io/nats.rs/pull/938
+* Add Context::get_consumer_from_stream by @Jarema in https://github.com/nats-io/nats.rs/pull/502
+* Add custom auth callback by @Jarema in https://github.com/nats-io/nats.rs/pull/997
+* Add custom tls config option by @Jarema in https://github.com/nats-io/nats.rs/pull/903
+* Add `watch_with_history` to KV store by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/902
+* Implement AsRef<str> for HeaderName by @matthiasbeyer in https://github.com/nats-io/nats.rs/pull/921
+* Implement `fmt::Display` for `HeaderName` by @caspervonb in https://github.com/nats-io/nats.rs/pull/924
+* Derive `Clone` for `Message` by @mgrachev in https://github.com/nats-io/nats.rs/pull/975
+* Add max_bytes for pull consumer config by @piotrpio in https://github.com/nats-io/nats.rs/pull/992
+* Add inactive threshold for pull consumer by @paulgb in https://github.com/nats-io/nats.rs/pull/994
+* Add const representation for standard header names by @caspervonb in https://github.com/nats-io/nats.rs/pull/946
+* Add static representation for custom header names by @caspervonb in https://github.com/nats-io/nats.rs/pull/967
+* Add `reconnect_delay_callback` to `ConnectOptions` by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/962
+* Makes `Message` serialize/deserialize by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/998
+
+## Fixed
+* Disconnect if pending pings is more than max pings by @caspervonb in https://github.com/nats-io/nats.rs/pull/956
+* Fix serialization of `object_store::ObjectInfo` fields by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/895
+* Fix ordered consumer handling for stream sequence and heartbeats by @Jarema in https://github.com/nats-io/nats.rs/pull/961
+* Canonicalize `header::NATS_LAST_STREAM` by @caspervonb in https://github.com/nats-io/nats.rs/pull/948
+* Fix KV update so that it works properly with a JS domain by @protochron in https://github.com/nats-io/nats.rs/pull/1000
+* Fix object store compatibility issue with Go implementation by @tinou98 in https://github.com/nats-io/nats.rs/pull/984
+* Drop subscription on object read done by @Jarema in https://github.com/nats-io/nats.rs/pull/1011
+
+## Changed
+* Make the current `Error` type work with anyhow by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1004
+* Remove collect to Vec in try_read_op by @YaZasnyal in https://github.com/nats-io/nats.rs/pull/894
+* Remove unnecessary clone for publish payloads by @YaZasnyal in https://github.com/nats-io/nats.rs/pull/893
+* Remove extra whitespaces by @mgrachev in https://github.com/nats-io/nats.rs/pull/904
+
+## What's Changed
+* Optimize read buffer with capacity to reduce allocations by @YaZasnyal in https://github.com/nats-io/nats.rs/pull/888
+* Make SubscribeError public by @Jarema in https://github.com/nats-io/nats.rs/pull/899
+* Remove a few redundant allocations by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/876
+* Update `base64` crate and use it in place of `base64-url` by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/871
+* Make `client` module public by @caspervonb in https://github.com/nats-io/nats.rs/pull/968
+* Allow multiple auth methods by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/937
+* Update nkeys to v0.3.0 by @vados-cosmonic in https://github.com/nats-io/nats.rs/pull/995
+
+## Misc
+* Make `ClientOp` private by @caspervonb in https://github.com/nats-io/nats.rs/pull/954
+* Make `Command` private by @caspervonb in https://github.com/nats-io/nats.rs/pull/953
+* Disallow non-alphanumeric in `HeaderName::from_str` by @caspervonb in https://github.com/nats-io/nats.rs/pull/944
+* Improve top level crate documentation by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/985
+* Make `ClientOp` private by @caspervonb in https://github.com/nats-io/nats.rs/pull/954
+* Make `Command` private by @caspervonb in https://github.com/nats-io/nats.rs/pull/953
+* Disallow new lines in `HeaderValue::from_str` by @caspervonb in https://github.com/nats-io/nats.rs/pull/943
+* Replace manual Error type declarations by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1005
+* Document `HeaderMap::new` by @caspervonb in https://github.com/nats-io/nats.rs/pull/981
+* Reset ping interval on incoming and outgoing messages by @caspervonb in https://github.com/nats-io/nats.rs/pull/932
+* Remove redundant serde `Serialize`, `Deserialize` and `default` attributes by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/929
+* Improve top level `jetstream` module documentation by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/990
+* Improve JetStream KV documentation by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/991
+* Bump rustls-webpki to v0.101.1 by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1013
+
+Thank you for all your contributions!
+Those make a difference and drive the ecosystem forward!
+
+## New Contributors
+* @YaZasnyal made their first contribution in https://github.com/nats-io/nats.rs/pull/894
+* @MJayat made their first contribution in https://github.com/nats-io/nats.rs/pull/901
+* @matthiasbeyer made their first contribution in https://github.com/nats-io/nats.rs/pull/921
+* @tinou98 made their first contribution in https://github.com/nats-io/nats.rs/pull/984
+* @piotrpio made their first contribution in https://github.com/nats-io/nats.rs/pull/992
+* @vados-cosmonic made their first contribution in https://github.com/nats-io/nats.rs/pull/995
+* @protochron made their first contribution in https://github.com/nats-io/nats.rs/pull/1000
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.29.0...async-nats/v0.30.0
+
 # 0.29.0
 ## Overview
 

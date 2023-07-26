@@ -328,9 +328,6 @@ mod kv {
 
     #[tokio::test]
     async fn watch_hearbeats_first() {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::TRACE)
-            .init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
@@ -759,6 +756,10 @@ mod kv {
         test.put("name", "ivan".into()).await.unwrap();
         let name = test.get("name").await.unwrap();
         assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan".to_string());
+
+        test.purge("name").await.unwrap();
+        let name = test.get("name").await.unwrap();
+        assert!(name.is_none());
 
         // Shutdown HUB and test get still work.
         drop(hub_server);

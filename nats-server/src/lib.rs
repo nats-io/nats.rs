@@ -355,15 +355,17 @@ mod tests {
 
         let jetstream = async_nats::jetstream::new(client);
 
-        let stream = jetstream
-            .create_stream(async_nats::jetstream::stream::Config {
+        let retry_strategy = tokio_retry::strategy::ExponentialBackoff::from_millis(500).take(3);
+        let mut stream = tokio_retry::Retry::spawn(retry_strategy, || {
+            jetstream.create_stream(async_nats::jetstream::stream::Config {
                 name: "replicated".to_string(),
                 num_replicas: 3,
                 ..Default::default()
             })
-            .await
-            .unwrap();
-        assert_eq!(stream.info.config.num_replicas, 3);
+        })
+        .await
+        .unwrap();
+        assert_eq!(stream.info().await.unwrap().config.num_replicas, 3);
 
         jetstream
             .create_stream(async_nats::jetstream::stream::Config {

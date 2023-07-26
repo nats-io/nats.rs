@@ -35,7 +35,7 @@ static VERSION_RE: Lazy<Regex> =
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
 #[derive(Debug, Error)]
 #[error("failed to publish message: {0}")]
-pub struct PublishError(#[source] Box<dyn std::error::Error + Send + Sync>);
+pub struct PublishError(#[source] crate::Error);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
@@ -601,7 +601,7 @@ impl Request {
 
 #[derive(Error, Debug)]
 #[error("failed to send subscribe: {0}")]
-pub struct SubscribeError(#[source] Box<dyn std::error::Error + Sync + Send>);
+pub struct SubscribeError(#[source] crate::Error);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
@@ -622,47 +622,33 @@ pub enum RequestErrorKind {
 
 /// Error returned when a core NATS request fails.
 /// To be enumerate over the variants, call [RequestError::kind].
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub struct RequestError {
     kind: RequestErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
+
+crate::error_impls!(RequestError, RequestErrorKind);
 
 impl Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             RequestErrorKind::TimedOut => write!(f, "request timed out"),
             RequestErrorKind::NoResponders => write!(f, "no responders"),
-            RequestErrorKind::Other => write!(f, "request failed: {:?}", self.source),
+            RequestErrorKind::Other => write!(f, "request failed: {:?}", self.kind),
         }
-    }
-}
-
-impl RequestError {
-    fn with_source<E>(kind: RequestErrorKind, source: E) -> RequestError
-    where
-        E: Into<Box<dyn std::error::Error + Send + Sync>>,
-    {
-        RequestError {
-            kind,
-            source: Some(source.into()),
-        }
-    }
-
-    /// Returns the [RequestErrorKind] enum, allowing iterating over
-    /// all error variants.
-    pub fn kind(&self) -> RequestErrorKind {
-        self.kind
     }
 }
 
 /// Error returned when flushing the messages buffered on the client fails.
 /// To be enumerate over the variants, call [FlushError::kind].
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub struct FlushError {
     kind: FlushErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<crate::Error>,
 }
+
+crate::error_impls!(FlushError, FlushErrorKind);
 
 impl Display for FlushError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -675,21 +661,6 @@ impl Display for FlushError {
             FlushErrorKind::SendError => write!(f, "failed to send flush request: {}", source_info),
             FlushErrorKind::FlushError => write!(f, "flush failed: {}", source_info),
         }
-    }
-}
-
-impl FlushError {
-    fn with_source<E>(kind: FlushErrorKind, source: E) -> FlushError
-    where
-        E: Into<Box<dyn std::error::Error + Send + Sync>>,
-    {
-        FlushError {
-            kind,
-            source: Some(source.into()),
-        }
-    }
-    pub fn kind(&self) -> FlushErrorKind {
-        self.kind
     }
 }
 
