@@ -44,7 +44,7 @@ use super::{
 
 fn kv_operation_from_stream_message(message: &RawMessage) -> Operation {
     match message.headers.as_deref() {
-        Some(headers) => headers.parse().unwrap_or_default(),
+        Some(headers) => headers.parse().unwrap_or(Operation::Put),
         None => Operation::Put,
     }
 }
@@ -119,10 +119,9 @@ pub struct Config {
 }
 
 /// Describes what kind of operation and entry represents
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Operation {
     /// A value was put into the bucket
-    #[default]
     Put,
     /// A value was deleted from a bucket
     Delete,
@@ -293,7 +292,8 @@ impl Store {
                             EntryError::with_source(EntryErrorKind::Other, "missing headers")
                         })?;
 
-                        let operation = kv_operation_from_message(&message).unwrap_or_default();
+                        let operation =
+                            kv_operation_from_message(&message).unwrap_or(Operation::Put);
 
                         let sequence = headers
                             .get(header::NATS_SEQUENCE)
@@ -883,7 +883,7 @@ impl<'a> futures::Stream for Watch<'a> {
                         )
                     })?;
 
-                    let operation = kv_operation_from_message(&message).unwrap_or_default();
+                    let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
 
                     let key = message
                         .subject
@@ -944,7 +944,7 @@ impl<'a> futures::Stream for History<'a> {
                         self.done = true;
                     }
 
-                    let operation = kv_operation_from_message(&message).unwrap_or_default();
+                    let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
 
                     let key = message
                         .subject
