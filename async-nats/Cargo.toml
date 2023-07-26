@@ -29,7 +29,7 @@ itoa = "1"
 url = { version = "2"}
 tokio-rustls = "0.24"
 rustls-pemfile = "1.0.2"
-nuid = "0.3.2"
+nuid = "0.4.1"
 serde_nanos = "0.1.3"
 time = { version = "0.3.20", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6"
@@ -42,7 +42,7 @@ rand = "0.8"
 webpki = { package = "rustls-webpki", version = "0.101.1", features = ["alloc", "std"] }
 
 [dev-dependencies]
-criterion =  { version = "0.3", features = ["async_tokio"]}
+criterion =  { version = "0.5", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
 tokio = { version = "1.25.0", features = ["rt-multi-thread"] }

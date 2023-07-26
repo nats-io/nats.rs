@@ -11,7 +11,7 @@ lazy_static = "1.4.0"
 regex = { version = "1.7.1", default-features = false, features = ["std", "unicode-perl"] }
 url = "2"
 json = "0.12"
-nuid = "0.3.2"
+nuid = "0.4.1"
 rand = "0.8"
 tokio-retry = "0.3.0"
 
