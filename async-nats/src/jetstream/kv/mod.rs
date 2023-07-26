@@ -15,7 +15,11 @@
 
 pub mod bucket;
 
-use std::{fmt::Display, task::Poll};
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+    task::Poll,
+};
 
 use crate::{HeaderValue, StatusCode};
 use bytes::Bytes;
@@ -38,22 +42,27 @@ use super::{
     },
 };
 
-// Helper to extract key value operation from message headers
-fn kv_operation_from_maybe_headers(maybe_headers: Option<&str>) -> Operation {
-    if let Some(headers) = maybe_headers {
-        return match headers {
-            KV_OPERATION_DELETE => Operation::Delete,
-            KV_OPERATION_PURGE => Operation::Purge,
-            _ => Operation::Put,
-        };
-    }
-
-    Operation::Put
-}
-
 fn kv_operation_from_stream_message(message: &RawMessage) -> Operation {
-    kv_operation_from_maybe_headers(message.headers.as_deref())
+    match message.headers.as_deref() {
+        Some(headers) => headers.parse().unwrap_or(Operation::Put),
+        None => Operation::Put,
+    }
 }
+
+fn kv_operation_from_message(message: &Message) -> Result<Operation, EntryError> {
+    let headers = message
+        .headers
+        .as_ref()
+        .ok_or_else(|| EntryError::with_source(EntryErrorKind::Other, "missing headers"))?;
+
+    headers
+        .get(KV_OPERATION)
+        .map(|x| x.iter().next().unwrap().as_str())
+        .unwrap_or(KV_OPERATION_PUT)
+        .parse()
+        .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
+}
+
 static VALID_BUCKET_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
 static VALID_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap());
 
@@ -119,6 +128,30 @@ pub enum Operation {
     /// A value was purged from a bucket
     Purge,
 }
+
+impl FromStr for Operation {
+    type Err = ParseOperationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            KV_OPERATION_DELETE => Ok(Operation::Delete),
+            KV_OPERATION_PURGE => Ok(Operation::Purge),
+            KV_OPERATION_PUT => Ok(Operation::Put),
+            _ => Err(ParseOperationError),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseOperationError;
+
+impl fmt::Display for ParseOperationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid value found for operation (value can only be {KV_OPERATION_PUT}, {KV_OPERATION_PURGE} or {KV_OPERATION_DELETE}")
+    }
+}
+
+impl std::error::Error for ParseOperationError {}
 
 /// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
@@ -258,20 +291,10 @@ impl Store {
                         let headers = message.headers.as_ref().ok_or_else(|| {
                             EntryError::with_source(EntryErrorKind::Other, "missing headers")
                         })?;
-                        let operation = headers.get(KV_OPERATION).map_or_else(
-                            || Operation::Put,
-                            |operation| match operation
-                                .iter()
-                                .next()
-                                .cloned()
-                                .unwrap_or_else(|| KV_OPERATION_PUT.to_string())
-                                .as_ref()
-                            {
-                                KV_OPERATION_PURGE => Operation::Purge,
-                                KV_OPERATION_DELETE => Operation::Delete,
-                                _ => Operation::Put,
-                            },
-                        );
+
+                        let operation =
+                            kv_operation_from_message(&message).unwrap_or(Operation::Put);
+
                         let sequence = headers
                             .get(header::NATS_SEQUENCE)
                             .ok_or_else(|| {
@@ -860,20 +883,7 @@ impl<'a> futures::Stream for Watch<'a> {
                         )
                     })?;
 
-                    let operation = match message
-                        .headers
-                        .as_ref()
-                        .and_then(|headers| headers.get(KV_OPERATION))
-                        .unwrap_or(&HeaderValue::from(KV_OPERATION_PUT))
-                        .iter()
-                        .next()
-                        .unwrap()
-                        .as_str()
-                    {
-                        KV_OPERATION_DELETE => Operation::Delete,
-                        KV_OPERATION_PURGE => Operation::Purge,
-                        _ => Operation::Put,
-                    };
+                    let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
 
                     let key = message
                         .subject
@@ -934,20 +944,7 @@ impl<'a> futures::Stream for History<'a> {
                         self.done = true;
                     }
 
-                    let operation = match message
-                        .headers
-                        .as_ref()
-                        .and_then(|headers| headers.get(KV_OPERATION))
-                        .unwrap_or(&HeaderValue::from(KV_OPERATION_PUT))
-                        .iter()
-                        .next()
-                        .unwrap()
-                        .as_str()
-                    {
-                        KV_OPERATION_DELETE => Operation::Delete,
-                        KV_OPERATION_PURGE => Operation::Purge,
-                        _ => Operation::Put,
-                    };
+                    let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
 
                     let key = message
                         .subject
