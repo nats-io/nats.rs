@@ -2137,11 +2137,7 @@ mod jetstream {
     #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
-        tracing_subscriber::fmt()
-            .with_max_level(Level::DEBUG)
-            .init();
-
-        use tracing::{debug, Level};
+        use tracing::debug;
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
