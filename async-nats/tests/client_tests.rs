@@ -20,6 +20,7 @@ mod client {
     use bytes::Bytes;
     use futures::future::join_all;
     use futures::stream::StreamExt;
+    use std::path::PathBuf;
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -351,6 +352,7 @@ mod client {
             .is_err());
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn reconnect_fallback() {
         use async_nats::ServerAddr;
@@ -618,6 +620,55 @@ mod client {
     }
 
     #[tokio::test]
+    async fn reconnect_delay_callback_custom() {
+        let server = nats_server::run_basic_server();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let _ = ConnectOptions::new()
+            .retry_on_initial_connect()
+            .reconnect_delay_callback(move |attempts| {
+                let tx = tx.clone();
+
+                let duration = std::time::Duration::from_millis(std::cmp::min(
+                    ((attempts - 1) * 500) as u64,
+                    1500,
+                ));
+
+                // report back the number of attempts
+                tx.send((attempts, duration)).unwrap();
+
+                duration
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        drop(server);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 1);
+        assert_eq!(duration.as_millis(), 0);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 2);
+        assert_eq!(duration.as_millis(), 500);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 3);
+        assert_eq!(duration.as_millis(), 1000);
+
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 4);
+        assert_eq!(duration.as_millis(), 1500);
+
+        // we don't exceed 1500ms
+        let (attempt, duration) = rx.recv().await.unwrap();
+        assert_eq!(attempt, 5);
+        assert_eq!(duration.as_millis(), 1500);
+    }
+
+    #[tokio::test]
     async fn connect_timeout() {
         // create the notifiers we'll use to synchronize readiness state
         let startup_listener = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -762,5 +813,58 @@ mod client {
 
         drop(servers.remove(0));
         rx.recv().await;
+    }
+
+    #[tokio::test]
+    async fn multiple_auth_methods() {
+        use async_nats::ServerAddr;
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let mut servers = vec![
+            nats_server::run_basic_server(),
+            nats_server::run_server("tests/configs/jwt.conf"),
+            nats_server::run_server("tests/configs/token.conf"),
+        ];
+
+        let client = async_nats::ConnectOptions::new()
+            .user_and_password("js".into(), "js".into())
+            .token("s3cr3t".into())
+            .credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .unwrap()
+            .connect(
+                servers
+                    .iter()
+                    .map(|server| server.client_url().parse::<ServerAddr>().unwrap())
+                    .collect::<Vec<ServerAddr>>()
+                    .as_slice(),
+            )
+            .await
+            .unwrap();
+
+        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        while !servers.is_empty() {
+            client.publish("test".into(), "data".into()).await.unwrap();
+            client.flush().await.unwrap();
+            assert!(subscriber.next().await.is_some());
+
+            drop(servers.remove(0));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_auth_callback() {
+        let server = nats_server::run_server("tests/configs/user_pass.conf");
+
+        ConnectOptions::with_auth_callback(move |_| async move {
+            let mut auth = async_nats::Auth::new();
+            auth.username = Some("derek".to_string());
+            auth.password = Some("s3cr3t".to_string());
+            Ok(auth)
+        })
+        .connect(server.client_url())
+        .await
+        .unwrap();
     }
 }

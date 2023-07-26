@@ -17,21 +17,25 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{header, Client, Command, Error, HeaderMap, HeaderValue, StatusCode};
+use crate::{header, Client, Command, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
+use std::fmt::Display;
 use std::future::IntoFuture;
-use std::io::{self, ErrorKind};
+use std::io::ErrorKind;
 use std::pin::Pin;
 use std::str::from_utf8;
 use std::task::Poll;
 use std::time::Duration;
 use tracing::debug;
 
+use super::consumer::{Consumer, FromConsumer, IntoConsumerConfig};
+use super::errors::ErrorCode;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{self, Config, DeleteStatus, DiscardPolicy, External, Info, Stream};
@@ -90,9 +94,12 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let ack = jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     /// ack.await?;
-    /// jetstream.publish("events".to_string(), "data".into())
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
     ///     .await?
     ///     .await?;
     /// # Ok(())
@@ -108,8 +115,12 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let first_ack = jetstream.publish("events".to_string(), "data".into()).await?;
-    /// let second_ack = jetstream.publish("events".to_string(), "data".into()).await?;
+    /// let first_ack = jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
+    /// let second_ack = jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     /// first_ack.await?;
     /// second_ack.await?;
     /// # Ok(())
@@ -119,7 +130,7 @@ impl Context {
         &self,
         subject: String,
         payload: Bytes,
-    ) -> Result<PublishAckFuture, Error> {
+    ) -> Result<PublishAckFuture, PublishError> {
         self.send_publish(subject, Publish::build().payload(payload))
             .await
     }
@@ -139,7 +150,9 @@ impl Context {
     ///
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", "Value");
-    /// let ack = jetstream.publish_with_headers("events".to_string(), headers, "data".into()).await?;
+    /// let ack = jetstream
+    ///     .publish_with_headers("events".to_string(), headers, "data".into())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -148,7 +161,7 @@ impl Context {
         subject: String,
         headers: crate::header::HeaderMap,
         payload: Bytes,
-    ) -> Result<PublishAckFuture, Error> {
+    ) -> Result<PublishAckFuture, PublishError> {
         self.send_publish(subject, Publish::build().payload(payload).headers(headers))
             .await
     }
@@ -166,10 +179,12 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack =
-    /// jetstream.send_publish("events".to_string(),
-    ///     Publish::build().payload("data".into()).message_id("uuid")
-    /// ).await?;
+    /// let ack = jetstream
+    ///     .send_publish(
+    ///         "events".to_string(),
+    ///         Publish::build().payload("data".into()).message_id("uuid"),
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -177,9 +192,13 @@ impl Context {
         &self,
         subject: String,
         publish: Publish,
-    ) -> Result<PublishAckFuture, Error> {
+    ) -> Result<PublishAckFuture, PublishError> {
         let inbox = self.client.new_inbox();
-        let response = self.client.subscribe(inbox.clone()).await?;
+        let response = self
+            .client
+            .subscribe(inbox.clone())
+            .await
+            .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?;
         tokio::time::timeout(self.timeout, async {
             if let Some(headers) = publish.headers {
                 self.client
@@ -196,10 +215,9 @@ impl Context {
                     .await
             }
         })
-        .map_err(|_| {
-            std::io::Error::new(ErrorKind::TimedOut, "JetStream publish request timed out")
-        })
-        .await??;
+        .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))
+        .await?
+        .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?;
 
         Ok(PublishAckFuture {
             timeout: self.timeout,
@@ -208,17 +226,11 @@ impl Context {
     }
 
     /// Query the server for account information
-    pub async fn query_account(&self) -> Result<Account, Error> {
+    pub async fn query_account(&self) -> Result<Account, AccountError> {
         let response: Response<Account> = self.request("INFO".into(), b"").await?;
 
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while querying account information: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(AccountError::new(AccountErrorKind::JetStream(error))),
             Response::Ok(account) => Ok(account),
         }
     }
@@ -236,33 +248,38 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 100_000,
-    ///     discard: DiscardPolicy::Old,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 100_000,
+    ///         discard: DiscardPolicy::Old,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn create_stream<S>(&self, stream_config: S) -> Result<Stream, Error>
+    pub async fn create_stream<S>(&self, stream_config: S) -> Result<Stream, CreateStreamError>
     where
         Config: From<S>,
     {
         let mut config: Config = stream_config.into();
         if config.name.is_empty() {
-            return Err(Box::new(io::Error::new(
-                ErrorKind::InvalidInput,
-                "the stream name must not be empty",
-            )));
+            return Err(CreateStreamError::new(
+                CreateStreamErrorKind::EmptyStreamName,
+            ));
+        }
+        if config.name.contains([' ', '.']) {
+            return Err(CreateStreamError::new(
+                CreateStreamErrorKind::InvalidStreamName,
+            ));
         }
         if let Some(ref mut mirror) = config.mirror {
             if let Some(ref mut domain) = mirror.domain {
                 if mirror.external.is_some() {
-                    return Err(Box::new(io::Error::new(
-                        ErrorKind::Other,
-                        "domain and external are both set",
-                    )));
+                    return Err(CreateStreamError::new(
+                        CreateStreamErrorKind::DomainAndExternalSet,
+                    ));
                 }
                 mirror.external = Some(External {
                     api_prefix: format!("$JS.{domain}.API"),
@@ -275,10 +292,9 @@ impl Context {
             for source in sources {
                 if let Some(ref mut domain) = source.domain {
                     if source.external.is_some() {
-                        return Err(Box::new(io::Error::new(
-                            ErrorKind::Other,
-                            "domain and external are both set",
-                        )));
+                        return Err(CreateStreamError::new(
+                            CreateStreamErrorKind::DomainAndExternalSet,
+                        ));
                     }
                     source.external = Some(External {
                         api_prefix: format!("$JS.{domain}.API"),
@@ -291,13 +307,7 @@ impl Context {
         let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while creating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(error.into()),
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
@@ -320,25 +330,21 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_stream<T: AsRef<str>>(&self, stream: T) -> Result<Stream, Error> {
+    pub async fn get_stream<T: AsRef<str>>(&self, stream: T) -> Result<Stream, GetStreamError> {
         let stream = stream.as_ref();
         if stream.is_empty() {
-            return Err(Box::new(io::Error::new(
-                ErrorKind::InvalidInput,
-                "the stream name must not be empty",
-            )));
+            return Err(GetStreamError::new(GetStreamErrorKind::EmptyName));
         }
 
         let subject = format!("STREAM.INFO.{stream}");
-        let request: Response<Info> = self.request(subject, &()).await?;
+        let request: Response<Info> = self
+            .request(subject, &())
+            .await
+            .map_err(|err| GetStreamError::with_source(GetStreamErrorKind::Request, err))?;
         match request {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => {
+                Err(GetStreamError::new(GetStreamErrorKind::JetStream(error)))
+            }
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
@@ -346,7 +352,7 @@ impl Context {
         }
     }
 
-    /// Create a stream with the given configuration on the server if it is not present. Returns a handle to the stream  on the server.
+    /// Create a stream with the given configuration on the server if it is not present. Returns a handle to the stream on the server.
     ///
     /// Note: This does not validate if the Stream on the server is compatible with the configuration passed in.
     ///
@@ -359,15 +365,20 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_or_create_stream(Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .get_or_create_stream(Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_or_create_stream<S>(&self, stream_config: S) -> Result<Stream, Error>
+    pub async fn get_or_create_stream<S>(
+        &self,
+        stream_config: S,
+    ) -> Result<Stream, CreateStreamError>
     where
         S: Into<Config>,
     {
@@ -376,14 +387,8 @@ impl Context {
 
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
-            Response::Err { error } if error.status == 404 => self.create_stream(&config).await,
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting or creating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } if error.code() == 404 => self.create_stream(&config).await,
+            Response::Err { error } => Err(error.into()),
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
@@ -406,23 +411,23 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_stream<T: AsRef<str>>(&self, stream: T) -> Result<DeleteStatus, Error> {
+    pub async fn delete_stream<T: AsRef<str>>(
+        &self,
+        stream: T,
+    ) -> Result<DeleteStatus, DeleteStreamError> {
         let stream = stream.as_ref();
         if stream.is_empty() {
-            return Err(Box::new(io::Error::new(
-                ErrorKind::InvalidInput,
-                "the stream name must not be empty",
-            )));
+            return Err(DeleteStreamError::new(DeleteStreamErrorKind::EmptyName));
         }
         let subject = format!("STREAM.DELETE.{stream}");
-        match self.request(subject, &json!({})).await? {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while deleting stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+        match self
+            .request(subject, &json!({}))
+            .await
+            .map_err(|err| DeleteStreamError::with_source(DeleteStreamErrorKind::Request, err))?
+        {
+            Response::Err { error } => Err(DeleteStreamError::new(
+                DeleteStreamErrorKind::JetStream(error),
+            )),
             Response::Ok(delete_response) => Ok(delete_response),
         }
     }
@@ -440,29 +445,25 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.update_stream(&Config {
-    ///     name: "events".to_string(),
-    ///     discard: DiscardPolicy::New,
-    ///     max_messages: 50_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .update_stream(&Config {
+    ///         name: "events".to_string(),
+    ///         discard: DiscardPolicy::New,
+    ///         max_messages: 50_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn update_stream<S>(&self, config: S) -> Result<Info, Error>
+    pub async fn update_stream<S>(&self, config: S) -> Result<Info, UpdateStreamError>
     where
         S: Borrow<Config>,
     {
         let config = config.borrow();
         let subject = format!("STREAM.UPDATE.{}", config.name);
         match self.request(subject, config).await? {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while updating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(error.into()),
             Response::Ok(info) => Ok(info),
         }
     }
@@ -533,23 +534,20 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, Error> {
+    pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, KeyValueError> {
         let bucket: String = bucket.into();
         if !crate::jetstream::kv::is_valid_bucket_name(&bucket) {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "invalid bucket name",
-            )));
+            return Err(KeyValueError::new(KeyValueErrorKind::InvalidStoreName));
         }
 
         let stream_name = format!("KV_{}", &bucket);
-        let stream = self.get_stream(stream_name.clone()).await?;
+        let stream = self
+            .get_stream(stream_name.clone())
+            .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::GetBucket, err))
+            .await?;
 
         if stream.info.config.max_messages_per_subject < 1 {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "not a valid key-value store",
-            )));
+            return Err(KeyValueError::new(KeyValueErrorKind::InvalidStoreName));
         }
         let mut store = Store {
             prefix: format!("$KV.{}.", &bucket),
@@ -584,31 +582,31 @@ impl Context {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn create_key_value(
         &self,
         mut config: crate::jetstream::kv::Config,
-    ) -> Result<Store, Error> {
+    ) -> Result<Store, CreateKeyValueError> {
         if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "invalid bucket name",
-            )));
+            return Err(CreateKeyValueError::new(
+                CreateKeyValueErrorKind::InvalidStoreName,
+            ));
         }
 
         let history = if config.history > 0 {
             if config.history > MAX_HISTORY {
-                return Err(Box::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "history limited to a max of 64",
-                )));
+                return Err(CreateKeyValueError::new(
+                    CreateKeyValueErrorKind::TooLongHistory,
+                ));
             }
             config.history
         } else {
@@ -659,7 +657,14 @@ impl Context {
                 mirror_direct: config.mirror_direct,
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|err| {
+                if err.kind() == CreateStreamErrorKind::TimedOut {
+                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::TimedOut, err)
+                } else {
+                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
+                }
+            })?;
 
         let mut store = Store {
             prefix: format!("$KV.{}.", &config.bucket),
@@ -694,24 +699,28 @@ impl Context {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_key_value<T: AsRef<str>>(&self, bucket: T) -> Result<DeleteStatus, Error> {
+    pub async fn delete_key_value<T: AsRef<str>>(
+        &self,
+        bucket: T,
+    ) -> Result<DeleteStatus, KeyValueError> {
         if !crate::jetstream::kv::is_valid_bucket_name(bucket.as_ref()) {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "invalid bucket name",
-            )));
+            return Err(KeyValueError::new(KeyValueErrorKind::InvalidStoreName));
         }
 
         let stream_name = format!("KV_{}", bucket.as_ref());
-        self.delete_stream(stream_name).await
+        self.delete_stream(stream_name)
+            .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::JetStream, err))
+            .await
     }
 
     // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), Error> {
@@ -729,6 +738,57 @@ impl Context {
     //         .and_then(|info| Ok(()))
     // }
 
+    /// Get a [crate::jetstream::consumer::Consumer] straight from [Context], without binding to a [Stream] first.
+    ///
+    /// It has one less interaction with the server when binding to only one
+    /// [crate::jetstream::consumer::Consumer].
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_consumer_from_stream("consumer", "stream")
+    ///     .await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_consumer_from_stream<T, C, S>(
+        &self,
+        consumer: C,
+        stream: S,
+    ) -> Result<Consumer<T>, crate::Error>
+    where
+        T: FromConsumer + IntoConsumerConfig,
+        S: AsRef<str>,
+        C: AsRef<str>,
+    {
+        let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
+
+        let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
+            Response::Ok(info) => info,
+            Response::Err { error } => {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("nats: error while getting consumer info: {}", error),
+                )))
+            }
+        };
+
+        Ok(Consumer::new(
+            T::try_from_consumer_config(info.config.clone())?,
+            info,
+            self.clone(),
+        ))
+    }
+
     /// Send a request to the jetstream JSON API.
     ///
     /// This is a low level API used mostly internally, that should be used only in
@@ -745,28 +805,33 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let response: Response<Info> = jetstream
-    /// .request("STREAM.INFO.events".to_string(), &()).await?;
+    ///     .request("STREAM.INFO.events".to_string(), &())
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<Response<V>, Error>
+    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<V, RequestError>
     where
         T: ?Sized + Serialize,
         V: DeserializeOwned,
     {
-        let request = serde_json::to_vec(&payload).map(Bytes::from)?;
+        let request = serde_json::to_vec(&payload)
+            .map(Bytes::from)
+            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
 
         debug!("JetStream request sent: {:?}", request);
 
         let message = self
             .client
             .request(format!("{}.{}", self.prefix, subject), request)
-            .await?;
+            .await;
+        let message = message?;
         debug!(
             "JetStream request response: {:?}",
             from_utf8(&message.payload)
         );
-        let response = serde_json::from_slice(message.payload.as_ref())?;
+        let response = serde_json::from_slice(message.payload.as_ref())
+            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
 
         Ok(response)
     }
@@ -780,22 +845,23 @@ impl Context {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let bucket = jetstream.create_object_store(async_nats::jetstream::object_store::Config {
-    ///     bucket: "bucket".to_string(),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let bucket = jetstream
+    ///     .create_object_store(async_nats::jetstream::object_store::Config {
+    ///         bucket: "bucket".to_string(),
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn create_object_store(
         &self,
         config: super::object_store::Config,
-    ) -> Result<super::object_store::ObjectStore, Error> {
+    ) -> Result<super::object_store::ObjectStore, CreateObjectStoreError> {
         if !super::object_store::is_valid_bucket_name(&config.bucket) {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "invalid bucket name",
-            )));
+            return Err(CreateObjectStoreError::new(
+                CreateKeyValueErrorKind::InvalidStoreName,
+            ));
         }
 
         let bucket_name = config.bucket.clone();
@@ -813,9 +879,13 @@ impl Context {
                 num_replicas: config.num_replicas,
                 discard: DiscardPolicy::New,
                 allow_rollup: true,
+                allow_direct: true,
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|err| {
+                CreateObjectStoreError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
+            })?;
 
         Ok(ObjectStore {
             name: bucket_name,
@@ -839,22 +909,18 @@ impl Context {
     pub async fn get_object_store<T: AsRef<str>>(
         &self,
         bucket_name: T,
-    ) -> Result<ObjectStore, Error> {
-        if !self.client.is_server_compatible(2, 6, 2) {
-            return Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                "object-store requires at least server version 2.6.2",
-            )));
-        }
+    ) -> Result<ObjectStore, ObjectStoreError> {
         let bucket_name = bucket_name.as_ref();
         if !is_valid_bucket_name(bucket_name) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid bucket name",
-            )));
+            return Err(ObjectStoreError::new(
+                ObjectStoreErrorKind::InvalidBucketName,
+            ));
         }
         let stream_name = format!("OBJ_{bucket_name}");
-        let stream = self.get_stream(stream_name).await?;
+        let stream = self
+            .get_stream(stream_name)
+            .await
+            .map_err(|err| ObjectStoreError::with_source(ObjectStoreErrorKind::GetStore, err))?;
 
         Ok(ObjectStore {
             name: bucket_name.to_string(),
@@ -875,11 +941,48 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_object_store<T: AsRef<str>>(&self, bucket_name: T) -> Result<(), Error> {
+    pub async fn delete_object_store<T: AsRef<str>>(
+        &self,
+        bucket_name: T,
+    ) -> Result<(), DeleteObjectStore> {
         let stream_name = format!("OBJ_{}", bucket_name.as_ref());
-        self.delete_stream(stream_name).await?;
+        self.delete_stream(stream_name)
+            .await
+            .map_err(|err| ObjectStoreError::with_source(ObjectStoreErrorKind::GetStore, err))?;
         Ok(())
     }
+}
+
+#[derive(Debug)]
+pub struct PublishError {
+    kind: PublishErrorKind,
+    source: Option<crate::Error>,
+}
+
+crate::error_impls!(PublishError, PublishErrorKind);
+
+impl Display for PublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source = self.format_source();
+        match self.kind {
+            PublishErrorKind::StreamNotFound => write!(f, "no stream found for given subject"),
+            PublishErrorKind::TimedOut => write!(f, "timed out: didn't receive ack in time"),
+            PublishErrorKind::Other => write!(f, "publish failed: {}", source),
+            PublishErrorKind::BrokenPipe => write!(f, "broken pipe"),
+            PublishErrorKind::WrongLastMessageId => write!(f, "wrong last message id"),
+            PublishErrorKind::WrongLastSequence => write!(f, "wrong last sequence"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PublishErrorKind {
+    StreamNotFound,
+    WrongLastMessageId,
+    WrongLastSequence,
+    TimedOut,
+    BrokenPipe,
+    Other,
 }
 
 #[derive(Debug)]
@@ -889,34 +992,31 @@ pub struct PublishAckFuture {
 }
 
 impl PublishAckFuture {
-    async fn next_with_timeout(mut self) -> Result<PublishAck, Error> {
+    async fn next_with_timeout(mut self) -> Result<PublishAck, PublishError> {
         self.subscription.sender.send(Command::TryFlush).await.ok();
         let next = tokio::time::timeout(self.timeout, self.subscription.next())
             .await
-            .map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "acknowledgment timed out"))?;
+            .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))?;
         next.map_or_else(
-            || {
-                Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    "broken pipe",
-                )))
-            },
+            || Err(PublishError::new(PublishErrorKind::BrokenPipe)),
             |m| {
                 if m.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(Box::from(std::io::Error::new(
-                        ErrorKind::NotFound,
-                        "no stream found for given subject",
-                    )));
+                    return Err(PublishError::new(PublishErrorKind::StreamNotFound));
                 }
-                let response = serde_json::from_slice(m.payload.as_ref())?;
+                let response = serde_json::from_slice(m.payload.as_ref())
+                    .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?;
                 match response {
-                    Response::Err { error } => Err(Box::from(std::io::Error::new(
-                        ErrorKind::Other,
-                        format!(
-                            "nats: error while publishing message: {}, {}, {}",
-                            error.code, error.status, error.description
-                        ),
-                    ))),
+                    Response::Err { error } => match error.error_code() {
+                        ErrorCode::STREAM_WRONG_LAST_MESSAGE_ID => Err(PublishError::with_source(
+                            PublishErrorKind::WrongLastMessageId,
+                            error,
+                        )),
+                        ErrorCode::STREAM_WRONG_LAST_SEQUENCE => Err(PublishError::with_source(
+                            PublishErrorKind::WrongLastSequence,
+                            error,
+                        )),
+                        _ => Err(PublishError::with_source(PublishErrorKind::Other, error)),
+                    },
                     Response::Ok(publish_ack) => Ok(publish_ack),
                 }
             },
@@ -924,9 +1024,9 @@ impl PublishAckFuture {
     }
 }
 impl IntoFuture for PublishAckFuture {
-    type Output = Result<PublishAck, Error>;
+    type Output = Result<PublishAck, PublishError>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<PublishAck, Error>> + Send>>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PublishAck, PublishError>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(
@@ -947,18 +1047,18 @@ struct StreamInfoPage {
     streams: Option<Vec<super::stream::Info>>,
 }
 
-type PageRequest = Pin<Box<dyn Future<Output = Result<StreamPage, Error>>>>;
+type PageRequest<'a> = BoxFuture<'a, Result<StreamPage, RequestError>>;
 
-pub struct StreamNames {
+pub struct StreamNames<'a> {
     context: Context,
     offset: usize,
-    page_request: Option<PageRequest>,
+    page_request: Option<PageRequest<'a>>,
     streams: Vec<String>,
     done: bool,
 }
 
-impl futures::Stream for StreamNames {
-    type Item = Result<String, Error>;
+impl futures::Stream for StreamNames<'_> {
+    type Item = Result<String, StreamsError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -968,7 +1068,8 @@ impl futures::Stream for StreamNames {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page?;
+                    let page = page
+                        .map_err(|err| StreamsError::with_source(RequestErrorKind::Other, err))?;
                     if let Some(streams) = page.streams {
                         self.offset += streams.len();
                         self.streams = streams;
@@ -1005,7 +1106,7 @@ impl futures::Stream for StreamNames {
                             .await?
                         {
                             Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                                Err(RequestError::with_source(RequestErrorKind::Other, error))
                             }
                             Response::Ok(page) => Ok(page),
                         }
@@ -1017,18 +1118,31 @@ impl futures::Stream for StreamNames {
     }
 }
 
-type PageInfoRequest = Pin<Box<dyn Future<Output = Result<StreamInfoPage, Error>>>>;
+type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, RequestError>>;
 
-pub struct Streams {
+#[derive(Debug)]
+pub struct StreamsError {
+    kind: RequestErrorKind,
+    source: Option<crate::Error>,
+}
+crate::error_impls!(StreamsError, RequestErrorKind);
+
+impl Display for StreamsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self::Display::fmt(&self, f)
+    }
+}
+
+pub struct Streams<'a> {
     context: Context,
     offset: usize,
-    page_request: Option<PageInfoRequest>,
+    page_request: Option<PageInfoRequest<'a>>,
     streams: Vec<super::stream::Info>,
     done: bool,
 }
 
-impl futures::Stream for Streams {
-    type Item = Result<super::stream::Info, Error>;
+impl futures::Stream for Streams<'_> {
+    type Item = Result<super::stream::Info, StreamsError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -1038,7 +1152,8 @@ impl futures::Stream for Streams {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page?;
+                    let page = page
+                        .map_err(|err| StreamsError::with_source(RequestErrorKind::Other, err))?;
                     if let Some(streams) = page.streams {
                         self.offset += streams.len();
                         self.streams = streams;
@@ -1075,7 +1190,7 @@ impl futures::Stream for Streams {
                             .await?
                         {
                             Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
+                                Err(RequestError::with_source(RequestErrorKind::Other, error))
                             }
                             Response::Ok(page) => Ok(page),
                         }
@@ -1150,5 +1265,280 @@ impl Publish {
             header::NATS_EXPECTED_STREAM,
             HeaderValue::from(stream.as_ref()),
         )
+    }
+}
+
+#[derive(Debug)]
+pub struct RequestError {
+    kind: RequestErrorKind,
+    source: Option<crate::Error>,
+}
+
+crate::error_impls!(RequestError, RequestErrorKind);
+
+impl Display for RequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source = self.format_source();
+        match &self.kind {
+            RequestErrorKind::TimedOut => write!(f, "timed out"),
+            RequestErrorKind::Other => write!(f, "request failed: {}", source),
+            RequestErrorKind::NoResponders => {
+                write!(f, "requested JetStream resource does not exist: {}", source)
+            }
+        }
+    }
+}
+
+impl From<crate::RequestError> for RequestError {
+    fn from(error: crate::RequestError) -> Self {
+        match error.kind() {
+            crate::RequestErrorKind::TimedOut => {
+                RequestError::with_source(RequestErrorKind::TimedOut, error)
+            }
+            crate::RequestErrorKind::NoResponders => {
+                RequestError::new(RequestErrorKind::NoResponders)
+            }
+            crate::RequestErrorKind::Other => {
+                RequestError::with_source(RequestErrorKind::Other, error)
+            }
+        }
+    }
+}
+
+impl From<super::errors::Error> for RequestError {
+    fn from(err: super::errors::Error) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, err)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RequestErrorKind {
+    NoResponders,
+    TimedOut,
+    Other,
+}
+
+#[derive(Debug)]
+pub struct CreateStreamError {
+    kind: CreateStreamErrorKind,
+    source: Option<crate::Error>,
+}
+
+crate::error_impls!(CreateStreamError, CreateStreamErrorKind);
+
+impl Display for CreateStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            CreateStreamErrorKind::EmptyStreamName => write!(f, "stream name cannot be empty"),
+            CreateStreamErrorKind::InvalidStreamName => {
+                write!(f, "stream name cannot contain `.`, `_`")
+            }
+            CreateStreamErrorKind::DomainAndExternalSet => {
+                write!(f, "domain and external are both set")
+            }
+            CreateStreamErrorKind::JetStream(err) => {
+                write!(f, "jetstream error: {}", err)
+            }
+            CreateStreamErrorKind::TimedOut => write!(f, "jetstream request timed out"),
+            CreateStreamErrorKind::JetStreamUnavailable => write!(f, "jetstream unavailable"),
+            CreateStreamErrorKind::ResponseParse => write!(f, "failed to parse server response"),
+            CreateStreamErrorKind::Response => {
+                write!(f, "response error: {}", self.format_source())
+            }
+        }
+    }
+}
+
+impl From<super::errors::Error> for CreateStreamError {
+    fn from(error: super::errors::Error) -> Self {
+        CreateStreamError::new(CreateStreamErrorKind::JetStream(error))
+    }
+}
+
+impl From<RequestError> for CreateStreamError {
+    fn from(error: RequestError) -> Self {
+        match error.kind() {
+            RequestErrorKind::NoResponders => {
+                CreateStreamError::new(CreateStreamErrorKind::JetStreamUnavailable)
+            }
+            RequestErrorKind::TimedOut => CreateStreamError::new(CreateStreamErrorKind::TimedOut),
+            RequestErrorKind::Other => {
+                CreateStreamError::with_source(CreateStreamErrorKind::Response, error)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateStreamErrorKind {
+    EmptyStreamName,
+    InvalidStreamName,
+    DomainAndExternalSet,
+    JetStreamUnavailable,
+    JetStream(super::errors::Error),
+    TimedOut,
+    Response,
+    ResponseParse,
+}
+
+#[derive(Debug)]
+pub struct GetStreamError {
+    kind: GetStreamErrorKind,
+    source: Option<crate::Error>,
+}
+
+crate::error_impls!(GetStreamError, GetStreamErrorKind);
+
+impl Display for GetStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind() {
+            GetStreamErrorKind::EmptyName => write!(f, "empty name cannot be empty"),
+            GetStreamErrorKind::Request => {
+                write!(f, "request error: {}", self.format_source())
+            }
+            GetStreamErrorKind::JetStream(err) => write!(f, "jetstream error: {}", err),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetStreamErrorKind {
+    EmptyName,
+    Request,
+    JetStream(super::errors::Error),
+}
+
+pub type UpdateStreamError = CreateStreamError;
+pub type UpdateStreamErrorKind = CreateStreamErrorKind;
+pub type DeleteStreamError = GetStreamError;
+pub type DeleteStreamErrorKind = GetStreamErrorKind;
+
+#[derive(Debug)]
+pub struct KeyValueError {
+    kind: KeyValueErrorKind,
+    source: Option<crate::Error>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyValueErrorKind {
+    InvalidStoreName,
+    GetBucket,
+    JetStream,
+}
+
+crate::error_impls!(KeyValueError, KeyValueErrorKind);
+
+impl Display for KeyValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind() {
+            KeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            KeyValueErrorKind::GetBucket => write!(f, "failed to get the bucket"),
+            KeyValueErrorKind::JetStream => {
+                write!(f, "JetStream error: {}", self.format_source())
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CreateKeyValueError {
+    kind: CreateKeyValueErrorKind,
+    source: Option<crate::Error>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CreateKeyValueErrorKind {
+    InvalidStoreName,
+    TooLongHistory,
+    JetStream,
+    BucketCreate,
+    TimedOut,
+}
+
+crate::error_impls!(CreateKeyValueError, CreateKeyValueErrorKind);
+
+impl Display for CreateKeyValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source = self.format_source();
+        match self.kind() {
+            CreateKeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            CreateKeyValueErrorKind::TooLongHistory => write!(f, "too long history"),
+            CreateKeyValueErrorKind::JetStream => {
+                write!(f, "JetStream error: {}", source)
+            }
+            CreateKeyValueErrorKind::BucketCreate => {
+                write!(f, "bucket creation failed: {}", source)
+            }
+            CreateKeyValueErrorKind::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
+pub type CreateObjectStoreError = CreateKeyValueError;
+pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
+
+#[derive(Debug)]
+pub struct ObjectStoreError {
+    kind: ObjectStoreErrorKind,
+    source: Option<crate::Error>,
+}
+crate::error_impls!(ObjectStoreError, ObjectStoreErrorKind);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ObjectStoreErrorKind {
+    InvalidBucketName,
+    GetStore,
+}
+
+impl Display for ObjectStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind() {
+            ObjectStoreErrorKind::InvalidBucketName => {
+                write!(f, "invalid Object Store bucket name")
+            }
+            ObjectStoreErrorKind::GetStore => write!(f, "failed to get Object Store"),
+        }
+    }
+}
+
+pub type DeleteObjectStore = ObjectStoreError;
+pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
+
+#[derive(Debug)]
+pub struct AccountError {
+    kind: AccountErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum AccountErrorKind {
+    TimedOut,
+    JetStream(super::errors::Error),
+    JetStreamUnavailable,
+    Other,
+}
+
+crate::error_impls!(AccountError, AccountErrorKind);
+
+impl Display for AccountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            AccountErrorKind::TimedOut => write!(f, "timed out"),
+            AccountErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+            AccountErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            AccountErrorKind::JetStreamUnavailable => write!(f, "JetStream unavailable"),
+        }
+    }
+}
+
+impl From<RequestError> for AccountError {
+    fn from(err: RequestError) -> Self {
+        match err.kind {
+            RequestErrorKind::NoResponders => {
+                AccountError::with_source(AccountErrorKind::JetStreamUnavailable, err)
+            }
+            RequestErrorKind::TimedOut => AccountError::new(AccountErrorKind::TimedOut),
+            RequestErrorKind::Other => AccountError::with_source(AccountErrorKind::Other, err),
+        }
     }
 }

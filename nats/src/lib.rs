@@ -40,8 +40,7 @@
 //!     .with_name("My Rust NATS App")
 //!     .connect("127.0.0.1")?;
 //!
-//! let nc3 = nats::Options::with_credentials("path/to/my.creds")
-//!     .connect("connect.ngs.global")?;
+//! let nc3 = nats::Options::with_credentials("path/to/my.creds").connect("connect.ngs.global")?;
 //!
 //! let nc4 = nats::Options::new()
 //!     .add_root_certificate("my-certs.pem")
@@ -115,7 +114,6 @@
 //! ```
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(test, deny(warnings))]
 #![cfg_attr(
     feature = "fault_injection",
     deny(
@@ -189,7 +187,9 @@
     clippy::wildcard_enum_match_arm,
     clippy::module_name_repetitions
 )]
-
+// As this is a deprecated client, we don't want warnings from new lints to make CI red.
+#![allow(clippy::all)]
+#![allow(warnings)]
 /// Async-enabled NATS client.
 pub mod asynk;
 
@@ -393,9 +393,9 @@ impl Drop for Inner {
 /// Instead of using strings, [`ServerAddress`]es can be used directly as well. This is handy for
 /// validating user input.
 /// ```no_run
+/// use nats::ServerAddress;
 /// use std::io;
 /// use structopt::StructOpt;
-/// use nats::ServerAddress;
 ///
 /// #[derive(Debug, StructOpt)]
 /// struct Config {
@@ -556,7 +556,12 @@ impl Connection {
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// let mut headers = nats::HeaderMap::new();
     /// headers.insert("X-key", "value".to_string());
-    /// let resp = nc.request_with_headers_or_timeout("foo", Some(&headers), Some(std::time::Duration::from_secs(2)), "Help me?")?;
+    /// let resp = nc.request_with_headers_or_timeout(
+    ///     "foo",
+    ///     Some(&headers),
+    ///     Some(std::time::Duration::from_secs(2)),
+    ///     "Help me?",
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
@@ -580,7 +585,12 @@ impl Connection {
     /// # nc.subscribe("foo")?.with_handler(move |m| { m.respond("ans=42")?; Ok(()) });
     /// let mut headers = nats::HeaderMap::new();
     /// headers.insert("X-key", "value".to_string());
-    /// let resp = nc.request_with_headers_or_timeout("foo", Some(&headers), Some(std::time::Duration::from_secs(2)), "Help me?")?;
+    /// let resp = nc.request_with_headers_or_timeout(
+    ///     "foo",
+    ///     Some(&headers),
+    ///     Some(std::time::Duration::from_secs(2)),
+    ///     "Help me?",
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
@@ -842,8 +852,9 @@ impl Connection {
     /// # fn main() -> std::io::Result<()> {
     /// # let nc = nats::connect("demo.nats.io")?;
     /// let sub = nc.subscribe("foo.headers")?;
-    /// let headers = [("header1", "value1"),
-    ///                ("header2", "value2")].iter().collect();
+    /// let headers = [("header1", "value1"), ("header2", "value2")]
+    ///     .iter()
+    ///     .collect();
     /// let reply_to = None;
     /// nc.publish_with_reply_or_headers("foo.headers", reply_to, Some(&headers), "Hello World!")?;
     /// nc.flush()?;

@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A Key-Value store built on top of JetStream, allowing you to store and retrieve data using simple key-value pairs.
+
 pub mod bucket;
 
-use std::{
-    io::{self, ErrorKind},
-    task::Poll,
-};
+use std::{fmt::Display, task::Poll};
 
 use crate::{HeaderValue, StatusCode};
 use bytes::Bytes;
@@ -24,20 +23,25 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use tracing::debug;
 
-use crate::{header, jetstream::response, Error, Message};
+use crate::{header, Message};
 
 use self::bucket::Status;
 
 use super::{
-    consumer::DeliverPolicy,
-    stream::{RawMessage, Republish, Source, StorageType, Stream},
+    consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
+    context::{PublishError, PublishErrorKind},
+    stream::{
+        ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
+        Republish, Source, StorageType, Stream,
+    },
 };
 
 // Helper to extract key value operation from message headers
-fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation {
+fn kv_operation_from_maybe_headers(maybe_headers: Option<&str>) -> Operation {
     if let Some(headers) = maybe_headers {
-        return match headers.as_str() {
+        return match headers {
             KV_OPERATION_DELETE => Operation::Delete,
             KV_OPERATION_PURGE => Operation::Purge,
             _ => Operation::Put,
@@ -48,7 +52,7 @@ fn kv_operation_from_maybe_headers(maybe_headers: Option<&String>) -> Operation 
 }
 
 fn kv_operation_from_stream_message(message: &RawMessage) -> Operation {
-    kv_operation_from_maybe_headers(message.headers.as_ref())
+    kv_operation_from_maybe_headers(message.headers.as_deref())
 }
 static VALID_BUCKET_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
 static VALID_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap());
@@ -119,11 +123,17 @@ pub enum Operation {
 /// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
 pub struct Store {
+    /// The name of the Store.
     pub name: String,
+    /// The name of the stream associated with the Store.
     pub stream_name: String,
+    /// The prefix for keys in the Store.
     pub prefix: String,
+    /// The optional prefix to use when putting new key-value pairs.
     pub put_prefix: Option<String>,
+    /// Indicates whether to use the JetStream prefix.
     pub use_jetstream_prefix: bool,
+    /// The stream associated with the Store.
     pub stream: Stream,
 }
 
@@ -137,17 +147,19 @@ impl Store {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let status = kv.status().await?;
     /// println!("status: {:?}", status);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn status(&self) -> Result<Status, Error> {
+    pub async fn status(&self) -> Result<Status, StatusError> {
         // TODO: should we poll for fresh info here? probably yes.
         let info = self.stream.info.clone();
 
@@ -168,21 +180,20 @@ impl Store {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let status = kv.put("key", "value".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn put<T: AsRef<str>>(&self, key: T, value: bytes::Bytes) -> Result<u64, Error> {
+    pub async fn put<T: AsRef<str>>(&self, key: T, value: bytes::Bytes) -> Result<u64, PutError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(PutError::new(PutErrorKind::InvalidKey));
         }
         let mut subject = String::new();
         if self.use_jetstream_prefix {
@@ -192,8 +203,15 @@ impl Store {
         subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
         subject.push_str(key.as_ref());
 
-        let publish_ack = self.stream.context.publish(subject, value).await?;
-        let ack = publish_ack.await?;
+        let publish_ack = self
+            .stream
+            .context
+            .publish(subject, value)
+            .await
+            .map_err(|err| PutError::with_source(PutErrorKind::Publish, err))?;
+        let ack = publish_ack
+            .await
+            .map_err(|err| PutError::with_source(PutErrorKind::Ack, err))?;
 
         Ok(ack.sequence)
     }
@@ -207,24 +225,23 @@ impl Store {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let status = kv.put("key", "value".into()).await?;
     /// let entry = kv.entry("key").await?;
     /// println!("entry: {:?}", entry);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn entry<T: Into<String>>(&self, key: T) -> Result<Option<Entry>, Error> {
+    pub async fn entry<T: Into<String>>(&self, key: T) -> Result<Option<Entry>, EntryError> {
         let key: String = key.into();
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(EntryError::new(EntryErrorKind::InvalidKey));
         }
 
         let subject = format!("{}{}", self.prefix.as_str(), &key);
@@ -239,7 +256,7 @@ impl Store {
                 match message {
                     Ok(message) => {
                         let headers = message.headers.as_ref().ok_or_else(|| {
-                            std::io::Error::new(io::ErrorKind::Other, "did not found headers")
+                            EntryError::with_source(EntryErrorKind::Other, "missing headers")
                         })?;
                         let operation = headers.get(KV_OPERATION).map_or_else(
                             || Operation::Put,
@@ -258,41 +275,50 @@ impl Store {
                         let sequence = headers
                             .get(header::NATS_SEQUENCE)
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
-                                    "did not found sequence header",
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
+                                    "missing sequence headers",
                                 )
                             })?
                             .iter()
                             .next()
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
                                     "did not found sequence header value",
                                 )
                             })?
-                            .parse()?;
+                            .parse()
+                            .map_err(|err| {
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
+                                    format!("failed to parse headers sequence value: {}", err),
+                                )
+                            })?;
                         let created = headers
                             .get(header::NATS_TIME_STAMP)
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
                                     "did not found timestamp header",
                                 )
                             })?
                             .iter()
                             .next()
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::NotFound,
+                                EntryError::with_source(
+                                    EntryErrorKind::Other,
                                     "did not found timestamp header value",
                                 )
                             })
                             .and_then(|created| {
                                 OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
-                                    std::io::Error::new(
-                                        io::ErrorKind::Other,
-                                        format!("failed to parse Nats-Time-Stamp: {err}"),
+                                    EntryError::with_source(
+                                        EntryErrorKind::Other,
+                                        format!(
+                                            "failed to parse headers timestampt value: {}",
+                                            err
+                                        ),
                                     )
                                 })
                             })?;
@@ -300,11 +326,10 @@ impl Store {
                         Some((message.message, operation, sequence, created))
                     }
                     Err(err) => {
-                        let e: std::io::Error = *err.downcast().unwrap();
-                        if e.kind() == ErrorKind::NotFound {
+                        if err.kind() == DirectGetErrorKind::NotFound {
                             None
                         } else {
-                            return Err(Box::new(e));
+                            return Err(err.into());
                         }
                     }
                 }
@@ -317,7 +342,8 @@ impl Store {
                     Ok(raw_message) => {
                         let operation = kv_operation_from_stream_message(&raw_message);
                         // TODO: unnecessary expensive, cloning whole Message.
-                        let nats_message = Message::try_from(raw_message.clone())?;
+                        let nats_message = Message::try_from(raw_message.clone())
+                            .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))?;
                         Some((
                             nats_message,
                             operation,
@@ -325,17 +351,15 @@ impl Store {
                             raw_message.time,
                         ))
                     }
-                    Err(err) => {
-                        let e: std::io::Error = *err.downcast().unwrap();
-                        let d = e.get_ref().unwrap();
-                        let de = d.downcast_ref::<response::Error>().unwrap();
-                        // 10037 is returned when there are no messages found.
-                        if de.code == 10037 {
-                            None
-                        } else {
-                            return Err(Box::new(e));
+                    Err(err) => match err.kind() {
+                        crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
+                        crate::jetstream::stream::LastRawMessageErrorKind::Other => {
+                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
                         }
-                    }
+                        crate::jetstream::stream::LastRawMessageErrorKind::JetStream(err) => {
+                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
+                        }
+                    },
                 }
             }
         };
@@ -349,7 +373,7 @@ impl Store {
                 let entry = Entry {
                     bucket: self.name.clone(),
                     key,
-                    value: message.payload.to_vec(),
+                    value: message.payload,
                     revision,
                     created,
                     operation,
@@ -373,11 +397,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut entries = kv.watch("kv").await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
@@ -385,9 +411,49 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, Error> {
+    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, WatchError> {
+        self.watch_with_deliver_policy(key, DeliverPolicy::New)
+            .await
+    }
+
+    /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
+    /// values whenever there are changes for that key with as well as last value.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let mut entries = kv.watch_with_history("kv").await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, WatchError> {
+        self.watch_with_deliver_policy(key, DeliverPolicy::LastPerSubject)
+            .await
+    }
+
+    async fn watch_with_deliver_policy<T: AsRef<str>>(
+        &self,
+        key: T,
+        deliver_policy: DeliverPolicy,
+    ) -> Result<Watch<'_>, WatchError> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
+        debug!("initial consumer creation");
         let consumer = self
             .stream
             .create_consumer(super::consumer::push::OrderedConfig {
@@ -395,13 +461,26 @@ impl Store {
                 description: Some("kv watch consumer".to_string()),
                 filter_subject: subject,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
-                deliver_policy: DeliverPolicy::New,
+                deliver_policy,
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|err| match err.kind() {
+                crate::jetstream::stream::ConsumerErrorKind::TimedOut => {
+                    WatchError::new(WatchErrorKind::TimedOut)
+                }
+                _ => WatchError::with_source(WatchErrorKind::Other, err),
+            })?;
 
         Ok(Watch {
-            subscription: consumer.messages().await?,
+            subscription: consumer.messages().await.map_err(|err| match err.kind() {
+                crate::jetstream::consumer::StreamErrorKind::TimedOut => {
+                    WatchError::new(WatchErrorKind::TimedOut)
+                }
+                crate::jetstream::consumer::StreamErrorKind::Other => {
+                    WatchError::with_source(WatchErrorKind::Other, err)
+                }
+            })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
         })
@@ -418,11 +497,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut entries = kv.watch_all().await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
@@ -430,11 +511,40 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_all(&self) -> Result<Watch<'_>, Error> {
+    pub async fn watch_all(&self) -> Result<Watch<'_>, WatchError> {
         self.watch(ALL_KEYS).await
     }
 
-    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Vec<u8>>, Error> {
+    /// Retrieves the [Entry] for a given key from a bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let value = kv.get("key").await?;
+    /// match value {
+    ///     Some(bytes) => {
+    ///         let value_str = std::str::from_utf8(&bytes)?;
+    ///         println!("Value: {}", value_str);
+    ///     }
+    ///     None => {
+    ///         println!("Key not found or value not set");
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get<T: Into<String>>(&self, key: T) -> Result<Option<Bytes>, EntryError> {
         match self.entry(key).await {
             Ok(Some(entry)) => match entry.operation {
                 Operation::Put => Ok(Some(entry.value)),
@@ -456,11 +566,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let revision = kv.put("key", "value".into()).await?;
     /// kv.update("key", "updated".into(), revision).await?;
     /// # Ok(())
@@ -471,14 +583,17 @@ impl Store {
         key: T,
         value: Bytes,
         revision: u64,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, UpdateError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(UpdateError::new(UpdateErrorKind::InvalidKey));
         }
-        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
+        let mut subject = String::new();
+        if self.use_jetstream_prefix {
+            subject.push_str(&self.stream.context.prefix);
+            subject.push('.');
+        }
+        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
+        subject.push_str(key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         headers.insert(
@@ -491,6 +606,7 @@ impl Store {
             .publish_with_headers(subject, headers, value)
             .await?
             .await
+            .map_err(|err| err.into())
             .map(|publish_ack| publish_ack.sequence)
     }
 
@@ -504,22 +620,21 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// kv.delete("key").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), Error> {
+    pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), DeleteError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(DeleteError::new(DeleteErrorKind::InvalidKey));
         }
         let mut subject = String::new();
         if self.use_jetstream_prefix {
@@ -531,7 +646,12 @@ impl Store {
 
         let mut headers = crate::HeaderMap::default();
         // TODO: figure out which headers k/v should be where.
-        headers.insert(KV_OPERATION, KV_OPERATION_DELETE.parse::<HeaderValue>()?);
+        headers.insert(
+            KV_OPERATION,
+            KV_OPERATION_DELETE
+                .parse::<HeaderValue>()
+                .map_err(|err| DeleteError::with_source(DeleteErrorKind::Other, err))?,
+        );
 
         self.stream
             .context
@@ -551,26 +671,31 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// kv.put("key", "another".into()).await?;
     /// kv.purge("key").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), Error> {
+    pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), PurgeError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
         }
 
-        let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
+        let mut subject = String::new();
+        if self.use_jetstream_prefix {
+            subject.push_str(&self.stream.context.prefix);
+            subject.push('.');
+        }
+        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
+        subject.push_str(key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
         headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
@@ -595,11 +720,13 @@ impl Store {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut entries = kv.history("kv").await?;
     /// while let Some(entry) = entries.next().await {
     ///     println!("entry: {:?}", entry);
@@ -607,12 +734,9 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, Error> {
+    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, HistoryError> {
         if !is_valid_key(key.as_ref()) {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid key",
-            )));
+            return Err(HistoryError::new(HistoryErrorKind::InvalidKey));
         }
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
@@ -647,11 +771,13 @@ impl Store {
     /// use futures::{StreamExt, TryStreamExt};
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let mut keys = kv.keys().await?.boxed();
     /// while let Some(key) = keys.try_next().await? {
     ///     println!("key: {:?}", key);
@@ -668,17 +794,19 @@ impl Store {
     /// use futures::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream.create_key_value(async_nats::jetstream::kv::Config {
-    ///     bucket: "kv".to_string(),
-    ///     history: 10,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// let keys = kv.keys().await?.try_collect::<Vec<String>>().await?;
     /// println!("Keys: {:?}", keys);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn keys(&self) -> Result<Keys, Error> {
+    pub async fn keys(&self) -> Result<Keys, HistoryError> {
         let subject = format!("{}>", self.prefix.as_str());
 
         let consumer = self
@@ -706,6 +834,7 @@ impl Store {
     }
 }
 
+/// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
 pub struct Watch<'a> {
     subscription: super::consumer::push::Ordered<'a>,
     prefix: String,
@@ -713,7 +842,7 @@ pub struct Watch<'a> {
 }
 
 impl<'a> futures::Stream for Watch<'a> {
-    type Item = Result<Entry, Error>;
+    type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -724,7 +853,12 @@ impl<'a> futures::Stream for Watch<'a> {
                 None => Poll::Ready(None),
                 Some(message) => {
                     let message = message?;
-                    let info = message.info()?;
+                    let info = message.info().map_err(|err| {
+                        WatcherError::with_source(
+                            WatcherErrorKind::Other,
+                            format!("failed to parse message metadata: {}", err),
+                        )
+                    })?;
 
                     let operation = match message
                         .headers
@@ -750,7 +884,7 @@ impl<'a> futures::Stream for Watch<'a> {
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.to_vec(),
+                        value: message.payload.clone(),
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,
@@ -767,6 +901,7 @@ impl<'a> futures::Stream for Watch<'a> {
     }
 }
 
+/// A structure representing the history of a key-value bucket, yielding past values.
 pub struct History<'a> {
     subscription: super::consumer::push::Ordered<'a>,
     done: bool,
@@ -775,7 +910,7 @@ pub struct History<'a> {
 }
 
 impl<'a> futures::Stream for History<'a> {
-    type Item = Result<Entry, Error>;
+    type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -789,7 +924,12 @@ impl<'a> futures::Stream for History<'a> {
                 None => Poll::Ready(None),
                 Some(message) => {
                     let message = message?;
-                    let info = message.info()?;
+                    let info = message.info().map_err(|err| {
+                        WatcherError::with_source(
+                            WatcherErrorKind::Other,
+                            format!("failed to parse message metadata: {}", err),
+                        )
+                    })?;
                     if info.pending == 0 {
                         self.done = true;
                     }
@@ -818,7 +958,7 @@ impl<'a> futures::Stream for History<'a> {
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.to_vec(),
+                        value: message.payload.clone(),
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,
@@ -840,7 +980,7 @@ pub struct Keys<'a> {
 }
 
 impl<'a> futures::Stream for Keys<'a> {
-    type Item = Result<String, Error>;
+    type Item = Result<String, WatcherError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -875,8 +1015,7 @@ pub struct Entry {
     /// The key that was retrieved.
     pub key: String,
     /// The value that was retrieved.
-    // TODO: should we use Bytes?
-    pub value: Vec<u8>,
+    pub value: Bytes,
     /// A unique sequence for this value.
     pub revision: u64,
     /// Distance from the latest value.
@@ -886,3 +1025,187 @@ pub struct Entry {
     /// The kind of operation that caused this entry.
     pub operation: Operation,
 }
+
+#[derive(Debug)]
+pub struct StatusError {
+    kind: StatusErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StatusErrorKind {
+    JetStream(crate::jetstream::Error),
+    TimedOut,
+}
+
+crate::error_impls!(StatusError, StatusErrorKind);
+
+impl Display for StatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind.clone() {
+            StatusErrorKind::JetStream(err) => {
+                write!(f, "jetstream request failed: {}", err)
+            }
+            StatusErrorKind::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PutError {
+    kind: PutErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum PutErrorKind {
+    InvalidKey,
+    Publish,
+    Ack,
+}
+
+crate::error_impls!(PutError, PutErrorKind);
+
+impl Display for PutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            PutErrorKind::Publish => {
+                write!(f, "failed to put key into store: {}", self.format_source())
+            }
+            PutErrorKind::Ack => write!(f, "ack error: {}", self.format_source()),
+            PutErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EntryError {
+    kind: EntryErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum EntryErrorKind {
+    InvalidKey,
+    TimedOut,
+    Other,
+}
+
+crate::error_impls!(EntryError, EntryErrorKind);
+crate::from_with_timeout!(
+    EntryError,
+    EntryErrorKind,
+    DirectGetError,
+    DirectGetErrorKind
+);
+
+impl Display for EntryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            EntryErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            EntryErrorKind::TimedOut => write!(f, "timed out"),
+            EntryErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WatchError {
+    kind: WatchErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum WatchErrorKind {
+    InvalidKey,
+    TimedOut,
+    ConsumerCreate,
+    Other,
+}
+
+crate::error_impls!(WatchError, WatchErrorKind);
+crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
+crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
+
+impl Display for WatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            WatchErrorKind::ConsumerCreate => {
+                write!(
+                    f,
+                    "watch consumer creation failed: {}",
+                    self.format_source()
+                )
+            }
+            WatchErrorKind::Other => write!(f, "watch failed: {}", self.format_source()),
+            WatchErrorKind::TimedOut => write!(f, "timed out"),
+            WatchErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UpdateError {
+    kind: UpdateErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateErrorKind {
+    InvalidKey,
+    TimedOut,
+    Other,
+}
+
+crate::error_impls!(UpdateError, UpdateErrorKind);
+crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
+
+impl Display for UpdateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            UpdateErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            UpdateErrorKind::TimedOut => write!(f, "timed out"),
+            UpdateErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WatcherError {
+    kind: WatcherErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WatcherErrorKind {
+    Consumer,
+    Other,
+}
+
+impl Display for WatcherError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            WatcherErrorKind::Consumer => {
+                write!(f, "watcher consumer error: {}", self.format_source())
+            }
+            WatcherErrorKind::Other => write!(f, "watcher error: {}", self.format_source()),
+        }
+    }
+}
+
+crate::error_impls!(WatcherError, WatcherErrorKind);
+
+impl From<OrderedError> for WatcherError {
+    fn from(err: OrderedError) -> Self {
+        WatcherError::with_source(WatcherErrorKind::Consumer, err)
+    }
+}
+
+type DeleteError = UpdateError;
+type DeleteErrorKind = UpdateErrorKind;
+
+type PurgeError = UpdateError;
+type PurgeErrorKind = UpdateErrorKind;
+
+type HistoryError = WatchError;
+type HistoryErrorKind = WatchErrorKind;

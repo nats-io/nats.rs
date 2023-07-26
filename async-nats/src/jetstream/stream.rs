@@ -16,7 +16,7 @@
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
-    fmt::Debug,
+    fmt::{self, Debug, Display},
     future::IntoFuture,
     io::{self, ErrorKind},
     pin::Pin,
@@ -25,19 +25,103 @@ use std::{
     time::Duration,
 };
 
-use crate::{header::HeaderName, HeaderMap, HeaderValue};
+use crate::{header::HeaderName, is_valid_subject, HeaderMap, HeaderValue};
 use crate::{Error, StatusCode};
+use base64::engine::general_purpose::STANDARD;
+use base64::engine::Engine;
 use bytes::Bytes;
-use futures::{Future, TryFutureExt};
+use futures::{future::BoxFuture, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
+    context::{RequestError, RequestErrorKind, StreamsError},
+    errors::ErrorCode,
     response::Response,
     Context, Message,
 };
+
+pub type InfoError = RequestError;
+
+#[derive(Debug)]
+pub struct DirectGetError {
+    kind: DirectGetErrorKind,
+    source: Option<crate::Error>,
+}
+crate::error_impls!(DirectGetError, DirectGetErrorKind);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DirectGetErrorKind {
+    NotFound,
+    InvalidSubject,
+    TimedOut,
+    Request,
+    ErrorResponse(StatusCode, String),
+    Other,
+}
+
+impl Display for DirectGetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match self.kind() {
+            DirectGetErrorKind::InvalidSubject => write!(f, "invalid subject"),
+            DirectGetErrorKind::NotFound => write!(f, "message not found"),
+            DirectGetErrorKind::ErrorResponse(status, description) => {
+                write!(f, "unable to get message: {} {}", status, description)
+            }
+            DirectGetErrorKind::Other => {
+                write!(f, "error getting message: {}", source)
+            }
+            DirectGetErrorKind::TimedOut => write!(f, "timed out"),
+            DirectGetErrorKind::Request => write!(f, "request failed: {}", source),
+        }
+    }
+}
+
+impl From<crate::RequestError> for DirectGetError {
+    fn from(err: crate::RequestError) -> Self {
+        match err.kind() {
+            crate::RequestErrorKind::TimedOut => DirectGetError::new(DirectGetErrorKind::TimedOut),
+            crate::RequestErrorKind::NoResponders => DirectGetError::new(DirectGetErrorKind::Other),
+            crate::RequestErrorKind::Other => {
+                DirectGetError::with_source(DirectGetErrorKind::Other, err)
+            }
+        }
+    }
+}
+
+impl From<serde_json::Error> for DirectGetError {
+    fn from(err: serde_json::Error) -> Self {
+        DirectGetError::with_source(DirectGetErrorKind::Other, err)
+    }
+}
+
+#[derive(Debug)]
+pub struct DeleteMessageError {
+    kind: DeleteMessageErrorKind,
+    source: Option<crate::Error>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeleteMessageErrorKind {
+    Request,
+    TimedOut,
+    JetStream(super::errors::Error),
+}
+crate::error_impls!(DeleteMessageError, DeleteMessageErrorKind);
+
+impl Display for DeleteMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match &self.kind {
+            DeleteMessageErrorKind::Request => write!(f, "request failed: {}", source),
+            DeleteMessageErrorKind::TimedOut => write!(f, "timed out"),
+            DeleteMessageErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+        }
+    }
+}
 
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug, Clone)]
@@ -58,14 +142,13 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let mut stream = jetstream
-    ///     .get_stream("events").await?;
+    /// let mut stream = jetstream.get_stream("events").await?;
     ///
     /// let info = stream.info().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn info(&mut self) -> Result<&Info, Error> {
+    pub async fn info(&mut self) -> Result<&Info, InfoError> {
         let subject = format!("STREAM.INFO.{}", self.info.config.name);
 
         match self.context.request(subject, &json!({})).await? {
@@ -73,13 +156,7 @@ impl Stream {
                 self.info = info;
                 Ok(&self.info)
             }
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting stream info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(error.into()),
         }
     }
 
@@ -95,8 +172,7 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream
-    ///     .get_stream("events").await?;
+    /// let stream = jetstream.get_stream("events").await?;
     ///
     /// let info = stream.cached_info();
     /// # Ok(())
@@ -121,18 +197,25 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events.data".into(), "data".into()).await?;
-    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
+    /// let pub_ack = jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream
-    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.await?.sequence)).await?;
+    /// let message = stream
+    ///     .direct_get_next_for_subject("events.data", Some(pub_ack.await?.sequence))
+    ///     .await?;
     ///
     /// # Ok(())
     /// # }
@@ -141,7 +224,10 @@ impl Stream {
         &self,
         subject: T,
         sequence: Option<u64>,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, DirectGetError> {
+        if !is_valid_subject(&subject) {
+            return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
+        }
         let request_subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -172,10 +258,21 @@ impl Stream {
             })?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{status} {description}"),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
             }
         }
         Ok(response)
@@ -196,16 +293,20 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    /// let pub_ack = jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream.direct_get_first_for_subject("events.data").await?;
+    /// let message = stream.direct_get_first_for_subject("events.data").await?;
     ///
     /// # Ok(())
     /// # }
@@ -213,7 +314,10 @@ impl Stream {
     pub async fn direct_get_first_for_subject<T: AsRef<str>>(
         &self,
         subject: T,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, DirectGetError> {
+        if !is_valid_subject(&subject) {
+            return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
+        }
         let request_subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -236,10 +340,21 @@ impl Stream {
             })?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{status} {description}"),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
             }
         }
         Ok(response)
@@ -260,21 +375,25 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// let pub_ack = jetstream.publish("events.data".into(), "data".into()).await?;
+    /// let pub_ack = jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream.direct_get(pub_ack.await?.sequence).await?;
+    /// let message = stream.direct_get(pub_ack.await?.sequence).await?;
     ///
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn direct_get(&self, sequence: u64) -> Result<Message, Error> {
+    pub async fn direct_get(&self, sequence: u64) -> Result<Message, DirectGetError> {
         let subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -295,10 +414,21 @@ impl Stream {
 
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
-                return Err(Box::from(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("{status} {description}"),
-                )));
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
             }
         }
         Ok(response)
@@ -319,16 +449,20 @@ impl Stream {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     subjects: vec!["events.>".to_string()],
-    ///     allow_direct: true,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         subjects: vec!["events.>".to_string()],
+    ///         allow_direct: true,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events.data".into(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events.data".into(), "data".into())
+    ///     .await?;
     ///
-    /// let message =  stream.direct_get_last_for_subject("events.data").await?;
+    /// let message = stream.direct_get_last_for_subject("events.data").await?;
     ///
     /// # Ok(())
     /// # }
@@ -336,7 +470,7 @@ impl Stream {
     pub async fn direct_get_last_for_subject<T: AsRef<str>>(
         &self,
         subject: T,
-    ) -> Result<Message, Error> {
+    ) -> Result<Message, DirectGetError> {
         let subject = format!(
             "{}.DIRECT.GET.{}.{}",
             &self.context.prefix,
@@ -357,23 +491,17 @@ impl Stream {
             if let Some(ref description) = response.description {
                 match status {
                     StatusCode::NOT_FOUND => {
-                        return Err(Box::from(std::io::Error::new(
-                            ErrorKind::NotFound,
-                            "message not found in stream",
-                        )))
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
                     }
                     // 408 is used in Direct Message for bad/empty payload.
                     StatusCode::TIMEOUT => {
-                        return Err(Box::from(std::io::Error::new(
-                            ErrorKind::Other,
-                            "empty or invalid request",
-                        )))
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
                     }
-                    other => {
-                        return Err(Box::from(std::io::Error::new(
-                            ErrorKind::Other,
-                            format!("{other}: {description}"),
-                        )))
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
                     }
                 }
             }
@@ -393,11 +521,13 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let context = async_nats::jetstream::new(client);
     ///
-    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = context
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.await?.sequence).await?;
@@ -415,10 +545,7 @@ impl Stream {
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
-                format!(
-                    "nats: error while getting message: {}, {}",
-                    error.code, error.description
-                ),
+                format!("nats: error while getting message: {}", error),
             ))),
             Response::Ok(value) => Ok(value.message),
         }
@@ -437,11 +564,13 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let context = async_nats::jetstream::new(client);
     ///
-    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = context
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
@@ -452,15 +581,29 @@ impl Stream {
     pub async fn get_last_raw_message_by_subject(
         &self,
         stream_subject: &str,
-    ) -> Result<RawMessage, Error> {
+    ) -> Result<RawMessage, LastRawMessageError> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
             "last_by_subj":  stream_subject,
         });
 
-        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        let response: Response<GetRawMessage> = self
+            .context
+            .request(subject, &payload)
+            .map_err(|err| LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err))
+            .await?;
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(ErrorKind::Other, error))),
+            Response::Err { error } => {
+                if error.error_code() == ErrorCode::NO_MESSAGE_FOUND {
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::NoMessageFound,
+                    ))
+                } else {
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::JetStream(error),
+                    ))
+                }
+            }
             Response::Ok(value) => Ok(value.message),
         }
     }
@@ -475,33 +618,40 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let context = async_nats::jetstream::new(client);
     ///
-    /// let stream = context.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = context
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
     /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
     /// stream.delete_message(publish_ack.await?.sequence).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_message(&self, sequence: u64) -> Result<bool, Error> {
+    pub async fn delete_message(&self, sequence: u64) -> Result<bool, DeleteMessageError> {
         let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
         let payload = json!({
             "seq": sequence,
         });
 
-        let response: Response<DeleteStatus> = self.context.request(subject, &payload).await?;
+        let response: Response<DeleteStatus> = self
+            .context
+            .request(subject, &payload)
+            .map_err(|err| match err.kind() {
+                RequestErrorKind::TimedOut => {
+                    DeleteMessageError::new(DeleteMessageErrorKind::TimedOut)
+                }
+                _ => DeleteMessageError::with_source(DeleteMessageErrorKind::Request, err),
+            })
+            .await?;
 
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while deleting message: {}, {}",
-                    error.code, error.status
-                ),
-            ))),
+            Response::Err { error } => Err(DeleteMessageError::new(
+                DeleteMessageErrorKind::JetStream(error),
+            )),
             Response::Ok(value) => Ok(value.success),
         }
     }
@@ -525,6 +675,33 @@ impl Stream {
         Purge::build(self)
     }
 
+    /// Purge `Stream` messages for a matching subject.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # #[allow(deprecated)]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// stream.purge_subject("data").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[deprecated(
+        since = "0.25.0",
+        note = "Overloads have been replaced with an into_future based builder. Use Stream::purge().filter(subject) instead."
+    )]
+    pub async fn purge_subject<T>(&self, subject: T) -> Result<PurgeResponse, PurgeError>
+    where
+        T: Into<String>,
+    {
+        self.purge().filter(subject).await
+    }
+
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer][Consumer]
     ///
@@ -538,17 +715,19 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let info = stream.create_consumer(consumer::pull::Config {
-    ///     durable_name: Some("pull".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let info = stream
+    ///     .create_consumer(consumer::pull::Config {
+    ///         durable_name: Some("pull".to_string()),
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn create_consumer<C: IntoConsumerConfig + FromConsumer>(
         &self,
         config: C,
-    ) -> Result<Consumer<C>, Error> {
+    ) -> Result<Consumer<C>, ConsumerError> {
         let config = config.into_consumer_config();
 
         let subject = {
@@ -570,10 +749,10 @@ impl Stream {
                     })
                     .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", self.info.config.name))
             } else if config.name.is_some() {
-                return Err(Box::new(std::io::Error::new(
-                    ErrorKind::Other,
-                    "can't use consumer name with server below version 2.9",
-                )));
+                return Err(ConsumerError::with_source(
+                    ConsumerErrorKind::Other,
+                    "can't use consumer name with server < 2.9.0",
+                ));
             } else if let Some(ref durable_name) = config.durable_name {
                 format!(
                     "CONSUMER.DURABLE.CREATE.{}.{}",
@@ -592,15 +771,10 @@ impl Stream {
             )
             .await?
         {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while creating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(ConsumerError::new(ConsumerErrorKind::JetStream(error))),
             Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
-                FromConsumer::try_from_consumer_config(info.clone().config)?,
+                FromConsumer::try_from_consumer_config(info.clone().config)
+                    .map_err(|err| ConsumerError::with_source(ConsumerErrorKind::Other, err))?,
                 info,
                 self.context.clone(),
             )),
@@ -632,10 +806,7 @@ impl Stream {
             Response::Ok(info) => Ok(info),
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
-                format!(
-                    "nats: error while getting consumer info: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
+                format!("nats: error while getting consumer info: {}", error),
             ))),
         }
     }
@@ -686,10 +857,15 @@ impl Stream {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream.get_stream("events").await?;
-    /// let consumer = stream.get_or_create_consumer("pull", consumer::pull::Config {
-    ///     durable_name: Some("pull".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "pull",
+    ///         consumer::pull::Config {
+    ///             durable_name: Some("pull".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -697,20 +873,16 @@ impl Stream {
         &self,
         name: &str,
         config: T,
-    ) -> Result<Consumer<T>, Error> {
+    ) -> Result<Consumer<T>, ConsumerError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
-            Response::Err { error } if error.status == 404 => self.create_consumer(config).await,
-            Response::Err { error } => Err(Box::new(io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while getting or creating stream: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } if error.code() == 404 => self.create_consumer(config).await,
+            Response::Err { error } => Err(error.into()),
             Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
-                T::try_from_consumer_config(info.config.clone())?,
+                T::try_from_consumer_config(info.config.clone()).map_err(|err| {
+                    ConsumerError::with_source(ConsumerErrorKind::InvalidConsumerType, err)
+                })?,
                 info,
                 self.context.clone(),
             )),
@@ -729,23 +901,20 @@ impl Stream {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// jetstream.get_stream("events").await?
-    ///     .delete_consumer("pull").await?;
+    /// jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .delete_consumer("pull")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, Error> {
+    pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, ConsumerError> {
         let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "nats: error while deleting consumer: {}, {}, {}",
-                    error.code, error.status, error.description
-                ),
-            ))),
+            Response::Err { error } => Err(error.into()),
         }
     }
 
@@ -851,16 +1020,16 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub no_ack: bool,
     /// The window within which to track duplicate messages.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub duplicate_window: i64,
+    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    pub duplicate_window: Duration,
     /// The owner of the template associated with this stream.
     #[serde(default, skip_serializing_if = "is_default")]
     pub template_owner: String,
     /// Indicates the stream is sealed and cannot be modified in any way
     #[serde(default, skip_serializing_if = "is_default")]
     pub sealed: bool,
-    #[serde(default, skip_serializing_if = "is_default")]
     /// A short description of the purpose of this stream.
+    #[serde(default, skip_serializing_if = "is_default")]
     pub description: Option<String>,
     #[serde(
         default,
@@ -992,7 +1161,7 @@ pub enum StorageType {
 }
 
 /// Shows config and current state for this stream.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Info {
     /// The configuration associated with this stream
     pub config: Config,
@@ -1003,7 +1172,6 @@ pub struct Info {
     pub state: State,
 
     ///information about leader and replicas
-    #[serde(default)]
     pub cluster: Option<ClusterInfo>,
 }
 
@@ -1013,7 +1181,7 @@ pub struct DeleteStatus {
 }
 
 /// information about the given stream.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -1063,11 +1231,12 @@ impl TryFrom<RawMessage> for crate::Message {
     type Error = Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
-        let decoded_payload = base64::decode(value.payload)
+        let decoded_payload = STANDARD
+            .decode(value.payload)
             .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
         let decoded_headers = value
             .headers
-            .map(base64::decode)
+            .map(|header| STANDARD.decode(header))
             .map_or(Ok(None), |v| v.map(Some))?;
 
         let length = decoded_headers
@@ -1095,7 +1264,6 @@ fn is_continuation(c: char) -> bool {
     c == ' ' || c == '\t'
 }
 const HEADER_LINE: &str = "NATS/1.0";
-const HEADER_LINE_LEN: usize = HEADER_LINE.len();
 
 #[allow(clippy::type_complexity)]
 fn parse_headers(
@@ -1114,29 +1282,29 @@ fn parse_headers(
     };
 
     if let Some(line) = lines.next() {
-        if !line.starts_with(HEADER_LINE) {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "version lie does not start with NATS/1.0",
-            )));
-        }
+        let line = line
+            .strip_prefix(HEADER_LINE)
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    ErrorKind::Other,
+                    "version line does not start with NATS/1.0",
+                ))
+            })?
+            .trim();
 
-        // TODO: return this as description to be consistent?
-        if let Some(slice) = line.get(HEADER_LINE_LEN..).map(|s| s.trim()) {
-            match slice.split_once(' ') {
-                Some((status, description)) => {
-                    if !status.is_empty() {
-                        maybe_status = Some(status.trim().parse()?);
-                    }
-
-                    if !description.is_empty() {
-                        maybe_description = Some(description.trim().to_string());
-                    }
+        match line.split_once(' ') {
+            Some((status, description)) => {
+                if !status.is_empty() {
+                    maybe_status = Some(status.parse()?);
                 }
-                None => {
-                    if !slice.is_empty() {
-                        maybe_status = Some(slice.trim().parse()?);
-                    }
+
+                if !description.is_empty() {
+                    maybe_description = Some(description.trim().to_string());
+                }
+            }
+            None => {
+                if !line.is_empty() {
+                    maybe_status = Some(line.parse()?);
                 }
             }
         }
@@ -1188,13 +1356,11 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
 /// Information about the stream's, consumer's associated `JetStream` cluster
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
 pub struct ClusterInfo {
     /// The cluster name.
-    #[serde(default)]
     pub name: Option<String>,
     /// The server name of the RAFT leader.
-    #[serde(default)]
     pub leader: Option<String>,
     /// The members of the RAFT cluster.
     #[serde(default)]
@@ -1202,7 +1368,7 @@ pub struct ClusterInfo {
 }
 
 /// The members of the RAFT cluster
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
 pub struct PeerInfo {
     /// The server name of the peer.
     pub name: String,
@@ -1219,7 +1385,7 @@ pub struct PeerInfo {
 }
 
 /// The response generated by trying to purge a stream.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct PurgeResponse {
     /// Whether the purge request was successful.
     pub success: bool,
@@ -1227,7 +1393,7 @@ pub struct PurgeResponse {
     pub purged: u64,
 }
 /// The payload used to generate a purge request.
-#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+#[derive(Default, Debug, Serialize, Clone)]
 pub struct PurgeRequest {
     /// Purge up to but not including sequence.
     #[serde(default, rename = "seq", skip_serializing_if = "is_default")]
@@ -1370,14 +1536,39 @@ where
     }
 }
 
+#[derive(Debug)]
+pub struct PurgeError {
+    kind: PurgeErrorKind,
+    source: Option<crate::Error>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PurgeErrorKind {
+    Request,
+    TimedOut,
+    JetStream(super::errors::Error),
+}
+crate::error_impls!(PurgeError, PurgeErrorKind);
+
+impl Display for PurgeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match &self.kind {
+            PurgeErrorKind::Request => write!(f, "request failed: {}", source),
+            PurgeErrorKind::TimedOut => write!(f, "timed out"),
+            PurgeErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+        }
+    }
+}
+
 impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
     S: ToAssign + std::marker::Send,
     K: ToAssign + std::marker::Send,
 {
-    type Output = Result<PurgeResponse, Error>;
+    type Output = Result<PurgeResponse, PurgeError>;
 
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<PurgeResponse, Error>> + Send + 'a>>;
+    type IntoFuture = BoxFuture<'a, Result<PurgeResponse, PurgeError>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(async move {
@@ -1386,16 +1577,14 @@ where
                 .stream
                 .context
                 .request(request_subject, &self.inner)
+                .map_err(|err| match err.kind() {
+                    RequestErrorKind::TimedOut => PurgeError::new(PurgeErrorKind::TimedOut),
+                    _ => PurgeError::with_source(PurgeErrorKind::Request, err),
+                })
                 .await?;
 
             match response {
-                Response::Err { error } => Err(Box::from(io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "error while purging stream: {}, {}, {}",
-                        error.code, error.status, error.description
-                    ),
-                ))),
+                Response::Err { error } => Err(PurgeError::new(PurgeErrorKind::JetStream(error))),
                 Response::Ok(response) => Ok(response),
             }
         }))
@@ -1414,19 +1603,20 @@ struct ConsumerInfoPage {
     consumers: Option<Vec<super::consumer::Info>>,
 }
 
-type PageRequest = Pin<Box<dyn Future<Output = Result<ConsumerPage, Error>>>>;
+type ConsumerNamesError = StreamsError;
+type PageRequest<'a> = BoxFuture<'a, Result<ConsumerPage, RequestError>>;
 
-pub struct ConsumerNames {
+pub struct ConsumerNames<'a> {
     context: Context,
     stream: String,
     offset: usize,
-    page_request: Option<PageRequest>,
+    page_request: Option<PageRequest<'a>>,
     consumers: Vec<String>,
     done: bool,
 }
 
-impl futures::Stream for ConsumerNames {
-    type Item = Result<String, Error>;
+impl futures::Stream for ConsumerNames<'_> {
+    type Item = Result<String, ConsumerNamesError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -1436,7 +1626,10 @@ impl futures::Stream for ConsumerNames {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page?;
+                    let page = page.map_err(|err| {
+                        ConsumerNamesError::with_source(RequestErrorKind::Other, err)
+                    })?;
+
                     if let Some(consumers) = page.consumers {
                         self.offset += consumers.len();
                         self.consumers = consumers;
@@ -1473,9 +1666,10 @@ impl futures::Stream for ConsumerNames {
                             )
                             .await?
                         {
-                            Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
-                            }
+                            Response::Err { error } => Err(RequestError::with_source(
+                                super::context::RequestErrorKind::Other,
+                                error,
+                            )),
                             Response::Ok(page) => Ok(page),
                         }
                     }));
@@ -1486,19 +1680,20 @@ impl futures::Stream for ConsumerNames {
     }
 }
 
-type PageInfoRequest = Pin<Box<dyn Future<Output = Result<ConsumerInfoPage, Error>>>>;
+pub type ConsumersError = StreamsError;
+type PageInfoRequest<'a> = BoxFuture<'a, Result<ConsumerInfoPage, RequestError>>;
 
-pub struct Consumers {
+pub struct Consumers<'a> {
     context: Context,
     stream: String,
     offset: usize,
-    page_request: Option<PageInfoRequest>,
+    page_request: Option<PageInfoRequest<'a>>,
     consumers: Vec<super::consumer::Info>,
     done: bool,
 }
 
-impl futures::Stream for Consumers {
-    type Item = Result<super::consumer::Info, Error>;
+impl futures::Stream for Consumers<'_> {
+    type Item = Result<super::consumer::Info, ConsumersError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -1508,7 +1703,8 @@ impl futures::Stream for Consumers {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page?;
+                    let page = page
+                        .map_err(|err| ConsumersError::with_source(RequestErrorKind::Other, err))?;
                     if let Some(consumers) = page.consumers {
                         self.offset += consumers.len();
                         self.consumers = consumers;
@@ -1545,9 +1741,10 @@ impl futures::Stream for Consumers {
                             )
                             .await?
                         {
-                            Response::Err { error } => {
-                                Err(Box::from(std::io::Error::new(ErrorKind::Other, error)))
-                            }
+                            Response::Err { error } => Err(RequestError::with_source(
+                                super::context::RequestErrorKind::Other,
+                                error,
+                            )),
                             Response::Ok(page) => Ok(page),
                         }
                     }));
@@ -1556,4 +1753,82 @@ impl futures::Stream for Consumers {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub struct LastRawMessageError {
+    source: Option<crate::Error>,
+    kind: LastRawMessageErrorKind,
+}
+crate::error_impls!(LastRawMessageError, LastRawMessageErrorKind);
+
+impl fmt::Display for LastRawMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            LastRawMessageErrorKind::NoMessageFound => write!(f, "no message found"),
+            LastRawMessageErrorKind::Other => write!(
+                f,
+                "failed to get last raw message: {}",
+                self.format_source()
+            ),
+            LastRawMessageErrorKind::JetStream(err) => {
+                write!(f, "JetStream error: {}", err)
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum LastRawMessageErrorKind {
+    NoMessageFound,
+    JetStream(super::errors::Error),
+    Other,
+}
+
+#[derive(Debug)]
+pub struct ConsumerError {
+    pub kind: ConsumerErrorKind,
+    pub source: Option<crate::Error>,
+}
+
+crate::error_impls!(ConsumerError, ConsumerErrorKind);
+
+impl Display for ConsumerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source = self.format_source();
+        match &self.kind() {
+            ConsumerErrorKind::TimedOut => write!(f, "timed out"),
+            ConsumerErrorKind::Request => write!(f, "request failed: {}", source),
+            ConsumerErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+            ConsumerErrorKind::Other => write!(f, "consumer error: {}", source),
+            ConsumerErrorKind::InvalidConsumerType => {
+                write!(f, "invalid consumer type: {}", source)
+            }
+        }
+    }
+}
+
+impl From<super::context::RequestError> for ConsumerError {
+    fn from(err: super::context::RequestError) -> Self {
+        match err.kind() {
+            RequestErrorKind::TimedOut => ConsumerError::new(ConsumerErrorKind::TimedOut),
+            _ => ConsumerError::with_source(ConsumerErrorKind::Request, err),
+        }
+    }
+}
+
+impl From<super::errors::Error> for ConsumerError {
+    fn from(err: super::errors::Error) -> Self {
+        ConsumerError::new(ConsumerErrorKind::JetStream(err))
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ConsumerErrorKind {
+    //TODO: get last should have timeout, which should be mapped here.
+    TimedOut,
+    Request,
+    InvalidConsumerType,
+    JetStream(super::errors::Error),
+    Other,
 }

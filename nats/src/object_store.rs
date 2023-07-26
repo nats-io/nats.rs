@@ -83,8 +83,8 @@ impl JetStream {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_object_store(&Config {
-    ///   bucket: "create_object_store".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "create_object_store".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// # context.delete_object_store("create_object_store")?;
@@ -137,8 +137,8 @@ impl JetStream {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// context.create_object_store(&Config {
-    ///   bucket: "object_store".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "object_store".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let bucket = context.object_store("object_store")?;
@@ -188,7 +188,6 @@ impl JetStream {
     /// # Ok(())
     /// # }
     /// ```
-    ///
     pub fn delete_object_store(&self, bucket_name: &str) -> io::Result<()> {
         let stream_name = format!("OBJ_{bucket_name}");
         self.delete_stream(stream_name)?;
@@ -215,11 +214,12 @@ pub struct ObjectInfo {
     /// Number of chunks the object is stored in.
     pub chunks: usize,
     /// Date and time the object was last modified.
-    #[serde(with = "rfc3339")]
+    #[serde(with = "rfc3339", rename = "mtime")]
     pub modified: DateTime,
     /// Digest of the object stream.
     pub digest: String,
     /// Set to true if the object has been deleted.
+    #[serde(default)]
     pub deleted: bool,
 }
 
@@ -351,8 +351,8 @@ impl ObjectStore {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_object_store(&Config {
-    ///   bucket: "info".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "info".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let bytes = vec![0];
@@ -385,7 +385,6 @@ impl ObjectStore {
     }
 
     /// Seals the object store from further modifications.
-    ///
     pub fn seal(&self) -> io::Result<()> {
         let stream_name = format!("OBJ_{}", self.name);
         let stream_info = self.context.stream_info(stream_name)?;
@@ -409,8 +408,8 @@ impl ObjectStore {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_object_store(&Config {
-    ///   bucket: "put".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "put".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let bytes = vec![0, 1, 2, 3, 4];
@@ -511,8 +510,8 @@ impl ObjectStore {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_object_store(&Config {
-    ///   bucket: "get".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "get".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let bytes = vec![0, 1, 2, 3, 4];
@@ -551,8 +550,8 @@ impl ObjectStore {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_object_store(&Config {
-    ///   bucket: "delete".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "delete".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let bytes = vec![0, 1, 2, 3, 4];
@@ -606,8 +605,8 @@ impl ObjectStore {
     /// # let context = nats::jetstream::new(client);
     /// #
     /// let bucket = context.create_object_store(&Config {
-    ///   bucket: "watch".to_string(),
-    ///   ..Default::default()
+    ///     bucket: "watch".to_string(),
+    ///     ..Default::default()
     /// })?;
     ///
     /// let mut watch = bucket.watch()?;

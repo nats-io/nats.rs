@@ -1,0 +1,58 @@
+name: Bug Report
+description: Report a bug found in the NATS Rust client
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Make sure you fill all the information in this form and include a [Minimal, Complete, and Verifiable example](https://stackoverflow.com/help/mcve)
+  - type: input
+    id: nats_version
+    attributes:
+      label: NATS version
+      description: What is the version of NATS Rust client that you're using?
+      placeholder: |
+        Run: grep 'name = "nats"' Cargo.lock -A 1
+    validations:
+      required: true
+  - type: input
+    id: rusts_version
+    attributes:
+      label: rustc version
+      description: What is the version of rustc that you're using?
+      placeholder: |
+        Run: rustc --version (we support Rust 1.41 and up)
+    validations:
+      required: true
+  - type: input
+    id: os_container_env
+    attributes:
+      label: OS/Container environment
+      description: What is the OS or container environment you're running the NATS Rust client on?
+      placeholder: ex. Debian 11.6
+    validations:
+      required: true
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps or code to reproduce the issue
+      description: How can we reproduce the issue?
+      placeholder: Your steps/code to reproduce the issue
+    validations:
+      requred: true
+  - type: textarea
+    id: expected_result
+    attributes:
+      label: Expected result
+      description: What is the expected result?
+      placeholder: Your expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual_result
+    attributes:
+      label: Actual result
+      description: What is the actual result?
+      placeholder: Your actual result
+    validations:
+      required: true

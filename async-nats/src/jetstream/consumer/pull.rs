@@ -1,4 +1,4 @@
-// Copyright 2020-2022 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,21 +12,12 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, FutureExt, StreamExt, TryFutureExt};
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
-use std::{
-    future, io,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    task::Poll,
-    time::Duration,
-};
-use tokio::{
-    task::JoinHandle,
-    time::{Instant, Sleep},
-};
+use std::{future, pin::Pin, task::Poll, time::Duration};
+use tokio::{task::JoinHandle, time::Sleep};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -34,10 +25,13 @@ use tracing::{debug, trace};
 use crate::{
     connection::State,
     jetstream::{self, Context},
-    Error, StatusCode, Subscriber,
+    Error, StatusCode, SubscribeError, Subscriber,
 };
 
-use super::{AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy};
+use super::{
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    StreamError, StreamErrorKind,
+};
 use jetstream::consumer;
 
 impl Consumer<Config> {
@@ -54,28 +48,37 @@ impl Consumer<Config> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     ///
-    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-    ///     durable_name: Some("consumer".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "consumer",
+    ///         async_nats::jetstream::consumer::pull::Config {
+    ///             durable_name: Some("consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
     ///
     /// let mut messages = consumer.messages().await?.take(100);
     /// while let Some(Ok(message)) = messages.next().await {
-    ///   println!("got message {:?}", message);
-    ///   message.ack().await?;
+    ///     println!("got message {:?}", message);
+    ///     message.ack().await?;
     /// }
     /// Ok(())
     /// # }
     /// ```
-    pub async fn messages(&self) -> Result<Stream, Error> {
+    pub async fn messages(&self) -> Result<Stream, StreamError> {
         Stream::stream(
             BatchConfig {
                 batch: 200,
@@ -97,19 +100,23 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.stream()
+    /// let mut messages = consumer
+    ///     .stream()
     ///     .max_messages_per_batch(100)
     ///     .max_bytes_per_batch(1024)
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -127,20 +134,26 @@ impl Consumer<Config> {
         &self,
         batch: I,
         inbox: String,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BatchRequestError> {
         debug!("sending batch");
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             self.context.prefix, self.info.stream_name, self.info.name
         );
 
-        let payload = serde_json::to_vec(&batch.into())?;
+        let payload = serde_json::to_vec(&batch.into())
+            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Serialize, err))?;
 
         self.context
             .client
             .publish_with_reply(subject, inbox, payload.into())
-            .await?;
-        self.context.client.flush().await?;
+            .await
+            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Publish, err))?;
+        self.context
+            .client
+            .flush()
+            .await
+            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Flush, err))?;
         debug!("batch request sent");
         Ok(())
     }
@@ -159,29 +172,40 @@ impl Consumer<Config> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     ///
-    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-    ///     durable_name: Some("consumer".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "consumer",
+    ///         async_nats::jetstream::consumer::pull::Config {
+    ///             durable_name: Some("consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
     ///
     /// for _ in 0..100 {
-    ///     jetstream.publish("events".to_string(), "data".into()).await?;
+    ///     jetstream
+    ///         .publish("events".to_string(), "data".into())
+    ///         .await?;
     /// }
     ///
     /// let mut messages = consumer.fetch().max_messages(200).messages().await?;
     /// // will finish after 100 messages, as that is the number of messages available on the
     /// // stream.
     /// while let Some(Ok(message)) = messages.next().await {
-    ///   println!("got message {:?}", message);
-    ///   message.ack().await?;
+    ///     println!("got message {:?}", message);
+    ///     message.ack().await?;
     /// }
     /// Ok(())
     /// # }
@@ -203,23 +227,32 @@ impl Consumer<Config> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     ///
-    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-    ///     durable_name: Some("consumer".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "consumer",
+    ///         async_nats::jetstream::consumer::pull::Config {
+    ///             durable_name: Some("consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
     ///
     /// let mut messages = consumer.batch().max_messages(100).messages().await?;
     /// while let Some(Ok(message)) = messages.next().await {
-    ///   println!("got message {:?}", message);
-    ///   message.ack().await?;
+    ///     println!("got message {:?}", message);
+    ///     message.ack().await?;
     /// }
     /// Ok(())
     /// # }
@@ -242,18 +275,27 @@ impl Consumer<Config> {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_or_create_stream(async_nats::jetstream::stream::Config {
-    ///     name: "events".to_string(),
-    ///     max_messages: 10_000,
-    ///     ..Default::default()
-    /// }).await?;
+    /// let stream = jetstream
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
     ///
-    /// jetstream.publish("events".to_string(), "data".into()).await?;
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
     ///
-    /// let consumer = stream.get_or_create_consumer("consumer", async_nats::jetstream::consumer::pull::Config {
-    ///     durable_name: Some("consumer".to_string()),
-    ///     ..Default::default()
-    /// }).await?;
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "consumer",
+    ///         async_nats::jetstream::consumer::pull::Config {
+    ///             durable_name: Some("consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
     ///
     /// let mut iter = consumer.sequence(50).unwrap().take(10);
     /// while let Ok(Some(mut batch)) = iter.try_next().await {
@@ -264,7 +306,7 @@ impl Consumer<Config> {
     /// Ok(())
     /// # }
     /// ```
-    pub fn sequence(&self, batch: usize) -> Result<Sequence, Error> {
+    pub fn sequence(&self, batch: usize) -> Result<Sequence, BatchError> {
         let context = self.context.clone();
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
@@ -273,10 +315,11 @@ impl Consumer<Config> {
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
-            expires: Some(Duration::from_secs(60).as_millis().try_into()?),
+            expires: Some(Duration::from_secs(60).as_nanos().try_into().unwrap()),
             ..Default::default()
         })
-        .map(Bytes::from)?;
+        .map(Bytes::from)
+        .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Serialize, err))?;
 
         Ok(Sequence {
             context,
@@ -297,14 +340,14 @@ pub struct Batch {
 }
 
 impl<'a> Batch {
-    async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, Error> {
+    async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, BatchError> {
         let inbox = consumer.context.client.new_inbox();
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
 
         let sleep = batch.expires.map(|e| {
             Box::pin(tokio::time::sleep(
-                Duration::from_nanos(e as u64).saturating_add(Duration::from_secs(5)),
+                Duration::from_nanos(e).saturating_add(Duration::from_secs(5)),
             ))
         });
 
@@ -391,11 +434,11 @@ pub struct Sequence<'a> {
     subject: String,
     request: Bytes,
     pending_messages: usize,
-    next: Option<BoxFuture<'a, Result<Batch, Error>>>,
+    next: Option<BoxFuture<'a, Result<Batch, MessagesError>>>,
 }
 
 impl<'a> futures::Stream for Sequence<'a> {
-    type Item = Result<Batch, Error>;
+    type Item = Result<Batch, MessagesError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -408,14 +451,19 @@ impl<'a> futures::Stream for Sequence<'a> {
                 let request = self.request.clone();
                 let pending_messages = self.pending_messages;
 
-                self.next = Some(Box::pin(async move {
+                let next = self.next.insert(Box::pin(async move {
                     let inbox = context.client.new_inbox();
-                    let subscriber = context.client.subscribe(inbox.clone()).await?;
+                    let subscriber = context
+                        .client
+                        .subscribe(inbox.clone())
+                        .await
+                        .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
                     context
                         .client
                         .publish_with_reply(subject, inbox, request)
-                        .await?;
+                        .await
+                        .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
                     // TODO(tp): Add timeout config and defaults.
                     Ok(Batch {
@@ -427,10 +475,12 @@ impl<'a> futures::Stream for Sequence<'a> {
                     })
                 }));
 
-                match self.next.as_mut().unwrap().as_mut().poll(cx) {
+                match next.as_mut().poll(cx) {
                     Poll::Ready(result) => {
                         self.next = None;
-                        Poll::Ready(Some(result))
+                        Poll::Ready(Some(result.map_err(|err| {
+                            MessagesError::with_source(MessagesErrorKind::Pull, err)
+                        })))
                     }
                     Poll::Pending => Poll::Pending,
                 }
@@ -439,7 +489,9 @@ impl<'a> futures::Stream for Sequence<'a> {
             Some(next) => match next.as_mut().poll(cx) {
                 Poll::Ready(result) => {
                     self.next = None;
-                    Poll::Ready(Some(result))
+                    Poll::Ready(Some(result.map_err(|err| {
+                        MessagesError::with_source(MessagesErrorKind::Pull, err)
+                    })))
                 }
                 Poll::Pending => Poll::Pending,
             },
@@ -447,28 +499,344 @@ impl<'a> futures::Stream for Sequence<'a> {
     }
 }
 
+impl<'a> Consumer<OrderedConfig> {
+    /// Returns a stream of messages for Ordered Pull Consumer.
+    ///
+    /// Ordered consumers uses single replica ephemeral consumer, no matter the replication factor of the
+    /// Stream. It does not use acks, instead it tracks sequences and recreate itself whenever it
+    /// sees mismatch.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream
+    ///     .get_or_create_stream(async_nats::jetstream::stream::Config {
+    ///         name: "events".to_string(),
+    ///         max_messages: 10_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    ///
+    /// jetstream
+    ///     .publish("events".to_string(), "data".into())
+    ///     .await?;
+    ///
+    /// let consumer = stream
+    ///     .get_or_create_consumer(
+    ///         "consumer",
+    ///         async_nats::jetstream::consumer::pull::OrderedConfig {
+    ///             name: Some("consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///     )
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.messages().await?.take(100);
+    /// while let Some(Ok(message)) = messages.next().await {
+    ///     println!("got message {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// Ok(())
+    /// # }
+    /// ```
+    pub async fn messages(self) -> Result<Ordered<'a>, StreamError> {
+        let config = Consumer {
+            config: self.config.clone().into(),
+            context: self.context.clone(),
+            info: self.info.clone(),
+        };
+        let stream = Stream::stream(
+            BatchConfig {
+                batch: 500,
+                expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
+                no_wait: false,
+                max_bytes: 0,
+                idle_heartbeat: Duration::from_secs(15),
+            },
+            &config,
+        )
+        .await?;
+
+        Ok(Ordered {
+            consumer_sequence: 0,
+            stream_sequence: 0,
+            create_stream: None,
+            context: self.context.clone(),
+            consumer_name: self
+                .config
+                .name
+                .clone()
+                .unwrap_or_else(|| self.context.client.new_inbox()),
+            consumer: self.config,
+            stream: Some(stream),
+            stream_name: self.info.stream_name.clone(),
+        })
+    }
+}
+
+/// Configuration for consumers. From a high level, the
+/// `durable_name` and `deliver_subject` fields have a particularly
+/// strong influence on the consumer's overall behavior.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct OrderedConfig {
+    /// A name of the consumer. Can be specified for both durable and ephemeral
+    /// consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A short description of the purpose of this consumer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subject: String,
+    #[cfg(feature = "server_2_10")]
+    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub filter_subjects: Vec<String>,
+    /// Whether messages are sent as quickly as possible or at the rate of receipt
+    pub replay_policy: ReplayPolicy,
+    /// The rate of message delivery in bits per second
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub rate_limit: u64,
+    /// What percentage of acknowledgments should be samples for observability, 0-100
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub sample_frequency: u8,
+    /// Only deliver headers without payloads.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub headers_only: bool,
+    /// Allows for a variety of options that determine how this consumer will receive messages
+    #[serde(flatten)]
+    pub deliver_policy: DeliverPolicy,
+    /// The maximum number of waiting consumers.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_waiting: i64,
+    #[cfg(feature = "server_2_10")]
+    // Additional consumer metadata.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub metadata: HashMap<String, String>,
+    // Maximum number of messages that can be requested in single Pull Request.
+    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
+    // [stream]
+    pub max_batch: i64,
+    // Maximum number of bytes that can be requested in single Pull Request.
+    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
+    // [stream]
+    pub max_bytes: i64,
+    // Maximum expiry that can be set for a single Pull Request.
+    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
+    // [stream]
+    pub max_expires: Duration,
+}
+
+impl From<OrderedConfig> for Config {
+    fn from(config: OrderedConfig) -> Self {
+        Config {
+            durable_name: None,
+            name: config.name,
+            description: config.description,
+            deliver_policy: config.deliver_policy,
+            ack_policy: AckPolicy::None,
+            ack_wait: Duration::default(),
+            max_deliver: 1,
+            filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
+            replay_policy: config.replay_policy,
+            rate_limit: config.rate_limit,
+            sample_frequency: config.sample_frequency,
+            max_waiting: config.max_waiting,
+            max_ack_pending: 0,
+            headers_only: config.headers_only,
+            max_batch: config.max_batch,
+            max_bytes: config.max_bytes,
+            max_expires: config.max_expires,
+            inactive_threshold: Duration::from_secs(30),
+            num_replicas: 1,
+            memory_storage: true,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
+            backoff: Vec::new(),
+        }
+    }
+}
+
+impl FromConsumer for OrderedConfig {
+    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
+        Ok(OrderedConfig {
+            name: config.name,
+            description: config.description,
+            filter_subject: config.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: config.filter_subjects,
+            replay_policy: config.replay_policy,
+            rate_limit: config.rate_limit,
+            sample_frequency: config.sample_frequency,
+            headers_only: config.headers_only,
+            deliver_policy: config.deliver_policy,
+            max_waiting: config.max_waiting,
+            #[cfg(feature = "server_2_10")]
+            metadata: config.metadata,
+            max_batch: config.max_batch,
+            max_bytes: config.max_bytes,
+            max_expires: config.max_expires,
+        })
+    }
+}
+
+impl IntoConsumerConfig for OrderedConfig {
+    fn into_consumer_config(self) -> super::Config {
+        jetstream::consumer::Config {
+            deliver_subject: None,
+            durable_name: None,
+            name: self.name,
+            description: self.description,
+            deliver_group: None,
+            deliver_policy: self.deliver_policy,
+            ack_policy: AckPolicy::None,
+            ack_wait: Duration::default(),
+            max_deliver: 1,
+            filter_subject: self.filter_subject,
+            #[cfg(feature = "server_2_10")]
+            filter_subjects: self.filter_subjects,
+            replay_policy: self.replay_policy,
+            rate_limit: self.rate_limit,
+            sample_frequency: self.sample_frequency,
+            max_waiting: self.max_waiting,
+            max_ack_pending: 0,
+            headers_only: self.headers_only,
+            flow_control: false,
+            idle_heartbeat: Duration::default(),
+            max_batch: 0,
+            max_bytes: 0,
+            max_expires: Duration::default(),
+            inactive_threshold: Duration::from_secs(30),
+            num_replicas: 1,
+            memory_storage: true,
+            #[cfg(feature = "server_2_10")]
+            metadata: self.metadata,
+            backoff: Vec::new(),
+        }
+    }
+}
+
+pub struct Ordered<'a> {
+    context: Context,
+    stream_name: String,
+    consumer: OrderedConfig,
+    consumer_name: String,
+    stream: Option<Stream>,
+    create_stream: Option<BoxFuture<'a, Result<Stream, ConsumerRecreateError>>>,
+    consumer_sequence: u64,
+    stream_sequence: u64,
+}
+
+impl<'a> futures::Stream for Ordered<'a> {
+    type Item = Result<jetstream::Message, OrderedError>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let mut recreate = false;
+        // Poll messages
+        if let Some(stream) = self.stream.as_mut() {
+            match stream.poll_next_unpin(cx) {
+                Poll::Ready(message) => match message {
+                    Some(message) => {
+                        // Do we bail out on all errors?
+                        // Or we want to handle some? (like consumer deleted?)
+                        let message = message?;
+                        let info = message.info().map_err(|err| {
+                            OrderedError::with_source(OrderedErrorKind::Other, err)
+                        })?;
+                        trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
+                                           self.consumer_sequence,
+                                           self.stream_sequence,
+                                           info.consumer_sequence,
+                                           info.stream_sequence);
+                        if info.consumer_sequence != self.consumer_sequence + 1 {
+                            debug!(
+                                "ordered consumer mismatch. current {}, info: {}",
+                                self.consumer_sequence, info.consumer_sequence
+                            );
+                            recreate = true;
+                            self.consumer_sequence = 0;
+                        } else {
+                            self.stream_sequence = info.stream_sequence;
+                            self.consumer_sequence = info.consumer_sequence;
+                            return Poll::Ready(Some(Ok(message)));
+                        }
+                    }
+                    None => return Poll::Ready(None),
+                },
+                Poll::Pending => (),
+            }
+        }
+        // Recreate consumer if needed
+        if recreate {
+            self.stream = None;
+            self.create_stream = Some(Box::pin({
+                let context = self.context.clone();
+                let config = self.consumer.clone().into();
+                let stream_name = self.stream_name.clone();
+                let consumer_name = self.consumer_name.clone();
+                let sequence = self.consumer_sequence;
+                async move {
+                    recreate_consumer_stream(context, config, stream_name, consumer_name, sequence)
+                        .await
+                }
+            }))
+        }
+        // check for recreation future
+        if let Some(result) = self.create_stream.as_mut() {
+            match result.poll_unpin(cx) {
+                Poll::Ready(result) => match result {
+                    Ok(stream) => {
+                        self.create_stream = None;
+                        self.stream = Some(stream);
+                        return self.poll_next(cx);
+                    }
+                    Err(err) => {
+                        return Poll::Ready(Some(Err(OrderedError::with_source(
+                            OrderedErrorKind::Recreate,
+                            err,
+                        ))))
+                    }
+                },
+                Poll::Pending => (),
+            }
+        }
+        Poll::Pending
+    }
+}
+
 pub struct Stream {
     pending_messages: usize,
     pending_bytes: usize,
-    request_result_rx: tokio::sync::mpsc::Receiver<Result<bool, crate::Error>>,
+    request_result_rx: tokio::sync::mpsc::Receiver<Result<bool, super::RequestError>>,
     request_tx: tokio::sync::watch::Sender<()>,
     subscriber: Subscriber,
     batch_config: BatchConfig,
     context: Context,
     pending_request: bool,
     task_handle: JoinHandle<()>,
-    heartbeat_handle: Option<JoinHandle<()>>,
-    last_seen: Arc<Mutex<Instant>>,
-    heartbeats_missing: tokio::sync::mpsc::Receiver<()>,
     terminated: bool,
+    heartbeat_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
         self.task_handle.abort();
-        if let Some(handle) = self.heartbeat_handle.take() {
-            handle.abort()
-        }
     }
 }
 
@@ -476,9 +844,14 @@ impl Stream {
     async fn stream(
         batch_config: BatchConfig,
         consumer: &Consumer<Config>,
-    ) -> Result<Stream, Error> {
+    ) -> Result<Stream, StreamError> {
         let inbox = consumer.context.client.new_inbox();
-        let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
+        let subscription = consumer
+            .context
+            .client
+            .subscribe(inbox.clone())
+            .await
+            .map_err(|err| StreamError::with_source(StreamErrorKind::Other, err))?;
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
             consumer.context.prefix, consumer.info.stream_name, consumer.info.name
@@ -487,8 +860,8 @@ impl Stream {
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let task_handle = tokio::task::spawn({
-            let consumer = consumer.clone();
             let batch = batch_config;
+            let consumer = consumer.clone();
             let mut context = consumer.context.clone();
             let subject = subject;
             let inbox = inbox.clone();
@@ -500,8 +873,7 @@ impl Stream {
                         .map(|expires| match expires {
                             0 => futures::future::Either::Left(future::pending()),
                             t => futures::future::Either::Right(tokio::time::sleep(
-                                Duration::from_nanos(t as u64)
-                                    .saturating_add(Duration::from_secs(5)),
+                                Duration::from_nanos(t).saturating_add(Duration::from_secs(5)),
                             )),
                         })
                         .unwrap_or_else(|| futures::future::Either::Left(future::pending()));
@@ -511,7 +883,7 @@ impl Stream {
                     let mut pending_reset = false;
 
                     tokio::select! {
-                       _  = context.client.state.changed() => {
+                       _ = context.client.state.changed() => {
                             let state = context.client.state.borrow().to_owned();
                             if !(state == crate::connection::State::Connected
                                 && prev_state != State::Connected) {
@@ -542,59 +914,25 @@ impl Stream {
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
                         .await
-                        .map(|_| pending_reset)
-                        .map_err(|err| Box::from(io::Error::new(io::ErrorKind::Other, err)));
+                        .map(|_| pending_reset);
                     if let Err(err) = consumer.context.client.flush().await {
                         debug!("flush failed: {err:?}");
                     }
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
-                        .send(result.map(|_| pending_reset))
+                        .send(result.map(|_| pending_reset).map_err(|err| {
+                            crate::RequestError::with_source(crate::RequestErrorKind::Other, err)
+                                .into()
+                        }))
                         .await
                         .unwrap();
                     trace!("result send over tx");
                 }
-                // }
             }
         });
-        let last_seen = Arc::new(Mutex::new(Instant::now()));
-        let (missed_heartbeat_tx, missed_heartbeat_rx) = tokio::sync::mpsc::channel(1);
-        let heartbeat_handle = if !batch_config.idle_heartbeat.is_zero() {
-            debug!("spawning heartbeat checker task");
-            Some(tokio::task::spawn({
-                let last_seen = last_seen.clone();
-                async move {
-                    loop {
-                        tokio::time::sleep(batch_config.idle_heartbeat).await;
-                        debug!("checking for missed heartbeats");
-                        let should_reset = {
-                            let mut last_seen = last_seen.lock().unwrap();
-                            if last_seen
-                                .elapsed()
-                                .gt(&batch_config.idle_heartbeat.saturating_mul(2))
-                            {
-                                // If we met the missed heartbeat threshold, reset the timer
-                                // so it will not be instantly triggered again.
-                                *last_seen = Instant::now();
-                                true
-                            } else {
-                                false
-                            }
-                        };
-                        if should_reset {
-                            debug!("missed heartbeat threshold met");
-                            missed_heartbeat_tx.send(()).await.unwrap();
-                        }
-                    }
-                }
-            }))
-        } else {
-            None
-        };
 
         Ok(Stream {
             task_handle,
-            heartbeat_handle,
             request_result_rx,
             request_tx,
             batch_config,
@@ -603,15 +941,101 @@ impl Stream {
             subscriber: subscription,
             context: consumer.context.clone(),
             pending_request: false,
-            last_seen,
-            heartbeats_missing: missed_heartbeat_rx,
             terminated: false,
+            heartbeat_timeout: None,
         })
     }
 }
+#[derive(Debug)]
+pub struct OrderedError {
+    kind: OrderedErrorKind,
+    source: Option<crate::Error>,
+}
+
+impl std::fmt::Display for OrderedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
+            OrderedErrorKind::Pull => {
+                write!(f, "pull request failed: {}", self.format_source())
+            }
+            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            OrderedErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
+        }
+    }
+}
+
+crate::error_impls!(OrderedError, OrderedErrorKind);
+
+impl From<MessagesError> for OrderedError {
+    fn from(err: MessagesError) -> Self {
+        match err.kind() {
+            MessagesErrorKind::MissingHeartbeat => {
+                OrderedError::new(OrderedErrorKind::MissingHeartbeat)
+            }
+            MessagesErrorKind::ConsumerDeleted => {
+                OrderedError::new(OrderedErrorKind::ConsumerDeleted)
+            }
+            MessagesErrorKind::Pull => OrderedError {
+                kind: OrderedErrorKind::Pull,
+                source: err.source,
+            },
+            MessagesErrorKind::PushBasedConsumer => {
+                OrderedError::new(OrderedErrorKind::PushBasedConsumer)
+            }
+            MessagesErrorKind::Other => OrderedError {
+                kind: OrderedErrorKind::Other,
+                source: err.source,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    Pull,
+    PushBasedConsumer,
+    Recreate,
+    Other,
+}
+
+#[derive(Debug)]
+pub struct MessagesError {
+    kind: MessagesErrorKind,
+    source: Option<crate::Error>,
+}
+
+impl std::fmt::Display for MessagesError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            MessagesErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            MessagesErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
+            MessagesErrorKind::Pull => {
+                write!(f, "pull request failed: {}", self.format_source())
+            }
+            MessagesErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            MessagesErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+        }
+    }
+}
+
+crate::error_impls!(MessagesError, MessagesErrorKind);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessagesErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    Pull,
+    PushBasedConsumer,
+    Other,
+}
 
 impl futures::Stream for Stream {
-    type Item = Result<jetstream::Message, Error>;
+    type Item = Result<jetstream::Message, MessagesError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -620,6 +1044,25 @@ impl futures::Stream for Stream {
         if self.terminated {
             return Poll::Ready(None);
         }
+
+        if !self.batch_config.idle_heartbeat.is_zero() {
+            trace!("checking idle hearbeats");
+            let timeout = self.batch_config.idle_heartbeat.saturating_mul(2);
+            match self
+                .heartbeat_timeout
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)))
+                .poll_unpin(cx)
+            {
+                Poll::Ready(_) => {
+                    self.heartbeat_timeout = None;
+                    return Poll::Ready(Some(Err(MessagesError::new(
+                        MessagesErrorKind::MissingHeartbeat,
+                    ))));
+                }
+                Poll::Pending => (),
+            }
+        }
+
         loop {
             trace!("pending messages: {}", self.pending_messages);
             if (self.pending_messages <= self.batch_config.batch / 2
@@ -631,29 +1074,7 @@ impl futures::Stream for Stream {
                 self.request_tx.send(()).unwrap();
                 self.pending_request = true;
             }
-            if self.heartbeat_handle.is_some() {
-                match self.heartbeats_missing.poll_recv(cx) {
-                    Poll::Ready(resp) => match resp {
-                        Some(()) => {
-                            trace!("received missing heartbeats notification");
-                            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                                std::io::ErrorKind::TimedOut,
-                                "did not receive idle heartbeat in time",
-                            )))));
-                        }
-                        None => {
-                            self.terminated = true;
-                            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                "unexpected termination of heartbeat checker",
-                            )))));
-                        }
-                    },
-                    Poll::Pending => {
-                        trace!("pending message from missing heartbeats notification channel");
-                    }
-                }
-            }
+
             match self.request_result_rx.poll_recv(cx) {
                 Poll::Ready(resp) => match resp {
                     Some(resp) => match resp {
@@ -670,7 +1091,12 @@ impl futures::Stream for Stream {
                             self.pending_request = false;
                             continue;
                         }
-                        Err(err) => return Poll::Ready(Some(Err(err))),
+                        Err(err) => {
+                            return Poll::Ready(Some(Err(MessagesError::with_source(
+                                MessagesErrorKind::Pull,
+                                err,
+                            ))))
+                        }
                     },
                     None => return Poll::Ready(None),
                 },
@@ -678,98 +1104,95 @@ impl futures::Stream for Stream {
                     trace!("pending result");
                 }
             }
+
             trace!("polling subscriber");
             match self.subscriber.receiver.poll_recv(cx) {
-                Poll::Ready(maybe_message) => match maybe_message {
-                    Some(message) => match message.status.unwrap_or(StatusCode::OK) {
-                        StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
-                            debug!("received status message: {:?}", message);
-                            // If consumer has been deleted, error and shutdown the iterator.
-                            if message.description.as_deref() == Some("Consumer Deleted") {
-                                self.terminated = true;
-                                return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                                    std::io::ErrorKind::NotFound,
-                                    format!("{:?}: {:?}", message.status, message.description),
-                                )))));
-                            }
-                            // If consumer is not pull based, error and shutdown the iterator.
-                            if message.description.as_deref() == Some("Consumer is push based") {
-                                self.terminated = true;
-                                return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    format!("{:?}: {:?}", message.status, message.description),
-                                )))));
-                            }
-                            // All other cases can be handled.
+                Poll::Ready(maybe_message) => {
+                    self.heartbeat_timeout = None;
+                    match maybe_message {
+                        Some(message) => match message.status.unwrap_or(StatusCode::OK) {
+                            StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
+                                debug!("received status message: {:?}", message);
+                                // If consumer has been deleted, error and shutdown the iterator.
+                                if message.description.as_deref() == Some("Consumer Deleted") {
+                                    self.terminated = true;
+                                    return Poll::Ready(Some(Err(MessagesError::new(
+                                        MessagesErrorKind::ConsumerDeleted,
+                                    ))));
+                                }
+                                // If consumer is not pull based, error and shutdown the iterator.
+                                if message.description.as_deref() == Some("Consumer is push based")
+                                {
+                                    self.terminated = true;
+                                    return Poll::Ready(Some(Err(MessagesError::new(
+                                        MessagesErrorKind::PushBasedConsumer,
+                                    ))));
+                                }
 
-                            // Got a status message from a consumer, meaning it's alive.
-                            // Update last seen.
-                            if !self.batch_config.idle_heartbeat.is_zero() {
-                                *self.last_seen.lock().unwrap() = Instant::now();
+                                // Do accounting for messages left after terminated/completed pull request.
+                                let pending_messages = message
+                                    .headers
+                                    .as_ref()
+                                    .and_then(|headers| headers.get("Nats-Pending-Messages"))
+                                    .map(|h| h.iter())
+                                    .and_then(|mut i| i.next())
+                                    .map(|e| e.parse::<usize>())
+                                    .unwrap_or(Ok(self.batch_config.batch))
+                                    .map_err(|err| {
+                                        MessagesError::with_source(MessagesErrorKind::Other, err)
+                                    })?;
+                                let pending_bytes = message
+                                    .headers
+                                    .as_ref()
+                                    .and_then(|headers| headers.get("Nats-Pending-Bytes"))
+                                    .map(|h| h.iter())
+                                    .and_then(|mut i| i.next())
+                                    .map(|e| e.parse::<usize>())
+                                    .unwrap_or(Ok(self.batch_config.max_bytes))
+                                    .map_err(|err| {
+                                        MessagesError::with_source(MessagesErrorKind::Other, err)
+                                    })?;
+                                debug!(
+                                    "timeout reached. remaining messages: {}, bytes {}",
+                                    pending_messages, pending_bytes
+                                );
+                                self.pending_messages =
+                                    self.pending_messages.saturating_sub(pending_messages);
+                                trace!("message bytes len: {}", pending_bytes);
+                                self.pending_bytes =
+                                    self.pending_bytes.saturating_sub(pending_bytes);
+                                continue;
                             }
-
-                            // Do accounting for messages left after terminated/completed pull request.
-                            let pending_messages = message
-                                .headers
-                                .as_ref()
-                                .and_then(|headers| headers.get("Nats-Pending-Messages"))
-                                .map(|h| h.iter())
-                                .and_then(|mut i| i.next())
-                                .map(|e| e.parse::<usize>())
-                                .unwrap_or(Ok(self.batch_config.batch))?;
-                            let pending_bytes = message
-                                .headers
-                                .as_ref()
-                                .and_then(|headers| headers.get("Nats-Pending-Bytes"))
-                                .map(|h| h.iter())
-                                .and_then(|mut i| i.next())
-                                .map(|e| e.parse::<usize>())
-                                .unwrap_or(Ok(self.batch_config.max_bytes))?;
-                            debug!(
-                                "timeout reached. remaining messages: {}, bytes {}",
-                                pending_messages, pending_bytes
-                            );
-                            self.pending_messages =
-                                self.pending_messages.saturating_sub(pending_messages);
-                            trace!("message bytes len: {}", pending_bytes);
-                            self.pending_bytes = self.pending_bytes.saturating_sub(pending_bytes);
-                            continue;
-                        }
-                        // Idle Hearbeat means we have no messages, but consumer is fine.
-                        StatusCode::IDLE_HEARTBEAT => {
-                            debug!("received idle heartbeat");
-                            if !self.batch_config.idle_heartbeat.is_zero() {
-                                *self.last_seen.lock().unwrap() = Instant::now();
+                            // Idle Hearbeat means we have no messages, but consumer is fine.
+                            StatusCode::IDLE_HEARTBEAT => {
+                                debug!("received idle heartbeat");
+                                continue;
                             }
-                            continue;
-                        }
-                        // We got an message from a stream.
-                        StatusCode::OK => {
-                            trace!("message received");
-                            if !self.batch_config.idle_heartbeat.is_zero() {
-                                *self.last_seen.lock().unwrap() = Instant::now();
+                            // We got an message from a stream.
+                            StatusCode::OK => {
+                                trace!("message received");
+                                self.pending_messages = self.pending_messages.saturating_sub(1);
+                                self.pending_bytes =
+                                    self.pending_bytes.saturating_sub(message.length);
+                                return Poll::Ready(Some(Ok(jetstream::Message {
+                                    context: self.context.clone(),
+                                    message,
+                                })));
                             }
-                            *self.last_seen.lock().unwrap() = Instant::now();
-                            self.pending_messages = self.pending_messages.saturating_sub(1);
-                            self.pending_bytes = self.pending_bytes.saturating_sub(message.length);
-                            return Poll::Ready(Some(Ok(jetstream::Message {
-                                context: self.context.clone(),
-                                message,
-                            })));
-                        }
-                        status => {
-                            debug!("received unknown  message: {:?}", message);
-                            return Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                format!(
-                                    "error while processing messages from the stream: {}, {:?}",
-                                    status, message.description
-                                ),
-                            )))));
-                        }
-                    },
-                    None => return Poll::Ready(None),
-                },
+                            status => {
+                                debug!("received unknown message: {:?}", message);
+                                return Poll::Ready(Some(Err(MessagesError::with_source(
+                                    MessagesErrorKind::Other,
+                                    format!(
+                                        "error while processing messages from the stream: {}, {:?}",
+                                        status, message.description
+                                    ),
+                                ))));
+                            }
+                        },
+                        None => return Poll::Ready(None),
+                    }
+                }
                 Poll::Pending => {
                     debug!("subscriber still pending");
                     return std::task::Poll::Pending;
@@ -811,7 +1234,7 @@ pub struct StreamBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: usize,
+    expires: u64,
     consumer: &'a Consumer<Config>,
 }
 
@@ -838,18 +1261,22 @@ impl<'a> StreamBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.stream()
+    /// let mut messages = consumer
+    ///     .stream()
     ///     .max_bytes_per_batch(1024)
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -876,18 +1303,22 @@ impl<'a> StreamBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.stream()
+    /// let mut messages = consumer
+    ///     .stream()
     ///     .max_messages_per_batch(100)
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -910,18 +1341,22 @@ impl<'a> StreamBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.stream()
+    /// let mut messages = consumer
+    ///     .stream()
     ///     .heartbeat(std::time::Duration::from_secs(10))
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -945,18 +1380,22 @@ impl<'a> StreamBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.stream()
+    /// let mut messages = consumer
+    ///     .stream()
     ///     .expires(std::time::Duration::from_secs(30))
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -978,18 +1417,22 @@ impl<'a> StreamBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.stream()
+    /// let mut messages = consumer
+    ///     .stream()
     ///     .max_messages_per_batch(100)
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -999,7 +1442,7 @@ impl<'a> StreamBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn messages(self) -> Result<Stream, Error> {
+    pub async fn messages(self) -> Result<Stream, StreamError> {
         Stream::stream(
             BatchConfig {
                 batch: self.batch,
@@ -1021,19 +1464,23 @@ impl<'a> StreamBuilder<'a> {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
-/// use futures::StreamExt;
 /// use async_nats::jetstream::consumer::PullConsumer;
+/// use futures::StreamExt;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
 /// let consumer: PullConsumer = jetstream
-///     .get_stream("events").await?
-///     .get_consumer("pull").await?;
+///     .get_stream("events")
+///     .await?
+///     .get_consumer("pull")
+///     .await?;
 ///
-/// let mut messages = consumer.fetch()
+/// let mut messages = consumer
+///     .fetch()
 ///     .max_messages(100)
 ///     .max_bytes(1024)
-///     .messages().await?;
+///     .messages()
+///     .await?;
 ///
 /// while let Some(message) = messages.next().await {
 ///     let message = message?;
@@ -1047,7 +1494,7 @@ pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: Option<usize>,
+    expires: Option<u64>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1079,12 +1526,12 @@ impl<'a> FetchBuilder<'a> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.fetch()
-    ///     .max_bytes(1024)
-    ///     .messages().await?;
+    /// let mut messages = consumer.fetch().max_bytes(1024).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1116,12 +1563,12 @@ impl<'a> FetchBuilder<'a> {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.fetch()
-    ///     .max_messages(100)
-    ///     .messages().await?;
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1144,18 +1591,22 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.fetch()
+    /// let mut messages = consumer
+    ///     .fetch()
     ///     .heartbeat(std::time::Duration::from_secs(10))
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1179,19 +1630,23 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.fetch()
+    /// let mut messages = consumer
+    ///     .fetch()
     ///     .expires(std::time::Duration::from_secs(30))
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1213,18 +1668,18 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.fetch()
-    ///     .max_messages(100)
-    ///     .messages().await?;
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1234,7 +1689,7 @@ impl<'a> FetchBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn messages(self) -> Result<Batch, Error> {
+    pub async fn messages(self) -> Result<Batch, BatchError> {
         Batch::batch(
             BatchConfig {
                 batch: self.batch,
@@ -1256,19 +1711,23 @@ impl<'a> FetchBuilder<'a> {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
-/// use futures::StreamExt;
 /// use async_nats::jetstream::consumer::PullConsumer;
+/// use futures::StreamExt;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
 /// let consumer: PullConsumer = jetstream
-///     .get_stream("events").await?
-///     .get_consumer("pull").await?;
+///     .get_stream("events")
+///     .await?
+///     .get_consumer("pull")
+///     .await?;
 ///
-/// let mut messages = consumer.batch()
+/// let mut messages = consumer
+///     .batch()
 ///     .max_messages(100)
 ///     .max_bytes(1024)
-///     .messages().await?;
+///     .messages()
+///     .await?;
 ///
 /// while let Some(message) = messages.next().await {
 ///     let message = message?;
@@ -1282,7 +1741,7 @@ pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: usize,
+    expires: u64,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1309,18 +1768,18 @@ impl<'a> BatchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.batch()
-    ///     .max_bytes(1024)
-    ///     .messages().await?;
+    /// let mut messages = consumer.batch().max_bytes(1024).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1347,18 +1806,18 @@ impl<'a> BatchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.batch()
-    ///     .max_messages(100)
-    ///     .messages().await?;
+    /// let mut messages = consumer.batch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1381,18 +1840,22 @@ impl<'a> BatchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.batch()
+    /// let mut messages = consumer
+    ///     .batch()
     ///     .heartbeat(std::time::Duration::from_secs(10))
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1416,18 +1879,22 @@ impl<'a> BatchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.batch()
+    /// let mut messages = consumer
+    ///     .batch()
     ///     .expires(std::time::Duration::from_secs(30))
-    ///     .messages().await?;
+    ///     .messages()
+    ///     .await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1449,18 +1916,18 @@ impl<'a> BatchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
     /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let consumer: PullConsumer = jetstream
-    ///     .get_stream("events").await?
-    ///     .get_consumer("pull").await?;
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
     ///
-    /// let mut messages = consumer.batch()
-    ///     .max_messages(100)
-    ///     .messages().await?;
+    /// let mut messages = consumer.batch().max_messages(100).messages().await?;
     ///
     /// while let Some(message) = messages.next().await {
     ///     let message = message?;
@@ -1470,7 +1937,7 @@ impl<'a> BatchBuilder<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn messages(self) -> Result<Batch, Error> {
+    pub async fn messages(self) -> Result<Batch, BatchError> {
         Batch::batch(
             BatchConfig {
                 batch: self.batch,
@@ -1486,19 +1953,19 @@ impl<'a> BatchBuilder<'a> {
 }
 
 /// Used for next Pull Request for Pull Consumer
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, Clone, Copy, PartialEq, Eq)]
 pub struct BatchConfig {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires: Option<u64>,
     /// This optionally causes the server not to store this pending request at all, but when there are no
     /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
     /// can know when you reached the end of the stream for example. A 409 is returned if the
     /// Consumer has reached MaxAckPending limits.
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub no_wait: bool,
 
     /// Sets max number of bytes in total in given batch size. This works together with `batch`.
@@ -1507,7 +1974,7 @@ pub struct BatchConfig {
 
     /// Setting this other than zero will cause the server to send 100 Idle Heartbeat status to the
     /// client
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
 }
 
@@ -1581,10 +2048,13 @@ pub struct Config {
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_batch: i64,
+    /// Maximum value of request max_bytes
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_bytes: i64,
     /// Maximum value for request expiration
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub max_expires: Duration,
-    /// Threshold for ephemeral consumer inactivity
+    /// Threshold for consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
     /// Number of consumer replicas
@@ -1632,6 +2102,7 @@ impl IntoConsumerConfig for Config {
             flow_control: false,
             idle_heartbeat: Duration::default(),
             max_batch: self.max_batch,
+            max_bytes: self.max_bytes,
             max_expires: self.max_expires,
             inactive_threshold: self.inactive_threshold,
             num_replicas: self.num_replicas,
@@ -1668,6 +2139,7 @@ impl FromConsumer for Config {
             max_ack_pending: config.max_ack_pending,
             headers_only: config.headers_only,
             max_batch: config.max_batch,
+            max_bytes: config.max_bytes,
             max_expires: config.max_expires,
             inactive_threshold: config.inactive_threshold,
             num_replicas: config.num_replicas,
@@ -1677,4 +2149,152 @@ impl FromConsumer for Config {
             backoff: config.backoff,
         })
     }
+}
+
+#[derive(Debug)]
+pub struct BatchRequestError {
+    kind: BatchRequestErrorKind,
+    source: Option<crate::Error>,
+}
+crate::error_impls!(BatchRequestError, BatchRequestErrorKind);
+
+impl std::fmt::Display for BatchRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            BatchRequestErrorKind::Publish => {
+                write!(f, "publish failed: {}", self.format_source())
+            }
+            BatchRequestErrorKind::Flush => {
+                write!(f, "flush failed: {}", self.format_source())
+            }
+            BatchRequestErrorKind::Serialize => {
+                write!(f, "serialize failed: {}", self.format_source())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BatchRequestErrorKind {
+    Publish,
+    Flush,
+    Serialize,
+}
+
+#[derive(Debug)]
+pub struct BatchError {
+    kind: BatchErrorKind,
+    source: Option<crate::Error>,
+}
+crate::error_impls!(BatchError, BatchErrorKind);
+
+impl std::fmt::Display for BatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            BatchErrorKind::Pull => {
+                write!(f, "pull request failed: {}", self.format_source())
+            }
+            BatchErrorKind::Flush => {
+                write!(f, "flush failed: {}", self.format_source())
+            }
+            BatchErrorKind::Serialize => {
+                write!(f, "serialize failed: {}", self.format_source())
+            }
+            BatchErrorKind::Subscribe => write!(f, "subscribe failed: {}", self.format_source()),
+        }
+    }
+}
+
+impl From<SubscribeError> for BatchError {
+    fn from(err: SubscribeError) -> Self {
+        BatchError::with_source(BatchErrorKind::Subscribe, err)
+    }
+}
+
+impl From<BatchRequestError> for BatchError {
+    fn from(err: BatchRequestError) -> Self {
+        BatchError::with_source(BatchErrorKind::Pull, err)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BatchErrorKind {
+    Subscribe,
+    Pull,
+    Flush,
+    Serialize,
+}
+
+#[derive(Debug)]
+pub struct ConsumerRecreateError {
+    kind: ConsumerRecreateErrorKind,
+    source: Option<crate::Error>,
+}
+
+crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
+
+impl std::fmt::Display for ConsumerRecreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind() {
+            ConsumerRecreateErrorKind::GetStream => {
+                write!(f, "error getting stream: {}", self.format_source())
+            }
+            ConsumerRecreateErrorKind::Recreate => {
+                write!(f, "consumer creation failed: {}", self.format_source())
+            }
+            ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum ConsumerRecreateErrorKind {
+    GetStream,
+    Recreate,
+    TimedOut,
+}
+
+async fn recreate_consumer_stream(
+    context: Context,
+    config: Config,
+    stream_name: String,
+    consumer_name: String,
+    sequence: u64,
+) -> Result<Stream, ConsumerRecreateError> {
+    // TODO(jarema): retry whole operation few times?
+    let stream = context
+        .get_stream(stream_name.clone())
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
+        })?;
+    stream
+        .delete_consumer(&consumer_name)
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
+        })?;
+
+    let deliver_policy = {
+        if sequence == 0 {
+            DeliverPolicy::All
+        } else {
+            DeliverPolicy::ByStartSequence {
+                start_sequence: sequence + 1,
+            }
+        }
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        stream.create_consumer(jetstream::consumer::pull::Config {
+            deliver_policy,
+            ..config
+        }),
+    )
+    .await
+    .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?
+    .messages()
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))
+    .await
 }

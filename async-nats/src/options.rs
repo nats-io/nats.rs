@@ -11,10 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Authorization, Client, ConnectError, Event, ToServerAddrs};
+use crate::auth::Auth;
+use crate::connector;
+use crate::{Client, ConnectError, Event, ToServerAddrs};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::Engine;
 use futures::Future;
 use std::fmt::Formatter;
-use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::io;
 use tokio_rustls::rustls;
 
@@ -23,11 +33,11 @@ use tokio_rustls::rustls;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::ConnectError> {
-/// let mut options =
-/// async_nats::ConnectOptions::new()
+/// let mut options = async_nats::ConnectOptions::new()
 ///     .require_tls(true)
 ///     .ping_interval(std::time::Duration::from_secs(10))
-///     .connect("demo.nats.io").await?;
+///     .connect("demo.nats.io")
+///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -39,7 +49,7 @@ pub struct ConnectOptions {
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) reconnect_buffer_size: usize,
     pub(crate) connection_timeout: Duration,
-    pub(crate) auth: Authorization,
+    pub(crate) auth: Auth,
     pub(crate) tls_required: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
@@ -55,6 +65,9 @@ pub struct ConnectOptions {
     pub(crate) retry_on_initial_connect: bool,
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
+    pub(crate) read_buffer_capacity: u16,
+    pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
+    pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -76,6 +89,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
+            .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
             .finish()
     }
 }
@@ -89,7 +103,6 @@ impl Default for ConnectOptions {
             reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: Some(60),
             connection_timeout: Duration::from_secs(5),
-            auth: Authorization::None,
             tls_required: false,
             certificates: Vec::new(),
             client_cert: None,
@@ -109,6 +122,12 @@ impl Default for ConnectOptions {
             retry_on_initial_connect: false,
             ignore_discovered_servers: false,
             retain_servers_order: false,
+            read_buffer_capacity: 65535,
+            reconnect_delay_callback: Box::new(|attempts| {
+                connector::reconnect_delay_callback_default(attempts)
+            }),
+            auth: Default::default(),
+            auth_callback: None,
         }
     }
 }
@@ -120,11 +139,11 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let mut options =
-    /// async_nats::ConnectOptions::new()
+    /// let mut options = async_nats::ConnectOptions::new()
     ///     .require_tls(true)
     ///     .ping_interval(std::time::Duration::from_secs(10))
-    ///     .connect("demo.nats.io").await?;
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -138,66 +157,136 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .require_tls(true)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// ## Pass multiple URLs.
     /// ```no_run
-    ///#[tokio::main]
-    ///# async fn main() -> Result<(), async_nats::Error> {
-    ///use async_nats::ServerAddr;
-    ///let client = async_nats::connect(vec![
-    ///    "demo.nats.io".parse::<ServerAddr>()?,
-    ///    "other.nats.io".parse::<ServerAddr>()?,
-    ///])
-    ///.await
-    ///.unwrap();
-    ///# Ok(())
-    ///# }
+    /// #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::ServerAddr;
+    /// let client = async_nats::connect(vec![
+    ///     "demo.nats.io".parse::<ServerAddr>()?,
+    ///     "other.nats.io".parse::<ServerAddr>()?,
+    /// ])
+    /// .await
+    /// .unwrap();
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn connect<A: ToServerAddrs>(self, addrs: A) -> Result<Client, ConnectError> {
         crate::connect_with_options(addrs, self).await
     }
 
-    /// Auth against NATS Server with provided token.
+    /// Creates a builder with a custom auth callback to be used when authenticating against the NATS Server.
+    /// Requires an asynchronous function that accepts nonce and returns [Auth].
+    /// It will overwrite all other auth methods used.
+    ///
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::with_auth_callback(move |_| async move {
+    ///     let mut auth = async_nats::Auth::new();
+    ///     auth.username = Some("derek".to_string());
+    ///     auth.password = Some("s3cr3t".to_string());
+    ///     Ok(auth)
+    /// })
+    /// .connect("demo.nats.io")
+    /// .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_auth_callback<F, Fut>(callback: F) -> Self
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<Auth, AuthError>> + 'static + Send + Sync,
+    {
+        let mut options = ConnectOptions::new();
+        options.auth_callback = Some(CallbackArg1::<Vec<u8>, Result<Auth, AuthError>>(Box::new(
+            move |nonce| Box::pin(callback(nonce)),
+        )));
+        options
+    }
+
+    /// Authenticate against NATS Server with the provided token.
     ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc =
-    /// async_nats::ConnectOptions::with_token("t0k3n!".into()).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::with_token("t0k3n!".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn with_token(token: String) -> Self {
-        ConnectOptions {
-            auth: Authorization::Token(token),
-            ..Default::default()
-        }
+        ConnectOptions::default().token(token)
     }
 
-    /// Auth against NATS Server with provided username and password.
+    /// Use a builder to specify a token, to be used when authenticating against the NATS Server.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .token("t0k3n!".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn token(mut self, token: String) -> Self {
+        self.auth.token = Some(token);
+        self
+    }
+
+    /// Authenticate against NATS Server with the provided username and password.
     ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let nc = async_nats::ConnectOptions::with_user_and_password("derek".into(), "s3cr3t!".into())
-    ///     .connect("demo.nats.io").await?;
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn with_user_and_password(user: String, pass: String) -> Self {
-        ConnectOptions {
-            auth: Authorization::UserAndPassword(user, pass),
-            ..Default::default()
-        }
+        ConnectOptions::default().user_and_password(user, pass)
     }
 
-    /// Authenticate with a NKey. Requires NKey Seed secret.
+    /// Use a builder to specify a username and password, to be used when authenticating against the NATS Server.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .user_and_password("derek".into(), "s3cr3t!".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn user_and_password(mut self, user: String, pass: String) -> Self {
+        self.auth.username = Some(user);
+        self.auth.password = Some(pass);
+        self
+    }
+
+    /// Authenticate with an NKey. Requires an NKey Seed secret.
     ///
     /// # Example
     /// ```no_run
@@ -205,19 +294,38 @@ impl ConnectOptions {
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let nc = async_nats::ConnectOptions::with_nkey(seed.into())
-    ///     .connect("localhost").await?;
+    ///     .connect("localhost")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn with_nkey(seed: String) -> Self {
-        ConnectOptions {
-            auth: Authorization::NKey(seed),
-            ..Default::default()
-        }
+        ConnectOptions::default().nkey(seed)
+    }
+
+    /// Use a builder to specify an NKey, to be used when authenticating against the NATS Server.
+    /// Requires an NKey Seed Secret.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .nkey(seed.into())
+    ///     .connect("localhost")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn nkey(mut self, seed: String) -> Self {
+        self.auth.nkey = Some(seed);
+        self
     }
 
     /// Authenticate with a JWT. Requires function to sign the server nonce.
-    /// The signing function is asynchronous
+    /// The signing function is asynchronous.
     ///
     /// # Example
     /// ```no_run
@@ -226,13 +334,16 @@ impl ConnectOptions {
     /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
     /// let key_pair = std::sync::Arc::new(nkeys::KeyPair::from_seed(seed).unwrap());
     /// // load jwt from creds file or other secure source
-    /// async fn load_jwt() -> std::io::Result<String> { todo!(); }
+    /// async fn load_jwt() -> std::io::Result<String> {
+    ///     todo!();
+    /// }
     /// let jwt = load_jwt().await?;
-    /// let nc = async_nats::ConnectOptions::with_jwt(jwt,
-    ///      move |nonce| {
-    ///         let key_pair = key_pair.clone();
-    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }})
-    ///     .connect("localhost").await?;
+    /// let nc = async_nats::ConnectOptions::with_jwt(jwt, move |nonce| {
+    ///     let key_pair = key_pair.clone();
+    ///     async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    /// })
+    /// .connect("localhost")
+    /// .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -241,22 +352,55 @@ impl ConnectOptions {
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
     {
+        ConnectOptions::default().jwt(jwt, sign_cb)
+    }
+
+    /// Use a builder to specify a JWT, to be used when authenticating against the NATS Server.
+    /// Requires an asynchronous function to sign the server nonce.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let seed = "SUANQDPB2RUOE4ETUA26CNX7FUKE5ZZKFCQIIW63OX225F2CO7UEXTM7ZY";
+    /// let key_pair = std::sync::Arc::new(nkeys::KeyPair::from_seed(seed).unwrap());
+    /// // load jwt from creds file or other secure source
+    /// async fn load_jwt() -> std::io::Result<String> {
+    ///     todo!();
+    /// }
+    /// let jwt = load_jwt().await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .jwt(jwt, move |nonce| {
+    ///         let key_pair = key_pair.clone();
+    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    ///     })
+    ///     .connect("localhost")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Self
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<Vec<u8>, AuthError>> + 'static + Send + Sync,
+    {
         let sign_cb = Arc::new(sign_cb);
-        ConnectOptions {
-            auth: Authorization::Jwt(
-                jwt,
-                CallbackArg1(Box::new(move |nonce: String| {
-                    let sign_cb = sign_cb.clone();
-                    Box::pin(async move {
-                        let sig = sign_cb(nonce.as_bytes().to_vec())
-                            .await
-                            .map_err(AuthError::new)?;
-                        Ok(base64_url::encode(&sig))
-                    })
-                })),
-            ),
-            ..Default::default()
-        }
+
+        let jwt_sign_callback = CallbackArg1(Box::new(move |nonce: String| {
+            let sign_cb = sign_cb.clone();
+            Box::pin(async move {
+                let sig = sign_cb(nonce.as_bytes().to_vec())
+                    .await
+                    .map_err(AuthError::new)?;
+                Ok(URL_SAFE_NO_PAD.encode(sig))
+            })
+        }));
+
+        self.auth.jwt = Some(jwt);
+        self.auth.signature_callback = Some(jwt_sign_callback);
+        self
     }
 
     /// Authenticate with NATS using a `.creds` file.
@@ -267,14 +411,37 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds".into()).await?
-    ///     .connect("connect.ngs.global").await?;
+    /// let nc = async_nats::ConnectOptions::with_credentials_file("path/to/my.creds")
+    ///     .await?
+    ///     .connect("connect.ngs.global")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn with_credentials_file(path: PathBuf) -> io::Result<Self> {
-        let cred_file_contents = crate::auth_utils::load_creds(path).await?;
+    pub async fn with_credentials_file(path: impl AsRef<Path>) -> io::Result<Self> {
+        let cred_file_contents = crate::auth_utils::load_creds(path.as_ref()).await?;
         Self::with_credentials(&cred_file_contents)
+    }
+
+    /// Use a builder to specify a credentials file, to be used when authenticating against the NATS Server.
+    /// This will open the credentials file and load its credentials.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .credentials_file("path/to/my.creds")
+    ///     .await?
+    ///     .connect("connect.ngs.global")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn credentials_file(self, path: impl AsRef<Path>) -> io::Result<Self> {
+        let cred_file_contents = crate::auth_utils::load_creds(path.as_ref()).await?;
+        self.credentials(&cred_file_contents)
     }
 
     /// Authenticate with NATS using a credential str, in the creds file format.
@@ -283,8 +450,7 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let creds =
-    /// "-----BEGIN NATS USER JWT-----
+    /// let creds = "-----BEGIN NATS USER JWT-----
     /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
     /// ------END NATS USER JWT------
     ///
@@ -299,14 +465,49 @@ impl ConnectOptions {
     ///
     /// let nc = async_nats::ConnectOptions::with_credentials(creds)
     ///     .expect("failed to parse static creds")
-    ///     .connect("connect.ngs.global").await?;
+    ///     .connect("connect.ngs.global")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn with_credentials(creds: &str) -> io::Result<Self> {
+        ConnectOptions::default().credentials(creds)
+    }
+
+    /// Use a builder to specify a credentials string, to be used when authenticating against the NATS Server.
+    /// The string should be in the credentials file format.
+    /// This can be used as a way to mix authentication methods.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let creds = "-----BEGIN NATS USER JWT-----
+    /// eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5...
+    /// ------END NATS USER JWT------
+    ///
+    /// ************************* IMPORTANT *************************
+    /// NKEY Seed printed below can be used sign and prove identity.
+    /// NKEYs are sensitive and should be treated as secrets.
+    ///
+    /// -----BEGIN USER NKEY SEED-----
+    /// SUAIO3FHUX5PNV2LQIIP7TZ3N4L7TX3W53MQGEIVYFIGA635OZCKEYHFLM
+    /// ------END USER NKEY SEED------
+    /// ";
+    ///
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .credentials(creds)
+    ///     .expect("failed to parse static creds")
+    ///     .connect("connect.ngs.global")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn credentials(self, creds: &str) -> io::Result<Self> {
         let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
         let key_pair = std::sync::Arc::new(key_pair);
-        Ok(Self::with_jwt(jwt, move |nonce| {
+
+        Ok(self.jwt(jwt.to_owned(), move |nonce| {
             let key_pair = key_pair.clone();
             async move { key_pair.sign(&nonce).map_err(AuthError::new) }
         }))
@@ -318,8 +519,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc =
-    /// async_nats::ConnectOptions::new().add_root_certificates("mycerts.pem".into()).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .add_root_certificates("mycerts.pem".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -334,8 +537,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc =
-    /// async_nats::ConnectOptions::new().add_client_certificate("cert.pem".into(), "key.pem".into()).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .add_client_certificate("cert.pem".into(), "key.pem".into())
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -351,8 +556,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// let nc =
-    /// async_nats::ConnectOptions::new().require_tls(true).connect("demo.nats.io").await?;
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .require_tls(true)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -370,7 +577,10 @@ impl ConnectOptions {
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .flush_interval(Duration::from_millis(100))
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -386,7 +596,10 @@ impl ConnectOptions {
     /// # use tokio::time::Duration;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().flush_interval(Duration::from_millis(100)).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .flush_interval(Duration::from_millis(100))
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -402,7 +615,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().no_echo().connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .no_echo()
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -419,7 +635,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().subscription_capacity(1024).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .subscription_capacity(1024)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -435,7 +654,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().connection_timeout(tokio::time::Duration::from_secs(5)).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .connection_timeout(tokio::time::Duration::from_secs(5))
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -450,7 +672,10 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().request_timeout(Some(std::time::Duration::from_secs(3))).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .request_timeout(Some(std::time::Duration::from_secs(3)))
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -471,26 +696,31 @@ impl ConnectOptions {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().event_callback(|event| async move {
+    /// async_nats::ConnectOptions::new()
+    ///     .event_callback(|event| async move {
     ///         println!("event occurred: {}", event);
-    /// }).connect("demo.nats.io").await?;
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
-    ///
     /// ```
     ///
     /// ## Listening to specific event kind
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new().event_callback(|event| async move {
-    ///     match event {
-    ///     async_nats::Event::Disconnected => println!("disconnected"),
-    ///         async_nats::Event::Connected => println!("reconnected"),
-    ///         async_nats::Event::ClientError(err) => println!("client error occurred: {}", err),
-    ///         other => println!("other event happened: {}", other),
-    /// }
-    /// }).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .event_callback(|event| async move {
+    ///         match event {
+    ///             async_nats::Event::Disconnected => println!("disconnected"),
+    ///             async_nats::Event::Connected => println!("reconnected"),
+    ///             async_nats::Event::ClientError(err) => println!("client error occurred: {}", err),
+    ///             other => println!("other event happened: {}", other),
+    ///         }
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -502,12 +732,15 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// let (tx, mut _rx) = tokio::sync::mpsc::channel(1);
-    /// async_nats::ConnectOptions::new().event_callback(move |event| {
-    ///     let tx = tx.clone();
-    ///     async move {
-    ///         tx.send(event).await.unwrap();
+    /// async_nats::ConnectOptions::new()
+    ///     .event_callback(move |event| {
+    ///         let tx = tx.clone();
+    ///         async move {
+    ///             tx.send(event).await.unwrap();
     ///         }
-    /// }).connect("demo.nats.io").await?;
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -520,6 +753,30 @@ impl ConnectOptions {
         self
     }
 
+    /// Registers a callback for a custom reconnect delay handler that can be used to define a backoff duration strategy.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .reconnect_delay_callback(|attempts| {
+    ///         println!("no of attempts: {attempts}");
+    ///         std::time::Duration::from_millis(std::cmp::min((attempts * 100) as u64, 8000))
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reconnect_delay_callback<F>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn(usize) -> Duration + Send + Sync + 'static,
+    {
+        self.reconnect_delay_callback = Box::new(cb);
+        self
+    }
+
     /// By default, Client dispatches op's to the Client onto the channel with capacity of 128.
     /// This option enables overriding it.
     ///
@@ -527,11 +784,13 @@ impl ConnectOptions {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    /// async_nats::ConnectOptions::new().client_capacity(256).connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .client_capacity(256)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    ///
     pub fn client_capacity(mut self, capacity: usize) -> ConnectOptions {
         self.sender_capacity = capacity;
         self
@@ -544,7 +803,10 @@ impl ConnectOptions {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// async_nats::ConnectOptions::new().custom_inbox_prefix("CUSTOM").connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .custom_inbox_prefix("CUSTOM")
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -559,7 +821,10 @@ impl ConnectOptions {
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// async_nats::ConnectOptions::new().name("rust-service").connect("demo.nats.io").await?;
+    /// async_nats::ConnectOptions::new()
+    ///     .name("rust-service")
+    ///     .connect("demo.nats.io")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -585,8 +850,63 @@ impl ConnectOptions {
         self.retain_servers_order = true;
         self
     }
+
+    /// Allows passing custom rustls tls config.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let mut root_store = async_nats::rustls::RootCertStore::empty();
+    ///
+    /// root_store.add_parsable_certificates(
+    ///     rustls_native_certs::load_native_certs()?
+    ///         .into_iter()
+    ///         .map(|cert| cert.0)
+    ///         .collect::<Vec<Vec<u8>>>()
+    ///         .as_ref(),
+    /// );
+    ///
+    /// let tls_client = async_nats::rustls::ClientConfig::builder()
+    ///     .with_safe_defaults()
+    ///     .with_root_certificates(root_store)
+    ///     .with_no_client_auth();
+    ///
+    /// let client = async_nats::ConnectOptions::new()
+    ///     .require_tls(true)
+    ///     .tls_client_config(tls_client)
+    ///     .connect("tls://demo.nats.io")
+    ///     .await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_client_config(mut self, config: rustls::ClientConfig) -> ConnectOptions {
+        self.tls_client_config = Some(config);
+        self
+    }
+
+    /// Sets the initial capacity of the read buffer. Which is a buffer used to gather partial
+    /// protocol messages.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new()
+    ///     .read_buffer_capacity(65535)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
+        self.read_buffer_capacity = size;
+        self
+    }
 }
-type AsyncCallbackArg1<A, T> =
+
+pub(crate) type AsyncCallbackArg1<A, T> =
     Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 
 pub(crate) struct CallbackArg1<A, T>(AsyncCallbackArg1<A, T>);

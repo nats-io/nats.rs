@@ -32,6 +32,22 @@ mod client {
     }
 
     #[tokio::test]
+    async fn nkey_auth_builder() {
+        let s = nats_server::run_server("tests/configs/nkey.conf");
+
+        let nc = async_nats::ConnectOptions::new()
+            .nkey(SECRET_SEED.into())
+            .connect(s.client_url())
+            .await
+            .unwrap();
+
+        // publish something
+        nc.publish("hello".into(), "world".into())
+            .await
+            .expect("published");
+    }
+
+    #[tokio::test]
     async fn nkey_reconnect() {
         use async_nats::ServerAddr;
 

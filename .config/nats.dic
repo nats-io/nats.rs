@@ -132,3 +132,11 @@ FlushError
 ConnectError
 DNS
 RequestErrorKind
+rustls
+Acker
+EndpointSchema
+auth
+filter_subject
+filter_subjects
+rollup
+IoT

@@ -34,6 +34,26 @@ mod client {
             .await
             .expect("published");
     }
+
+    #[tokio::test]
+    async fn jwt_auth_builder() {
+        let s = nats_server::run_server("tests/configs/jwt.conf");
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let nc = async_nats::ConnectOptions::new()
+            .credentials_file(path.join("tests/configs/TestUser.creds"))
+            .await
+            .expect("loaded user creds file")
+            .connect(s.client_url())
+            .await
+            .unwrap();
+
+        // publish something
+        nc.publish("hello".into(), "world".into())
+            .await
+            .expect("published");
+    }
+
     #[tokio::test]
     async fn jwt_reconnect() {
         use async_nats::ServerAddr;

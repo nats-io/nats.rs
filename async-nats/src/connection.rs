@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module provides a connection implementation for communicating with a NATS server.
+
 use std::fmt::Display;
 use std::str::{self, FromStr};
 
@@ -30,6 +32,7 @@ pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
 /// Blanked implementation that applies to both TLS and non-TLS `TcpStream`.
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
+/// An enum representing the state of the connection.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum State {
     Pending,
@@ -56,13 +59,13 @@ pub(crate) struct Connection {
 /// Internal representation of the connection.
 /// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
+    /// Attempts to read a server operation from the read buffer.
+    /// Returns `None` if there is not enough data to parse an entire operation.
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        let maybe_len = memchr::memmem::find(&self.buffer, b"\r\n");
-        if maybe_len.is_none() {
-            return Ok(None);
-        }
-
-        let len = maybe_len.unwrap();
+        let len = match memchr::memmem::find(&self.buffer, b"\r\n") {
+            Some(len) => len,
+            None => return Ok(None),
+        };
 
         if self.buffer.starts_with(b"+OK") {
             self.buffer.advance(len + 2);
@@ -83,7 +86,7 @@ impl Connection {
             let description = str::from_utf8(&self.buffer[5..len])
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
-                .to_string();
+                .to_owned();
 
             self.buffer.advance(len + 2);
 
@@ -104,27 +107,34 @@ impl Connection {
             let mut args = line.split(' ').filter(|s| !s.is_empty());
 
             // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
-            let subject = args.next();
-            let sid = args.next();
-            let mut reply_to = args.next();
-            let mut payload_len = args.next();
-            if payload_len.is_none() {
-                std::mem::swap(&mut reply_to, &mut payload_len);
-            }
+            let (subject, sid, reply_to, payload_len) = match (
+                args.next(),
+                args.next(),
+                args.next(),
+                args.next(),
+                args.next(),
+            ) {
+                (Some(subject), Some(sid), Some(reply_to), Some(payload_len), None) => {
+                    (subject, sid, Some(reply_to), payload_len)
+                }
+                (Some(subject), Some(sid), Some(payload_len), None, None) => {
+                    (subject, sid, None, payload_len)
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid number of arguments after MSG",
+                    ))
+                }
+            };
 
-            if subject.is_none() || sid.is_none() || payload_len.is_none() || args.next().is_some()
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid number of arguments after MSG",
-                ));
-            }
-
-            let sid = u64::from_str(sid.unwrap())
+            let sid = sid
+                .parse::<u64>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
             // Parse the number of payload bytes.
-            let payload_len = usize::from_str(payload_len.unwrap())
+            let payload_len = payload_len
+                .parse::<usize>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
             // Return early without advancing if there is not enough data read the entire
@@ -133,18 +143,19 @@ impl Connection {
                 return Ok(None);
             }
 
-            let subject = subject.unwrap().to_owned();
-            let reply_to = reply_to.map(String::from);
+            let subject = subject.to_owned();
+            let reply_to = reply_to.map(ToOwned::to_owned);
 
             self.buffer.advance(len + 2);
             let payload = self.buffer.split_to(payload_len).freeze();
             self.buffer.advance(2);
 
+            let length = payload_len
+                + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                + subject.len();
             return Ok(Some(ServerOp::Message {
                 sid,
-                length: payload_len
-                    + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
-                    + subject.len(),
+                length,
                 reply: reply_to,
                 headers: None,
                 subject,
@@ -160,33 +171,38 @@ impl Connection {
             let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
-            let subject = args.next();
-            let sid = args.next();
-            let mut reply_to = args.next();
-            let mut num_header_bytes = args.next();
-            let mut num_bytes = args.next();
-            if num_bytes.is_none() {
-                std::mem::swap(&mut num_header_bytes, &mut num_bytes);
-                std::mem::swap(&mut reply_to, &mut num_header_bytes);
-            }
-
-            if subject.is_none()
-                || sid.is_none()
-                || num_header_bytes.is_none()
-                || num_bytes.is_none()
-                || args.next().is_some()
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid number of arguments after HMSG",
-                ));
-            }
+            let (subject, sid, reply_to, header_len, total_len) = match (
+                args.next(),
+                args.next(),
+                args.next(),
+                args.next(),
+                args.next(),
+                args.next(),
+            ) {
+                (
+                    Some(subject),
+                    Some(sid),
+                    Some(reply_to),
+                    Some(header_len),
+                    Some(total_len),
+                    None,
+                ) => (subject, sid, Some(reply_to), header_len, total_len),
+                (Some(subject), Some(sid), Some(header_len), Some(total_len), None, None) => {
+                    (subject, sid, None, header_len, total_len)
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid number of arguments after HMSG",
+                    ))
+                }
+            };
 
             // Convert the slice into an owned string.
-            let subject = subject.unwrap().to_string();
+            let subject = subject.to_owned();
 
             // Parse the subject ID.
-            let sid = u64::from_str(sid.unwrap()).map_err(|_| {
+            let sid = sid.parse::<u64>().map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "cannot parse sid argument after HMSG",
@@ -194,10 +210,10 @@ impl Connection {
             })?;
 
             // Convert the slice into an owned string.
-            let reply_to = reply_to.map(ToString::to_string);
+            let reply_to = reply_to.map(ToOwned::to_owned);
 
             // Parse the number of payload bytes.
-            let num_header_bytes = usize::from_str(num_header_bytes.unwrap()).map_err(|_| {
+            let header_len = header_len.parse::<usize>().map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "cannot parse the number of header bytes argument after \
@@ -206,14 +222,14 @@ impl Connection {
             })?;
 
             // Parse the number of payload bytes.
-            let num_bytes = usize::from_str(num_bytes.unwrap()).map_err(|_| {
+            let total_len = total_len.parse::<usize>().map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "cannot parse the number of bytes argument after HMSG",
                 )
             })?;
 
-            if num_bytes < num_header_bytes {
+            if total_len < header_len {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "number of header bytes was greater than or equal to the \
@@ -221,56 +237,51 @@ impl Connection {
                 ));
             }
 
-            if len + num_bytes + 4 > self.buffer.remaining() {
+            if len + total_len + 4 > self.buffer.remaining() {
                 return Ok(None);
             }
 
             self.buffer.advance(len + 2);
-            let buffer = self.buffer.split_to(num_header_bytes).freeze();
-            let payload = self.buffer.split_to(num_bytes - num_header_bytes).freeze();
+            let header = self.buffer.split_to(header_len);
+            let payload = self.buffer.split_to(total_len - header_len).freeze();
             self.buffer.advance(2);
 
-            let mut lines = std::str::from_utf8(&buffer).unwrap().lines().peekable();
+            let mut lines = std::str::from_utf8(&header)
+                .map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "header isn't valid utf-8")
+                })?
+                .lines()
+                .peekable();
             let version_line = lines.next().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "no header version line found")
             })?;
 
-            if !version_line.starts_with("NATS/1.0") {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "header version line does not begin with nats/1.0",
-                ));
-            }
+            let version_line_suffix = version_line
+                .strip_prefix("NATS/1.0")
+                .map(str::trim)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "header version line does not begin with `NATS/1.0`",
+                    )
+                })?;
 
-            let mut maybe_status: Option<StatusCode> = None;
-            let mut maybe_description: Option<String> = None;
-            if let Some(slice) = version_line.get("NATS/1.0".len()..).map(|s| s.trim()) {
-                match slice.split_once(' ') {
-                    Some((status, description)) => {
-                        if !status.is_empty() {
-                            maybe_status = Some(status.trim().parse().map_err(|_| {
-                                std::io::Error::new(
-                                    io::ErrorKind::Other,
-                                    "could not covert Description header into header value",
-                                )
-                            })?);
-                        }
-                        if !description.is_empty() {
-                            maybe_description = Some(description.trim().to_string());
-                        }
-                    }
-                    None => {
-                        if !slice.is_empty() {
-                            maybe_status = Some(slice.trim().parse().map_err(|_| {
-                                std::io::Error::new(
-                                    io::ErrorKind::Other,
-                                    "could not covert Description header into header value",
-                                )
-                            })?);
-                        }
-                    }
-                }
-            }
+            let (status, description) = version_line_suffix
+                .split_once(' ')
+                .map(|(status, description)| (status.trim(), description.trim()))
+                .unwrap_or((version_line_suffix, ""));
+            let status = if !status.is_empty() {
+                Some(status.parse::<StatusCode>().map_err(|_| {
+                    std::io::Error::new(io::ErrorKind::Other, "could not parse status parameter")
+                })?)
+            } else {
+                None
+            };
+            let description = if !description.is_empty() {
+                Some(description.to_owned())
+            } else {
+                None
+            };
 
             let mut headers = HeaderMap::new();
             while let Some(line) = lines.next() {
@@ -278,29 +289,35 @@ impl Connection {
                     continue;
                 }
 
-                let (key, value) = line.split_once(':').ok_or_else(|| {
+                let (name, value) = line.split_once(':').ok_or_else(|| {
                     io::Error::new(io::ErrorKind::InvalidInput, "no header version line found")
                 })?;
 
-                let mut value = String::from_str(value).unwrap();
+                let name = HeaderName::from_str(name)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+
+                // Read the header value, which might have been split into multiple lines
+                // `trim_start` and `trim_end` do the same job as doing `value.trim().to_owned()` at the end, but without a reallocation
+                let mut value = value.trim_start().to_owned();
                 while let Some(v) = lines.next_if(|s| s.starts_with(char::is_whitespace)) {
                     value.push_str(v);
                 }
+                value.truncate(value.trim_end().len());
 
-                headers.append(HeaderName::from_str(key).unwrap(), value.trim().to_string());
+                headers.append(name, value);
             }
 
             return Ok(Some(ServerOp::Message {
-                length: reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                length: reply_to.as_ref().map_or(0, |reply| reply.len())
                     + subject.len()
-                    + num_bytes,
+                    + total_len,
                 sid,
                 reply: reply_to,
                 subject,
                 headers: Some(headers),
                 payload,
-                status: maybe_status,
-                description: maybe_description,
+                status,
+                description,
             }));
         }
 
@@ -316,6 +333,8 @@ impl Connection {
     }
 
     // TODO: do we want an custom error here?
+    /// Read a server operation from read buffer.
+    /// Blocks until an operation ca be parsed.
     pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
         loop {
             if let Some(op) = self.try_read_op()? {
@@ -332,7 +351,8 @@ impl Connection {
         }
     }
 
-    pub(crate) async fn write_op(&mut self, item: ClientOp) -> Result<(), io::Error> {
+    /// Writes a client operation to the write buffer.
+    pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> Result<(), io::Error> {
         match item {
             ClientOp::Connect(connect_info) => {
                 let op = format!(
@@ -397,7 +417,7 @@ impl Connection {
                     }
                 }
 
-                self.stream.write_all(&payload).await?;
+                self.stream.write_all(payload).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
 
@@ -438,6 +458,7 @@ impl Connection {
         Ok(())
     }
 
+    /// Flush the write buffer, sending all pending data down the current write stream.
     pub(crate) async fn flush(&mut self) -> Result<(), io::Error> {
         self.stream.flush().await
     }
@@ -764,7 +785,7 @@ mod write_op {
         };
 
         connection
-            .write_op(ClientOp::Publish {
+            .write_op(&ClientOp::Publish {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: None,
@@ -781,7 +802,7 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR 11\r\nHello World\r\n");
 
         connection
-            .write_op(ClientOp::Publish {
+            .write_op(&ClientOp::Publish {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: Some("INBOX.67".into()),
@@ -797,7 +818,7 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR INBOX.67 11\r\nHello World\r\n");
 
         connection
-            .write_op(ClientOp::Publish {
+            .write_op(&ClientOp::Publish {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: Some("INBOX.67".into()),
@@ -830,7 +851,7 @@ mod write_op {
         };
 
         connection
-            .write_op(ClientOp::Subscribe {
+            .write_op(&ClientOp::Subscribe {
                 sid: 11,
                 subject: "FOO.BAR".into(),
                 queue_group: None,
@@ -845,7 +866,7 @@ mod write_op {
         assert_eq!(buffer, "SUB FOO.BAR 11\r\n");
 
         connection
-            .write_op(ClientOp::Subscribe {
+            .write_op(&ClientOp::Subscribe {
                 sid: 11,
                 subject: "FOO.BAR".into(),
                 queue_group: Some("QUEUE.GROUP".into()),
@@ -868,7 +889,7 @@ mod write_op {
         };
 
         connection
-            .write_op(ClientOp::Unsubscribe { sid: 11, max: None })
+            .write_op(&ClientOp::Unsubscribe { sid: 11, max: None })
             .await
             .unwrap();
         connection.flush().await.unwrap();
@@ -879,7 +900,7 @@ mod write_op {
         assert_eq!(buffer, "UNSUB 11\r\n");
 
         connection
-            .write_op(ClientOp::Unsubscribe {
+            .write_op(&ClientOp::Unsubscribe {
                 sid: 11,
                 max: Some(2),
             })
@@ -903,7 +924,7 @@ mod write_op {
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(ClientOp::Ping).await.unwrap();
+        connection.write_op(&ClientOp::Ping).await.unwrap();
         connection.flush().await.unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
@@ -922,7 +943,7 @@ mod write_op {
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(ClientOp::Pong).await.unwrap();
+        connection.write_op(&ClientOp::Pong).await.unwrap();
         connection.flush().await.unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
@@ -942,7 +963,7 @@ mod write_op {
         let mut buffer = String::new();
 
         connection
-            .write_op(ClientOp::Connect(ConnectInfo {
+            .write_op(&ClientOp::Connect(ConnectInfo {
                 verbose: false,
                 pedantic: false,
                 user_jwt: None,

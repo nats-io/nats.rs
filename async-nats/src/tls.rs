@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
 use tokio_rustls::rustls::{self, Certificate, OwnedTrustAnchor, PrivateKey};
-use tokio_rustls::webpki::TrustAnchor;
+use webpki::TrustAnchor;
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
@@ -28,8 +28,8 @@ pub(crate) async fn load_certs(path: PathBuf) -> io::Result<Vec<Certificate>> {
         let file = std::fs::File::open(path)?;
         let mut reader = BufReader::new(file);
         let certs = rustls_pemfile::certs(&mut reader)?
-            .iter()
-            .map(|v| Certificate(v.clone()))
+            .into_iter()
+            .map(Certificate)
             .collect();
         Ok(certs)
     })
@@ -114,7 +114,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
                 if let Some(key) = options.client_key.clone() {
                     let key = tls::load_key(key).await?;
                     let cert = tls::load_certs(cert).await?;
-                    builder.with_single_cert(cert, key).map_err(|_| {
+                    builder.with_client_auth_cert(cert, key).map_err(|_| {
                         io::Error::new(ErrorKind::Other, "could not add certificate or key")
                     })
                 } else {

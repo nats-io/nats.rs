@@ -14,12 +14,12 @@
 use nkeys::KeyPair;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::{io, path::PathBuf};
+use std::{io, path::Path};
 
 /// Loads user credentials file with jwt and key. Return file contents.
 /// Uses tokio non-blocking io
-pub(crate) async fn load_creds(path: PathBuf) -> io::Result<String> {
-    tokio::fs::read_to_string(&path).await.map_err(|err| {
+pub(crate) async fn load_creds(path: &Path) -> io::Result<String> {
+    tokio::fs::read_to_string(path).await.map_err(|err| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("loading creds file '{}': {}", path.display(), err),
@@ -28,7 +28,7 @@ pub(crate) async fn load_creds(path: PathBuf) -> io::Result<String> {
 }
 
 /// Parses the string, expected to be formatted as credentials file
-pub(crate) fn parse_jwt_and_key_from_creds(contents: &str) -> io::Result<(String, KeyPair)> {
+pub(crate) fn parse_jwt_and_key_from_creds(contents: &str) -> io::Result<(&str, KeyPair)> {
     let jwt = parse_decorated_jwt(contents).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -44,7 +44,7 @@ pub(crate) fn parse_jwt_and_key_from_creds(contents: &str) -> io::Result<(String
     })?;
 
     let kp =
-        KeyPair::from_seed(&nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        KeyPair::from_seed(nkey).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok((jwt, kp))
 }
@@ -73,13 +73,13 @@ static USER_CONFIG_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// Parses a credentials file and returns its user JWT.
-fn parse_decorated_jwt(contents: &str) -> Option<String> {
+fn parse_decorated_jwt(contents: &str) -> Option<&str> {
     let capture = USER_CONFIG_RE.captures_iter(contents).next()?;
-    Some(capture[1].to_string())
+    Some(capture.get(1)?.as_str())
 }
 
 /// Parses a credentials file and returns its nkey.
-fn parse_decorated_nkey(contents: &str) -> Option<String> {
+fn parse_decorated_nkey(contents: &str) -> Option<&str> {
     let capture = USER_CONFIG_RE.captures_iter(contents).nth(1)?;
-    Some(capture[1].to_string())
+    Some(capture.get(1)?.as_str())
 }

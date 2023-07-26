@@ -1,7 +1,6 @@
-use std::{env, str::from_utf8};
-
-use async_nats::jetstream::{self, consumer::PullConsumer};
+use async_nats::jetstream::{self, consumer::PushConsumer};
 use futures::StreamExt;
+use std::{env, str::from_utf8, time::Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
@@ -11,6 +10,8 @@ async fn main() -> Result<(), async_nats::Error> {
     // Create an unauthenticated connection to NATS.
     let client = async_nats::connect(nats_url).await?;
 
+    let inbox = client.new_inbox();
+
     // Access the JetStream Context for managing streams and consumers as well as for publishing and subscription convenience methods.
     let jetstream = jetstream::new(client);
 
@@ -19,7 +20,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Create a stream and a consumer.
     // We can chain the methods.
     // First we create a stream and bind to it.
-    let consumer: PullConsumer = jetstream
+    let consumer: PushConsumer = jetstream
         .create_stream(jetstream::stream::Config {
             name: stream_name,
             subjects: vec!["events.>".to_string()],
@@ -27,8 +28,9 @@ async fn main() -> Result<(), async_nats::Error> {
         })
         .await?
         // Then, on that `Stream` use method to create Consumer and bind to it too.
-        .create_consumer(jetstream::consumer::pull::Config {
-            durable_name: Some("consumer".to_string()),
+        .create_consumer(jetstream::consumer::push::Config {
+            deliver_subject: inbox.clone(),
+            inactive_threshold: Duration::from_secs(60),
             ..Default::default()
         })
         .await?;
@@ -46,7 +48,6 @@ async fn main() -> Result<(), async_nats::Error> {
     }
 
     // Attach to the messages iterator for the Consumer.
-    // The iterator does its best to optimize retrieval of messages from the server.
     let mut messages = consumer.messages().await?.take(10);
 
     // Iterate over messages.

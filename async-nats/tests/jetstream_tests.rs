@@ -31,19 +31,20 @@ mod jetstream {
 
     use super::*;
     use async_nats::connection::State;
-    use async_nats::header::{HeaderMap, NATS_MESSAGE_ID};
+    use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
     use async_nats::jetstream::consumer::{
-        self, AckPolicy, DeliverPolicy, Info, OrderedPushConsumer, PullConsumer, PushConsumer,
+        self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
+        PullConsumer, PushConsumer, ReplayPolicy,
     };
-    use async_nats::jetstream::context::Publish;
+    use async_nats::jetstream::context::{Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
     use async_nats::jetstream::AckKind;
     use async_nats::ConnectOptions;
-    use bytes::Bytes;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tokio_retry::Retry;
+    use tracing::debug;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -160,7 +161,7 @@ mod jetstream {
         assert_eq!(message.payload, bytes::Bytes::from("data"));
 
         // Publish message with different ID and expect error.
-        context
+        let err = context
             .send_publish(
                 "foo".to_string(),
                 Publish::build().expected_last_message_id("BAD_ID"),
@@ -168,7 +169,9 @@ mod jetstream {
             .await
             .unwrap()
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .kind();
+        assert_eq!(err, PublishErrorKind::WrongLastMessageId);
         // Publish a new message with expected ID.
         context
             .send_publish(
@@ -191,15 +194,19 @@ mod jetstream {
             .await
             .unwrap();
         // 3 messages should be there, so this should error.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_sequence(2),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
+        assert_eq!(
+            context
+                .send_publish(
+                    "foo".to_string(),
+                    Publish::build().expected_last_sequence(2),
+                )
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
         // 3 messages there, should be ok for this subject too.
         context
             .send_publish(
@@ -211,15 +218,19 @@ mod jetstream {
             .await
             .unwrap();
         // 4 messages there, should error.
-        context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_subject_sequence(3),
-            )
-            .await
-            .unwrap()
-            .await
-            .unwrap_err();
+        assert_eq!(
+            context
+                .send_publish(
+                    "foo".to_string(),
+                    Publish::build().expected_last_subject_sequence(3),
+                )
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::WrongLastSequence
+        );
 
         // Check if it works for the other subjects in the stream.
         context
@@ -357,16 +368,18 @@ mod jetstream {
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let mut stream = context
-            .create_stream(&stream::Config {
+        let retry_strategy = tokio_retry::strategy::FibonacciBackoff::from_millis(500).take(5);
+        let mut stream = Retry::spawn(retry_strategy, || {
+            context.create_stream(stream::Config {
                 name: "events2".to_string(),
                 num_replicas: 3,
                 max_bytes: 1024,
                 storage: StorageType::Memory,
                 ..Default::default()
             })
-            .await
-            .unwrap();
+        })
+        .await
+        .unwrap();
 
         assert_eq!(stream.cached_info().config.num_replicas, 3);
         assert!(stream.cached_info().cluster.is_some());
@@ -680,7 +693,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -739,7 +752,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -813,7 +826,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -882,7 +895,7 @@ mod jetstream {
             .headers
             .as_ref()
             .unwrap()
-            .get("Nats-Sequence")
+            .get(header::NATS_SEQUENCE)
             .unwrap()
             .iter()
             .next()
@@ -1073,6 +1086,34 @@ mod jetstream {
         let consumer = stream.get_consumer("pull").await.unwrap();
         consumer.fetch().max_messages(10).messages().await.unwrap();
     }
+    #[tokio::test]
+    async fn get_consumer_from_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("stream").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream
+            .create_consumer(consumer::push::Config {
+                durable_name: Some("push".to_string()),
+                deliver_subject: "subject".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let _consumer: PullConsumer = context
+            .get_consumer_from_stream("pull", "stream")
+            .await
+            .unwrap();
+    }
 
     #[tokio::test]
     async fn get_or_create_consumer() {
@@ -1113,6 +1154,7 @@ mod jetstream {
             .unwrap();
     }
 
+    #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_sequence() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -1147,7 +1189,7 @@ mod jetstream {
         let mut iter = consumer.sequence(50).unwrap().take(10);
         while let Ok(Some(mut batch)) = iter.try_next().await {
             while let Ok(Some(message)) = batch.try_next().await {
-                assert_eq!(message.payload, Bytes::from(b"dat".as_ref()));
+                assert_eq!(message.payload, bytes::Bytes::from(b"dat".as_ref()));
             }
         }
     }
@@ -1286,6 +1328,55 @@ mod jetstream {
             assert_eq!(message.payload.as_ref(), b"dat");
         }
     }
+
+    #[tokio::test]
+    async fn pull_ordered() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPullConsumer = stream
+            .create_consumer(consumer::pull::OrderedConfig {
+                name: Some("pull_ordered".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        tokio::task::spawn({
+            let context = context.clone();
+            async move {
+                for i in 0..1000 {
+                    if i % 500 == 0 {
+                        tokio::time::sleep(Duration::from_secs(6)).await
+                    }
+                    context
+                        .publish("events".to_string(), "dat".into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        let mut messages = consumer.messages().await.unwrap().take(1000);
+        while let Some(message) = messages.next().await {
+            let message = message.unwrap();
+            assert_eq!(message.status, None);
+            assert_eq!(message.payload.as_ref(), b"dat");
+        }
+    }
+
     #[tokio::test]
     async fn push_ordered_recreate() {
         let mut server =
@@ -1541,6 +1632,35 @@ mod jetstream {
             seen += 1;
         }
         assert_eq!(seen, 1000);
+
+        let consumer = stream
+            .create_consumer(consumer::push::Config {
+                deliver_subject: "delivery".to_string(),
+                durable_name: Some("delete_me".to_string()),
+                idle_heartbeat: Duration::from_secs(5),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        stream.delete_consumer("delete_me").await.unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        assert_eq!(
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::push::MessagesErrorKind::MissingHeartbeat
+        );
+        stream
+            .create_consumer(consumer::push::Config {
+                deliver_subject: "delivery".to_string(),
+                durable_name: Some("delete_me".to_string()),
+                idle_heartbeat: Duration::from_secs(5),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        messages.next().await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -1692,6 +1812,46 @@ mod jetstream {
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
         }
+    }
+
+    #[cfg(feature = "server_2_10")]
+    #[tokio::test]
+    async fn update_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        stream
+            .create_consumer(consumer::pull::Config {
+                name: Some("CONSUMER".into()),
+                filter_subjects: vec!["one".into(), "two".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(consumer::pull::Config {
+                name: Some("CONSUMER".into()),
+                filter_subjects: vec!["one".into(), "three".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            consumer.cached_info().config.filter_subjects,
+            vec!["one".to_string(), "three".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -2013,29 +2173,15 @@ mod jetstream {
         debug!("waiting for the first idle heartbeat timeout");
         let mut messages = consumer.messages().await.unwrap();
         assert_eq!(
-            messages
-                .next()
-                .await
-                .unwrap()
-                .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::TimedOut
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::MissingHeartbeat,
         );
         // But the consumer iterator should still be there.
         // We should get timeout again.
         debug!("waiting for the second idle heartbeat timeout");
         assert_eq!(
-            messages
-                .next()
-                .await
-                .unwrap()
-                .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::TimedOut
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::MissingHeartbeat,
         );
         // Now recreate the consumer and see if we can continue.
         // So recreate the consumer.
@@ -2057,7 +2203,10 @@ mod jetstream {
             .unwrap();
         // and expect the message to be there.
         debug!("awaiting the message with recreated consumer");
-        messages.next().await.unwrap().unwrap();
+        let now = Instant::now();
+        let m = messages.next().await.unwrap();
+        println!("after: {:?}", now.elapsed());
+        m.unwrap();
     }
 
     #[tokio::test]
@@ -2101,16 +2250,10 @@ mod jetstream {
         let name = &consumer.cached_info().name;
         stream.delete_consumer(name).await.unwrap();
         assert_eq!(
-            messages
-                .next()
-                .await
-                .unwrap()
-                .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::NotFound
+            messages.next().await.unwrap().unwrap_err().kind(),
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::ConsumerDeleted,
         );
+        messages.next().await;
         // after terminal error, consumer should always return none.
         assert!(messages.next().await.is_none());
     }
@@ -2326,23 +2469,16 @@ mod jetstream {
                 .unwrap();
         }
         drop(server);
-        let ack = jetstream
-            .publish("events".into(), "fail".into())
-            .await
-            .unwrap()
-            .await;
-        println!("ACK: {ack:?}");
-        println!(
-            "DOWNCAST: {:?}",
-            ack.unwrap_err().downcast::<std::io::Error>()
+        assert_eq!(
+            jetstream
+                .publish("events".into(), "fail".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap_err()
+                .kind(),
+            PublishErrorKind::TimedOut
         );
-        // assert_eq!(
-        //     ack.unwrap_err()
-        //         .downcast::<std::io::Error>()
-        //         .unwrap()
-        //         .kind(),
-        //     ErrorKind::TimedOut
-        // )
     }
 
     #[tokio::test]
@@ -2835,10 +2971,8 @@ mod jetstream {
                 .unwrap()
                 .await
                 .unwrap_err()
-                .downcast::<std::io::Error>()
-                .unwrap()
                 .kind(),
-            std::io::ErrorKind::NotFound
+            PublishErrorKind::StreamNotFound
         );
     }
 
@@ -3098,5 +3232,100 @@ mod jetstream {
         let message = messages.next().await.unwrap().unwrap();
 
         assert_eq!(message.subject, "fromtest.transformed.test");
+    }
+
+    #[tokio::test]
+    async fn acker() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            context
+                .publish("test".into(), "data".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("consumer".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap().take(10);
+
+        while let Some((_, acker)) = messages
+            .try_next()
+            .await
+            .unwrap()
+            .map(|message| message.split())
+        {
+            acker.ack().await.unwrap();
+        }
+    }
+
+    // This test was added to make sure that in case of slow consumers client can properly recreate
+    // ordered consumer.
+    #[tokio::test]
+    async fn ordered_recreate() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .read_buffer_capacity(1000)
+            .subscription_capacity(1000)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        debug!("start publishing");
+        for _ in 0..5000 {
+            context.publish("test".into(), "data".into()).await.unwrap();
+        }
+        debug!("finished publishing");
+
+        let mut messages = stream
+            .create_consumer(push::OrderedConfig {
+                deliver_subject: "deliver".to_string(),
+                deliver_policy: DeliverPolicy::All,
+                replay_policy: ReplayPolicy::Instant,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap()
+            .take(5000);
+
+        tokio::time::timeout(Duration::from_secs(30), async move {
+            while let Some(message) = messages.next().await {
+                message.unwrap();
+            }
+        })
+        .await
+        .unwrap();
     }
 }
