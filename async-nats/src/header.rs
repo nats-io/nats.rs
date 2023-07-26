@@ -404,7 +404,7 @@ standard_headers! {
     /// The last known sequence number of the message.
     (NatsLastSequence, NATS_LAST_SEQUENCE, b"Nats-Last-Sequence");
     /// The expected last sequence number of the subject.
-    (NatsExpectgedLastSubjectSequence, NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, b"Nats-Expected-Last-Subject-Sequence");
+    (NatsExpectedLastSubjectSequence, NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, b"Nats-Expected-Last-Subject-Sequence");
     /// The expected last message ID within the stream.
     (NatsExpectedLastMessageId, NATS_EXPECTED_LAST_MESSAGE_ID, b"Nats-Expected-Last-Msg-Id");
     /// The expected last sequence number within the stream.
