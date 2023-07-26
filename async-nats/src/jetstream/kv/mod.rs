@@ -16,8 +16,7 @@
 pub mod bucket;
 
 use std::{
-    fmt::Display,
-    io::{self, ErrorKind},
+    fmt::{self, Display},
     str::FromStr,
     task::Poll,
 };
@@ -132,20 +131,28 @@ pub enum Operation {
 }
 
 impl FromStr for Operation {
-    type Err = io::Error;
+    type Err = ParseOperationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             KV_OPERATION_DELETE => Ok(Operation::Delete),
             KV_OPERATION_PURGE => Ok(Operation::Purge),
             KV_OPERATION_PUT => Ok(Operation::Put),
-            _ => Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("Invalid KV operation: {s}"),
-            )),
+            _ => Err(ParseOperationError),
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct ParseOperationError;
+
+impl fmt::Display for ParseOperationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid value found for operation (value can only be {KV_OPERATION_PUT}, {KV_OPERATION_PURGE} or {KV_OPERATION_DELETE}")
+    }
+}
+
+impl std::error::Error for ParseOperationError {}
 
 /// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
