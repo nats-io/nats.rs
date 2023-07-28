@@ -750,18 +750,18 @@ pub enum InfoErrorKind {
     TimedOut,
 }
 
-pub type InfoError = NatsError<InfoErrorKind>;
-
-impl Display for InfoError {
+impl Display for InfoErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            InfoErrorKind::InvalidName => write!(f, "invalid object name"),
-            InfoErrorKind::Other => write!(f, "getting info failed: {}", self.format_source()),
-            InfoErrorKind::NotFound => write!(f, "not found"),
-            InfoErrorKind::TimedOut => write!(f, "timed out"),
+        match self {
+            Self::InvalidName => write!(f, "invalid object name"),
+            Self::Other => write!(f, "getting info failed"),
+            Self::NotFound => write!(f, "not found"),
+            Self::TimedOut => write!(f, "timed out"),
         }
     }
 }
+
+pub type InfoError = NatsError<InfoErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GetErrorKind {
@@ -770,6 +770,18 @@ pub enum GetErrorKind {
     NotFound,
     Other,
     TimedOut,
+}
+
+impl Display for GetErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConsumerCreate => write!(f, "failed creating consumer for fetching object"),
+            Self::Other => write!(f, "failed getting object"),
+            Self::NotFound => write!(f, "object not found"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::InvalidName => write!(f, "invalid object name"),
+        }
+    }
 }
 
 pub type GetError = NatsError<GetErrorKind>;
@@ -788,24 +800,6 @@ impl From<InfoError> for GetError {
     }
 }
 
-impl Display for GetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            GetErrorKind::ConsumerCreate => {
-                write!(
-                    f,
-                    "failed creating consumer for fetching object: {}",
-                    self.format_source()
-                )
-            }
-            GetErrorKind::Other => write!(f, "failed getting object: {}", self.format_source()),
-            GetErrorKind::NotFound => write!(f, "object not found"),
-            GetErrorKind::TimedOut => write!(f, "timed out"),
-            GetErrorKind::InvalidName => write!(f, "invalid object name"),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DeleteErrorKind {
     TimedOut,
@@ -816,22 +810,20 @@ pub enum DeleteErrorKind {
     Other,
 }
 
-pub type DeleteError = NatsError<DeleteErrorKind>;
-
-impl Display for DeleteError {
+impl Display for DeleteErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            DeleteErrorKind::TimedOut => write!(f, "timed out"),
-            DeleteErrorKind::Metadata => {
-                write!(f, "failed rolling up metadata: {}", self.format_source())
-            }
-            DeleteErrorKind::Chunks => write!(f, "failed purging chunks: {}", self.format_source()),
-            DeleteErrorKind::Other => write!(f, "delete failed: {}", self.format_source()),
-            DeleteErrorKind::NotFound => write!(f, "object not found"),
-            DeleteErrorKind::InvalidName => write!(f, "invalid object name"),
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Metadata => write!(f, "failed rolling up metadata"),
+            Self::Chunks => write!(f, "failed purging chunks"),
+            Self::Other => write!(f, "delete failed"),
+            Self::NotFound => write!(f, "object not found"),
+            Self::InvalidName => write!(f, "invalid object name"),
         }
     }
 }
+
+pub type DeleteError = NatsError<DeleteErrorKind>;
 
 impl From<InfoError> for DeleteError {
     fn from(err: InfoError) -> Self {
@@ -858,35 +850,21 @@ pub enum PutErrorKind {
     Other,
 }
 
-pub type PutError = NatsError<PutErrorKind>;
-
-impl Display for PutError {
+impl Display for PutErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            PutErrorKind::PublishChunks => {
-                write!(
-                    f,
-                    "failed publishing object chunks: {}",
-                    self.format_source()
-                )
-            }
-            PutErrorKind::PublishMetadata => {
-                write!(f, "failed publishing metadata: {}", self.format_source())
-            }
-            PutErrorKind::PurgeOldChunks => {
-                write!(f, "falied purging old chunks: {}", self.format_source())
-            }
-            PutErrorKind::TimedOut => write!(f, "timed out"),
-            PutErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            PutErrorKind::InvalidName => write!(f, "invalid object name"),
-            PutErrorKind::ReadChunks => write!(
-                f,
-                "error while reading the buffer: {}",
-                self.format_source()
-            ),
+        match self {
+            Self::PublishChunks => write!(f, "failed publishing object chunks:"),
+            Self::PublishMetadata => write!(f, "failed publishing metadata"),
+            Self::PurgeOldChunks => write!(f, "failed purging old chunks:"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "error"),
+            Self::InvalidName => write!(f, "invalid object name"),
+            Self::ReadChunks => write!(f, "error while reading the buffer"),
         }
     }
 }
+
+pub type PutError = NatsError<PutErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {
@@ -895,26 +873,20 @@ pub enum WatchErrorKind {
     Other,
 }
 
+impl Display for WatchErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConsumerCreate => write!(f, "watch consumer creation failed"),
+            Self::Other => write!(f, "watch failed"),
+            Self::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
 pub type WatchError = NatsError<WatchErrorKind>;
 
 crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
 crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
-
-impl Display for WatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            WatchErrorKind::ConsumerCreate => {
-                write!(
-                    f,
-                    "watch consumer creation failed: {}",
-                    self.format_source()
-                )
-            }
-            WatchErrorKind::Other => write!(f, "watch failed: {}", self.format_source()),
-            WatchErrorKind::TimedOut => write!(f, "timed out"),
-        }
-    }
-}
 
 pub type ListError = WatchError;
 pub type ListErrorKind = WatchErrorKind;
@@ -927,24 +899,18 @@ pub enum SealErrorKind {
     Update,
 }
 
-pub type SealError = NatsError<SealErrorKind>;
-
-impl Display for SealError {
+impl Display for SealErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            SealErrorKind::TimedOut => write!(f, "timed out"),
-            SealErrorKind::Other => write!(f, "seal failed: {}", self.format_source()),
-            SealErrorKind::Info => write!(
-                f,
-                "failed getting stream info before sealing bucket: {}",
-                self.format_source()
-            ),
-            SealErrorKind::Update => {
-                write!(f, "failed sealing the bucket: {}", self.format_source())
-            }
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "seal failed"),
+            Self::Info => write!(f, "failed getting stream info before sealing bucket"),
+            Self::Update => write!(f, "failed sealing the bucket"),
         }
     }
 }
+
+pub type SealError = NatsError<SealErrorKind>;
 
 impl From<super::context::UpdateStreamError> for SealError {
     fn from(err: super::context::UpdateStreamError) -> Self {
@@ -963,18 +929,16 @@ pub enum WatcherErrorKind {
     Other,
 }
 
-pub type WatcherError = NatsError<WatcherErrorKind>;
-
-impl Display for WatcherError {
+impl Display for WatcherErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            WatcherErrorKind::ConsumerError => {
-                write!(f, "watcher consumer error: {}", self.format_source())
-            }
-            WatcherErrorKind::Other => write!(f, "watcher error: {}", self.format_source()),
+        match self {
+            Self::ConsumerError => write!(f, "watcher consumer error"),
+            Self::Other => write!(f, "watcher error"),
         }
     }
 }
+
+pub type WatcherError = NatsError<WatcherErrorKind>;
 
 impl From<OrderedError> for WatcherError {
     fn from(err: OrderedError) -> Self {

@@ -964,22 +964,20 @@ pub enum OrderedErrorKind {
     Other,
 }
 
-pub type OrderedError = NatsError<OrderedErrorKind>;
-
-impl std::fmt::Display for OrderedError {
+impl std::fmt::Display for OrderedErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            OrderedErrorKind::Pull => {
-                write!(f, "pull request failed: {}", self.format_source())
-            }
-            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            OrderedErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
-            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Pull => write!(f, "pull request failed"),
+            Self::Other => write!(f, "error"),
+            Self::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+            Self::Recreate => write!(f, "consumer recreation failed"),
         }
     }
 }
+
+pub type OrderedError = NatsError<OrderedErrorKind>;
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -1014,21 +1012,19 @@ pub enum MessagesErrorKind {
     Other,
 }
 
-pub type MessagesError = NatsError<MessagesErrorKind>;
-
-impl std::fmt::Display for MessagesError {
+impl std::fmt::Display for MessagesErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            MessagesErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            MessagesErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            MessagesErrorKind::Pull => {
-                write!(f, "pull request failed: {}", self.format_source())
-            }
-            MessagesErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            MessagesErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Pull => write!(f, "pull request failed"),
+            Self::Other => write!(f, "error"),
+            Self::PushBasedConsumer => write!(f, "cannot use with push consumer"),
         }
     }
 }
+
+pub type MessagesError = NatsError<MessagesErrorKind>;
 
 impl futures::Stream for Stream {
     type Item = Result<jetstream::Message, MessagesError>;
@@ -2154,23 +2150,17 @@ pub enum BatchRequestErrorKind {
     Serialize,
 }
 
-pub type BatchRequestError = NatsError<BatchRequestErrorKind>;
-
-impl std::fmt::Display for BatchRequestError {
+impl std::fmt::Display for BatchRequestErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            BatchRequestErrorKind::Publish => {
-                write!(f, "publish failed: {}", self.format_source())
-            }
-            BatchRequestErrorKind::Flush => {
-                write!(f, "flush failed: {}", self.format_source())
-            }
-            BatchRequestErrorKind::Serialize => {
-                write!(f, "serialize failed: {}", self.format_source())
-            }
+        match self {
+            Self::Publish => write!(f, "publish failed"),
+            Self::Flush => write!(f, "flush failed"),
+            Self::Serialize => write!(f, "serialize failed"),
         }
     }
 }
+
+pub type BatchRequestError = NatsError<BatchRequestErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BatchErrorKind {
@@ -2180,24 +2170,18 @@ pub enum BatchErrorKind {
     Serialize,
 }
 
-pub type BatchError = NatsError<BatchErrorKind>;
-
-impl std::fmt::Display for BatchError {
+impl std::fmt::Display for BatchErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            BatchErrorKind::Pull => {
-                write!(f, "pull request failed: {}", self.format_source())
-            }
-            BatchErrorKind::Flush => {
-                write!(f, "flush failed: {}", self.format_source())
-            }
-            BatchErrorKind::Serialize => {
-                write!(f, "serialize failed: {}", self.format_source())
-            }
-            BatchErrorKind::Subscribe => write!(f, "subscribe failed: {}", self.format_source()),
+        match self {
+            Self::Pull => write!(f, "pull request failed:"),
+            Self::Flush => write!(f, "flush failed"),
+            Self::Serialize => write!(f, "serialize failed"),
+            Self::Subscribe => write!(f, "subscribe failed"),
         }
     }
 }
+
+pub type BatchError = NatsError<BatchErrorKind>;
 
 impl From<SubscribeError> for BatchError {
     fn from(err: SubscribeError) -> Self {
@@ -2218,21 +2202,17 @@ pub enum ConsumerRecreateErrorKind {
     TimedOut,
 }
 
-pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
-
-impl std::fmt::Display for ConsumerRecreateError {
+impl std::fmt::Display for ConsumerRecreateErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            ConsumerRecreateErrorKind::GetStream => {
-                write!(f, "error getting stream: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::Recreate => {
-                write!(f, "consumer creation failed: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
+        match self {
+            Self::GetStream => write!(f, "error getting stream"),
+            Self::Recreate => write!(f, "consumer creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
         }
     }
 }
+
+pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_stream(
     context: Context,

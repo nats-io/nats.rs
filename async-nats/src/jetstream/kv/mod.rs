@@ -1030,18 +1030,16 @@ pub enum StatusErrorKind {
     TimedOut,
 }
 
-pub type StatusError = NatsError<StatusErrorKind>;
-
-impl Display for StatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind.clone() {
-            StatusErrorKind::JetStream(err) => {
-                write!(f, "jetstream request failed: {}", err)
-            }
-            StatusErrorKind::TimedOut => write!(f, "timed out"),
+impl Display for StatusErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::JetStream(err) => write!(f, "jetstream request failed: {}", err),
+            Self::TimedOut => write!(f, "timed out"),
         }
     }
 }
+
+pub type StatusError = NatsError<StatusErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PutErrorKind {
@@ -1050,25 +1048,33 @@ pub enum PutErrorKind {
     Ack,
 }
 
-pub type PutError = NatsError<PutErrorKind>;
-
-impl Display for PutError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            PutErrorKind::Publish => {
-                write!(f, "failed to put key into store: {}", self.format_source())
-            }
-            PutErrorKind::Ack => write!(f, "ack error: {}", self.format_source()),
-            PutErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+impl Display for PutErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Publish => write!(f, "failed to put key into store"),
+            Self::Ack => write!(f, "ack error"),
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
         }
     }
 }
+
+pub type PutError = NatsError<PutErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntryErrorKind {
     InvalidKey,
     TimedOut,
     Other,
+}
+
+impl Display for EntryErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "failed getting entry"),
+        }
+    }
 }
 
 pub type EntryError = NatsError<EntryErrorKind>;
@@ -1080,16 +1086,6 @@ crate::from_with_timeout!(
     DirectGetErrorKind
 );
 
-impl Display for EntryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            EntryErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
-            EntryErrorKind::TimedOut => write!(f, "timed out"),
-            EntryErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {
     InvalidKey,
@@ -1098,27 +1094,21 @@ pub enum WatchErrorKind {
     Other,
 }
 
+impl Display for WatchErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConsumerCreate => write!(f, "watch consumer creation failed"),
+            Self::Other => write!(f, "watch failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+        }
+    }
+}
+
 pub type WatchError = NatsError<WatchErrorKind>;
 
 crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
 crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
-
-impl Display for WatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            WatchErrorKind::ConsumerCreate => {
-                write!(
-                    f,
-                    "watch consumer creation failed: {}",
-                    self.format_source()
-                )
-            }
-            WatchErrorKind::Other => write!(f, "watch failed: {}", self.format_source()),
-            WatchErrorKind::TimedOut => write!(f, "timed out"),
-            WatchErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UpdateErrorKind {
@@ -1127,19 +1117,19 @@ pub enum UpdateErrorKind {
     Other,
 }
 
-pub type UpdateError = NatsError<UpdateErrorKind>;
-
-crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
-
-impl Display for UpdateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            UpdateErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
-            UpdateErrorKind::TimedOut => write!(f, "timed out"),
-            UpdateErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
+impl Display for UpdateErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "failed getting entry"),
         }
     }
 }
+
+pub type UpdateError = NatsError<UpdateErrorKind>;
+
+crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatcherErrorKind {
@@ -1147,18 +1137,16 @@ pub enum WatcherErrorKind {
     Other,
 }
 
-pub type WatcherError = NatsError<WatcherErrorKind>;
-
-impl Display for WatcherError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            WatcherErrorKind::Consumer => {
-                write!(f, "watcher consumer error: {}", self.format_source())
-            }
-            WatcherErrorKind::Other => write!(f, "watcher error: {}", self.format_source()),
+impl Display for WatcherErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Consumer => write!(f, "watcher consumer error"),
+            Self::Other => write!(f, "watcher error"),
         }
     }
 }
+
+pub type WatcherError = NatsError<WatcherErrorKind>;
 
 impl From<OrderedError> for WatcherError {
     fn from(err: OrderedError) -> Self {

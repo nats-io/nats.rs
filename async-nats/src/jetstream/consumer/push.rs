@@ -746,19 +746,19 @@ pub enum OrderedErrorKind {
     Other,
 }
 
-pub type OrderedError = NatsError<OrderedErrorKind>;
-
-impl std::fmt::Display for OrderedError {
+impl std::fmt::Display for OrderedErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            OrderedErrorKind::PullBasedConsumer => write!(f, "cannot use with push consumer"),
-            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Other => write!(f, "error"),
+            Self::PullBasedConsumer => write!(f, "cannot use with push consumer"),
+            Self::Recreate => write!(f, "consumer recreation failed"),
         }
     }
 }
+
+pub type OrderedError = NatsError<OrderedErrorKind>;
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -780,7 +780,7 @@ impl From<MessagesError> for OrderedError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MessagesErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
@@ -788,18 +788,18 @@ pub enum MessagesErrorKind {
     Other,
 }
 
-pub type MessagesError = NatsError<MessagesErrorKind>;
-
-impl std::fmt::Display for MessagesError {
+impl std::fmt::Display for MessagesErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            MessagesErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            MessagesErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            MessagesErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            MessagesErrorKind::PullBasedConsumer => write!(f, "cannot use with pull consumer"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Other => write!(f, "error"),
+            Self::PullBasedConsumer => write!(f, "cannot use with pull consumer"),
         }
     }
 }
+
+pub type MessagesError = NatsError<MessagesErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConsumerRecreateErrorKind {
@@ -809,22 +809,18 @@ pub enum ConsumerRecreateErrorKind {
     TimedOut,
 }
 
-pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
-
-impl std::fmt::Display for ConsumerRecreateError {
+impl std::fmt::Display for ConsumerRecreateErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            ConsumerRecreateErrorKind::GetStream => {
-                write!(f, "error getting stream: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::Recreate => {
-                write!(f, "consumer creation failed: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
-            ConsumerRecreateErrorKind::Subscription => write!(f, "failed to resubscribe"),
+        match self {
+            Self::GetStream => write!(f, "error getting stream"),
+            Self::Recreate => write!(f, "consumer creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Subscription => write!(f, "failed to resubscribe"),
         }
     }
 }
+
+pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_and_subscription(
     context: Context,

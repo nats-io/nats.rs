@@ -964,21 +964,20 @@ pub enum PublishErrorKind {
     Other,
 }
 
-pub type PublishError = NatsError<PublishErrorKind>;
-
-impl Display for PublishError {
+impl Display for PublishErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.format_source();
-        match self.kind {
-            PublishErrorKind::StreamNotFound => write!(f, "no stream found for given subject"),
-            PublishErrorKind::TimedOut => write!(f, "timed out: didn't receive ack in time"),
-            PublishErrorKind::Other => write!(f, "publish failed: {}", source),
-            PublishErrorKind::BrokenPipe => write!(f, "broken pipe"),
-            PublishErrorKind::WrongLastMessageId => write!(f, "wrong last message id"),
-            PublishErrorKind::WrongLastSequence => write!(f, "wrong last sequence"),
+        match self {
+            Self::StreamNotFound => write!(f, "no stream found for given subject"),
+            Self::TimedOut => write!(f, "timed out: didn't receive ack in time"),
+            Self::Other => write!(f, "publish failed"),
+            Self::BrokenPipe => write!(f, "broken pipe"),
+            Self::WrongLastMessageId => write!(f, "wrong last message id"),
+            Self::WrongLastSequence => write!(f, "wrong last sequence"),
         }
     }
 }
+
+pub type PublishError = NatsError<PublishErrorKind>;
 
 #[derive(Debug)]
 pub struct PublishAckFuture {
@@ -1260,20 +1259,17 @@ pub enum RequestErrorKind {
     Other,
 }
 
-pub type RequestError = NatsError<RequestErrorKind>;
-
-impl Display for RequestError {
+impl Display for RequestErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.format_source();
-        match &self.kind {
-            RequestErrorKind::TimedOut => write!(f, "timed out"),
-            RequestErrorKind::Other => write!(f, "request failed: {}", source),
-            RequestErrorKind::NoResponders => {
-                write!(f, "requested JetStream resource does not exist: {}", source)
-            }
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "request failed"),
+            Self::NoResponders => write!(f, "requested JetStream resource does not exist"),
         }
     }
 }
+
+pub type RequestError = NatsError<RequestErrorKind>;
 
 impl From<crate::RequestError> for RequestError {
     fn from(error: crate::RequestError) -> Self {
@@ -1309,30 +1305,22 @@ pub enum CreateStreamErrorKind {
     ResponseParse,
 }
 
-pub type CreateStreamError = NatsError<CreateStreamErrorKind>;
-
-impl Display for CreateStreamError {
+impl Display for CreateStreamErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind {
-            CreateStreamErrorKind::EmptyStreamName => write!(f, "stream name cannot be empty"),
-            CreateStreamErrorKind::InvalidStreamName => {
-                write!(f, "stream name cannot contain `.`, `_`")
-            }
-            CreateStreamErrorKind::DomainAndExternalSet => {
-                write!(f, "domain and external are both set")
-            }
-            CreateStreamErrorKind::JetStream(err) => {
-                write!(f, "jetstream error: {}", err)
-            }
-            CreateStreamErrorKind::TimedOut => write!(f, "jetstream request timed out"),
-            CreateStreamErrorKind::JetStreamUnavailable => write!(f, "jetstream unavailable"),
-            CreateStreamErrorKind::ResponseParse => write!(f, "failed to parse server response"),
-            CreateStreamErrorKind::Response => {
-                write!(f, "response error: {}", self.format_source())
-            }
+        match self {
+            Self::EmptyStreamName => write!(f, "stream name cannot be empty"),
+            Self::InvalidStreamName => write!(f, "stream name cannot contain `.`, `_`"),
+            Self::DomainAndExternalSet => write!(f, "domain and external are both set"),
+            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::TimedOut => write!(f, "jetstream request timed out"),
+            Self::JetStreamUnavailable => write!(f, "jetstream unavailable"),
+            Self::ResponseParse => write!(f, "failed to parse server response"),
+            Self::Response => write!(f, "response error"),
         }
     }
 }
+
+pub type CreateStreamError = NatsError<CreateStreamErrorKind>;
 
 impl From<super::errors::Error> for CreateStreamError {
     fn from(error: super::errors::Error) -> Self {
@@ -1361,19 +1349,17 @@ pub enum GetStreamErrorKind {
     JetStream(super::errors::Error),
 }
 
-pub type GetStreamError = NatsError<GetStreamErrorKind>;
-
-impl Display for GetStreamError {
+impl Display for GetStreamErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            GetStreamErrorKind::EmptyName => write!(f, "empty name cannot be empty"),
-            GetStreamErrorKind::Request => {
-                write!(f, "request error: {}", self.format_source())
-            }
-            GetStreamErrorKind::JetStream(err) => write!(f, "jetstream error: {}", err),
+        match self {
+            Self::EmptyName => write!(f, "empty name cannot be empty"),
+            Self::Request => write!(f, "request error"),
+            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
         }
     }
 }
+
+pub type GetStreamError = NatsError<GetStreamErrorKind>;
 
 pub type UpdateStreamError = CreateStreamError;
 pub type UpdateStreamErrorKind = CreateStreamErrorKind;
@@ -1387,19 +1373,17 @@ pub enum KeyValueErrorKind {
     JetStream,
 }
 
-pub type KeyValueError = NatsError<KeyValueErrorKind>;
-
-impl Display for KeyValueError {
+impl Display for KeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            KeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
-            KeyValueErrorKind::GetBucket => write!(f, "failed to get the bucket"),
-            KeyValueErrorKind::JetStream => {
-                write!(f, "JetStream error: {}", self.format_source())
-            }
+        match self {
+            Self::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            Self::GetBucket => write!(f, "failed to get the bucket"),
+            Self::JetStream => write!(f, "JetStream error"),
         }
     }
 }
+
+pub type KeyValueError = NatsError<KeyValueErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CreateKeyValueErrorKind {
@@ -1410,24 +1394,19 @@ pub enum CreateKeyValueErrorKind {
     TimedOut,
 }
 
-pub type CreateKeyValueError = NatsError<CreateKeyValueErrorKind>;
-
-impl Display for CreateKeyValueError {
+impl Display for CreateKeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.format_source();
-        match self.kind() {
-            CreateKeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
-            CreateKeyValueErrorKind::TooLongHistory => write!(f, "too long history"),
-            CreateKeyValueErrorKind::JetStream => {
-                write!(f, "JetStream error: {}", source)
-            }
-            CreateKeyValueErrorKind::BucketCreate => {
-                write!(f, "bucket creation failed: {}", source)
-            }
-            CreateKeyValueErrorKind::TimedOut => write!(f, "timed out"),
+        match self {
+            Self::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            Self::TooLongHistory => write!(f, "too long history"),
+            Self::JetStream => write!(f, "JetStream error"),
+            Self::BucketCreate => write!(f, "bucket creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
         }
     }
 }
+
+pub type CreateKeyValueError = NatsError<CreateKeyValueErrorKind>;
 
 pub type CreateObjectStoreError = CreateKeyValueError;
 pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
@@ -1438,18 +1417,16 @@ pub enum ObjectStoreErrorKind {
     GetStore,
 }
 
-pub type ObjectStoreError = NatsError<ObjectStoreErrorKind>;
-
-impl Display for ObjectStoreError {
+impl Display for ObjectStoreErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            ObjectStoreErrorKind::InvalidBucketName => {
-                write!(f, "invalid Object Store bucket name")
-            }
-            ObjectStoreErrorKind::GetStore => write!(f, "failed to get Object Store"),
+        match self {
+            Self::InvalidBucketName => write!(f, "invalid Object Store bucket name"),
+            Self::GetStore => write!(f, "failed to get Object Store"),
         }
     }
 }
+
+pub type ObjectStoreError = NatsError<ObjectStoreErrorKind>;
 
 pub type DeleteObjectStore = ObjectStoreError;
 pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
@@ -1462,18 +1439,18 @@ pub enum AccountErrorKind {
     Other,
 }
 
-pub type AccountError = NatsError<AccountErrorKind>;
-
-impl Display for AccountError {
+impl Display for AccountErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind {
-            AccountErrorKind::TimedOut => write!(f, "timed out"),
-            AccountErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
-            AccountErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            AccountErrorKind::JetStreamUnavailable => write!(f, "JetStream unavailable"),
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::Other => write!(f, "error"),
+            Self::JetStreamUnavailable => write!(f, "JetStream unavailable"),
         }
     }
 }
+
+pub type AccountError = NatsError<AccountErrorKind>;
 
 impl From<RequestError> for AccountError {
     fn from(err: RequestError) -> Self {

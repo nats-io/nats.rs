@@ -433,13 +433,13 @@ pub enum StreamErrorKind {
     Other,
 }
 
-pub type StreamError = NatsError<StreamErrorKind>;
-
-impl std::fmt::Display for StreamError {
+impl std::fmt::Display for StreamErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            StreamErrorKind::TimedOut => write!(f, "timed out"),
-            StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "failed"),
         }
     }
 }
+
+pub type StreamError = NatsError<StreamErrorKind>;

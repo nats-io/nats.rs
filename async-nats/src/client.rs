@@ -621,19 +621,19 @@ pub enum RequestErrorKind {
     Other,
 }
 
-/// Error returned when a core NATS request fails.
-/// To be enumerate over the variants, call [RequestError::kind].
-pub type RequestError = NatsError<RequestErrorKind>;
-
-impl Display for RequestError {
+impl Display for RequestErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            RequestErrorKind::TimedOut => write!(f, "request timed out"),
-            RequestErrorKind::NoResponders => write!(f, "no responders"),
-            RequestErrorKind::Other => write!(f, "request failed: {:?}", self.kind),
+        match self {
+            Self::TimedOut => write!(f, "request timed out"),
+            Self::NoResponders => write!(f, "no responders"),
+            Self::Other => write!(f, "request failed"),
         }
     }
 }
+
+/// Error returned when a core NATS request fails.
+/// To be enumerate over the variants, call [RequestError::kind].
+pub type RequestError = NatsError<RequestErrorKind>;
 
 impl From<PublishError> for RequestError {
     fn from(e: PublishError) -> Self {
@@ -657,18 +657,13 @@ pub enum FlushErrorKind {
     FlushError,
 }
 
-pub type FlushError = NatsError<FlushErrorKind>;
-
-impl Display for FlushError {
+impl Display for FlushErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source_info = self
-            .source
-            .as_ref()
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "no details".into());
-        match self.kind {
-            FlushErrorKind::SendError => write!(f, "failed to send flush request: {}", source_info),
-            FlushErrorKind::FlushError => write!(f, "flush failed: {}", source_info),
+        match self {
+            Self::SendError => write!(f, "failed to send flush request"),
+            Self::FlushError => write!(f, "flush failed"),
         }
     }
 }
+
+pub type FlushError = NatsError<FlushErrorKind>;

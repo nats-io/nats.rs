@@ -55,25 +55,22 @@ pub enum DirectGetErrorKind {
     Other,
 }
 
-pub type DirectGetError = NatsError<DirectGetErrorKind>;
-
-impl Display for DirectGetError {
+impl Display for DirectGetErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match self.kind() {
-            DirectGetErrorKind::InvalidSubject => write!(f, "invalid subject"),
-            DirectGetErrorKind::NotFound => write!(f, "message not found"),
-            DirectGetErrorKind::ErrorResponse(status, description) => {
+        match self {
+            Self::InvalidSubject => write!(f, "invalid subject"),
+            Self::NotFound => write!(f, "message not found"),
+            Self::ErrorResponse(status, description) => {
                 write!(f, "unable to get message: {} {}", status, description)
             }
-            DirectGetErrorKind::Other => {
-                write!(f, "error getting message: {}", source)
-            }
-            DirectGetErrorKind::TimedOut => write!(f, "timed out"),
-            DirectGetErrorKind::Request => write!(f, "request failed: {}", source),
+            Self::Other => write!(f, "error getting message"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
         }
     }
 }
+
+pub type DirectGetError = NatsError<DirectGetErrorKind>;
 
 impl From<crate::RequestError> for DirectGetError {
     fn from(err: crate::RequestError) -> Self {
@@ -100,18 +97,17 @@ pub enum DeleteMessageErrorKind {
     JetStream(super::errors::Error),
 }
 
-pub type DeleteMessageError = NatsError<DeleteMessageErrorKind>;
-
-impl Display for DeleteMessageError {
+impl Display for DeleteMessageErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match &self.kind {
-            DeleteMessageErrorKind::Request => write!(f, "request failed: {}", source),
-            DeleteMessageErrorKind::TimedOut => write!(f, "timed out"),
-            DeleteMessageErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+        match self {
+            Self::Request => write!(f, "request failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
         }
     }
 }
+
+pub type DeleteMessageError = NatsError<DeleteMessageErrorKind>;
 
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug, Clone)]
@@ -1534,18 +1530,17 @@ pub enum PurgeErrorKind {
     JetStream(super::errors::Error),
 }
 
-pub type PurgeError = NatsError<PurgeErrorKind>;
-
-impl Display for PurgeError {
+impl Display for PurgeErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match &self.kind {
-            PurgeErrorKind::Request => write!(f, "request failed: {}", source),
-            PurgeErrorKind::TimedOut => write!(f, "timed out"),
-            PurgeErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+        match self {
+            Self::Request => write!(f, "request failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
         }
     }
 }
+
+pub type PurgeError = NatsError<PurgeErrorKind>;
 
 impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
@@ -1751,23 +1746,17 @@ pub enum LastRawMessageErrorKind {
     Other,
 }
 
-pub type LastRawMessageError = NatsError<LastRawMessageErrorKind>;
-
-impl fmt::Display for LastRawMessageError {
+impl Display for LastRawMessageErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            LastRawMessageErrorKind::NoMessageFound => write!(f, "no message found"),
-            LastRawMessageErrorKind::Other => write!(
-                f,
-                "failed to get last raw message: {}",
-                self.format_source()
-            ),
-            LastRawMessageErrorKind::JetStream(err) => {
-                write!(f, "JetStream error: {}", err)
-            }
+        match self {
+            Self::NoMessageFound => write!(f, "no message found"),
+            Self::Other => write!(f, "failed to get last raw message"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
         }
     }
 }
+
+pub type LastRawMessageError = NatsError<LastRawMessageErrorKind>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerErrorKind {
@@ -1779,22 +1768,19 @@ pub enum ConsumerErrorKind {
     Other,
 }
 
-pub type ConsumerError = NatsError<ConsumerErrorKind>;
-
-impl Display for ConsumerError {
+impl Display for ConsumerErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match &self.kind() {
-            ConsumerErrorKind::TimedOut => write!(f, "timed out"),
-            ConsumerErrorKind::Request => write!(f, "request failed: {}", source),
-            ConsumerErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
-            ConsumerErrorKind::Other => write!(f, "consumer error: {}", source),
-            ConsumerErrorKind::InvalidConsumerType => {
-                write!(f, "invalid consumer type: {}", source)
-            }
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::Other => write!(f, "consumer error"),
+            Self::InvalidConsumerType => write!(f, "invalid consumer type"),
         }
     }
 }
+
+pub type ConsumerError = NatsError<ConsumerErrorKind>;
 
 impl From<super::context::RequestError> for ConsumerError {
     fn from(err: super::context::RequestError) -> Self {

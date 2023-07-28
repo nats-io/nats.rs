@@ -5,7 +5,7 @@ use std::fmt::{Debug, Display};
 #[derive(Debug)]
 pub struct NatsError<Kind>
 where
-    Kind: Clone + Debug + PartialEq,
+    Kind: Clone + Debug + Display + PartialEq,
 {
     pub(crate) kind: Kind,
     pub(crate) source: Option<crate::Error>,
@@ -13,7 +13,7 @@ where
 
 impl<Kind> NatsError<Kind>
 where
-    Kind: Clone + Debug + PartialEq,
+    Kind: Clone + Debug + Display + PartialEq,
 {
     pub(crate) fn new(kind: Kind) -> Self {
         Self { kind, source: None }
@@ -29,30 +29,30 @@ where
         }
     }
 
-    // TODO: shouldn't this method to be pub(crate) ?
-    //       or maybe it is better to expose the source error?
-    pub fn format_source(&self) -> String {
-        self.source
-            .as_ref()
-            .map(|err| err.to_string())
-            .unwrap_or("unknown".to_string())
-    }
-
+    // In some cases the kind doesn't implement `Copy` trait
     pub fn kind(&self) -> Kind {
         self.kind.clone()
     }
 }
 
-impl<Kind> Error for NatsError<Kind>
+impl<Kind> Display for NatsError<Kind>
 where
-    Kind: PartialEq + Clone + Debug,
-    NatsError<Kind>: Debug + Display,
+    Kind: Clone + Debug + Display + PartialEq,
 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(err) = &self.source {
+            write!(f, "{}: {}", self.kind, err)
+        } else {
+            write!(f, "{}", self.kind)
+        }
+    }
 }
+
+impl<Kind> Error for NatsError<Kind> where Kind: Clone + Debug + Display + PartialEq {}
 
 impl<Kind> From<Kind> for NatsError<Kind>
 where
-    Kind: PartialEq + Clone + Debug,
+    Kind: Clone + Debug + Display + PartialEq,
 {
     fn from(kind: Kind) -> Self {
         Self { kind, source: None }
@@ -63,7 +63,7 @@ where
 /// by additionally specifying the kind of the target error.
 trait WithKind<Kind>
 where
-    Kind: Clone + Debug + PartialEq,
+    Kind: Clone + Debug + Display + PartialEq,
     Self: Into<crate::Error>,
 {
     fn with_kind(self, kind: Kind) -> NatsError<Kind> {
@@ -76,7 +76,7 @@ where
 
 impl<E, Kind> WithKind<Kind> for E
 where
-    Kind: Clone + Debug + PartialEq,
+    Kind: Clone + Debug + Display + PartialEq,
     E: Into<crate::Error>,
 {
 }
@@ -95,16 +95,17 @@ mod test {
         Baz,
     }
 
-    // Define a custom error type as a public struct
-    type FooError = NatsError<FooErrorKind>;
-
-    // Implement the Display trait for the custom error type
-    // to unlock the implementation of the Error trait.
-    impl Display for FooError {
+    impl Display for FooErrorKind {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(f, "foo error")
+            match self {
+                Self::Bar => write!(f, "bar error"),
+                Self::Baz => write!(f, "baz error"),
+            }
         }
     }
+
+    // Define a custom error type as a public struct
+    type FooError = NatsError<FooErrorKind>;
 
     #[test]
     fn new() {
@@ -130,16 +131,16 @@ mod test {
     }
 
     #[test]
-    fn format_source_with_source() {
+    fn display_with_source() {
         let source = std::io::Error::new(std::io::ErrorKind::Other, "foo");
-        let error = FooError::with_source(FooErrorKind::Bar, source);
-        assert_eq!(error.format_source(), "foo");
+        let error = source.with_kind(FooErrorKind::Bar);
+        assert_eq!(format!("{}", error), "bar error: foo");
     }
 
     #[test]
-    fn format_source_without_source() {
+    fn display_without_source() {
         let error: FooError = FooErrorKind::Bar.into();
-        assert_eq!(error.format_source(), "unknown");
+        assert_eq!(format!("{}", error), "bar error");
     }
 
     #[test]
@@ -154,6 +155,6 @@ mod test {
         let source = std::io::Error::new(std::io::ErrorKind::Other, "foo");
         let error: FooError = source.with_kind(FooErrorKind::Baz);
         assert_eq!(error.kind(), FooErrorKind::Baz);
-        assert!(error.source.unwrap().to_string().contains("foo"));
+        assert_eq!(format!("{}", error), "baz error: foo");
     }
 }

@@ -857,30 +857,23 @@ pub enum ConnectErrorKind {
     Io,
 }
 
-/// Returned when initial connection fails.
-/// To be enumerate over the variants, call [ConnectError::kind].
-pub type ConnectError = NatsError<ConnectErrorKind>;
-
-impl Display for ConnectError {
+impl Display for ConnectErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source_info = self
-            .source
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "no details".to_string());
-        match self.kind {
-            ConnectErrorKind::ServerParse => {
-                write!(f, "failed to parse server or server list: {}", source_info)
-            }
-            ConnectErrorKind::Dns => write!(f, "DNS error: {}", source_info),
-            ConnectErrorKind::Authentication => write!(f, "failed signing nonce"),
-            ConnectErrorKind::AuthorizationViolation => write!(f, "authorization violation"),
-            ConnectErrorKind::TimedOut => write!(f, "timed out"),
-            ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
-            ConnectErrorKind::Io => write!(f, "{}", source_info),
+        match self {
+            Self::ServerParse => write!(f, "failed to parse server or server list"),
+            Self::Dns => write!(f, "DNS error"),
+            Self::Authentication => write!(f, "failed signing nonce"),
+            Self::AuthorizationViolation => write!(f, "authorization violation"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Tls => write!(f, "TLS error:"),
+            Self::Io => write!(f, "IO error"),
         }
     }
 }
+
+/// Returned when initial connection fails.
+/// To be enumerate over the variants, call [ConnectError::kind].
+pub type ConnectError = NatsError<ConnectErrorKind>;
 
 impl From<std::io::Error> for ConnectError {
     fn from(err: std::io::Error) -> Self {
