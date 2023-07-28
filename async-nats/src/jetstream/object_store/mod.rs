@@ -486,6 +486,79 @@ impl ObjectStore {
             .await?;
         Ok(())
     }
+
+    /// Updates [Object] [ObjectMeta].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::object_store;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut bucket = jetstream.get_object_store("store").await?;
+    /// bucket.update_metadata("object", object_store::ObjectMeta{
+    ///     name: "new_name".to_string(),
+    ///     description: Some("a new description".to_string()),
+    ///     link: None,
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn update_metadata<A: AsRef<str>>(
+        &self,
+        object: A,
+        metadata: ObjectMeta,
+    ) -> Result<ObjectInfo, UpdateMetadataError> {
+        let mut info = self.info(object.as_ref()).await?;
+
+        info.name = metadata.name;
+        info.description = metadata.description;
+        info.link = metadata.link;
+
+        let name = encode_object_name(object.as_ref());
+        let subject = format!("$O.{}.M.{}", &self.name, &name);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            NATS_ROLLUP,
+            ROLLUP_SUBJECT.parse::<HeaderValue>().map_err(|err| {
+                UpdateMetadataError::with_source(
+                    UpdateMetadataErrorKind::Other,
+                    format!("failed parsing header: {}", err),
+                )
+            })?,
+        );
+        let data = serde_json::to_vec(&info).map_err(|err| {
+            UpdateMetadataError::with_source(
+                UpdateMetadataErrorKind::Other,
+                format!("failed serializing object info: {}", err),
+            )
+        })?;
+
+        // publish meta.
+        self.stream
+            .context
+            .publish_with_headers(subject, headers, data.into())
+            .await
+            .map_err(|err| {
+                UpdateMetadataError::with_source(
+                    UpdateMetadataErrorKind::PublishMetadata,
+                    format!("failed publishing metadata: {}", err),
+                )
+            })?
+            .await
+            .map_err(|err| {
+                UpdateMetadataError::with_source(
+                    UpdateMetadataErrorKind::PublishMetadata,
+                    format!("failed ack from metadata publish: {}", err),
+                )
+            })?;
+
+        Ok(info)
+    }
 }
 
 pub struct Watch<'a> {
@@ -740,6 +813,62 @@ impl From<&str> for ObjectMeta {
             ..Default::default()
         }
     }
+}
+
+impl From<ObjectInfo> for ObjectMeta {
+    fn from(info: ObjectInfo) -> Self {
+        ObjectMeta {
+            name: info.name,
+            description: info.description,
+            link: info.link,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UpdateMetadataError {
+    kind: UpdateMetadataErrorKind,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+}
+
+crate::error_impls!(UpdateMetadataError, UpdateMetadataErrorKind);
+
+impl Display for UpdateMetadataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind() {
+            UpdateMetadataErrorKind::InvalidName => write!(f, "invalid object name"),
+            UpdateMetadataErrorKind::NotFound => write!(f, "object not found"),
+            UpdateMetadataErrorKind::TimedOut => write!(f, "timed out"),
+            UpdateMetadataErrorKind::Other => write!(f, "error: {}", self.format_source()),
+            UpdateMetadataErrorKind::PublishMetadata => {
+                write!(f, "failed publishing metadata: {}", self.format_source())
+            }
+        }
+    }
+}
+
+impl From<InfoError> for UpdateMetadataError {
+    fn from(error: InfoError) -> Self {
+        match error.kind() {
+            InfoErrorKind::InvalidName => {
+                UpdateMetadataError::new(UpdateMetadataErrorKind::InvalidName)
+            }
+            InfoErrorKind::NotFound => UpdateMetadataError::new(UpdateMetadataErrorKind::NotFound),
+            InfoErrorKind::Other => {
+                UpdateMetadataError::with_source(UpdateMetadataErrorKind::Other, error)
+            }
+            InfoErrorKind::TimedOut => UpdateMetadataError::new(UpdateMetadataErrorKind::TimedOut),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateMetadataErrorKind {
+    InvalidName,
+    NotFound,
+    TimedOut,
+    Other,
+    PublishMetadata,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

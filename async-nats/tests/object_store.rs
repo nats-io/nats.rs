@@ -343,4 +343,41 @@ mod object_store {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn update_metadata() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        bucket
+            .put("DATA", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+
+        let given_metadata = ObjectMeta {
+            name: "data".to_owned(),
+            description: Some("description".to_string()),
+            link: None,
+        };
+
+        bucket
+            .update_metadata("DATA", given_metadata.clone())
+            .await
+            .unwrap();
+
+        let info = bucket.info("DATA").await.unwrap();
+
+        assert_eq!(info.name, given_metadata.name);
+        assert_eq!(info.description, given_metadata.description);
+        assert_eq!(info.link, given_metadata.link);
+    }
 }
