@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 
 use super::consumer::push::OrderedError;
-use super::consumer::{StreamError, StreamErrorKind};
+use super::consumer::{DeliverPolicy, StreamError, StreamErrorKind};
 use super::context::{PublishError, PublishErrorKind};
 use super::stream::{ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
@@ -401,11 +401,25 @@ impl ObjectStore {
     /// # }
     /// ```
     pub async fn watch(&self) -> Result<Watch<'_>, WatchError> {
+        self.watch_with_deliver_policy(DeliverPolicy::New).await
+    }
+
+    /// Creates a [Watch] stream over changes in the [ObjectStore] which yields values whenever
+    /// there are changes for that key with as well as last value.
+    pub async fn watch_with_history(&self) -> Result<Watch<'_>, WatchError> {
+        self.watch_with_deliver_policy(DeliverPolicy::LastPerSubject)
+            .await
+    }
+
+    async fn watch_with_deliver_policy(
+        &self,
+        deliver_policy: DeliverPolicy,
+    ) -> Result<Watch<'_>, WatchError> {
         let subject = format!("$O.{}.M.>", self.name);
         let ordered = self
             .stream
             .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
-                deliver_policy: super::consumer::DeliverPolicy::New,
+                deliver_policy,
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("object store watcher".to_string()),
                 filter_subject: subject,
