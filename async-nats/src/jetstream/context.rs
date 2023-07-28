@@ -894,7 +894,7 @@ impl Context {
         })
     }
 
-    /// Creates a new object store bucket.
+    /// Get an existing object store bucket.
     ///
     /// # Examples
     ///
