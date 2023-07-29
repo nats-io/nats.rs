@@ -2175,7 +2175,7 @@ pub enum BatchErrorKind {
 impl std::fmt::Display for BatchErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Pull => write!(f, "pull request failed:"),
+            Self::Pull => write!(f, "pull request failed"),
             Self::Flush => write!(f, "flush failed"),
             Self::Serialize => write!(f, "serialize failed"),
             Self::Subscribe => write!(f, "subscribe failed"),

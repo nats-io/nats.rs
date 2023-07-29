@@ -865,7 +865,7 @@ impl Display for ConnectErrorKind {
             Self::Authentication => write!(f, "failed signing nonce"),
             Self::AuthorizationViolation => write!(f, "authorization violation"),
             Self::TimedOut => write!(f, "timed out"),
-            Self::Tls => write!(f, "TLS error:"),
+            Self::Tls => write!(f, "TLS error"),
             Self::Io => write!(f, "IO error"),
         }
     }

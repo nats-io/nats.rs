@@ -853,9 +853,9 @@ pub enum PutErrorKind {
 impl Display for PutErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PublishChunks => write!(f, "failed publishing object chunks:"),
+            Self::PublishChunks => write!(f, "failed publishing object chunks"),
             Self::PublishMetadata => write!(f, "failed publishing metadata"),
-            Self::PurgeOldChunks => write!(f, "failed purging old chunks:"),
+            Self::PurgeOldChunks => write!(f, "failed purging old chunks"),
             Self::TimedOut => write!(f, "timed out"),
             Self::Other => write!(f, "error"),
             Self::InvalidName => write!(f, "invalid object name"),
