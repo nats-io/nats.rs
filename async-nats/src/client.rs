@@ -15,6 +15,7 @@ use crate::connection::State;
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
+use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
@@ -609,7 +610,7 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RequestErrorKind {
     /// There are services listening on requested subject, but they didn't respond
     /// in time.
@@ -620,51 +621,33 @@ pub enum RequestErrorKind {
     Other,
 }
 
+impl Display for RequestErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "request timed out"),
+            Self::NoResponders => write!(f, "no responders"),
+            Self::Other => write!(f, "request failed"),
+        }
+    }
+}
+
 /// Error returned when a core NATS request fails.
 /// To be enumerate over the variants, call [RequestError::kind].
-#[derive(Debug)]
-pub struct RequestError {
-    kind: RequestErrorKind,
-    source: Option<crate::Error>,
-}
+pub type RequestError = Error<RequestErrorKind>;
 
-crate::error_impls!(RequestError, RequestErrorKind);
-
-impl Display for RequestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            RequestErrorKind::TimedOut => write!(f, "request timed out"),
-            RequestErrorKind::NoResponders => write!(f, "no responders"),
-            RequestErrorKind::Other => write!(f, "request failed: {:?}", self.kind),
-        }
+impl From<PublishError> for RequestError {
+    fn from(e: PublishError) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, e)
     }
 }
 
-/// Error returned when flushing the messages buffered on the client fails.
-/// To be enumerate over the variants, call [FlushError::kind].
-#[derive(Debug)]
-pub struct FlushError {
-    kind: FlushErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(FlushError, FlushErrorKind);
-
-impl Display for FlushError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source_info = self
-            .source
-            .as_ref()
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "no details".into());
-        match self.kind {
-            FlushErrorKind::SendError => write!(f, "failed to send flush request: {}", source_info),
-            FlushErrorKind::FlushError => write!(f, "flush failed: {}", source_info),
-        }
+impl From<SubscribeError> for RequestError {
+    fn from(e: SubscribeError) -> Self {
+        RequestError::with_source(RequestErrorKind::Other, e)
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FlushErrorKind {
     /// Sending the flush failed client side.
     SendError,
@@ -674,13 +657,13 @@ pub enum FlushErrorKind {
     FlushError,
 }
 
-impl From<PublishError> for RequestError {
-    fn from(e: PublishError) -> Self {
-        RequestError::with_source(RequestErrorKind::Other, e)
+impl Display for FlushErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SendError => write!(f, "failed to send flush request"),
+            Self::FlushError => write!(f, "flush failed"),
+        }
     }
 }
-impl From<SubscribeError> for RequestError {
-    fn from(e: SubscribeError) -> Self {
-        RequestError::with_source(RequestErrorKind::Other, e)
-    }
-}
+
+pub type FlushError = Error<FlushErrorKind>;

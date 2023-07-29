@@ -29,6 +29,7 @@ use regex::Regex;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tracing::debug;
 
+use crate::error::Error;
 use crate::{header, Message};
 
 use self::bucket::Status;
@@ -1023,72 +1024,61 @@ pub struct Entry {
     pub operation: Operation,
 }
 
-#[derive(Debug)]
-pub struct StatusError {
-    kind: StatusErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StatusErrorKind {
     JetStream(crate::jetstream::Error),
     TimedOut,
 }
 
-crate::error_impls!(StatusError, StatusErrorKind);
-
-impl Display for StatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind.clone() {
-            StatusErrorKind::JetStream(err) => {
-                write!(f, "jetstream request failed: {}", err)
-            }
-            StatusErrorKind::TimedOut => write!(f, "timed out"),
+impl Display for StatusErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::JetStream(err) => write!(f, "jetstream request failed: {}", err),
+            Self::TimedOut => write!(f, "timed out"),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct PutError {
-    kind: PutErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
+pub type StatusError = Error<StatusErrorKind>;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PutErrorKind {
     InvalidKey,
     Publish,
     Ack,
 }
 
-crate::error_impls!(PutError, PutErrorKind);
-
-impl Display for PutError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            PutErrorKind::Publish => {
-                write!(f, "failed to put key into store: {}", self.format_source())
-            }
-            PutErrorKind::Ack => write!(f, "ack error: {}", self.format_source()),
-            PutErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+impl Display for PutErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Publish => write!(f, "failed to put key into store"),
+            Self::Ack => write!(f, "ack error"),
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct EntryError {
-    kind: EntryErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
+pub type PutError = Error<PutErrorKind>;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntryErrorKind {
     InvalidKey,
     TimedOut,
     Other,
 }
 
-crate::error_impls!(EntryError, EntryErrorKind);
+impl Display for EntryErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "failed getting entry"),
+        }
+    }
+}
+
+pub type EntryError = Error<EntryErrorKind>;
+
 crate::from_with_timeout!(
     EntryError,
     EntryErrorKind,
@@ -1096,23 +1086,7 @@ crate::from_with_timeout!(
     DirectGetErrorKind
 );
 
-impl Display for EntryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            EntryErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
-            EntryErrorKind::TimedOut => write!(f, "timed out"),
-            EntryErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct WatchError {
-    kind: WatchErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {
     InvalidKey,
     TimedOut,
@@ -1120,77 +1094,59 @@ pub enum WatchErrorKind {
     Other,
 }
 
-crate::error_impls!(WatchError, WatchErrorKind);
-crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
-crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
-
-impl Display for WatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            WatchErrorKind::ConsumerCreate => {
-                write!(
-                    f,
-                    "watch consumer creation failed: {}",
-                    self.format_source()
-                )
-            }
-            WatchErrorKind::Other => write!(f, "watch failed: {}", self.format_source()),
-            WatchErrorKind::TimedOut => write!(f, "timed out"),
-            WatchErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+impl Display for WatchErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConsumerCreate => write!(f, "watch consumer creation failed"),
+            Self::Other => write!(f, "watch failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct UpdateError {
-    kind: UpdateErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
+pub type WatchError = Error<WatchErrorKind>;
 
-#[derive(Debug, PartialEq, Clone)]
+crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
+crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UpdateErrorKind {
     InvalidKey,
     TimedOut,
     Other,
 }
 
-crate::error_impls!(UpdateError, UpdateErrorKind);
-crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
-
-impl Display for UpdateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            UpdateErrorKind::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
-            UpdateErrorKind::TimedOut => write!(f, "timed out"),
-            UpdateErrorKind::Other => write!(f, "failed getting entry: {}", self.format_source()),
+impl Display for UpdateErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "failed getting entry"),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct WatcherError {
-    kind: WatcherErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
+pub type UpdateError = Error<UpdateErrorKind>;
 
-#[derive(Clone, Debug, PartialEq)]
+crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatcherErrorKind {
     Consumer,
     Other,
 }
 
-impl Display for WatcherError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
-            WatcherErrorKind::Consumer => {
-                write!(f, "watcher consumer error: {}", self.format_source())
-            }
-            WatcherErrorKind::Other => write!(f, "watcher error: {}", self.format_source()),
+impl Display for WatcherErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Consumer => write!(f, "watcher consumer error"),
+            Self::Other => write!(f, "watcher error"),
         }
     }
 }
 
-crate::error_impls!(WatcherError, WatcherErrorKind);
+pub type WatcherError = Error<WatcherErrorKind>;
 
 impl From<OrderedError> for WatcherError {
     fn from(err: OrderedError) -> Self {

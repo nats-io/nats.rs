@@ -25,8 +25,9 @@ use std::{
     time::Duration,
 };
 
-use crate::{header::HeaderName, is_valid_subject, HeaderMap, HeaderValue};
-use crate::{Error, StatusCode};
+use crate::{
+    error::Error, header::HeaderName, is_valid_subject, HeaderMap, HeaderValue, StatusCode,
+};
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
 use bytes::Bytes;
@@ -37,7 +38,7 @@ use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
-    context::{RequestError, RequestErrorKind, StreamsError},
+    context::{RequestError, RequestErrorKind, StreamsError, StreamsErrorKind},
     errors::ErrorCode,
     response::Response,
     Context, Message,
@@ -45,14 +46,7 @@ use super::{
 
 pub type InfoError = RequestError;
 
-#[derive(Debug)]
-pub struct DirectGetError {
-    kind: DirectGetErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(DirectGetError, DirectGetErrorKind);
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DirectGetErrorKind {
     NotFound,
     InvalidSubject,
@@ -62,23 +56,22 @@ pub enum DirectGetErrorKind {
     Other,
 }
 
-impl Display for DirectGetError {
+impl Display for DirectGetErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match self.kind() {
-            DirectGetErrorKind::InvalidSubject => write!(f, "invalid subject"),
-            DirectGetErrorKind::NotFound => write!(f, "message not found"),
-            DirectGetErrorKind::ErrorResponse(status, description) => {
+        match self {
+            Self::InvalidSubject => write!(f, "invalid subject"),
+            Self::NotFound => write!(f, "message not found"),
+            Self::ErrorResponse(status, description) => {
                 write!(f, "unable to get message: {} {}", status, description)
             }
-            DirectGetErrorKind::Other => {
-                write!(f, "error getting message: {}", source)
-            }
-            DirectGetErrorKind::TimedOut => write!(f, "timed out"),
-            DirectGetErrorKind::Request => write!(f, "request failed: {}", source),
+            Self::Other => write!(f, "error getting message"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
         }
     }
 }
+
+pub type DirectGetError = Error<DirectGetErrorKind>;
 
 impl From<crate::RequestError> for DirectGetError {
     fn from(err: crate::RequestError) -> Self {
@@ -98,30 +91,24 @@ impl From<serde_json::Error> for DirectGetError {
     }
 }
 
-#[derive(Debug)]
-pub struct DeleteMessageError {
-    kind: DeleteMessageErrorKind,
-    source: Option<crate::Error>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DeleteMessageErrorKind {
     Request,
     TimedOut,
     JetStream(super::errors::Error),
 }
-crate::error_impls!(DeleteMessageError, DeleteMessageErrorKind);
 
-impl Display for DeleteMessageError {
+impl Display for DeleteMessageErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match &self.kind {
-            DeleteMessageErrorKind::Request => write!(f, "request failed: {}", source),
-            DeleteMessageErrorKind::TimedOut => write!(f, "timed out"),
-            DeleteMessageErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+        match self {
+            Self::Request => write!(f, "request failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
         }
     }
 }
+
+pub type DeleteMessageError = Error<DeleteMessageErrorKind>;
 
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug, Clone)]
@@ -535,7 +522,7 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, Error> {
+    pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, crate::Error> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
             "seq": sequence,
@@ -797,7 +784,10 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<consumer::Info, Error> {
+    pub async fn consumer_info<T: AsRef<str>>(
+        &self,
+        name: T,
+    ) -> Result<consumer::Info, crate::Error> {
         let name = name.as_ref();
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
@@ -832,7 +822,7 @@ impl Stream {
     pub async fn get_consumer<T: FromConsumer + IntoConsumerConfig>(
         &self,
         name: &str,
-    ) -> Result<Consumer<T>, Error> {
+    ) -> Result<Consumer<T>, crate::Error> {
         let info = self.consumer_info(name).await?;
 
         Ok(Consumer::new(
@@ -1228,7 +1218,7 @@ pub struct RawMessage {
 }
 
 impl TryFrom<RawMessage> for crate::Message {
-    type Error = Error;
+    type Error = crate::Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
         let decoded_payload = STANDARD
@@ -1268,7 +1258,7 @@ const HEADER_LINE: &str = "NATS/1.0";
 #[allow(clippy::type_complexity)]
 fn parse_headers(
     buf: &[u8],
-) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), Error> {
+) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), crate::Error> {
     let mut headers = HeaderMap::new();
     let mut maybe_status: Option<StatusCode> = None;
     let mut maybe_description: Option<String> = None;
@@ -1536,30 +1526,24 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct PurgeError {
-    kind: PurgeErrorKind,
-    source: Option<crate::Error>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PurgeErrorKind {
     Request,
     TimedOut,
     JetStream(super::errors::Error),
 }
-crate::error_impls!(PurgeError, PurgeErrorKind);
 
-impl Display for PurgeError {
+impl Display for PurgeErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match &self.kind {
-            PurgeErrorKind::Request => write!(f, "request failed: {}", source),
-            PurgeErrorKind::TimedOut => write!(f, "timed out"),
-            PurgeErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
+        match self {
+            Self::Request => write!(f, "request failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
         }
     }
 }
+
+pub type PurgeError = Error<PurgeErrorKind>;
 
 impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
@@ -1603,6 +1587,7 @@ struct ConsumerInfoPage {
     consumers: Option<Vec<super::consumer::Info>>,
 }
 
+type ConsumerNamesErrorKind = StreamsErrorKind;
 type ConsumerNamesError = StreamsError;
 type PageRequest<'a> = BoxFuture<'a, Result<ConsumerPage, RequestError>>;
 
@@ -1627,7 +1612,7 @@ impl futures::Stream for ConsumerNames<'_> {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
                     let page = page.map_err(|err| {
-                        ConsumerNamesError::with_source(RequestErrorKind::Other, err)
+                        ConsumerNamesError::with_source(ConsumerNamesErrorKind::Other, err)
                     })?;
 
                     if let Some(consumers) = page.consumers {
@@ -1680,6 +1665,7 @@ impl futures::Stream for ConsumerNames<'_> {
     }
 }
 
+pub type ConsumersErrorKind = StreamsErrorKind;
 pub type ConsumersError = StreamsError;
 type PageInfoRequest<'a> = BoxFuture<'a, Result<ConsumerInfoPage, RequestError>>;
 
@@ -1703,8 +1689,9 @@ impl futures::Stream for Consumers<'_> {
             Some(page) => match page.try_poll_unpin(cx) {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
-                    let page = page
-                        .map_err(|err| ConsumersError::with_source(RequestErrorKind::Other, err))?;
+                    let page = page.map_err(|err| {
+                        ConsumersError::with_source(ConsumersErrorKind::Other, err)
+                    })?;
                     if let Some(consumers) = page.consumers {
                         self.offset += consumers.len();
                         self.consumers = consumers;
@@ -1755,58 +1742,48 @@ impl futures::Stream for Consumers<'_> {
     }
 }
 
-#[derive(Debug)]
-pub struct LastRawMessageError {
-    source: Option<crate::Error>,
-    kind: LastRawMessageErrorKind,
-}
-crate::error_impls!(LastRawMessageError, LastRawMessageErrorKind);
-
-impl fmt::Display for LastRawMessageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            LastRawMessageErrorKind::NoMessageFound => write!(f, "no message found"),
-            LastRawMessageErrorKind::Other => write!(
-                f,
-                "failed to get last raw message: {}",
-                self.format_source()
-            ),
-            LastRawMessageErrorKind::JetStream(err) => {
-                write!(f, "JetStream error: {}", err)
-            }
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LastRawMessageErrorKind {
     NoMessageFound,
     JetStream(super::errors::Error),
     Other,
 }
 
-#[derive(Debug)]
-pub struct ConsumerError {
-    pub kind: ConsumerErrorKind,
-    pub source: Option<crate::Error>,
-}
-
-crate::error_impls!(ConsumerError, ConsumerErrorKind);
-
-impl Display for ConsumerError {
+impl Display for LastRawMessageErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source = self.format_source();
-        match &self.kind() {
-            ConsumerErrorKind::TimedOut => write!(f, "timed out"),
-            ConsumerErrorKind::Request => write!(f, "request failed: {}", source),
-            ConsumerErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
-            ConsumerErrorKind::Other => write!(f, "consumer error: {}", source),
-            ConsumerErrorKind::InvalidConsumerType => {
-                write!(f, "invalid consumer type: {}", source)
-            }
+        match self {
+            Self::NoMessageFound => write!(f, "no message found"),
+            Self::Other => write!(f, "failed to get last raw message"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
         }
     }
 }
+
+pub type LastRawMessageError = Error<LastRawMessageErrorKind>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerErrorKind {
+    //TODO: get last should have timeout, which should be mapped here.
+    TimedOut,
+    Request,
+    InvalidConsumerType,
+    JetStream(super::errors::Error),
+    Other,
+}
+
+impl Display for ConsumerErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::Other => write!(f, "consumer error"),
+            Self::InvalidConsumerType => write!(f, "invalid consumer type"),
+        }
+    }
+}
+
+pub type ConsumerError = Error<ConsumerErrorKind>;
 
 impl From<super::context::RequestError> for ConsumerError {
     fn from(err: super::context::RequestError) -> Self {
@@ -1821,14 +1798,4 @@ impl From<super::errors::Error> for ConsumerError {
     fn from(err: super::errors::Error) -> Self {
         ConsumerError::new(ConsumerErrorKind::JetStream(err))
     }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum ConsumerErrorKind {
-    //TODO: get last should have timeout, which should be mapped here.
-    TimedOut,
-    Request,
-    InvalidConsumerType,
-    JetStream(super::errors::Error),
-    Other,
 }
