@@ -26,9 +26,8 @@ use time::serde::rfc3339;
 use super::context::RequestError;
 use super::stream::ClusterInfo;
 use super::Context;
+use crate::error::Error;
 use crate::jetstream::consumer;
-use crate::nats_error::NatsError;
-use crate::Error;
 
 pub trait IntoConsumerConfig {
     fn into_consumer_config(self) -> Config;
@@ -120,7 +119,9 @@ impl<T: IntoConsumerConfig> Consumer<T> {
 /// [Push][crate::jetstream::consumer::push::Config] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
-    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    fn try_from_consumer_config(
+        config: crate::jetstream::consumer::Config,
+    ) -> Result<Self, crate::Error>
     where
         Self: Sized;
 }
@@ -344,7 +345,7 @@ impl IntoConsumerConfig for &Config {
 }
 
 impl FromConsumer for Config {
-    fn try_from_consumer_config(config: Config) -> Result<Self, Error>
+    fn try_from_consumer_config(config: Config) -> Result<Self, crate::Error>
     where
         Self: Sized,
     {
@@ -442,4 +443,4 @@ impl std::fmt::Display for StreamErrorKind {
     }
 }
 
-pub type StreamError = NatsError<StreamErrorKind>;
+pub type StreamError = Error<StreamErrorKind>;

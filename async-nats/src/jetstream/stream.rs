@@ -25,8 +25,9 @@ use std::{
     time::Duration,
 };
 
-use crate::{header::HeaderName, is_valid_subject, HeaderMap, HeaderValue};
-use crate::{Error, StatusCode};
+use crate::{
+    error::Error, header::HeaderName, is_valid_subject, HeaderMap, HeaderValue, StatusCode,
+};
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
 use bytes::Bytes;
@@ -70,7 +71,7 @@ impl Display for DirectGetErrorKind {
     }
 }
 
-pub type DirectGetError = NatsError<DirectGetErrorKind>;
+pub type DirectGetError = Error<DirectGetErrorKind>;
 
 impl From<crate::RequestError> for DirectGetError {
     fn from(err: crate::RequestError) -> Self {
@@ -107,7 +108,7 @@ impl Display for DeleteMessageErrorKind {
     }
 }
 
-pub type DeleteMessageError = NatsError<DeleteMessageErrorKind>;
+pub type DeleteMessageError = Error<DeleteMessageErrorKind>;
 
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug, Clone)]
@@ -521,7 +522,7 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, Error> {
+    pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, crate::Error> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
             "seq": sequence,
@@ -783,7 +784,10 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn consumer_info<T: AsRef<str>>(&self, name: T) -> Result<consumer::Info, Error> {
+    pub async fn consumer_info<T: AsRef<str>>(
+        &self,
+        name: T,
+    ) -> Result<consumer::Info, crate::Error> {
         let name = name.as_ref();
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
@@ -818,7 +822,7 @@ impl Stream {
     pub async fn get_consumer<T: FromConsumer + IntoConsumerConfig>(
         &self,
         name: &str,
-    ) -> Result<Consumer<T>, Error> {
+    ) -> Result<Consumer<T>, crate::Error> {
         let info = self.consumer_info(name).await?;
 
         Ok(Consumer::new(
@@ -1214,7 +1218,7 @@ pub struct RawMessage {
 }
 
 impl TryFrom<RawMessage> for crate::Message {
-    type Error = Error;
+    type Error = crate::Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
         let decoded_payload = STANDARD
@@ -1254,7 +1258,7 @@ const HEADER_LINE: &str = "NATS/1.0";
 #[allow(clippy::type_complexity)]
 fn parse_headers(
     buf: &[u8],
-) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), Error> {
+) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), crate::Error> {
     let mut headers = HeaderMap::new();
     let mut maybe_status: Option<StatusCode> = None;
     let mut maybe_description: Option<String> = None;
@@ -1438,7 +1442,6 @@ pub struct External {
     pub delivery_prefix: Option<String>,
 }
 
-use crate::nats_error::NatsError;
 use std::marker::PhantomData;
 
 #[derive(Debug, Default)]
@@ -1540,7 +1543,7 @@ impl Display for PurgeErrorKind {
     }
 }
 
-pub type PurgeError = NatsError<PurgeErrorKind>;
+pub type PurgeError = Error<PurgeErrorKind>;
 
 impl<'a, S, K> IntoFuture for Purge<'a, S, K>
 where
@@ -1756,7 +1759,7 @@ impl Display for LastRawMessageErrorKind {
     }
 }
 
-pub type LastRawMessageError = NatsError<LastRawMessageErrorKind>;
+pub type LastRawMessageError = Error<LastRawMessageErrorKind>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerErrorKind {
@@ -1780,7 +1783,7 @@ impl Display for ConsumerErrorKind {
     }
 }
 
-pub type ConsumerError = NatsError<ConsumerErrorKind>;
+pub type ConsumerError = Error<ConsumerErrorKind>;
 
 impl From<super::context::RequestError> for ConsumerError {
     fn from(err: super::context::RequestError) -> Self {

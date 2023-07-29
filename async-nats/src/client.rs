@@ -15,7 +15,7 @@ use crate::connection::State;
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
-use crate::nats_error::NatsError;
+use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
@@ -633,7 +633,7 @@ impl Display for RequestErrorKind {
 
 /// Error returned when a core NATS request fails.
 /// To be enumerate over the variants, call [RequestError::kind].
-pub type RequestError = NatsError<RequestErrorKind>;
+pub type RequestError = Error<RequestErrorKind>;
 
 impl From<PublishError> for RequestError {
     fn from(e: PublishError) -> Self {
@@ -666,4 +666,4 @@ impl Display for FlushErrorKind {
     }
 }
 
-pub type FlushError = NatsError<FlushErrorKind>;
+pub type FlushError = Error<FlushErrorKind>;

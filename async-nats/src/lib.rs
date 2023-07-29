@@ -173,10 +173,10 @@ pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
+pub mod error;
 pub mod header;
 pub mod jetstream;
 pub mod message;
-pub mod nats_error;
 #[cfg(feature = "service")]
 pub mod service;
 pub mod status;
@@ -873,10 +873,10 @@ impl Display for ConnectErrorKind {
 
 /// Returned when initial connection fails.
 /// To be enumerate over the variants, call [ConnectError::kind].
-pub type ConnectError = NatsError<ConnectErrorKind>;
+pub type ConnectError = error::Error<ConnectErrorKind>;
 
-impl From<std::io::Error> for ConnectError {
-    fn from(err: std::io::Error) -> Self {
+impl From<io::Error> for ConnectError {
+    fn from(err: io::Error) -> Self {
         ConnectError::with_source(ConnectErrorKind::Io, err)
     }
 }
@@ -1313,7 +1313,6 @@ macro_rules! from_with_timeout {
         }
     };
 }
-use crate::nats_error::NatsError;
 pub(crate) use from_with_timeout;
 
 #[cfg(test)]

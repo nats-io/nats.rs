@@ -17,11 +17,11 @@ use super::{
 };
 use crate::{
     connection::State,
+    error::Error,
     jetstream::{self, Context, Message},
-    Error, StatusCode, Subscriber,
+    StatusCode, Subscriber,
 };
 
-use crate::nats_error::NatsError;
 use bytes::Bytes;
 use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
@@ -277,7 +277,7 @@ pub struct Config {
 }
 
 impl FromConsumer for Config {
-    fn try_from_consumer_config(config: super::Config) -> Result<Self, Error> {
+    fn try_from_consumer_config(config: super::Config) -> Result<Self, crate::Error> {
         if config.deliver_subject.is_none() {
             return Err(Box::new(io::Error::new(
                 ErrorKind::Other,
@@ -405,7 +405,9 @@ pub struct OrderedConfig {
 }
 
 impl FromConsumer for OrderedConfig {
-    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    fn try_from_consumer_config(
+        config: crate::jetstream::consumer::Config,
+    ) -> Result<Self, crate::Error>
     where
         Self: Sized,
     {
@@ -758,7 +760,7 @@ impl std::fmt::Display for OrderedErrorKind {
     }
 }
 
-pub type OrderedError = NatsError<OrderedErrorKind>;
+pub type OrderedError = Error<OrderedErrorKind>;
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -799,7 +801,7 @@ impl std::fmt::Display for MessagesErrorKind {
     }
 }
 
-pub type MessagesError = NatsError<MessagesErrorKind>;
+pub type MessagesError = Error<MessagesErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConsumerRecreateErrorKind {
@@ -820,7 +822,7 @@ impl std::fmt::Display for ConsumerRecreateErrorKind {
     }
 }
 
-pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
+pub type ConsumerRecreateError = Error<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_and_subscription(
     context: Context,

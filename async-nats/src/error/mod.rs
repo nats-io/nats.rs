@@ -1,9 +1,8 @@
-use std::error::Error;
 use std::fmt::{Debug, Display};
 
 /// The error type for the NATS client, generic by the kind of error.
 #[derive(Debug)]
-pub struct NatsError<Kind>
+pub struct Error<Kind>
 where
     Kind: Clone + Debug + Display + PartialEq,
 {
@@ -11,7 +10,7 @@ where
     pub(crate) source: Option<crate::Error>,
 }
 
-impl<Kind> NatsError<Kind>
+impl<Kind> Error<Kind>
 where
     Kind: Clone + Debug + Display + PartialEq,
 {
@@ -35,7 +34,7 @@ where
     }
 }
 
-impl<Kind> Display for NatsError<Kind>
+impl<Kind> Display for Error<Kind>
 where
     Kind: Clone + Debug + Display + PartialEq,
 {
@@ -48,9 +47,9 @@ where
     }
 }
 
-impl<Kind> Error for NatsError<Kind> where Kind: Clone + Debug + Display + PartialEq {}
+impl<Kind> std::error::Error for Error<Kind> where Kind: Clone + Debug + Display + PartialEq {}
 
-impl<Kind> From<Kind> for NatsError<Kind>
+impl<Kind> From<Kind> for Error<Kind>
 where
     Kind: Clone + Debug + Display + PartialEq,
 {
@@ -66,8 +65,8 @@ where
     Kind: Clone + Debug + Display + PartialEq,
     Self: Into<crate::Error>,
 {
-    fn with_kind(self, kind: Kind) -> NatsError<Kind> {
-        NatsError::<Kind> {
+    fn with_kind(self, kind: Kind) -> Error<Kind> {
+        Error::<Kind> {
             kind,
             source: Some(self.into()),
         }
@@ -105,20 +104,20 @@ mod test {
     }
 
     // Define a custom error type as a public struct
-    type FooError = NatsError<FooErrorKind>;
+    type FooError = Error<FooErrorKind>;
 
     #[test]
     fn new() {
         let error = FooError::new(FooErrorKind::Bar);
-        assert_eq!(error.kind(), FooErrorKind::Bar);
-        assert!(error.source().is_none());
+        assert_eq!(error.kind, FooErrorKind::Bar);
+        assert!(error.source.is_none());
     }
 
     #[test]
     fn with_source() {
         let source = std::io::Error::new(std::io::ErrorKind::Other, "foo");
         let error = FooError::with_source(FooErrorKind::Bar, source);
-        assert_eq!(error.kind(), FooErrorKind::Bar);
+        assert_eq!(error.kind, FooErrorKind::Bar);
         assert_eq!(error.source.unwrap().to_string(), "foo");
     }
 
@@ -126,7 +125,8 @@ mod test {
     fn kind() {
         let error: FooError = FooErrorKind::Bar.into();
         let kind = error.kind();
-        let _ = error.kind(); // ensure the kind can be invoked multiple times
+        // ensure the kind can be invoked multiple times even though Copy is not implemented
+        let _ = error.kind();
         assert_eq!(kind, FooErrorKind::Bar);
     }
 
@@ -146,8 +146,8 @@ mod test {
     #[test]
     fn from() {
         let error: FooError = FooErrorKind::Bar.into();
-        assert_eq!(error.kind(), FooErrorKind::Bar);
-        assert!(error.source().is_none());
+        assert_eq!(error.kind, FooErrorKind::Bar);
+        assert!(error.source.is_none());
     }
 
     #[test]

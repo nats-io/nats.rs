@@ -27,15 +27,15 @@ use tracing::{debug, trace};
 
 use crate::{
     connection::State,
+    error::Error,
     jetstream::{self, Context},
-    Error, StatusCode, SubscribeError, Subscriber,
+    StatusCode, SubscribeError, Subscriber,
 };
 
 use super::{
     AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
-use crate::nats_error::NatsError;
 use jetstream::consumer;
 
 impl Consumer<Config> {
@@ -366,7 +366,7 @@ impl<'a> Batch {
 }
 
 impl futures::Stream for Batch {
-    type Item = Result<jetstream::Message, Error>;
+    type Item = Result<jetstream::Message, crate::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -672,7 +672,9 @@ impl From<OrderedConfig> for Config {
 }
 
 impl FromConsumer for OrderedConfig {
-    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    fn try_from_consumer_config(
+        config: crate::jetstream::consumer::Config,
+    ) -> Result<Self, crate::Error>
     where
         Self: Sized,
     {
@@ -977,7 +979,7 @@ impl std::fmt::Display for OrderedErrorKind {
     }
 }
 
-pub type OrderedError = NatsError<OrderedErrorKind>;
+pub type OrderedError = Error<OrderedErrorKind>;
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -1024,7 +1026,7 @@ impl std::fmt::Display for MessagesErrorKind {
     }
 }
 
-pub type MessagesError = NatsError<MessagesErrorKind>;
+pub type MessagesError = Error<MessagesErrorKind>;
 
 impl futures::Stream for Stream {
     type Item = Result<jetstream::Message, MessagesError>;
@@ -2106,7 +2108,7 @@ impl IntoConsumerConfig for Config {
     }
 }
 impl FromConsumer for Config {
-    fn try_from_consumer_config(config: consumer::Config) -> Result<Self, Error> {
+    fn try_from_consumer_config(config: consumer::Config) -> Result<Self, crate::Error> {
         if config.deliver_subject.is_some() {
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -2160,7 +2162,7 @@ impl std::fmt::Display for BatchRequestErrorKind {
     }
 }
 
-pub type BatchRequestError = NatsError<BatchRequestErrorKind>;
+pub type BatchRequestError = Error<BatchRequestErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BatchErrorKind {
@@ -2181,7 +2183,7 @@ impl std::fmt::Display for BatchErrorKind {
     }
 }
 
-pub type BatchError = NatsError<BatchErrorKind>;
+pub type BatchError = Error<BatchErrorKind>;
 
 impl From<SubscribeError> for BatchError {
     fn from(err: SubscribeError) -> Self {
@@ -2212,7 +2214,7 @@ impl std::fmt::Display for ConsumerRecreateErrorKind {
     }
 }
 
-pub type ConsumerRecreateError = NatsError<ConsumerRecreateErrorKind>;
+pub type ConsumerRecreateError = Error<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_stream(
     context: Context,

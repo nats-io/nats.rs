@@ -13,11 +13,11 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
+use crate::error::Error;
 use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::nats_error::NatsError;
 use crate::{header, Client, Command, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -724,7 +724,7 @@ impl Context {
             .await
     }
 
-    // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), Error> {
+    // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), crate::Error> {
     //     let config = config.borrow();
     //     if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
     //         return Err(Box::new(std::io::Error::new(
@@ -977,7 +977,7 @@ impl Display for PublishErrorKind {
     }
 }
 
-pub type PublishError = NatsError<PublishErrorKind>;
+pub type PublishError = Error<PublishErrorKind>;
 
 #[derive(Debug)]
 pub struct PublishAckFuture {
@@ -1269,7 +1269,7 @@ impl Display for RequestErrorKind {
     }
 }
 
-pub type RequestError = NatsError<RequestErrorKind>;
+pub type RequestError = Error<RequestErrorKind>;
 
 impl From<crate::RequestError> for RequestError {
     fn from(error: crate::RequestError) -> Self {
@@ -1320,7 +1320,7 @@ impl Display for CreateStreamErrorKind {
     }
 }
 
-pub type CreateStreamError = NatsError<CreateStreamErrorKind>;
+pub type CreateStreamError = Error<CreateStreamErrorKind>;
 
 impl From<super::errors::Error> for CreateStreamError {
     fn from(error: super::errors::Error) -> Self {
@@ -1359,7 +1359,7 @@ impl Display for GetStreamErrorKind {
     }
 }
 
-pub type GetStreamError = NatsError<GetStreamErrorKind>;
+pub type GetStreamError = Error<GetStreamErrorKind>;
 
 pub type UpdateStreamError = CreateStreamError;
 pub type UpdateStreamErrorKind = CreateStreamErrorKind;
@@ -1383,7 +1383,7 @@ impl Display for KeyValueErrorKind {
     }
 }
 
-pub type KeyValueError = NatsError<KeyValueErrorKind>;
+pub type KeyValueError = Error<KeyValueErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CreateKeyValueErrorKind {
@@ -1406,7 +1406,7 @@ impl Display for CreateKeyValueErrorKind {
     }
 }
 
-pub type CreateKeyValueError = NatsError<CreateKeyValueErrorKind>;
+pub type CreateKeyValueError = Error<CreateKeyValueErrorKind>;
 
 pub type CreateObjectStoreError = CreateKeyValueError;
 pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
@@ -1426,7 +1426,7 @@ impl Display for ObjectStoreErrorKind {
     }
 }
 
-pub type ObjectStoreError = NatsError<ObjectStoreErrorKind>;
+pub type ObjectStoreError = Error<ObjectStoreErrorKind>;
 
 pub type DeleteObjectStore = ObjectStoreError;
 pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
@@ -1450,7 +1450,7 @@ impl Display for AccountErrorKind {
     }
 }
 
-pub type AccountError = NatsError<AccountErrorKind>;
+pub type AccountError = Error<AccountErrorKind>;
 
 impl From<RequestError> for AccountError {
     fn from(err: RequestError) -> Self {

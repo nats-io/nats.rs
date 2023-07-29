@@ -34,7 +34,7 @@ use super::consumer::{StreamError, StreamErrorKind};
 use super::context::{PublishError, PublishErrorKind};
 use super::stream::{ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
-use crate::nats_error::NatsError;
+use crate::error::Error;
 use time::{serde::rfc3339, OffsetDateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
@@ -761,7 +761,7 @@ impl Display for InfoErrorKind {
     }
 }
 
-pub type InfoError = NatsError<InfoErrorKind>;
+pub type InfoError = Error<InfoErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GetErrorKind {
@@ -784,7 +784,7 @@ impl Display for GetErrorKind {
     }
 }
 
-pub type GetError = NatsError<GetErrorKind>;
+pub type GetError = Error<GetErrorKind>;
 
 crate::from_with_timeout!(GetError, GetErrorKind, ConsumerError, ConsumerErrorKind);
 crate::from_with_timeout!(GetError, GetErrorKind, StreamError, StreamErrorKind);
@@ -823,7 +823,7 @@ impl Display for DeleteErrorKind {
     }
 }
 
-pub type DeleteError = NatsError<DeleteErrorKind>;
+pub type DeleteError = Error<DeleteErrorKind>;
 
 impl From<InfoError> for DeleteError {
     fn from(err: InfoError) -> Self {
@@ -864,7 +864,7 @@ impl Display for PutErrorKind {
     }
 }
 
-pub type PutError = NatsError<PutErrorKind>;
+pub type PutError = Error<PutErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {
@@ -883,7 +883,7 @@ impl Display for WatchErrorKind {
     }
 }
 
-pub type WatchError = NatsError<WatchErrorKind>;
+pub type WatchError = Error<WatchErrorKind>;
 
 crate::from_with_timeout!(WatchError, WatchErrorKind, ConsumerError, ConsumerErrorKind);
 crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKind);
@@ -910,7 +910,7 @@ impl Display for SealErrorKind {
     }
 }
 
-pub type SealError = NatsError<SealErrorKind>;
+pub type SealError = Error<SealErrorKind>;
 
 impl From<super::context::UpdateStreamError> for SealError {
     fn from(err: super::context::UpdateStreamError) -> Self {
@@ -938,7 +938,7 @@ impl Display for WatcherErrorKind {
     }
 }
 
-pub type WatcherError = NatsError<WatcherErrorKind>;
+pub type WatcherError = Error<WatcherErrorKind>;
 
 impl From<OrderedError> for WatcherError {
     fn from(err: OrderedError) -> Self {
