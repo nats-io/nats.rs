@@ -499,11 +499,16 @@ impl ObjectStore {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let mut bucket = jetstream.get_object_store("store").await?;
-    /// bucket.update_metadata("object", object_store::ObjectMeta{
-    ///     name: "new_name".to_string(),
-    ///     description: Some("a new description".to_string()),
-    ///     link: None,
-    /// }).await?;
+    /// bucket
+    ///     .update_metadata(
+    ///         "object",
+    ///         object_store::ObjectMeta {
+    ///             name: "new_name".to_string(),
+    ///             description: Some("a new description".to_string()),
+    ///             link: None,
+    ///         },
+    ///     )
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -514,11 +519,54 @@ impl ObjectStore {
     ) -> Result<ObjectInfo, UpdateMetadataError> {
         let mut info = self.info(object.as_ref()).await?;
 
+        // If name is being update, we need to check if other metadata with it already exists.
+        // If does, error. Otherwise, purge old name metadata.
+        if metadata.name != info.name {
+            tracing::info!("new metadata name is different than then old one");
+            if !is_valid_object_name(&metadata.name) {
+                return Err(UpdateMetadataError::new(
+                    UpdateMetadataErrorKind::InvalidName,
+                ));
+            }
+            match self.info(&metadata.name).await {
+                Ok(_) => {
+                    return Err(UpdateMetadataError::new(
+                        UpdateMetadataErrorKind::NameAlreadyInUse,
+                    ))
+                }
+                Err(err) => match err.kind() {
+                    InfoErrorKind::NotFound => {
+                        tracing::info!("purging old metadata: {}", info.name);
+                        self.stream
+                            .purge()
+                            .filter(format!(
+                                "$O.{}.M.{}",
+                                self.name,
+                                encode_object_name(&info.name)
+                            ))
+                            .await
+                            .map_err(|err| {
+                                UpdateMetadataError::with_source(
+                                    UpdateMetadataErrorKind::Purge,
+                                    err,
+                                )
+                            })?;
+                    }
+                    _ => {
+                        return Err(UpdateMetadataError::with_source(
+                            UpdateMetadataErrorKind::Other,
+                            err,
+                        ))
+                    }
+                },
+            }
+        }
+
         info.name = metadata.name;
         info.description = metadata.description;
         info.link = metadata.link;
 
-        let name = encode_object_name(object.as_ref());
+        let name = encode_object_name(&info.name);
         let subject = format!("$O.{}.M.{}", &self.name, &name);
 
         let mut headers = HeaderMap::new();
@@ -825,24 +873,31 @@ impl From<ObjectInfo> for ObjectMeta {
     }
 }
 
-#[derive(Debug)]
-pub struct UpdateMetadataError {
-    kind: UpdateMetadataErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateMetadataErrorKind {
+    InvalidName,
+    NotFound,
+    TimedOut,
+    Other,
+    PublishMetadata,
+    NameAlreadyInUse,
+    Purge,
 }
 
-crate::error_impls!(UpdateMetadataError, UpdateMetadataErrorKind);
-
-impl Display for UpdateMetadataError {
+impl Display for UpdateMetadataErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            UpdateMetadataErrorKind::InvalidName => write!(f, "invalid object name"),
-            UpdateMetadataErrorKind::NotFound => write!(f, "object not found"),
-            UpdateMetadataErrorKind::TimedOut => write!(f, "timed out"),
-            UpdateMetadataErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            UpdateMetadataErrorKind::PublishMetadata => {
-                write!(f, "failed publishing metadata: {}", self.format_source())
+        match self {
+            Self::InvalidName => write!(f, "invalid object name"),
+            Self::NotFound => write!(f, "object not found"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "error"),
+            Self::PublishMetadata => {
+                write!(f, "failed publishing metadata")
             }
+            Self::NameAlreadyInUse => {
+                write!(f, "object with updated name already exists")
+            }
+            Self::Purge => write!(f, "failed purging old name metadata"),
         }
     }
 }
@@ -862,14 +917,7 @@ impl From<InfoError> for UpdateMetadataError {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum UpdateMetadataErrorKind {
-    InvalidName,
-    NotFound,
-    TimedOut,
-    Other,
-    PublishMetadata,
-}
+pub type UpdateMetadataError = Error<UpdateMetadataErrorKind>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InfoErrorKind {

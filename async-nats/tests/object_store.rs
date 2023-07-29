@@ -15,7 +15,7 @@ mod object_store {
 
     use std::{io, time::Duration};
 
-    use async_nats::jetstream::object_store::ObjectMeta;
+    use async_nats::jetstream::{object_store::ObjectMeta, stream::DirectGetErrorKind};
     use base64::Engine;
     use futures::StreamExt;
     use rand::RngCore;
@@ -359,22 +359,42 @@ mod object_store {
             .await
             .unwrap();
         bucket
-            .put("DATA", &mut "some data".as_bytes())
+            .put("old_object", &mut "some data".as_bytes())
             .await
             .unwrap();
 
         let given_metadata = ObjectMeta {
-            name: "data".to_owned(),
+            name: "new_object".to_owned(),
             description: Some("description".to_string()),
             link: None,
         };
 
         bucket
-            .update_metadata("DATA", given_metadata.clone())
+            .update_metadata("old_object", given_metadata.clone())
             .await
             .unwrap();
 
-        let info = bucket.info("DATA").await.unwrap();
+        let stream = jetstream.get_stream("OBJ_bucket").await.unwrap();
+
+        stream
+            .direct_get_last_for_subject(format!(
+                "$O.bucket.M.{}",
+                base64::engine::general_purpose::URL_SAFE.encode("new_object")
+            ))
+            .await
+            .unwrap();
+
+        let old_meta_subject = stream
+            .direct_get_last_for_subject(format!(
+                "$O.bucket.M.{}",
+                base64::engine::general_purpose::URL_SAFE.encode("old_object")
+            ))
+            .await
+            .unwrap_err();
+
+        assert_eq!(old_meta_subject.kind(), DirectGetErrorKind::NotFound);
+
+        let info = bucket.info("new_object").await.unwrap();
 
         assert_eq!(info.name, given_metadata.name);
         assert_eq!(info.description, given_metadata.description);
