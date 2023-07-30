@@ -53,7 +53,7 @@ impl Display for State {
 /// A framed connection
 pub(crate) struct Connection {
     pub(crate) stream: Box<dyn AsyncReadWrite>,
-    buffer: BytesMut,
+    read_buf: BytesMut,
 }
 
 /// Internal representation of the connection.
@@ -62,55 +62,55 @@ impl Connection {
     pub(crate) fn new(stream: Box<dyn AsyncReadWrite>, read_buffer_capacity: usize) -> Self {
         Self {
             stream,
-            buffer: BytesMut::with_capacity(read_buffer_capacity),
+            read_buf: BytesMut::with_capacity(read_buffer_capacity),
         }
     }
 
     /// Attempts to read a server operation from the read buffer.
     /// Returns `None` if there is not enough data to parse an entire operation.
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        let len = match memchr::memmem::find(&self.buffer, b"\r\n") {
+        let len = match memchr::memmem::find(&self.read_buf, b"\r\n") {
             Some(len) => len,
             None => return Ok(None),
         };
 
-        if self.buffer.starts_with(b"+OK") {
-            self.buffer.advance(len + 2);
+        if self.read_buf.starts_with(b"+OK") {
+            self.read_buf.advance(len + 2);
             return Ok(Some(ServerOp::Ok));
         }
 
-        if self.buffer.starts_with(b"PING") {
-            self.buffer.advance(len + 2);
+        if self.read_buf.starts_with(b"PING") {
+            self.read_buf.advance(len + 2);
             return Ok(Some(ServerOp::Ping));
         }
 
-        if self.buffer.starts_with(b"PONG") {
-            self.buffer.advance(len + 2);
+        if self.read_buf.starts_with(b"PONG") {
+            self.read_buf.advance(len + 2);
             return Ok(Some(ServerOp::Pong));
         }
 
-        if self.buffer.starts_with(b"-ERR") {
-            let description = str::from_utf8(&self.buffer[5..len])
+        if self.read_buf.starts_with(b"-ERR") {
+            let description = str::from_utf8(&self.read_buf[5..len])
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
                 .to_owned();
 
-            self.buffer.advance(len + 2);
+            self.read_buf.advance(len + 2);
 
             return Ok(Some(ServerOp::Error(ServerError::new(description))));
         }
 
-        if self.buffer.starts_with(b"INFO ") {
-            let info = serde_json::from_slice(&self.buffer[4..len])
+        if self.read_buf.starts_with(b"INFO ") {
+            let info = serde_json::from_slice(&self.read_buf[4..len])
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
-            self.buffer.advance(len + 2);
+            self.read_buf.advance(len + 2);
 
             return Ok(Some(ServerOp::Info(Box::new(info))));
         }
 
-        if self.buffer.starts_with(b"MSG ") {
-            let line = str::from_utf8(&self.buffer[4..len]).unwrap();
+        if self.read_buf.starts_with(b"MSG ") {
+            let line = str::from_utf8(&self.read_buf[4..len]).unwrap();
             let mut args = line.split(' ').filter(|s| !s.is_empty());
 
             // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
@@ -146,16 +146,16 @@ impl Connection {
 
             // Return early without advancing if there is not enough data read the entire
             // message
-            if len + payload_len + 4 > self.buffer.remaining() {
+            if len + payload_len + 4 > self.read_buf.remaining() {
                 return Ok(None);
             }
 
             let subject = subject.to_owned();
             let reply_to = reply_to.map(ToOwned::to_owned);
 
-            self.buffer.advance(len + 2);
-            let payload = self.buffer.split_to(payload_len).freeze();
-            self.buffer.advance(2);
+            self.read_buf.advance(len + 2);
+            let payload = self.read_buf.split_to(payload_len).freeze();
+            self.read_buf.advance(2);
 
             let length = payload_len
                 + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
@@ -172,9 +172,9 @@ impl Connection {
             }));
         }
 
-        if self.buffer.starts_with(b"HMSG ") {
+        if self.read_buf.starts_with(b"HMSG ") {
             // Extract whitespace-delimited arguments that come after "HMSG".
-            let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
+            let line = std::str::from_utf8(&self.read_buf[5..len]).unwrap();
             let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
@@ -244,14 +244,14 @@ impl Connection {
                 ));
             }
 
-            if len + total_len + 4 > self.buffer.remaining() {
+            if len + total_len + 4 > self.read_buf.remaining() {
                 return Ok(None);
             }
 
-            self.buffer.advance(len + 2);
-            let header = self.buffer.split_to(header_len);
-            let payload = self.buffer.split_to(total_len - header_len).freeze();
-            self.buffer.advance(2);
+            self.read_buf.advance(len + 2);
+            let header = self.read_buf.split_to(header_len);
+            let payload = self.read_buf.split_to(total_len - header_len).freeze();
+            self.read_buf.advance(2);
 
             let mut lines = std::str::from_utf8(&header)
                 .map_err(|_| {
@@ -328,7 +328,7 @@ impl Connection {
             }));
         }
 
-        let buffer = self.buffer.split_to(len + 2);
+        let buffer = self.read_buf.split_to(len + 2);
         let line = str::from_utf8(&buffer).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidInput, "unable to parse unknown input")
         })?;
@@ -348,8 +348,8 @@ impl Connection {
                 return Ok(Some(op));
             }
 
-            if 0 == self.stream.read_buf(&mut self.buffer).await? {
-                if self.buffer.is_empty() {
+            if 0 == self.stream.read_buf(&mut self.read_buf).await? {
+                if self.read_buf.is_empty() {
                     return Ok(None);
                 } else {
                     return Err(io::Error::new(io::ErrorKind::ConnectionReset, ""));
