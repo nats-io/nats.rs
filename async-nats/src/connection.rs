@@ -14,7 +14,9 @@
 //! This module provides a connection implementation for communicating with a NATS server.
 
 use std::fmt::Display;
+use std::future::{self, Future};
 use std::str::{self, FromStr};
+use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
@@ -339,22 +341,31 @@ impl Connection {
         ))
     }
 
+    pub(crate) fn read_op(&mut self) -> impl Future<Output = io::Result<Option<ServerOp>>> + '_ {
+        future::poll_fn(|cx| self.poll_read_op(cx))
+    }
+
     // TODO: do we want an custom error here?
     /// Read a server operation from read buffer.
     /// Blocks until an operation ca be parsed.
-    pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
+    pub(crate) fn poll_read_op(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<Option<ServerOp>>> {
         loop {
             if let Some(op) = self.try_read_op()? {
-                return Ok(Some(op));
+                return Poll::Ready(Ok(Some(op)));
             }
 
-            if 0 == self.stream.read_buf(&mut self.read_buf).await? {
-                if self.read_buf.is_empty() {
-                    return Ok(None);
-                } else {
-                    return Err(io::Error::new(io::ErrorKind::ConnectionReset, ""));
-                }
-            }
+            let read_buf = self.stream.read_buf(&mut self.read_buf);
+            tokio::pin!(read_buf);
+            return match read_buf.poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Ok(0)) if self.read_buf.is_empty() => Poll::Ready(Ok(None)),
+                Poll::Ready(Ok(0)) => Poll::Ready(Err(io::ErrorKind::ConnectionReset.into())),
+                Poll::Ready(Ok(_n)) => continue,
+                Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+            };
         }
     }
 
