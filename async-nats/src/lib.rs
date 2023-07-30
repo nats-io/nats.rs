@@ -287,9 +287,8 @@ pub(crate) enum Command {
         max: Option<u64>,
     },
     Flush {
-        result: oneshot::Sender<Result<(), io::Error>>,
+        observer: oneshot::Sender<()>,
     },
-    TryFlush,
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -341,6 +340,8 @@ pub(crate) struct ConnectionHandler {
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
     flush_interval: Interval,
+    is_flushing: bool,
+    flush_observers: Vec<oneshot::Sender<()>>,
 }
 
 impl ConnectionHandler {
@@ -366,6 +367,8 @@ impl ConnectionHandler {
             info_sender,
             ping_interval,
             flush_interval,
+            is_flushing: false,
+            flush_observers: Vec::new(),
         }
     }
 
@@ -396,8 +399,14 @@ impl ConnectionHandler {
                 },
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
-                        Some(command) => if let Err(err) = self.handle_command(command).await {
-                            error!("error handling command {}", err);
+                        Some(command) => {
+                            self.handle_command(command);
+
+                            if self.is_flushing {
+                                if let Err(_err) = self.handle_flush().await {
+                                    self.handle_disconnect().await?;
+                                }
+                            }
                         }
                         None => {
                             break;
@@ -539,12 +548,17 @@ impl ConnectionHandler {
 
     async fn handle_flush(&mut self) -> io::Result<()> {
         self.connection.easy_write_and_flush([].iter()).await?;
-        self.flush_interval.reset();
 
+        self.flush_interval.reset();
+        self.is_flushing = false;
+
+        for observer in self.handler.flush_observers.drain(..) {
+            let _ = observer.send(());
+        }
         Ok(())
     }
 
-    async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
+    fn handle_command(&mut self, command: Command) {
         self.ping_interval.reset();
 
         match command {
@@ -566,29 +580,9 @@ impl ConnectionHandler {
                         .enqueue_write_op(&ClientOp::Unsubscribe { sid, max });
                 }
             }
-            Command::Flush { result } => {
-                if let Err(_err) = self.handle_flush().await {
-                    if let Err(err) = self.handle_disconnect().await {
-                        result.send(Err(err)).map_err(|_| {
-                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                        })?;
-                    } else if let Err(err) = self.handle_flush().await {
-                        result.send(Err(err)).map_err(|_| {
-                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                        })?;
-                    } else {
-                        result.send(Ok(())).map_err(|_| {
-                            io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                        })?;
-                    }
-                } else {
-                    result.send(Ok(())).map_err(|_| {
-                        io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
-                    })?;
-                }
-            }
-            Command::TryFlush => {
-                self.handle_flush().await?;
+            Command::Flush { observer } => {
+                self.is_flushing = true;
+                self.flush_observers.push(observer);
             }
             Command::Subscribe {
                 sid,
@@ -619,9 +613,7 @@ impl ConnectionHandler {
                 headers,
                 sender,
             } => {
-                let (prefix, token) = respond.rsplit_once('.').ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, "malformed request subject")
-                })?;
+                let (prefix, token) = respond.rsplit_once('.').expect("malformed request subject");
 
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
@@ -667,8 +659,6 @@ impl ConnectionHandler {
                 });
             }
         }
-
-        Ok(())
     }
 
     async fn handle_disconnect(&mut self) -> io::Result<()> {
