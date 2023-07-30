@@ -237,10 +237,10 @@ impl Connector {
                         }
 
                         connection
-                            .write_op(&ClientOp::Connect(connect_info))
+                            .easy_write_and_flush(
+                                [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
+                            )
                             .await?;
-                        connection.write_op(&ClientOp::Ping).await?;
-                        connection.flush().await?;
 
                         match connection.read_op().await? {
                             Some(ServerOp::Error(err)) => match err {

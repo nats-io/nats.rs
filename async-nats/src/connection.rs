@@ -372,14 +372,21 @@ impl Connection {
         }
     }
 
-    pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> io::Result<()> {
-        self.enqueue_write_op(item);
+    pub(crate) async fn easy_write_and_flush<'a>(
+        &mut self,
+        items: impl Iterator<Item = &'a ClientOp>,
+    ) -> io::Result<()> {
+        for item in items {
+            self.enqueue_write_op(item);
+        }
 
-        future::poll_fn(|cx| self.poll_write(cx)).await
+        future::poll_fn(|cx| self.poll_write(cx)).await?;
+        future::poll_fn(|cx| self.poll_flush(cx)).await?;
+        Ok(())
     }
 
     /// Writes a client operation to the write buffer.
-    fn enqueue_write_op<'a>(&mut self, item: &'a ClientOp) {
+    pub(crate) fn enqueue_write_op(&mut self, item: &ClientOp) {
         match item {
             ClientOp::Connect(connect_info) => {
                 let json = serde_json::to_vec(&connect_info).expect("serialize `ConnectInfo`");
@@ -468,7 +475,7 @@ impl Connection {
     /// * `Poll::Ready(Err(err))` means that writing to the stream failed.
     ///   Compared to [`AsyncWrite::poll_write`], this implementation
     ///   may do a partial write before failing.
-    fn poll_write(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(crate) fn poll_write(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         loop {
             let buf = match self.write_buf.front_mut() {
                 Some(buf) => buf,
@@ -495,7 +502,7 @@ impl Connection {
     }
 
     /// Write `buf` into the writes buffer
-    /// 
+    ///
     /// Empty `buf`s are a no-op.
     fn write(&mut self, buf: impl Into<Bytes>) {
         let buf = buf.into();
@@ -505,11 +512,6 @@ impl Connection {
 
         self.write_buf_len += buf.len();
         self.write_buf.push_back(buf);
-    }
-
-    /// Flush the write buffer, sending all pending data down the current write stream.
-    pub(crate) fn flush(&mut self) -> impl Future<Output = io::Result<()>> + '_ {
-        future::poll_fn(|cx| self.poll_flush(cx))
     }
 
     /// Flush the write buffer, sending all pending data down the current write stream.
@@ -817,15 +819,17 @@ mod write_op {
         let mut connection = Connection::new(Box::new(stream), 0);
 
         connection
-            .write_op(&ClientOp::Publish {
-                subject: "FOO.BAR".into(),
-                payload: "Hello World".into(),
-                respond: None,
-                headers: None,
-            })
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: None,
+                    headers: None,
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -834,15 +838,17 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR 11\r\nHello World\r\n");
 
         connection
-            .write_op(&ClientOp::Publish {
-                subject: "FOO.BAR".into(),
-                payload: "Hello World".into(),
-                respond: Some("INBOX.67".into()),
-                headers: None,
-            })
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: Some("INBOX.67".into()),
+                    headers: None,
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -850,18 +856,20 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR INBOX.67 11\r\nHello World\r\n");
 
         connection
-            .write_op(&ClientOp::Publish {
-                subject: "FOO.BAR".into(),
-                payload: "Hello World".into(),
-                respond: Some("INBOX.67".into()),
-                headers: Some(HeaderMap::from_iter([(
-                    "Header".parse().unwrap(),
-                    "X".parse().unwrap(),
-                )])),
-            })
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: Some("INBOX.67".into()),
+                    headers: Some(HeaderMap::from_iter([(
+                        "Header".parse().unwrap(),
+                        "X".parse().unwrap(),
+                    )])),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -880,14 +888,16 @@ mod write_op {
         let mut connection = Connection::new(Box::new(stream), 0);
 
         connection
-            .write_op(&ClientOp::Subscribe {
-                sid: 11,
-                subject: "FOO.BAR".into(),
-                queue_group: None,
-            })
+            .easy_write_and_flush(
+                [ClientOp::Subscribe {
+                    sid: 11,
+                    subject: "FOO.BAR".into(),
+                    queue_group: None,
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -895,14 +905,16 @@ mod write_op {
         assert_eq!(buffer, "SUB FOO.BAR 11\r\n");
 
         connection
-            .write_op(&ClientOp::Subscribe {
-                sid: 11,
-                subject: "FOO.BAR".into(),
-                queue_group: Some("QUEUE.GROUP".into()),
-            })
+            .easy_write_and_flush(
+                [ClientOp::Subscribe {
+                    sid: 11,
+                    subject: "FOO.BAR".into(),
+                    queue_group: Some("QUEUE.GROUP".into()),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -915,10 +927,9 @@ mod write_op {
         let mut connection = Connection::new(Box::new(stream), 0);
 
         connection
-            .write_op(&ClientOp::Unsubscribe { sid: 11, max: None })
+            .easy_write_and_flush([ClientOp::Unsubscribe { sid: 11, max: None }].iter())
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -926,13 +937,15 @@ mod write_op {
         assert_eq!(buffer, "UNSUB 11\r\n");
 
         connection
-            .write_op(&ClientOp::Unsubscribe {
-                sid: 11,
-                max: Some(2),
-            })
+            .easy_write_and_flush(
+                [ClientOp::Unsubscribe {
+                    sid: 11,
+                    max: Some(2),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -947,8 +960,10 @@ mod write_op {
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(&ClientOp::Ping).await.unwrap();
-        connection.flush().await.unwrap();
+        connection
+            .easy_write_and_flush([ClientOp::Ping].iter())
+            .await
+            .unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
 
@@ -963,8 +978,10 @@ mod write_op {
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(&ClientOp::Pong).await.unwrap();
-        connection.flush().await.unwrap();
+        connection
+            .easy_write_and_flush([ClientOp::Pong].iter())
+            .await
+            .unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
 
@@ -980,27 +997,29 @@ mod write_op {
         let mut buffer = String::new();
 
         connection
-            .write_op(&ClientOp::Connect(ConnectInfo {
-                verbose: false,
-                pedantic: false,
-                user_jwt: None,
-                nkey: None,
-                signature: None,
-                name: None,
-                echo: false,
-                lang: "Rust".into(),
-                version: "1.0.0".into(),
-                protocol: Protocol::Dynamic,
-                tls_required: false,
-                user: None,
-                pass: None,
-                auth_token: None,
-                headers: false,
-                no_responders: false,
-            }))
+            .easy_write_and_flush(
+                [ClientOp::Connect(ConnectInfo {
+                    verbose: false,
+                    pedantic: false,
+                    user_jwt: None,
+                    nkey: None,
+                    signature: None,
+                    name: None,
+                    echo: false,
+                    lang: "Rust".into(),
+                    version: "1.0.0".into(),
+                    protocol: Protocol::Dynamic,
+                    tls_required: false,
+                    user: None,
+                    pass: None,
+                    auth_token: None,
+                    headers: false,
+                    no_responders: false,
+                })]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
