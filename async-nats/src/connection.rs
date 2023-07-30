@@ -13,16 +13,15 @@
 
 //! This module provides a connection implementation for communicating with a NATS server.
 
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::future::{self, Future};
+use std::pin::Pin;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncWriteExt};
-use tokio::io::{AsyncReadExt, AsyncWrite};
-
-use bytes::{Buf, BytesMut};
-use tokio::io;
+use bytes::{Buf, Bytes, BytesMut};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
@@ -56,6 +55,8 @@ impl Display for State {
 pub(crate) struct Connection {
     pub(crate) stream: Box<dyn AsyncReadWrite>,
     read_buf: BytesMut,
+    write_buf: VecDeque<Bytes>,
+    write_buf_len: usize,
 }
 
 /// Internal representation of the connection.
@@ -65,6 +66,8 @@ impl Connection {
         Self {
             stream,
             read_buf: BytesMut::with_capacity(read_buffer_capacity),
+            write_buf: VecDeque::new(),
+            write_buf_len: 0,
         }
     }
 
@@ -369,16 +372,21 @@ impl Connection {
         }
     }
 
+    pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> io::Result<()> {
+        self.enqueue_write_op(item);
+
+        future::poll_fn(|cx| self.poll_write(cx)).await
+    }
+
     /// Writes a client operation to the write buffer.
-    pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> Result<(), io::Error> {
+    fn enqueue_write_op<'a>(&mut self, item: &'a ClientOp) {
         match item {
             ClientOp::Connect(connect_info) => {
-                let op = format!(
-                    "CONNECT {}\r\n",
-                    serde_json::to_string(&connect_info)
-                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
-                );
-                self.stream.write_all(op.as_bytes()).await?;
+                let json = serde_json::to_vec(&connect_info).expect("serialize `ConnectInfo`");
+
+                self.write("CONNECT ");
+                self.write(json);
+                self.write("\r\n");
             }
             ClientOp::Publish {
                 subject,
@@ -386,57 +394,36 @@ impl Connection {
                 respond,
                 headers,
             } => {
-                match headers.as_ref() {
-                    Some(headers) if !headers.is_empty() => {
-                        self.stream.write_all(b"HPUB ").await?;
-                    }
-                    _ => {
-                        self.stream.write_all(b"PUB ").await?;
-                    }
-                }
+                self.write(match headers.as_ref() {
+                    Some(headers) if !headers.is_empty() => "HPUB ",
+                    _ => "PUB ",
+                });
 
-                self.stream.write_all(subject.as_bytes()).await?;
-                self.stream.write_all(b" ").await?;
+                self.write(Bytes::copy_from_slice(subject.as_bytes()));
+                self.write(" ");
 
                 if let Some(respond) = respond {
-                    self.stream.write_all(respond.as_bytes()).await?;
-                    self.stream.write_all(b" ").await?;
+                    self.write(Bytes::copy_from_slice(respond.as_bytes()));
+                    self.write(" ");
                 }
 
                 match headers {
                     Some(headers) if !headers.is_empty() => {
                         let headers = headers.to_bytes();
 
-                        let mut header_len_buf = itoa::Buffer::new();
-                        self.stream
-                            .write_all(header_len_buf.format(headers.len()).as_bytes())
-                            .await?;
-
-                        self.stream.write_all(b" ").await?;
-
-                        let mut total_len_buf = itoa::Buffer::new();
-                        self.stream
-                            .write_all(
-                                total_len_buf
-                                    .format(headers.len() + payload.len())
-                                    .as_bytes(),
-                            )
-                            .await?;
-
-                        self.stream.write_all(b"\r\n").await?;
-                        self.stream.write_all(&headers).await?;
+                        let headers_len = headers.len();
+                        let total_len = headers_len + payload.len();
+                        self.write(format!("{headers_len} {total_len}\r\n"));
+                        self.write(headers);
                     }
                     _ => {
-                        let mut len_buf = itoa::Buffer::new();
-                        self.stream
-                            .write_all(len_buf.format(payload.len()).as_bytes())
-                            .await?;
-                        self.stream.write_all(b"\r\n").await?;
+                        let payload_len = payload.len();
+                        self.write(format!("{payload_len}\r\n"));
                     }
                 }
 
-                self.stream.write_all(payload).await?;
-                self.stream.write_all(b"\r\n").await?;
+                self.write(Bytes::clone(payload));
+                self.write("\r\n");
             }
 
             ClientOp::Subscribe {
@@ -444,41 +431,94 @@ impl Connection {
                 subject,
                 queue_group,
             } => {
-                self.stream.write_all(b"SUB ").await?;
-                self.stream.write_all(subject.as_bytes()).await?;
-                if let Some(queue_group) = queue_group {
-                    self.stream
-                        .write_all(format!(" {queue_group}").as_bytes())
-                        .await?;
-                }
-                self.stream
-                    .write_all(format!(" {sid}\r\n").as_bytes())
-                    .await?;
+                self.write(match queue_group {
+                    Some(queue_group) => {
+                        format!("SUB {subject} {queue_group} {sid}\r\n")
+                    }
+                    None => {
+                        format!("SUB {subject} {sid}\r\n")
+                    }
+                });
             }
 
             ClientOp::Unsubscribe { sid, max } => {
-                self.stream.write_all(b"UNSUB ").await?;
-                self.stream.write_all(format!("{sid}").as_bytes()).await?;
-                if let Some(max) = max {
-                    self.stream.write_all(format!(" {max}").as_bytes()).await?;
-                }
-                self.stream.write_all(b"\r\n").await?;
+                self.write(match max {
+                    Some(max) => format!("UNSUB {sid} {max}\r\n"),
+                    None => format!("UNSUB {sid}\r\n"),
+                });
             }
             ClientOp::Ping => {
-                self.stream.write_all(b"PING\r\n").await?;
-                self.stream.flush().await?;
+                self.write("PING\r\n");
             }
             ClientOp::Pong => {
-                self.stream.write_all(b"PONG\r\n").await?;
+                self.write("PONG\r\n");
             }
         }
+    }
 
-        Ok(())
+    /// Write the internal buffers into the write stream
+    ///
+    /// Returns one of the following:
+    ///
+    /// * `Poll::Pending` means that we weren't able to fully empty
+    ///   the internal buffers. Compared to [`AsyncWrite::poll_write`],
+    ///   this implementation may do a partial write before yielding.
+    /// * `Poll::Ready(Ok())` means that the internal write buffers have
+    ///   been emptied or were already empty.
+    /// * `Poll::Ready(Err(err))` means that writing to the stream failed.
+    ///   Compared to [`AsyncWrite::poll_write`], this implementation
+    ///   may do a partial write before failing.
+    fn poll_write(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        loop {
+            let buf = match self.write_buf.front_mut() {
+                Some(buf) => buf,
+                None => return Poll::Ready(Ok(())),
+            };
+
+            debug_assert!(!buf.is_empty());
+
+            match Pin::new(&mut self.stream).poll_write(cx, buf) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(n)) => {
+                    self.write_buf_len -= n;
+
+                    if n < buf.len() {
+                        buf.advance(n);
+                    } else {
+                        self.write_buf.pop_front();
+                    }
+                    continue;
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            }
+        }
+    }
+
+    /// Write `buf` into the writes buffer
+    /// 
+    /// Empty `buf`s are a no-op.
+    fn write(&mut self, buf: impl Into<Bytes>) {
+        let buf = buf.into();
+        if buf.is_empty() {
+            return;
+        }
+
+        self.write_buf_len += buf.len();
+        self.write_buf.push_back(buf);
     }
 
     /// Flush the write buffer, sending all pending data down the current write stream.
-    pub(crate) async fn flush(&mut self) -> Result<(), io::Error> {
-        self.stream.flush().await
+    pub(crate) fn flush(&mut self) -> impl Future<Output = io::Result<()>> + '_ {
+        future::poll_fn(|cx| self.poll_flush(cx))
+    }
+
+    /// Flush the write buffer, sending all pending data down the current write stream.
+    fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.stream).poll_flush(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+        }
     }
 }
 
