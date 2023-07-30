@@ -122,15 +122,16 @@
 
 use thiserror::Error;
 
-use futures::future::FutureExt;
-use futures::select;
 use futures::stream::Stream;
+use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::future::Future;
 use std::iter;
+use std::mem;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::option;
 use std::pin::Pin;
@@ -145,7 +146,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::task;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -372,80 +373,171 @@ impl ConnectionHandler {
         }
     }
 
-    pub(crate) async fn process(
-        &mut self,
-        mut receiver: mpsc::Receiver<Command>,
-    ) -> Result<(), io::Error> {
-        loop {
-            select! {
-                _ = self.ping_interval.tick().fuse() => {
-                    self.pending_pings += 1;
+    pub(crate) async fn process<'a>(&'a mut self, receiver: &'a mut mpsc::Receiver<Command>) {
+        struct ProcessFut<'a> {
+            handler: &'a mut ConnectionHandler,
+            receiver: &'a mut mpsc::Receiver<Command>,
+        }
 
-                    if self.pending_pings > MAX_PENDING_PINGS {
-                        debug!(
-                            "pending pings {}, max pings {}. disconnecting",
-                            self.pending_pings, MAX_PENDING_PINGS
-                        );
-                        self.handle_disconnect().await?;
-                    }
+        enum ExitReason {
+            Disconnected(Option<io::Error>),
+            Closed,
+        }
 
-                    self.connection.enqueue_write_op(&ClientOp::Ping);
+        impl<'a> ProcessFut<'a> {
+            #[cold]
+            fn ping(&mut self) -> Poll<ExitReason> {
+                self.handler.pending_pings += 1;
 
-                },
-                _ = self.flush_interval.tick().fuse() => {
-                    if let Err(_err) = self.handle_flush().await {
-                        self.handle_disconnect().await?;
-                    }
-                },
-                maybe_command = receiver.recv().fuse() => {
-                    match maybe_command {
-                        Some(command) => {
-                            self.handle_command(command);
+                if self.handler.pending_pings > MAX_PENDING_PINGS {
+                    debug!(
+                        "pending pings {}, max pings {}. disconnecting",
+                        self.handler.pending_pings, MAX_PENDING_PINGS
+                    );
 
-                            if self.is_flushing {
-                                if let Err(_err) = self.handle_flush().await {
-                                    self.handle_disconnect().await?;
-                                }
-                            }
-                        }
-                        None => {
-                            break;
-                        }
-                    }
-                }
+                    Poll::Ready(ExitReason::Disconnected(None))
+                } else {
+                    self.handler.connection.enqueue_write_op(&ClientOp::Ping);
+                    self.handler.is_flushing = true;
 
-                maybe_op_result = self.connection.read_op().fuse() => {
-                    match maybe_op_result {
-                        Ok(Some(server_op)) => if let Err(err) = self.handle_server_op(server_op).await {
-                            error!("error handling operation {}", err);
-                        }
-                        Ok(None) => {
-                            if let Err(err) = self.handle_disconnect().await {
-                                error!("error handling operation {}", err);
-                            }
-                        }
-                        Err(op_err) => {
-                            if let Err(err) = self.handle_disconnect().await {
-                                error!("error reconnecting {}. original error={}", err, op_err);
-                            }
-                        },
-                    }
+                    Poll::Pending
                 }
             }
         }
 
-        self.handle_flush().await?;
+        impl<'a> Future for ProcessFut<'a> {
+            type Output = ExitReason;
 
-        Ok(())
+            /// Drives the connection forward.
+            ///
+            /// Returns one of the following:
+            ///
+            /// * `Poll::Pending` means that the connection
+            ///   is blocked on all fronts or there are
+            ///   no commands to send or receive
+            /// * `Poll::Ready(ExitReason::Disconnected(_))` means
+            ///   that an I/O operation failed and the connection
+            ///   is considered dead.
+            /// * `Poll::Ready(ExitReason::Closed)` means that
+            ///   [`Self::receiver`] was closed, so there's nothing
+            ///   more for us to do than to exit the client.
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                if self.handler.ping_interval.poll_tick(cx).is_ready() {
+                    if let Poll::Ready(exit) = self.ping() {
+                        return Poll::Ready(exit);
+                    }
+                }
+
+                loop {
+                    match self.handler.connection.poll_read_op(cx) {
+                        Poll::Pending => break,
+                        Poll::Ready(Ok(Some(server_op))) => {
+                            self.handler.handle_server_op(server_op);
+                        }
+                        Poll::Ready(Ok(None)) => {
+                            return Poll::Ready(ExitReason::Disconnected(None))
+                        }
+                        Poll::Ready(Err(err)) => {
+                            return Poll::Ready(ExitReason::Disconnected(Some(err)))
+                        }
+                    }
+                }
+
+                // WARNING: after the following loop `handle_command`,
+                // or other functions which call `enqueue_write_op`,
+                // cannot be called anymore. Runtime wakeups won't
+                // trigger a call to `poll_write`
+
+                let mut made_progress = true;
+                loop {
+                    while !self.handler.connection.is_write_buf_full() {
+                        match self.receiver.poll_recv(cx) {
+                            Poll::Pending => break,
+                            Poll::Ready(Some(cmd)) => {
+                                made_progress = true;
+                                self.handler.handle_command(cmd);
+                            }
+                            Poll::Ready(None) => return Poll::Ready(ExitReason::Closed),
+                        }
+                    }
+
+                    // The first round will poll both from
+                    // the `receiver` and the writer, giving
+                    // them both a chance to make progress
+                    // and register `Waker`s.
+                    //
+                    // If writing is `Poll::Pending` we exit.
+                    //
+                    // If writing is completed we can repeat the entire
+                    // cycle as long as the `receiver` doesn't end-up
+                    // `Poll::Pending` immediately.
+                    if !mem::take(&mut made_progress) {
+                        break;
+                    }
+
+                    match self.handler.connection.poll_write(cx) {
+                        Poll::Pending => {
+                            // Write buffer couldn't be fully emptied
+                            break;
+                        }
+                        Poll::Ready(Ok(())) => {
+                            // Write buffer is empty
+                            continue;
+                        }
+                        Poll::Ready(Err(err)) => {
+                            return Poll::Ready(ExitReason::Disconnected(Some(err)))
+                        }
+                    }
+                }
+
+                if !self.handler.is_flushing && self.handler.connection.should_flush() {
+                    self.handler.is_flushing = self.handler.flush_interval.poll_tick(cx).is_ready();
+                }
+
+                if self.handler.is_flushing {
+                    match self.handler.connection.poll_flush(cx) {
+                        Poll::Pending => {}
+                        Poll::Ready(Ok(())) => {
+                            self.handler.is_flushing = false;
+                            self.handler.flush_interval.reset();
+
+                            for observer in self.handler.flush_observers.drain(..) {
+                                let _ = observer.send(());
+                            }
+                        }
+                        Poll::Ready(Err(err)) => {
+                            return Poll::Ready(ExitReason::Disconnected(Some(err)))
+                        }
+                    }
+                }
+
+                Poll::Pending
+            }
+        }
+
+        loop {
+            let process = ProcessFut {
+                handler: self,
+                receiver,
+            };
+            match process.await {
+                ExitReason::Disconnected(err) => {
+                    debug!(?err, "disconnected");
+
+                    self.handle_disconnect().await;
+                    debug!("reconnected");
+                }
+                ExitReason::Closed => break,
+            }
+        }
     }
 
-    async fn handle_server_op(&mut self, server_op: ServerOp) -> Result<(), io::Error> {
+    fn handle_server_op(&mut self, server_op: ServerOp) {
         self.ping_interval.reset();
 
         match server_op {
             ServerOp::Ping => {
                 self.connection.enqueue_write_op(&ClientOp::Pong);
-                self.handle_flush().await?;
             }
             ServerOp::Pong => {
                 debug!("received PONG");
@@ -495,8 +587,7 @@ impl ConnectionHandler {
                         Err(mpsc::error::TrySendError::Full(_)) => {
                             self.connector
                                 .events_tx
-                                .send(Event::SlowConsumer(sid))
-                                .await
+                                .try_send(Event::SlowConsumer(sid))
                                 .ok();
                         }
                         Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -530,11 +621,7 @@ impl ConnectionHandler {
             // TODO: we should probably update advertised server list here too.
             ServerOp::Info(info) => {
                 if info.lame_duck_mode {
-                    self.connector
-                        .events_tx
-                        .send(Event::LameDuckMode)
-                        .await
-                        .ok();
+                    self.connector.events_tx.try_send(Event::LameDuckMode).ok();
                 }
             }
 
@@ -542,20 +629,6 @@ impl ConnectionHandler {
                 // TODO: don't ignore.
             }
         }
-
-        Ok(())
-    }
-
-    async fn handle_flush(&mut self) -> io::Result<()> {
-        self.connection.easy_write_and_flush([].iter()).await?;
-
-        self.flush_interval.reset();
-        self.is_flushing = false;
-
-        for observer in self.handler.flush_observers.drain(..) {
-            let _ = observer.send(());
-        }
-        Ok(())
     }
 
     fn handle_command(&mut self, command: Command) {
@@ -661,24 +734,18 @@ impl ConnectionHandler {
         }
     }
 
-    async fn handle_disconnect(&mut self) -> io::Result<()> {
+    async fn handle_disconnect(&mut self) {
         self.pending_pings = 0;
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
-        self.handle_reconnect().await?;
 
-        Ok(())
+        self.handle_reconnect().await;
     }
 
-    async fn handle_reconnect(&mut self) -> Result<(), io::Error> {
-        let (info, connection) = self.connector.connect().await?;
+    async fn handle_reconnect(&mut self) {
+        let (info, connection) = self.connector.connect().await;
         self.connection = connection;
-        self.info_sender.send(info).map_err(|err| {
-            std::io::Error::new(
-                ErrorKind::Other,
-                format!("failed to send info update: {err}"),
-            )
-        })?;
+        let _ = self.info_sender.send(info);
 
         self.subscriptions
             .retain(|_, subscription| !subscription.sender.is_closed());
@@ -700,8 +767,6 @@ impl ConnectionHandler {
         }
 
         self.connector.events_tx.try_send(Event::Connected).ok();
-
-        Ok(())
     }
 }
 
@@ -763,7 +828,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
-    let (sender, receiver) = mpsc::channel(options.sender_capacity);
+    let (sender, mut receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(
         info_watcher,
@@ -782,7 +847,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     task::spawn(async move {
         if connection.is_none() && options.retry_on_initial_connect {
-            let (info, connection_ok) = connector.connect().await.unwrap();
+            let (info, connection_ok) = connector.connect().await;
             info_sender.send(info).ok();
             connection = Some(connection_ok);
         }
@@ -794,7 +859,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             ping_period,
             flush_period,
         );
-        connection_handler.process(receiver).await
+        connection_handler.process(&mut receiver).await
     });
 
     Ok(client)

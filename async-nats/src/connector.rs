@@ -101,10 +101,10 @@ impl Connector {
         })
     }
 
-    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn connect(&mut self) -> (ServerInfo, Connection) {
         loop {
             match self.try_connect().await {
-                Ok(inner) => return Ok(inner),
+                Ok(inner) => return inner,
                 Err(error) => {
                     self.events_tx
                         .send(Event::ClientError(ClientError::Other(error.to_string())))
