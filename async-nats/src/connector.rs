@@ -33,7 +33,6 @@ use crate::LANG;
 use crate::VERSION;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
-use bytes::BytesMut;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp;
@@ -296,10 +295,10 @@ impl Connector {
 
         tcp_stream.set_nodelay(true)?;
 
-        let mut connection = Connection {
-            stream: Box::new(BufWriter::new(tcp_stream)),
-            buffer: BytesMut::with_capacity(self.options.read_buffer_capacity.into()),
-        };
+        let mut connection = Connection::new(
+            Box::new(BufWriter::new(tcp_stream)),
+            self.options.read_buffer_capacity.into(),
+        );
 
         let op = connection.read_op().await?;
         let info = match op {
@@ -336,10 +335,10 @@ impl Connector {
             let domain = rustls::ServerName::try_from(tls_host)
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
-            connection = Connection {
-                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
-                buffer: BytesMut::new(),
-            };
+            connection = Connection::new(
+                Box::new(tls_connector.connect(domain, connection.stream).await?),
+                0,
+            );
         };
 
         Ok((*info, connection))
