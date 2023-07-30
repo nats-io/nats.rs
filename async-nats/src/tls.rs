@@ -77,7 +77,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
                 .into_iter()
                 .map(|cert| cert.0)
                 .collect::<Vec<Vec<u8>>>()
-                .as_ref(),
+                .as_slice(),
         );
     }
 
