@@ -89,9 +89,8 @@ impl Message {
             self.context
                 .client
                 .publish(reply.to_string(), "".into())
-                .into_future()
-                .map_err(Error::from)
                 .await
+                .map_err(Error::from)
         } else {
             Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -132,9 +131,8 @@ impl Message {
             self.context
                 .client
                 .publish(reply.to_string(), kind.into())
-                .into_future()
-                .map_err(Error::from)
                 .await
+                .map_err(Error::from)
         } else {
             Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,

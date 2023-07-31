@@ -45,6 +45,7 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     }
 }
 
+#[must_use]
 pub struct Publish {
     sender: mpsc::Sender<Command>,
     subject: String,
@@ -80,7 +81,7 @@ impl IntoFuture for Publish {
     type IntoFuture = Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let sender = self.sender.clone();
+        let sender = self.sender;
         let subject = self.subject;
         let payload = self.payload;
         let respond = self.respond;
