@@ -13,11 +13,16 @@
 
 use std::fmt::{Debug, Display};
 
+// A trait to mark enums that can be used as error kinds.
+pub trait ErrorKind: Clone + Debug + PartialEq {}
+
+impl<T> ErrorKind for T where T: Clone + Debug + PartialEq {}
+
 /// The error type for the NATS client, generic by the kind of error.
 #[derive(Debug)]
 pub struct Error<Kind>
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind,
 {
     pub(crate) kind: Kind,
     pub(crate) source: Option<crate::Error>,
@@ -25,7 +30,7 @@ where
 
 impl<Kind> Error<Kind>
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind,
 {
     pub(crate) fn new(kind: Kind) -> Self {
         Self { kind, source: None }
@@ -49,7 +54,7 @@ where
 
 impl<Kind> Display for Error<Kind>
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(err) = &self.source {
@@ -60,11 +65,16 @@ where
     }
 }
 
-impl<Kind> std::error::Error for Error<Kind> where Kind: Clone + Debug + Display + PartialEq {}
+impl<Kind> std::error::Error for Error<Kind>
+where
+    Kind: ErrorKind,
+    Error<Kind>: Display,
+{
+}
 
 impl<Kind> From<Kind> for Error<Kind>
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind,
 {
     fn from(kind: Kind) -> Self {
         Self { kind, source: None }
@@ -75,7 +85,7 @@ where
 /// by additionally specifying the kind of the target error.
 trait WithKind<Kind>
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind,
     Self: Into<crate::Error>,
 {
     fn with_kind(self, kind: Kind) -> Error<Kind> {
@@ -88,7 +98,7 @@ where
 
 impl<E, Kind> WithKind<Kind> for E
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind,
     E: Into<crate::Error>,
 {
 }
