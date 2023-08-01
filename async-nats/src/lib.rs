@@ -135,6 +135,8 @@ use std::option;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
@@ -323,7 +325,7 @@ pub(crate) struct ConnectionHandler {
     pending_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
-    flush_interval: Interval,
+    pending: Arc<AtomicU64>,
 }
 
 impl ConnectionHandler {
@@ -333,6 +335,7 @@ impl ConnectionHandler {
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
         ping_period: Duration,
         flush_period: Duration,
+        pending: Arc<AtomicU64>,
     ) -> ConnectionHandler {
         let mut ping_interval = interval(ping_period);
         ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -347,7 +350,7 @@ impl ConnectionHandler {
             pending_pings: 0,
             info_sender,
             ping_interval,
-            flush_interval,
+            pending,
         }
     }
 
@@ -375,15 +378,19 @@ impl ConnectionHandler {
                     self.handle_flush().await?;
 
                 },
-                _ = self.flush_interval.tick().fuse() => {
-                    if let Err(_err) = self.handle_flush().await {
-                        self.handle_disconnect().await?;
-                    }
-                },
                 maybe_command = receiver.recv().fuse() => {
                     match maybe_command {
-                        Some(command) => if let Err(err) = self.handle_command(command).await {
-                            error!("error handling command {}", err);
+                        Some(command) => {
+                            if let Err(err) = self.handle_command(command).await {
+                                 error!("error handling command {}", err);
+                            }
+                            let prev = self
+                                .pending
+                                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                            // trace!("pending: {}", prev);
+                            if prev <= 1 {
+                                self.handle_flush().await?;
+                            }
                         }
                         None => {
                             break;
@@ -505,11 +512,9 @@ impl ConnectionHandler {
         Ok(())
     }
 
+    #[inline]
     async fn handle_flush(&mut self) -> Result<(), io::Error> {
-        self.connection.flush().await?;
-        self.flush_interval.reset();
-
-        Ok(())
+        self.connection.flush().await
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), io::Error> {
@@ -710,6 +715,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
     let (sender, receiver) = mpsc::channel(options.sender_capacity);
+    let pending = Arc::new(AtomicU64::new(0));
+    let sender = Sender::new(pending.clone(), sender);
 
     let client = Client::new(
         info_watcher,
@@ -739,6 +746,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             info_sender,
             ping_period,
             flush_period,
+            pending,
         );
         connection_handler.process(receiver).await
     });
@@ -898,15 +906,44 @@ impl From<io::Error> for ConnectError {
 pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
+    sender: Sender,
+}
+
+#[derive(Debug, Clone)]
+struct Sender {
+    pending: Arc<AtomicU64>,
     sender: mpsc::Sender<Command>,
 }
 
+impl Sender {
+    fn new(pending: Arc<AtomicU64>, sender: mpsc::Sender<Command>) -> Sender {
+        Sender { pending, sender }
+    }
+
+    async fn send(
+        &self,
+        command: Command,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<Command>> {
+        self.pending.fetch_add(1, Ordering::Relaxed);
+        let result = self.sender.send(command).await;
+        if result.is_err() {
+            self.pending.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
+    }
+
+    fn try_send(&self, command: Command) -> Result<(), mpsc::error::TrySendError<Command>> {
+        self.pending.fetch_add(1, Ordering::Relaxed);
+        let result = self.sender.try_send(command);
+        if result.is_err() {
+            self.pending.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
+    }
+}
+
 impl Subscriber {
-    fn new(
-        sid: u64,
-        sender: mpsc::Sender<Command>,
-        receiver: mpsc::Receiver<Message>,
-    ) -> Subscriber {
+    fn new(sid: u64, sender: Sender, receiver: mpsc::Receiver<Message>) -> Subscriber {
         Subscriber {
             sid,
             sender,

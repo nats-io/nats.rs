@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::connection::State;
-use crate::ServerInfo;
+use crate::{Sender, ServerInfo};
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
@@ -51,7 +51,7 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
 pub struct Client {
     info: tokio::sync::watch::Receiver<ServerInfo>,
     pub(crate) state: tokio::sync::watch::Receiver<State>,
-    sender: mpsc::Sender<Command>,
+    sender: Sender,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
     inbox_prefix: String,
@@ -62,7 +62,7 @@ impl Client {
     pub(crate) fn new(
         info: tokio::sync::watch::Receiver<ServerInfo>,
         state: tokio::sync::watch::Receiver<State>,
-        sender: mpsc::Sender<Command>,
+        sender: Sender,
         capacity: usize,
         inbox_prefix: String,
         request_timeout: Option<Duration>,
