@@ -59,13 +59,14 @@ pub fn publish(c: &mut Criterion) {
 
 pub fn subscribe(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
+    let messages_per_subscribe = 100_000;
 
     let mut subscribe_amount_group = c.benchmark_group("subscribe amount");
     subscribe_amount_group.sample_size(30);
     subscribe_amount_group.warm_up_time(std::time::Duration::from_secs(1));
 
     for &size in [32, 1024, 8192].iter() {
-        subscribe_amount_group.throughput(criterion::Throughput::Elements(100));
+        subscribe_amount_group.throughput(criterion::Throughput::Elements(messages_per_subscribe));
         subscribe_amount_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
             &size,
@@ -91,7 +92,7 @@ pub fn subscribe(c: &mut Criterion) {
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
-                    async move { subscribe_messages(nc, 100).await }
+                    async move { subscribe_messages(nc, messages_per_subscribe).await }
                 });
             },
         );
@@ -105,7 +106,7 @@ async fn publish_messages(nc: async_nats::Client, msg: Bytes, amount: usize) {
     nc.flush().await.unwrap();
 }
 
-async fn subscribe_messages(nc: async_nats::Client, amount: usize) {
+async fn subscribe_messages(nc: async_nats::Client, amount: u64) {
     let mut sub = nc.subscribe("bench".into()).await.unwrap();
     for _ in 0..amount {
         sub.next().await.unwrap();
