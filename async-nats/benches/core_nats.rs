@@ -60,7 +60,6 @@ pub fn publish(c: &mut Criterion) {
 
 pub fn subscribe(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
-
     let mut subscribe_amount_group = c.benchmark_group("subscribe amount");
     subscribe_amount_group.sample_size(30);
     subscribe_amount_group.warm_up_time(std::time::Duration::from_secs(1));
@@ -82,9 +81,12 @@ pub fn subscribe(c: &mut Criterion) {
                             let msg = &bmsg[0..*size].to_vec();
 
                             loop {
-                                nc.publish("bench".to_string(), msg.clone().into())
-                                    .await
-                                    .unwrap();
+                                let result =
+                                    nc.publish("bench".to_string(), msg.clone().into()).await;
+
+                                if result.is_err() {
+                                    break;
+                                }
                             }
                         }
                     });
