@@ -282,7 +282,6 @@ mod object_store {
                 ObjectMeta {
                     name: "Foo".to_string(),
                     description: Some("foo desc".to_string()),
-                    ..Default::default()
                 },
                 &mut "dadada".as_bytes(),
             )
@@ -366,7 +365,6 @@ mod object_store {
         let given_metadata = ObjectMeta {
             name: "new_object".to_owned(),
             description: Some("description".to_string()),
-            link: None,
         };
 
         bucket
@@ -398,6 +396,5 @@ mod object_store {
 
         assert_eq!(info.name, given_metadata.name);
         assert_eq!(info.description, given_metadata.description);
-        assert_eq!(info.link, given_metadata.link);
     }
 }
