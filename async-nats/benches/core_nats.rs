@@ -59,27 +59,40 @@ pub fn publish(c: &mut Criterion) {
 
 pub fn subscribe(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
-    let messages_per_subscribe = 100_000;
+    let messages_per_subscribe = 1_000_000;
 
     let mut subscribe_amount_group = c.benchmark_group("subscribe amount");
-    subscribe_amount_group.sample_size(30);
-    subscribe_amount_group.warm_up_time(std::time::Duration::from_secs(1));
+    subscribe_amount_group.sample_size(10);
 
     for &size in [32, 1024, 8192].iter() {
+        let url = server.client_url();
         subscribe_amount_group.throughput(criterion::Throughput::Elements(messages_per_subscribe));
         subscribe_amount_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
             &size,
-            |b, _| {
+            move |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                let nc = rt.block_on(async {
-                    let nc = async_nats::connect(server.client_url()).await.unwrap();
-
-                    tokio::task::spawn({
-                        let nc = nc.clone();
+                let url = url.clone();
+                let (nc, handle) = rt.block_on(async move {
+                    let nc = async_nats::ConnectOptions::new()
+                        .connect(url.clone())
+                        .await
+                        .unwrap();
+                    let (started, ready) = tokio::sync::oneshot::channel();
+                    let handle = tokio::task::spawn({
                         async move {
+                            let client = async_nats::ConnectOptions::new()
+                                .connect(url)
+                                .await
+                                .unwrap();
+
+                            let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
+                            let msg = &bmsg[0..*size].to_vec();
+
+                            started.send(()).unwrap();
                             loop {
-                                nc.publish("bench".to_string(), Bytes::from_static(&MSG[..size]))
+                                client
+                                    .publish("bench".to_string(), Bytes::from_static(&MSG[..size]))
                                     .await
                                     .unwrap();
                             }
@@ -87,13 +100,15 @@ pub fn subscribe(c: &mut Criterion) {
                     });
                     nc.publish("data".to_string(), "data".into()).await.unwrap();
                     nc.flush().await.unwrap();
-                    nc
+                    ready.await.unwrap();
+                    (nc, handle)
                 });
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
                     async move { subscribe_messages(nc, messages_per_subscribe).await }
                 });
+                handle.abort();
             },
         );
     }
