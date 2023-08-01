@@ -321,7 +321,7 @@ impl ObjectStore {
         let object_info = ObjectInfo {
             name: object_meta.name,
             description: object_meta.description,
-            link: object_meta.link,
+            link: None,
             bucket: self.name.clone(),
             nuid: object_nuid,
             chunks: object_chunks,
@@ -505,7 +505,6 @@ impl ObjectStore {
     ///         object_store::ObjectMeta {
     ///             name: "new_name".to_string(),
     ///             description: Some("a new description".to_string()),
-    ///             link: None,
     ///         },
     ///     )
     ///     .await?;
@@ -564,7 +563,6 @@ impl ObjectStore {
 
         info.name = metadata.name;
         info.description = metadata.description;
-        info.link = metadata.link;
 
         let name = encode_object_name(&info.name);
         let subject = format!("$O.{}.M.{}", &self.name, &name);
@@ -850,8 +848,6 @@ pub struct ObjectMeta {
     pub name: String,
     /// A short human readable description of the object.
     pub description: Option<String>,
-    /// Link this object points to, if any.
-    pub link: Option<ObjectLink>,
 }
 
 impl From<&str> for ObjectMeta {
@@ -868,7 +864,6 @@ impl From<ObjectInfo> for ObjectMeta {
         ObjectMeta {
             name: info.name,
             description: info.description,
-            link: info.link,
         }
     }
 }
