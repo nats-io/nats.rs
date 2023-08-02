@@ -71,7 +71,7 @@ impl Client {
             info,
             state,
             sender,
-            next_subscription_id: Arc::new(AtomicU64::new(0)),
+            next_subscription_id: Arc::new(AtomicU64::new(1)),
             subscription_capacity: capacity,
             inbox_prefix,
             request_timeout,
