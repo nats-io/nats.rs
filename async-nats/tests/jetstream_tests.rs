@@ -695,9 +695,8 @@ mod jetstream {
             .unwrap()
             .get(header::NATS_SEQUENCE)
             .unwrap()
-            .iter()
-            .next()
-            .unwrap();
+            .as_str();
+
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
@@ -754,9 +753,8 @@ mod jetstream {
             .unwrap()
             .get(header::NATS_SEQUENCE)
             .unwrap()
-            .iter()
-            .next()
-            .unwrap();
+            .as_str();
+
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
@@ -828,9 +826,8 @@ mod jetstream {
             .unwrap()
             .get(header::NATS_SEQUENCE)
             .unwrap()
-            .iter()
-            .next()
-            .unwrap();
+            .as_str();
+
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 
@@ -897,9 +894,8 @@ mod jetstream {
             .unwrap()
             .get(header::NATS_SEQUENCE)
             .unwrap()
-            .iter()
-            .next()
-            .unwrap();
+            .as_str();
+
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
 

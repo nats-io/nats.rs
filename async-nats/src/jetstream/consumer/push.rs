@@ -657,14 +657,12 @@ impl<'a> futures::Stream for Ordered<'a> {
                                             headers.get(crate::header::NATS_LAST_CONSUMER)
                                         {
                                             let sequence: u64 =
-                                                sequence.iter().next().unwrap().parse().map_err(
-                                                    |err| {
-                                                        OrderedError::with_source(
-                                                            OrderedErrorKind::Other,
-                                                            err,
-                                                        )
-                                                    },
-                                                )?;
+                                                sequence.as_str().parse().map_err(|err| {
+                                                    OrderedError::with_source(
+                                                        OrderedErrorKind::Other,
+                                                        err,
+                                                    )
+                                                })?;
 
                                             let last_sequence =
                                                 self.consumer_sequence.load(Ordering::Relaxed);

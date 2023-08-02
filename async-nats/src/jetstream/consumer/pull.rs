@@ -1128,24 +1128,20 @@ impl futures::Stream for Stream {
                                     .headers
                                     .as_ref()
                                     .and_then(|headers| headers.get("Nats-Pending-Messages"))
-                                    .map(|h| h.iter())
-                                    .and_then(|mut i| i.next())
-                                    .map(|e| e.parse::<usize>())
-                                    .unwrap_or(Ok(self.batch_config.batch))
+                                    .map_or(Ok(self.batch_config.batch), |x| x.as_str().parse())
                                     .map_err(|err| {
                                         MessagesError::with_source(MessagesErrorKind::Other, err)
                                     })?;
+
                                 let pending_bytes = message
                                     .headers
                                     .as_ref()
                                     .and_then(|headers| headers.get("Nats-Pending-Bytes"))
-                                    .map(|h| h.iter())
-                                    .and_then(|mut i| i.next())
-                                    .map(|e| e.parse::<usize>())
-                                    .unwrap_or(Ok(self.batch_config.max_bytes))
+                                    .map_or(Ok(self.batch_config.max_bytes), |x| x.as_str().parse())
                                     .map_err(|err| {
                                         MessagesError::with_source(MessagesErrorKind::Other, err)
                                     })?;
+
                                 debug!(
                                     "timeout reached. remaining messages: {}, bytes {}",
                                     pending_messages, pending_bytes
