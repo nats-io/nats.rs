@@ -1,5 +1,8 @@
+use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::stream::StreamExt;
+
+static MSG: &[u8] = &[22; 32768];
 
 pub fn publish(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
@@ -7,21 +10,19 @@ pub fn publish(c: &mut Criterion) {
     throughput_group.sample_size(30);
     throughput_group.warm_up_time(std::time::Duration::from_secs(1));
 
-    let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
-    for size in [32, 1024, 8192].iter() {
-        throughput_group.throughput(criterion::Throughput::Bytes(*size as u64 * 100));
+    for &size in [32, 1024, 8192].iter() {
+        throughput_group.throughput(criterion::Throughput::Bytes(size as u64 * 100));
         throughput_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
-            size,
+            &size,
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc =
                     rt.block_on(async { async_nats::connect(server.client_url()).await.unwrap() });
-                let msg = &bmsg[0..*size];
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
-                    async move { publish_messages(nc, msg, 100).await }
+                    async move { publish_messages(nc, Bytes::from_static(&MSG[..size]), 100).await }
                 });
             },
         );
@@ -32,12 +33,11 @@ pub fn publish(c: &mut Criterion) {
     messages_group.sample_size(30);
     messages_group.warm_up_time(std::time::Duration::from_secs(1));
 
-    let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
-    for size in [32, 1024, 8192].iter() {
+    for &size in [32, 1024, 8192].iter() {
         messages_group.throughput(criterion::Throughput::Elements(100));
         messages_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
-            size,
+            &size,
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
@@ -46,11 +46,10 @@ pub fn publish(c: &mut Criterion) {
                     nc.flush().await.unwrap();
                     nc
                 });
-                let msg = &bmsg[0..*size];
 
                 b.to_async(rt).iter(move || {
                     let nc = nc.clone();
-                    async move { publish_messages(nc, msg, 100).await }
+                    async move { publish_messages(nc, Bytes::from_static(&MSG[..size]), 100).await }
                 });
             },
         );
@@ -65,11 +64,11 @@ pub fn subscribe(c: &mut Criterion) {
     subscribe_amount_group.sample_size(30);
     subscribe_amount_group.warm_up_time(std::time::Duration::from_secs(1));
 
-    for size in [32, 1024, 8192].iter() {
+    for &size in [32, 1024, 8192].iter() {
         subscribe_amount_group.throughput(criterion::Throughput::Elements(100));
         subscribe_amount_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),
-            size,
+            &size,
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
@@ -78,11 +77,8 @@ pub fn subscribe(c: &mut Criterion) {
                     tokio::task::spawn({
                         let nc = nc.clone();
                         async move {
-                            let bmsg: Vec<u8> = (0..32768).map(|_| 22).collect();
-                            let msg = &bmsg[0..*size].to_vec();
-
                             loop {
-                                nc.publish("bench".to_string(), msg.clone().into())
+                                nc.publish("bench".to_string(), Bytes::from_static(&MSG[..size]))
                                     .await
                                     .unwrap();
                             }
@@ -102,12 +98,9 @@ pub fn subscribe(c: &mut Criterion) {
     }
     subscribe_amount_group.finish();
 }
-async fn publish_messages(nc: async_nats::Client, msg: &'_ [u8], amount: usize) {
-    let msg = msg.to_vec();
+async fn publish_messages(nc: async_nats::Client, msg: Bytes, amount: usize) {
     for _i in 0..amount {
-        nc.publish("bench".into(), msg.clone().into())
-            .await
-            .unwrap();
+        nc.publish("bench".into(), msg.clone()).await.unwrap();
     }
     nc.flush().await.unwrap();
 }
