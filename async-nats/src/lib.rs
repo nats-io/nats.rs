@@ -267,6 +267,12 @@ pub(crate) enum Command {
         respond: Option<String>,
         headers: Option<HeaderMap>,
     },
+    Request {
+        subject: String,
+        payload: Bytes,
+        headers: Option<HeaderMap>,
+        sender: oneshot::Sender<Message>,
+    },
     Subscribe {
         sid: u64,
         subject: String,
@@ -315,11 +321,19 @@ struct Subscription {
     max: Option<u64>,
 }
 
+#[derive(Debug)]
+struct Multiplexer {
+    sid: u64,
+    prefix: String,
+    senders: HashMap<String, oneshot::Sender<Message>>,
+}
+
 /// A connection handler which facilitates communication from channels to a single shared connection.
 pub(crate) struct ConnectionHandler {
     connection: Connection,
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
+    multiplexer: Option<Multiplexer>,
     pending_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
@@ -344,6 +358,7 @@ impl ConnectionHandler {
             connection,
             connector,
             subscriptions: HashMap::new(),
+            multiplexer: None,
             pending_pings: 0,
             info_sender,
             ping_interval,
@@ -484,6 +499,24 @@ impl ConnectionHandler {
                             self.handle_flush().await?;
                         }
                     }
+                } else if let Some(multiplexer) = self.multiplexer.as_mut() {
+                    let maybe_token = subject.strip_prefix(&multiplexer.prefix).to_owned();
+
+                    if let Some(token) = maybe_token {
+                        if let Some(sender) = multiplexer.senders.remove(token) {
+                            let message = Message {
+                                subject,
+                                reply,
+                                payload,
+                                headers,
+                                status,
+                                description,
+                                length,
+                            };
+
+                            sender.send(message);
+                        }
+                    }
                 }
             }
             // TODO: we should probably update advertised server list here too.
@@ -591,6 +624,58 @@ impl ConnectionHandler {
                     error!("Sending Subscribe failed with {:?}", err);
                 }
             }
+            Command::Request {
+                subject,
+                payload,
+                headers,
+                sender,
+            } => {
+                let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
+                    multiplexer
+                } else {
+                    // TODO what is the sid?
+                    let sid = 0;
+
+                    let inbox = nuid::next();
+                    let prefix = format!("{}.", inbox);
+                    let subject = format!("{}.*", inbox);
+
+                    if let Err(err) = self
+                        .connection
+                        .write_op(&ClientOp::Subscribe {
+                            sid,
+                            subject,
+                            queue_group: None,
+                        })
+                        .await
+                    {
+                        error!("Sending Subscribe failed with {:?}", err);
+                    }
+
+                    self.multiplexer.insert(Multiplexer {
+                        sid,
+                        prefix,
+                        senders: HashMap::new(),
+                    })
+                };
+
+                let token = nuid::next();
+                let respond = Some(format!("{}{}", multiplexer.prefix, token));
+                multiplexer.senders.insert(token, sender);
+
+                let pub_op = ClientOp::Publish {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                };
+
+                while let Err(err) = self.connection.write_op(&pub_op).await {
+                    self.handle_disconnect().await?;
+                    error!("Sending Publish failed with {:?}", err);
+                }
+            }
+
             Command::Publish {
                 subject,
                 payload,
