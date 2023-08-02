@@ -56,12 +56,15 @@ fn kv_operation_from_message(message: &Message) -> Result<Operation, EntryError>
         .as_ref()
         .ok_or_else(|| EntryError::with_source(EntryErrorKind::Other, "missing headers"))?;
 
-    headers
-        .get(KV_OPERATION)
-        .map(|x| x.iter().next().unwrap().as_str())
-        .unwrap_or(KV_OPERATION_PUT)
-        .parse()
-        .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
+    if let Some(op) = headers.get(KV_OPERATION) {
+        Operation::from_str(op.as_str())
+            .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
+    } else {
+        Err(EntryError::with_source(
+            EntryErrorKind::Other,
+            "missing operation",
+        ))
+    }
 }
 
 static VALID_BUCKET_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
@@ -304,14 +307,7 @@ impl Store {
                                     "missing sequence headers",
                                 )
                             })?
-                            .iter()
-                            .next()
-                            .ok_or_else(|| {
-                                EntryError::with_source(
-                                    EntryErrorKind::Other,
-                                    "did not found sequence header value",
-                                )
-                            })?
+                            .as_str()
                             .parse()
                             .map_err(|err| {
                                 EntryError::with_source(
@@ -319,6 +315,7 @@ impl Store {
                                     format!("failed to parse headers sequence value: {}", err),
                                 )
                             })?;
+
                         let created = headers
                             .get(header::NATS_TIME_STAMP)
                             .ok_or_else(|| {
@@ -326,17 +323,9 @@ impl Store {
                                     EntryErrorKind::Other,
                                     "did not found timestamp header",
                                 )
-                            })?
-                            .iter()
-                            .next()
-                            .ok_or_else(|| {
-                                EntryError::with_source(
-                                    EntryErrorKind::Other,
-                                    "did not found timestamp header value",
-                                )
                             })
                             .and_then(|created| {
-                                OffsetDateTime::parse(created, &Rfc3339).map_err(|err| {
+                                OffsetDateTime::parse(created.as_str(), &Rfc3339).map_err(|err| {
                                     EntryError::with_source(
                                         EntryErrorKind::Other,
                                         format!(
