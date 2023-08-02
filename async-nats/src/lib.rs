@@ -514,7 +514,8 @@ impl ConnectionHandler {
                                 length,
                             };
 
-                            sender.send(message);
+                            // TODO don't unwrap
+                            sender.send(message).unwrap();
                         }
                     }
                 }
@@ -674,6 +675,8 @@ impl ConnectionHandler {
                     self.handle_disconnect().await?;
                     error!("Sending Publish failed with {:?}", err);
                 }
+
+                // TODO(caspervonb) we can flush directly here
             }
 
             Command::Publish {

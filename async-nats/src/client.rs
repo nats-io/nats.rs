@@ -361,7 +361,7 @@ impl Client {
         };
 
         match request {
-            Some(message) => {
+            Ok(message) => {
                 if message.status == Some(StatusCode::NO_RESPONDERS) {
                     return Err(RequestError::with_source(
                         RequestErrorKind::NoResponders,
@@ -370,10 +370,7 @@ impl Client {
                 }
                 Ok(message)
             }
-            None => Err(RequestError::with_source(
-                RequestErrorKind::Other,
-                "broken pipe",
-            )),
+            Err(err) => Err(RequestError::with_source(RequestErrorKind::Other, err)),
         }
     }
 
