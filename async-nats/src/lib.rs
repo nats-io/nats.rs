@@ -387,7 +387,6 @@ impl ConnectionHandler {
                             let prev = self
                                 .pending
                                 .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-                            // trace!("pending: {}", prev);
                             if prev <= 1 {
                                 self.handle_flush().await?;
                             }
@@ -920,6 +919,7 @@ impl Sender {
         Sender { pending, sender }
     }
 
+    #[inline]
     async fn send(
         &self,
         command: Command,
@@ -932,6 +932,7 @@ impl Sender {
         result
     }
 
+    #[inline]
     fn try_send(&self, command: Command) -> Result<(), mpsc::error::TrySendError<Command>> {
         self.pending.fetch_add(1, Ordering::Relaxed);
         let result = self.sender.try_send(command);
