@@ -105,7 +105,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<rustls:
                         ta.name_constraints,
                     )
                 });
-                root_store.add_server_trust_anchors(trust_anchors);
+                root_store.add_trust_anchors(trust_anchors);
             }
             let builder = rustls::ClientConfig::builder()
                 .with_safe_defaults()
