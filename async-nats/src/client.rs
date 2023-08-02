@@ -346,9 +346,6 @@ impl Client {
             }
             None => self.publish_with_reply(subject, inbox, payload).await?,
         }
-        self.flush()
-            .await
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
         let request = match timeout {
             Some(timeout) => {
                 tokio::time::timeout(timeout, sub.next())

@@ -987,7 +987,6 @@ pub struct PublishAckFuture {
 
 impl PublishAckFuture {
     async fn next_with_timeout(mut self) -> Result<PublishAck, PublishError> {
-        self.subscription.sender.send(Command::TryFlush).await.ok();
         let next = tokio::time::timeout(self.timeout, self.subscription.next())
             .await
             .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))?;

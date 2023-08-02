@@ -388,7 +388,9 @@ impl ConnectionHandler {
                                 .pending
                                 .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                             if prev <= 1 {
-                                self.handle_flush().await?;
+                               if let Err(_err) = self.handle_flush().await {
+                                   self.handle_disconnect().await?;
+                               }
                             }
                         }
                         None => {
