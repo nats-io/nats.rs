@@ -338,12 +338,14 @@ impl Client {
         let (sender, receiver) = oneshot::channel();
 
         let payload = request.payload.unwrap_or_else(|| Bytes::new());
+        let respond = self.new_inbox();
         let headers = request.headers;
 
         self.sender
             .send(Command::Request {
                 subject,
                 payload,
+                respond,
                 headers,
                 sender,
             })

@@ -270,6 +270,7 @@ pub(crate) enum Command {
     Request {
         subject: String,
         payload: Bytes,
+        respond: String,
         headers: Option<HeaderMap>,
         sender: oneshot::Sender<Message>,
     },
@@ -628,18 +629,19 @@ impl ConnectionHandler {
             Command::Request {
                 subject,
                 payload,
+                respond,
                 headers,
                 sender,
             } => {
+                // FIXME unwrap or err
+                let (prefix, token) = respond.rsplit_once('.').unwrap();
+
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
                     // TODO what is the sid?
                     let sid = 0;
-
-                    let inbox = nuid::next();
-                    let prefix = format!("{}.", inbox);
-                    let subject = format!("{}.*", inbox);
+                    let subject = format!("{}.*", prefix);
 
                     if let Err(err) = self
                         .connection
@@ -655,19 +657,17 @@ impl ConnectionHandler {
 
                     self.multiplexer.insert(Multiplexer {
                         sid,
-                        prefix,
+                        prefix: prefix.to_owned(),
                         senders: HashMap::new(),
                     })
                 };
 
-                let token = nuid::next();
-                let respond = Some(format!("{}{}", multiplexer.prefix, token));
-                multiplexer.senders.insert(token, sender);
+                multiplexer.senders.insert(token.to_owned(), sender);
 
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
-                    respond,
+                    respond: Some(respond),
                     headers,
                 };
 
