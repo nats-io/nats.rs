@@ -232,6 +232,27 @@ mod jetstream {
             PublishErrorKind::WrongLastSequence
         );
 
+        context
+            .send_publish(
+                "baz".to_string(),
+                Publish::build().expected_last_subject_sequence(0),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        // Should not error
+        context
+            .send_publish(
+                "baz".to_string(),
+                Publish::build().expected_last_subject_sequence(1),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
         // Check if it works for the other subjects in the stream.
         context
             .send_publish(
@@ -242,6 +263,7 @@ mod jetstream {
             .unwrap()
             .await
             .unwrap();
+
         // Sequence is now 1, so this should fail.
         context
             .send_publish(
@@ -252,6 +274,7 @@ mod jetstream {
             .unwrap()
             .await
             .unwrap_err();
+
         // test header shorthand
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
