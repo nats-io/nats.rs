@@ -657,7 +657,7 @@ impl ConnectionHandler {
 
                     self.multiplexer.insert(Multiplexer {
                         sid,
-                        prefix: prefix.to_owned(),
+                        prefix: format!("{}.", prefix),
                         senders: HashMap::new(),
                     })
                 };
@@ -676,7 +676,7 @@ impl ConnectionHandler {
                     error!("Sending Publish failed with {:?}", err);
                 }
 
-                // TODO(caspervonb) we can flush directly here
+                self.connection.flush().await?;
             }
 
             Command::Publish {
