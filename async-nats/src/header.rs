@@ -211,8 +211,7 @@ impl HeaderMap {
     }
 }
 
-/// A struct representing value of a given header.
-/// Can contain one or more elements.
+/// Represents NATS header field value.
 ///
 /// # Examples
 ///
