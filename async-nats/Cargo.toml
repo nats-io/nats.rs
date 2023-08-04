@@ -58,6 +58,6 @@ slow_tests = []
 
 
 [[bench]]
-name = "core_nats"
+name = "main"
 harness = false
 lto = true
