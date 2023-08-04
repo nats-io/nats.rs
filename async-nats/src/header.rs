@@ -139,17 +139,15 @@ impl HeaderMap {
     /// let mut headers = HeaderMap::new();
     /// headers.append("Key", "Value");
     /// headers.append("Key", "Another");
-    pub fn append<K: IntoHeaderName, V: ToString>(&mut self, name: K, value: V) {
+    pub fn append<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         let key = name.into_header_name();
         let v = self.inner.get_mut(&key);
         match v {
             Some(v) => {
-                v.push(HeaderValue {
-                    inner: value.to_string(),
-                });
+                v.push(value.into_header_value());
             }
             None => {
-                self.insert(key, value.to_string().into_header_value());
+                self.insert(key, value.into_header_value());
             }
         }
     }

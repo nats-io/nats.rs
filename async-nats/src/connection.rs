@@ -22,7 +22,7 @@ use tokio::io::{AsyncReadExt, AsyncWrite};
 use bytes::{Buf, BytesMut};
 use tokio::io;
 
-use crate::header::{HeaderMap, HeaderName};
+use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
 use crate::{ClientOp, ServerError, ServerOp};
 
@@ -304,7 +304,7 @@ impl Connection {
                 }
                 value.truncate(value.trim_end().len());
 
-                headers.append(name, value);
+                headers.append(name, value.into_header_value());
             }
 
             return Ok(Some(ServerOp::Message {
