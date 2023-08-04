@@ -282,7 +282,6 @@ pub(crate) enum Command {
     Flush {
         result: oneshot::Sender<Result<(), io::Error>>,
     },
-    TryFlush,
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -565,9 +564,6 @@ impl ConnectionHandler {
                         io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
                     })?;
                 }
-            }
-            Command::TryFlush => {
-                self.handle_flush().await?;
             }
             Command::Subscribe {
                 sid,

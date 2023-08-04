@@ -18,7 +18,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::{header, Client, Command, HeaderMap, HeaderValue, StatusCode};
+use crate::{header, Client, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
