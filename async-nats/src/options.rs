@@ -13,11 +13,12 @@
 
 use crate::auth::Auth;
 use crate::connector;
+use crate::error::Error;
 use crate::{Client, ConnectError, Event, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures::Future;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -337,7 +338,7 @@ impl ConnectOptions {
     /// let jwt = load_jwt().await?;
     /// let nc = async_nats::ConnectOptions::with_jwt(jwt, move |nonce| {
     ///     let key_pair = key_pair.clone();
-    ///     async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    ///     async move { key_pair.sign(&nonce) }
     /// })
     /// .connect("localhost")
     /// .await?;
@@ -371,7 +372,7 @@ impl ConnectOptions {
     /// let nc = async_nats::ConnectOptions::new()
     ///     .jwt(jwt, move |nonce| {
     ///         let key_pair = key_pair.clone();
-    ///         async move { key_pair.sign(&nonce).map_err(async_nats::AuthError::new) }
+    ///         async move { key_pair.sign(&nonce) }
     ///     })
     ///     .connect("localhost")
     ///     .await?;
@@ -390,7 +391,7 @@ impl ConnectOptions {
             Box::pin(async move {
                 let sig = sign_cb(nonce.as_bytes().to_vec())
                     .await
-                    .map_err(AuthError::new)?;
+                    .map_err(|_| AuthError::new(AuthErrorKind::InvalidSignature))?;
                 Ok(URL_SAFE_NO_PAD.encode(sig))
             })
         }));
@@ -506,7 +507,11 @@ impl ConnectOptions {
 
         Ok(self.jwt(jwt.to_owned(), move |nonce| {
             let key_pair = key_pair.clone();
-            async move { key_pair.sign(&nonce).map_err(AuthError::new) }
+            async move {
+                key_pair
+                    .sign(&nonce)
+                    .map_err(|_| AuthErrorKind::InvalidKeyPair.into())
+            }
         }))
     }
 
@@ -899,27 +904,20 @@ impl<A, T> fmt::Debug for CallbackArg1<A, T> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AuthErrorKind {
+    InvalidKeyPair,
+    InvalidSignature,
+}
+
+impl Display for AuthErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidKeyPair => f.write_str("invalid keypair"),
+            Self::InvalidSignature => f.write_str("invalid signature"),
+        }
+    }
+}
+
 /// Error report from signing callback.
-// This was needed because std::io::Error isn't Send.
-#[derive(Clone, PartialEq)]
-pub struct AuthError(String);
-
-impl AuthError {
-    pub fn new(s: impl ToString) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl std::fmt::Display for AuthError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&format!("AuthError({})", &self.0))
-    }
-}
-
-impl std::fmt::Debug for AuthError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&format!("AuthError({})", &self.0))
-    }
-}
-
-impl std::error::Error for AuthError {}
+pub type AuthError = Error<AuthErrorKind>;
