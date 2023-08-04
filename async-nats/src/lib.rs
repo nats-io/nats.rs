@@ -171,7 +171,7 @@ mod options;
 
 pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
-pub use options::{AuthError, ConnectOptions};
+pub use options::{AuthError, AuthErrorKind, ConnectOptions};
 
 pub mod error;
 pub mod header;
@@ -878,6 +878,12 @@ pub type ConnectError = error::Error<ConnectErrorKind>;
 impl From<io::Error> for ConnectError {
     fn from(err: io::Error) -> Self {
         ConnectError::with_source(ConnectErrorKind::Io, err)
+    }
+}
+
+impl From<AuthError> for ConnectError {
+    fn from(value: AuthError) -> Self {
+        value.with_kind(ConnectErrorKind::Authentication)
     }
 }
 
