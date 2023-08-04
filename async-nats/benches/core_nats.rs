@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, Criterion};
 use futures::stream::StreamExt;
 
 static MSG: &[u8] = &[22; 32768];
@@ -200,5 +200,4 @@ async fn subscribe_messages(nc: async_nats::Client, amount: u64) {
     }
 }
 
-criterion_group!(benches, publish, subscribe, request);
-criterion_main!(benches);
+criterion_group!(core_nats, publish, subscribe, request);
