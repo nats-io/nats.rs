@@ -25,7 +25,7 @@ pub fn publish(c: &mut Criterion) {
                 let nc =
                     rt.block_on(async { async_nats::connect(server.client_url()).await.unwrap() });
 
-                b.to_async(rt).iter(move || {
+                b.to_async(rt).iter_with_large_drop(move || {
                     let nc = nc.clone();
                     async move {
                         publish_messages(nc, Bytes::from_static(&MSG[..size]), messages_per_iter)
@@ -55,7 +55,7 @@ pub fn publish(c: &mut Criterion) {
                     nc
                 });
 
-                b.to_async(rt).iter(move || {
+                b.to_async(rt).iter_with_large_drop(move || {
                     let nc = nc.clone();
                     async move {
                         publish_messages(nc, Bytes::from_static(&MSG[..size]), messages_per_iter)
@@ -84,13 +84,13 @@ pub fn subscribe(c: &mut Criterion) {
             move |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let url = url.clone();
-                let (nc, handle) = rt.block_on(async move {
+                let nc = rt.block_on(async move {
                     let nc = async_nats::ConnectOptions::new()
                         .connect(url.clone())
                         .await
                         .unwrap();
                     let (started, ready) = tokio::sync::oneshot::channel();
-                    let handle = tokio::task::spawn({
+                    tokio::task::spawn({
                         async move {
                             let client = async_nats::ConnectOptions::new()
                                 .connect(url)
@@ -102,21 +102,20 @@ pub fn subscribe(c: &mut Criterion) {
                                 client
                                     .publish("bench".to_string(), Bytes::from_static(&MSG[..size]))
                                     .await
-                                    .ok();
+                                    .unwrap()
                             }
                         }
                     });
                     nc.publish("data".to_string(), "data".into()).await.unwrap();
                     nc.flush().await.unwrap();
                     ready.await.unwrap();
-                    (nc, handle)
+                    nc
                 });
 
-                b.to_async(rt).iter(move || {
+                b.to_async(rt).iter_with_large_drop(move || {
                     let nc = nc.clone();
                     async move { subscribe_messages(nc, messages_per_iter).await }
                 });
-                handle.abort();
             },
         );
     }
@@ -139,13 +138,13 @@ pub fn request(c: &mut Criterion) {
             move |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let url = url.clone();
-                let (nc, handle) = rt.block_on(async move {
+                let nc = rt.block_on(async move {
                     let nc = async_nats::ConnectOptions::new()
                         .connect(url.clone())
                         .await
                         .unwrap();
                     let (started, ready) = tokio::sync::oneshot::channel();
-                    let handle = tokio::task::spawn({
+                    tokio::task::spawn({
                         async move {
                             let client = async_nats::ConnectOptions::new()
                                 .connect(url)
@@ -167,15 +166,14 @@ pub fn request(c: &mut Criterion) {
                     });
                     nc.flush().await.unwrap();
                     ready.await.unwrap();
-                    (nc, handle)
+                    nc
                 });
-                b.to_async(rt).iter(move || {
+                b.to_async(rt).iter_with_large_drop(move || {
                     let nc = nc.clone();
                     async move {
                         requests(nc, Bytes::from_static(&MSG[..size]), messages_per_iter).await
                     }
                 });
-                handle.abort();
             },
         );
     }
