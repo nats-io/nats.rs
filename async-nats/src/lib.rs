@@ -645,7 +645,7 @@ impl ConnectionHandler {
                         .connection
                         .write_op(&ClientOp::Subscribe {
                             sid: 0,
-                            subject,
+                            subject: subject.clone(),
                             queue_group: None,
                         })
                         .await
