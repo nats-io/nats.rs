@@ -51,7 +51,6 @@ pub fn publish(c: &mut Criterion) {
                 let nc = rt.block_on(async {
                     let nc = async_nats::connect(server.client_url()).await.unwrap();
                     nc.publish("data".to_string(), "data".into()).await.unwrap();
-                    nc.flush().await.unwrap();
                     nc
                 });
 
@@ -107,7 +106,6 @@ pub fn subscribe(c: &mut Criterion) {
                         }
                     });
                     nc.publish("data".to_string(), "data".into()).await.unwrap();
-                    nc.flush().await.unwrap();
                     ready.await.unwrap();
                     nc
                 });
@@ -160,11 +158,9 @@ pub fn request(c: &mut Criterion) {
                                     .publish(request.reply.unwrap(), "".into())
                                     .await
                                     .unwrap();
-                                client.flush().await.unwrap();
                             }
                         }
                     });
-                    nc.flush().await.unwrap();
                     ready.await.unwrap();
                     nc
                 });
@@ -190,7 +186,6 @@ async fn publish_messages(nc: async_nats::Client, msg: Bytes, amount: u64) {
     for _i in 0..amount {
         nc.publish("bench".into(), msg.clone()).await.unwrap();
     }
-    nc.flush().await.unwrap();
 }
 
 async fn subscribe_messages(nc: async_nats::Client, amount: u64) {
