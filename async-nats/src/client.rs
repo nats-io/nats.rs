@@ -375,7 +375,7 @@ impl Client {
         } else {
             let (sender, receiver) = oneshot::channel();
 
-            let payload = request.payload.unwrap_or_else(|| Bytes::new());
+            let payload = request.payload.unwrap_or_else(Bytes::new);
             let respond = self.new_inbox();
             let headers = request.headers;
 
