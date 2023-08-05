@@ -152,6 +152,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const MAX_PENDING_PINGS: usize = 2;
+const MULTIPLEXER_SID: u64 = 0;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -644,7 +645,7 @@ impl ConnectionHandler {
                     if let Err(err) = self
                         .connection
                         .write_op(&ClientOp::Subscribe {
-                            sid: 0,
+                            sid: MULTIPLEXER_SID,
                             subject: subject.clone(),
                             queue_group: None,
                         })
@@ -735,7 +736,7 @@ impl ConnectionHandler {
         if let Some(multiplexer) = &self.multiplexer {
             self.connection
                 .write_op(&ClientOp::Subscribe {
-                    sid: 0,
+                    sid: MULTIPLEXER_SID,
                     subject: multiplexer.subject.to_owned(),
                     queue_group: None,
                 })
