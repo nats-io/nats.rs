@@ -324,6 +324,7 @@ struct Subscription {
 
 #[derive(Debug)]
 struct Multiplexer {
+    subject: String,
     prefix: String,
     senders: HashMap<String, oneshot::Sender<Message>>,
 }
@@ -653,6 +654,7 @@ impl ConnectionHandler {
                     }
 
                     self.multiplexer.insert(Multiplexer {
+                        subject,
                         prefix: format!("{}.", prefix),
                         senders: HashMap::new(),
                     })
@@ -729,6 +731,18 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
+
+        if let Some(multiplexer) = &self.multiplexer {
+            self.connection
+                .write_op(&ClientOp::Subscribe {
+                    sid: 0,
+                    subject: multiplexer.subject.to_owned(),
+                    queue_group: None,
+                })
+                .await
+                .unwrap();
+        }
+
         self.connector.events_tx.try_send(Event::Connected).ok();
 
         Ok(())
