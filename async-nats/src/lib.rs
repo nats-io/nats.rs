@@ -324,7 +324,6 @@ struct Subscription {
 
 #[derive(Debug)]
 struct Multiplexer {
-    sid: u64,
     prefix: String,
     senders: HashMap<String, oneshot::Sender<Message>>,
 }

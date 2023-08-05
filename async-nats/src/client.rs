@@ -18,7 +18,6 @@ use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber}
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
-use futures::stream::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
