@@ -18,6 +18,7 @@ use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber}
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
+use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
@@ -334,44 +335,83 @@ impl Client {
         subject: String,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let (sender, receiver) = oneshot::channel();
-
-        let payload = request.payload.unwrap_or_else(|| Bytes::new());
-        let respond = self.new_inbox();
-        let headers = request.headers;
-
-        self.sender
-            .send(Command::Request {
-                subject,
-                payload,
-                respond,
-                headers,
-                sender,
-            })
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))
-            .await?;
-
-        let timeout = request.timeout.unwrap_or(self.request_timeout);
-        let request = match timeout {
-            Some(timeout) => {
-                tokio::time::timeout(timeout, receiver)
-                    .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
-                    .await?
-            }
-            None => receiver.await,
-        };
-
-        match request {
-            Ok(message) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(RequestError::with_source(
-                        RequestErrorKind::NoResponders,
-                        "no responders",
-                    ));
+        if let Some(inbox) = request.inbox {
+            let timeout = request.timeout.unwrap_or(self.request_timeout);
+            let mut sub = self.subscribe(inbox.clone()).await?;
+            let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
+            match request.headers {
+                Some(headers) => {
+                    self.publish_with_reply_and_headers(subject, inbox, headers, payload)
+                        .await?
                 }
-                Ok(message)
+                None => self.publish_with_reply(subject, inbox, payload).await?,
             }
-            Err(err) => Err(RequestError::with_source(RequestErrorKind::Other, err)),
+            self.flush()
+                .await
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
+            let request = match timeout {
+                Some(timeout) => {
+                    tokio::time::timeout(timeout, sub.next())
+                        .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
+                        .await?
+                }
+                None => sub.next().await,
+            };
+            match request {
+                Some(message) => {
+                    if message.status == Some(StatusCode::NO_RESPONDERS) {
+                        return Err(RequestError::with_source(
+                            RequestErrorKind::NoResponders,
+                            "no responders",
+                        ));
+                    }
+                    Ok(message)
+                }
+                None => Err(RequestError::with_source(
+                    RequestErrorKind::Other,
+                    "broken pipe",
+                )),
+            }
+        } else {
+            let (sender, receiver) = oneshot::channel();
+
+            let payload = request.payload.unwrap_or_else(|| Bytes::new());
+            let respond = self.new_inbox();
+            let headers = request.headers;
+
+            self.sender
+                .send(Command::Request {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                    sender,
+                })
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))
+                .await?;
+
+            let timeout = request.timeout.unwrap_or(self.request_timeout);
+            let request = match timeout {
+                Some(timeout) => {
+                    tokio::time::timeout(timeout, receiver)
+                        .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
+                        .await?
+                }
+                None => receiver.await,
+            };
+
+            match request {
+                Ok(message) => {
+                    if message.status == Some(StatusCode::NO_RESPONDERS) {
+                        return Err(RequestError::with_source(
+                            RequestErrorKind::NoResponders,
+                            "no responders",
+                        ));
+                    }
+                    Ok(message)
+                }
+                Err(err) => Err(RequestError::with_source(RequestErrorKind::Other, err)),
+            }
         }
     }
 
