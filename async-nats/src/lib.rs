@@ -638,14 +638,12 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    // TODO what is the sid?
-                    let sid = 0;
                     let subject = format!("{}.*", prefix);
 
                     if let Err(err) = self
                         .connection
                         .write_op(&ClientOp::Subscribe {
-                            sid,
+                            sid: 0,
                             subject,
                             queue_group: None,
                         })
@@ -655,7 +653,6 @@ impl ConnectionHandler {
                     }
 
                     self.multiplexer.insert(Multiplexer {
-                        sid,
                         prefix: format!("{}.", prefix),
                         senders: HashMap::new(),
                     })
