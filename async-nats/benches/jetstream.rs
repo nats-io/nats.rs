@@ -9,7 +9,7 @@ static MSG: &[u8] = &[22; 32768];
 pub fn jetstream_publish_sync(c: &mut Criterion) {
     let messages_per_iter = 50_000;
     let server = nats_server::run_server("tests/configs/jetstream.conf");
-    let mut throughput_group = c.benchmark_group("jetstream sync publish throughput");
+    let mut throughput_group = c.benchmark_group("jetstream::sync_publish_throughput");
     throughput_group.sample_size(10);
     throughput_group.warm_up_time(std::time::Duration::from_secs(1));
 
@@ -141,7 +141,8 @@ pub fn jetstream_publish_async(c: &mut Criterion) {
     }
     throughput_group.finish();
 
-    let mut messages_group = c.benchmark_group("jetstream async publish messages amount");
+    let mut messages_group = c.benchmark_group("jetstream::async_publish_messages_amount");
+
     messages_group.sample_size(10);
     messages_group.warm_up_time(std::time::Duration::from_secs(1));
 
@@ -197,7 +198,7 @@ async fn publish_sync_batch(context: async_nats::jetstream::Context, msg: Bytes,
 }
 
 async fn publish_async_batch(context: async_nats::jetstream::Context, msg: Bytes, amount: u64) {
-    // This acts as a semaphore that does not allow for more than 1000 publish acks awaiting.
+    // This acts as a semaphore that does not allow for more than 10 publish acks awaiting.
     let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
     let handle = tokio::task::spawn(async move {

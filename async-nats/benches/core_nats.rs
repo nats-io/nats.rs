@@ -9,7 +9,7 @@ static MSG: &[u8] = &[22; 32768];
 pub fn publish(c: &mut Criterion) {
     let messages_per_iter = 500_000;
     let server = nats_server::run_basic_server();
-    let mut throughput_group = c.benchmark_group("async-nats: publish throughput");
+    let mut throughput_group = c.benchmark_group("nats::publish_throughput");
     throughput_group.sample_size(10);
     throughput_group.warm_up_time(std::time::Duration::from_secs(1));
 
@@ -37,7 +37,7 @@ pub fn publish(c: &mut Criterion) {
     }
     throughput_group.finish();
 
-    let mut messages_group = c.benchmark_group("async-nats: publish messages amount");
+    let mut messages_group = c.benchmark_group("nats::publish_amount");
     messages_group.sample_size(10);
     messages_group.warm_up_time(std::time::Duration::from_secs(1));
 
@@ -72,7 +72,7 @@ pub fn subscribe(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
     let messages_per_iter = 500_000;
 
-    let mut subscribe_amount_group = c.benchmark_group("subscribe amount");
+    let mut subscribe_amount_group = c.benchmark_group("nats::subscribe_amount");
     subscribe_amount_group.sample_size(10);
 
     for &size in [32, 1024, 8192].iter() {
@@ -126,7 +126,7 @@ pub fn request(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
     let messages_per_iter = 10_000;
 
-    let mut subscribe_amount_group = c.benchmark_group("request amount");
+    let mut subscribe_amount_group = c.benchmark_group("nats::request_amount");
     subscribe_amount_group.sample_size(10);
 
     for &size in [32, 1024, 8192].iter() {
