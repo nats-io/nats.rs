@@ -170,7 +170,7 @@ mod connector;
 mod options;
 
 pub use auth::Auth;
-pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
+pub use client::{Client, Request, RequestError, RequestErrorKind};
 pub use options::{AuthError, AuthErrorKind, ConnectOptions};
 
 pub mod error;
@@ -934,13 +934,14 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn unsubscribe(&mut self) -> Result<(), UnsubscribeError> {
+    pub async fn unsubscribe(&mut self) -> Result<(), RequestError> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
                 max: None,
             })
-            .await?;
+            .await
+            .map_err(|e| e.with_kind(RequestErrorKind::UnsubscriptionFailed))?;
         self.receiver.close();
         Ok(())
     }
@@ -971,24 +972,15 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> Result<(), UnsubscribeError> {
+    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> Result<(), RequestError> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
                 max: Some(unsub_after),
             })
-            .await?;
+            .await
+            .map_err(|e| e.with_kind(RequestErrorKind::UnsubscriptionFailed))?;
         Ok(())
-    }
-}
-
-#[derive(Error, Debug, PartialEq)]
-#[error("failed to send unsubscribe")]
-pub struct UnsubscribeError(String);
-
-impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
-    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        UnsubscribeError(err.to_string())
     }
 }
 
@@ -1319,6 +1311,7 @@ macro_rules! from_with_timeout {
         }
     };
 }
+use crate::error::WithKind;
 pub(crate) use from_with_timeout;
 
 #[cfg(test)]

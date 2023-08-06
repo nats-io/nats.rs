@@ -29,7 +29,7 @@ use crate::{
     connection::State,
     error::Error,
     jetstream::{self, Context},
-    StatusCode, SubscribeError, Subscriber,
+    RequestError, RequestErrorKind, StatusCode, Subscriber,
 };
 
 use super::{
@@ -2181,9 +2181,14 @@ impl std::fmt::Display for BatchErrorKind {
 
 pub type BatchError = Error<BatchErrorKind>;
 
-impl From<SubscribeError> for BatchError {
-    fn from(err: SubscribeError) -> Self {
-        BatchError::with_source(BatchErrorKind::Subscribe, err)
+impl From<RequestError> for BatchError {
+    fn from(err: RequestError) -> Self {
+        match err.kind {
+            RequestErrorKind::SubscriptionFailed => {
+                BatchError::with_source(BatchErrorKind::Subscribe, err)
+            }
+            _ => panic!("Cannot convert error"),
+        }
     }
 }
 

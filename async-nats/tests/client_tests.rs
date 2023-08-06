@@ -756,7 +756,7 @@ mod client {
     async fn publish_error_should_be_nameable() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
-        let _error: Result<(), async_nats::PublishError> =
+        let _error: Result<(), async_nats::RequestError> =
             client.publish("foo".into(), "data".into()).await;
     }
 

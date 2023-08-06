@@ -36,7 +36,7 @@ use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::debug;
 
-use crate::{Client, Error, HeaderMap, Message, PublishError, Subscriber};
+use crate::{Client, Error, HeaderMap, Message, RequestError, Subscriber};
 
 use self::endpoint::Endpoint;
 
@@ -406,6 +406,7 @@ impl Service {
             subjects,
         })
     }
+
     /// Stops this instance of the [Service].
     /// If there are more instances of [Services][Service] with the same name, the [Service] will
     /// be scaled down by one instance. If it was the only running instance, it will effectively
@@ -511,7 +512,7 @@ impl Service {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
+    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, RequestError> {
         EndpointBuilder::new(
             self.client.clone(),
             self.endpoints_state.clone(),
@@ -574,7 +575,7 @@ impl Group {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
+    pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, RequestError> {
         EndpointBuilder::new(
             self.client.clone(),
             self.stats.clone(),
@@ -616,7 +617,7 @@ async fn verb_subscription(
     verb: Verb,
     name: String,
     id: String,
-) -> Result<futures::stream::Fuse<SelectAll<Subscriber>>, Error> {
+) -> Result<futures::stream::Fuse<SelectAll<Subscriber>>, RequestError> {
     let verb_all = client
         .subscribe(format!("{SERVICE_API_PREFIX}.{verb}"))
         .await?;
@@ -668,7 +669,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn respond(self, response: Result<Bytes, error::Error>) -> Result<(), PublishError> {
+    pub async fn respond(self, response: Result<Bytes, error::Error>) -> Result<(), RequestError> {
         let reply = self.message.reply.clone().unwrap();
         let result = match response {
             Ok(payload) => self.client.publish(reply, payload).await,
@@ -742,7 +743,7 @@ impl EndpointBuilder {
     }
 
     /// Finalizes the builder and adds the [Endpoint].
-    pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, Error> {
+    pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, RequestError> {
         let subject = subject.to_string();
         let name = self.name.clone().unwrap_or_else(|| subject.clone());
         let requests = self
