@@ -141,21 +141,21 @@ impl FromStr for Operation {
             KV_OPERATION_DELETE => Ok(Operation::Delete),
             KV_OPERATION_PURGE => Ok(Operation::Purge),
             KV_OPERATION_PUT => Ok(Operation::Put),
-            _ => Err(ParseOperationError),
+            _ => Err(ParseOperationError::new(ParseOperationErrorKind)),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ParseOperationError;
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParseOperationErrorKind;
 
-impl fmt::Display for ParseOperationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for ParseOperationErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "invalid value found for operation (value can only be {KV_OPERATION_PUT}, {KV_OPERATION_PURGE} or {KV_OPERATION_DELETE}")
     }
 }
 
-impl std::error::Error for ParseOperationError {}
+pub type ParseOperationError = Error<ParseOperationErrorKind>;
 
 /// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
