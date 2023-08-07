@@ -13,10 +13,11 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
-use crate::Error;
+use crate::error::WithKind;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
+use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use time::OffsetDateTime;
 
@@ -54,6 +55,7 @@ impl Message {
             },
         )
     }
+
     /// Acknowledges a message delivery by sending `+ACK` to the server.
     ///
     /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
@@ -83,18 +85,15 @@ impl Message {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn ack(&self) -> Result<(), Error> {
+    pub async fn ack(&self) -> Result<(), AckError> {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
                 .publish(reply.to_string(), "".into())
-                .map_err(Error::from)
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No reply subject, not a JetStream message",
-            )))
+            Err(AckErrorKind::NoReplySubject.into())
         }
     }
 
@@ -125,18 +124,15 @@ impl Message {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn ack_with(&self, kind: AckKind) -> Result<(), Error> {
+    pub async fn ack_with(&self, kind: AckKind) -> Result<(), AckError> {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
                 .publish(reply.to_string(), kind.into())
-                .map_err(Error::from)
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No reply subject, not a JetStream message",
-            )))
+            Err(AckErrorKind::NoReplySubject.into())
         }
     }
 
@@ -170,52 +166,46 @@ impl Message {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn double_ack(&self) -> Result<(), Error> {
+    pub async fn double_ack(&self) -> Result<(), AckError> {
         if let Some(ref reply) = self.reply {
             let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
+            let mut subscription = self
+                .context
+                .client
+                .subscribe(inbox.clone())
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
+                .await?;
             self.context
                 .client
                 .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
                 .await?;
             match tokio::time::timeout(self.context.timeout, subscription.next())
                 .await
-                .map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "double ack response timed out",
-                    )
-                })? {
+                .map_err(|e| e.with_kind(AckErrorKind::TimedOut))?
+            {
                 Some(_) => Ok(()),
-                None => Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "subscription dropped",
-                ))),
+                None => Err(AckErrorKind::SubscriptionDropped.into()),
             }
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No reply subject, not a JetStream message",
-            )))
+            Err(AckErrorKind::NoReplySubject.into())
         }
     }
 
     /// Returns the `JetStream` message ID
     /// if this is a `JetStream` message.
     #[allow(clippy::mixed_read_write_in_expression)]
-    pub fn info(&self) -> Result<Info<'_>, Error> {
+    pub fn info(&self) -> Result<Info<'_>, MessageError> {
         const PREFIX: &str = "$JS.ACK.";
         const SKIP: usize = PREFIX.len();
 
-        let mut reply: &str = self.reply.as_ref().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "did not found reply subject")
-        })?;
+        let mut reply: &str = self
+            .reply
+            .as_ref()
+            .ok_or_else(|| MessageError::new(MessageErrorKind::SubjectNotFound))?;
 
         if !reply.starts_with(PREFIX) {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "did not found proper prefix",
-            )));
+            return Err(MessageErrorKind::PrefixNotFound.into());
         }
 
         reply = &reply[SKIP..];
@@ -241,7 +231,7 @@ impl Message {
                 match str::parse(try_parse!(str)) {
                     Ok(parsed) => parsed,
                     Err(e) => {
-                        return Err(Box::new(e));
+                        return Err(e.with_kind(MessageErrorKind::UnparseableString));
                     }
                 }
             };
@@ -255,10 +245,7 @@ impl Message {
                     }
                     next
                 } else {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "too few tokens",
-                    )));
+                    return Err(MessageErrorKind::TooFewTokens(token_index).into());
                 }
             };
         }
@@ -289,7 +276,8 @@ impl Message {
                 consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
-                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos)
+                        .map_err(|e| e.with_kind(MessageErrorKind::UnparseableNanos))?
                 },
                 pending: try_parse!(),
                 token: if n_tokens >= 9 {
@@ -311,16 +299,14 @@ impl Message {
                 consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
-                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                    OffsetDateTime::from_unix_timestamp_nanos(nanos)
+                        .map_err(|e| e.with_kind(MessageErrorKind::UnparseableNanos))?
                 },
                 pending: try_parse!(),
                 token: None,
             })
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "bad token number",
-            )))
+            Err(MessageErrorKind::BadTokenNumber(n_tokens).into())
         }
     }
 }
@@ -370,18 +356,15 @@ impl Acker {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn ack(&self) -> Result<(), Error> {
+    pub async fn ack(&self) -> Result<(), AckError> {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
                 .publish(reply.to_string(), "".into())
-                .map_err(Error::from)
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No reply subject, not a JetStream message",
-            )))
+            Err(AckErrorKind::NoReplySubject.into())
         }
     }
 
@@ -418,18 +401,15 @@ impl Acker {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn ack_with(&self, kind: AckKind) -> Result<(), Error> {
+    pub async fn ack_with(&self, kind: AckKind) -> Result<(), AckError> {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
                 .publish(reply.to_string(), kind.into())
-                .map_err(Error::from)
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No reply subject, not a JetStream message",
-            )))
+            Err(AckErrorKind::NoReplySubject.into())
         }
     }
 
@@ -469,33 +449,29 @@ impl Acker {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn double_ack(&self) -> Result<(), Error> {
+    pub async fn double_ack(&self) -> Result<(), AckError> {
         if let Some(ref reply) = self.reply {
             let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
+            let mut subscription = self
+                .context
+                .client
+                .subscribe(inbox.clone())
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
+                .await?;
             self.context
                 .client
                 .publish_with_reply(reply.to_string(), inbox, AckKind::Ack.into())
+                .map_err(|e| e.with_kind(AckErrorKind::RequestFailed))
                 .await?;
             match tokio::time::timeout(self.context.timeout, subscription.next())
-                .await
-                .map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "double ack response timed out",
-                    )
-                })? {
+                .map_err(|_| AckError::new(AckErrorKind::TimedOut))
+                .await?
+            {
                 Some(_) => Ok(()),
-                None => Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "subscription dropped",
-                ))),
+                None => Err(AckErrorKind::SubscriptionDropped.into()),
             }
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No reply subject, not a JetStream message",
-            )))
+            Err(AckErrorKind::NoReplySubject.into())
         }
     }
 }
@@ -561,3 +537,53 @@ pub struct Info<'a> {
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AckErrorKind {
+    RequestFailed,
+    TimedOut,
+    PrefixNotFound,
+    SubjectNotFound,
+    NoReplySubject,
+    SubscriptionDropped,
+}
+
+impl Display for AckErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RequestFailed => write!(f, "failed to publish acknowledge"),
+            Self::NoReplySubject => write!(f, "no reply subject, not a JetStream message"),
+            Self::SubjectNotFound => write!(f, "did not found reply subject"),
+            Self::PrefixNotFound => write!(f, "did not found proper prefix"),
+            Self::TimedOut => write!(f, "double ack response timed out"),
+            Self::SubscriptionDropped => write!(f, "subscription dropped"),
+        }
+    }
+}
+
+pub type AckError = crate::error::Error<AckErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MessageErrorKind {
+    BadTokenNumber(usize),
+    PrefixNotFound,
+    SubjectNotFound,
+    TooFewTokens(usize),
+    UnparseableNanos,
+    UnparseableString,
+}
+
+impl Display for MessageErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadTokenNumber(n) => write!(f, "bad token number {} (expected 7 or 9)", n),
+            Self::PrefixNotFound => write!(f, "did not found proper prefix"),
+            Self::TooFewTokens(n) => write!(f, "too few tokens (cannot find the #{}-th token", n),
+            Self::SubjectNotFound => write!(f, "did not found reply subject"),
+            Self::UnparseableString => write!(f, "cannot parse the string"),
+            Self::UnparseableNanos => write!(f, "cannot parse the number of nanoseconds"),
+        }
+    }
+}
+
+pub type MessageError = crate::error::Error<MessageErrorKind>;
