@@ -340,7 +340,6 @@ pub(crate) struct ConnectionHandler {
     pending_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
-    flush_interval: Interval,
     is_flushing: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
 }
@@ -351,13 +350,9 @@ impl ConnectionHandler {
         connector: Connector,
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
         ping_period: Duration,
-        flush_period: Duration,
     ) -> ConnectionHandler {
         let mut ping_interval = interval(ping_period);
         ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        let mut flush_interval = interval(flush_period);
-        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         ConnectionHandler {
             connection,
@@ -367,7 +362,6 @@ impl ConnectionHandler {
             pending_pings: 0,
             info_sender,
             ping_interval,
-            flush_interval,
             is_flushing: false,
             flush_observers: Vec::new(),
         }
@@ -491,7 +485,7 @@ impl ConnectionHandler {
                 }
 
                 if !self.handler.is_flushing && self.handler.connection.should_flush() {
-                    self.handler.is_flushing = self.handler.flush_interval.poll_tick(cx).is_ready();
+                    self.handler.is_flushing = true;
                 }
 
                 if self.handler.is_flushing {
@@ -499,7 +493,6 @@ impl ConnectionHandler {
                         Poll::Pending => {}
                         Poll::Ready(Ok(())) => {
                             self.handler.is_flushing = false;
-                            self.handler.flush_interval.reset();
 
                             for observer in self.handler.flush_observers.drain(..) {
                                 let _ = observer.send(());
@@ -790,7 +783,6 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     options: ConnectOptions,
 ) -> Result<Client, ConnectError> {
     let ping_period = options.ping_interval;
-    let flush_period = options.flush_interval;
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
@@ -852,13 +844,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection = Some(connection_ok);
         }
         let connection = connection.unwrap();
-        let mut connection_handler = ConnectionHandler::new(
-            connection,
-            connector,
-            info_sender,
-            ping_period,
-            flush_period,
-        );
+        let mut connection_handler =
+            ConnectionHandler::new(connection, connector, info_sender, ping_period);
         connection_handler.process(&mut receiver).await
     });
 

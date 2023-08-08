@@ -55,7 +55,6 @@ pub struct ConnectOptions {
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
-    pub(crate) flush_interval: Duration,
     pub(crate) ping_interval: Duration,
     pub(crate) subscription_capacity: usize,
     pub(crate) sender_capacity: usize,
@@ -84,7 +83,6 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
-            .entry(&"flush_interval", &self.flush_interval)
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
@@ -108,7 +106,6 @@ impl Default for ConnectOptions {
             client_cert: None,
             client_key: None,
             tls_client_config: None,
-            flush_interval: Duration::from_millis(1),
             ping_interval: Duration::from_secs(60),
             sender_capacity: 128,
             subscription_capacity: 4096,
@@ -565,27 +562,6 @@ impl ConnectOptions {
     /// ```
     pub fn require_tls(mut self, is_required: bool) -> ConnectOptions {
         self.tls_required = is_required;
-        self
-    }
-
-    /// Sets the interval for flushing. NATS connection will send buffered data to the NATS Server
-    /// whenever buffer limit is reached, but it is also necessary to flush once in a while if
-    /// client is sending rarely and small messages. Flush interval allows to modify that interval.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use tokio::time::Duration;
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::ConnectError> {
-    /// async_nats::ConnectOptions::new()
-    ///     .flush_interval(Duration::from_millis(100))
-    ///     .connect("demo.nats.io")
-    ///     .await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn flush_interval(mut self, flush_interval: Duration) -> ConnectOptions {
-        self.flush_interval = flush_interval;
         self
     }
 
