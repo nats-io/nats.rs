@@ -40,7 +40,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
@@ -296,7 +295,7 @@ impl Connector {
         tcp_stream.set_nodelay(true)?;
 
         let mut connection = Connection::new(
-            Box::new(BufWriter::new(tcp_stream)),
+            Box::new(tcp_stream),
             self.options.read_buffer_capacity.into(),
         );
 
