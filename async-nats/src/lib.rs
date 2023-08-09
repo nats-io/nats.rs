@@ -516,8 +516,9 @@ impl ConnectionHandler {
                                 length,
                             };
 
-                            // TODO don't unwrap
-                            sender.send(message).unwrap();
+                            sender.send(message).map_err(|_| {
+                                io::Error::new(io::ErrorKind::Other, "request receiver closed")
+                            })?;
                         }
                     }
                 }
@@ -634,8 +635,9 @@ impl ConnectionHandler {
                 headers,
                 sender,
             } => {
-                // FIXME unwrap or err
-                let (prefix, token) = respond.rsplit_once('.').unwrap();
+                let (prefix, token) = respond.rsplit_once('.').ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::Other, "malformed request subject")
+                })?;
 
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
