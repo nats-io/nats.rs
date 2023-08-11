@@ -243,6 +243,70 @@ impl AsRef<str> for HeaderValue {
     }
 }
 
+impl From<i16> for HeaderValue {
+    fn from(v: i16) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<i32> for HeaderValue {
+    fn from(v: i32) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<i64> for HeaderValue {
+    fn from(v: i64) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<isize> for HeaderValue {
+    fn from(v: isize) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<u16> for HeaderValue {
+    fn from(v: u16) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<u32> for HeaderValue {
+    fn from(v: u32) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<u64> for HeaderValue {
+    fn from(v: u64) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<usize> for HeaderValue {
+    fn from(v: usize) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
 impl FromStr for HeaderValue {
     type Err = ParseHeaderValueError;
 
@@ -254,14 +318,6 @@ impl FromStr for HeaderValue {
         Ok(HeaderValue {
             inner: s.to_string(),
         })
-    }
-}
-
-impl From<u64> for HeaderValue {
-    fn from(v: u64) -> Self {
-        Self {
-            inner: v.to_string(),
-        }
     }
 }
 
