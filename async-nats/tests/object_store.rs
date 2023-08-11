@@ -111,6 +111,66 @@ mod object_store {
     }
 
     #[tokio::test]
+    async fn watch_with_history() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket
+            .put("FOO", &mut std::io::Cursor::new(vec![1, 2, 3, 4]))
+            .await
+            .unwrap();
+
+        bucket
+            .put("BAR", &mut std::io::Cursor::new(vec![5, 6, 7, 8]))
+            .await
+            .unwrap();
+
+        bucket
+            .put("FOO", &mut std::io::Cursor::new(vec![9, 0, 1, 2]))
+            .await
+            .unwrap();
+
+        let mut watcher = bucket.watch_with_history().await.unwrap();
+
+        tokio::task::spawn({
+            let bucket = bucket.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                bucket
+                    .put("BAR", &mut io::Cursor::new(vec![2, 3, 4, 5]))
+                    .await
+                    .unwrap();
+                bucket.delete("BAR").await.unwrap();
+            }
+        });
+
+        // check to see if we get the values in accordance to the LastPerSubject deliver policy
+        // we should get `BAR` and only one `FOO`
+        let object = watcher.next().await.unwrap().unwrap();
+        assert_eq!(object.name, "BAR".to_string());
+
+        let object = watcher.next().await.unwrap().unwrap();
+        assert_eq!(object.name, "FOO".to_string());
+
+        // make sure we get the rest correctly
+        let object = watcher.next().await.unwrap().unwrap();
+        assert_eq!(object.name, "BAR".to_string());
+        let object = watcher.next().await.unwrap().unwrap();
+        assert_eq!(object.name, "BAR".to_string());
+        assert!(object.deleted);
+    }
+
+    #[tokio::test]
     async fn info() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
