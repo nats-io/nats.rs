@@ -231,6 +231,12 @@ impl fmt::Display for HeaderValue {
     }
 }
 
+impl AsRef<[u8]> for HeaderValue {
+    fn as_ref(&self) -> &[u8] {
+        self.inner.as_ref()
+    }
+}
+
 impl From<HeaderValue> for String {
     fn from(header: HeaderValue) -> Self {
         header.to_string()
