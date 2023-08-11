@@ -225,9 +225,9 @@ pub struct HeaderValue {
     inner: String,
 }
 
-impl ToString for HeaderValue {
-    fn to_string(&self) -> String {
-        self.inner.to_string()
+impl fmt::Display for HeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.as_str(), f)
     }
 }
 
