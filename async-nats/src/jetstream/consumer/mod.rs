@@ -26,8 +26,8 @@ use time::serde::rfc3339;
 use super::context::RequestError;
 use super::stream::ClusterInfo;
 use super::Context;
+use crate::error::Error;
 use crate::jetstream::consumer;
-use crate::Error;
 
 pub trait IntoConsumerConfig {
     fn into_consumer_config(self) -> Config;
@@ -119,7 +119,9 @@ impl<T: IntoConsumerConfig> Consumer<T> {
 /// [Push][crate::jetstream::consumer::push::Config] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
-    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    fn try_from_consumer_config(
+        config: crate::jetstream::consumer::Config,
+    ) -> Result<Self, crate::Error>
     where
         Self: Sized;
 }
@@ -343,7 +345,7 @@ impl IntoConsumerConfig for &Config {
 }
 
 impl FromConsumer for Config {
-    fn try_from_consumer_config(config: Config) -> Result<Self, Error>
+    fn try_from_consumer_config(config: Config) -> Result<Self, crate::Error>
     where
         Self: Sized,
     {
@@ -426,24 +428,19 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
 
-#[derive(Debug)]
-pub struct StreamError {
-    kind: StreamErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(StreamError, StreamErrorKind);
-
-impl std::fmt::Display for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            StreamErrorKind::TimedOut => write!(f, "timed out"),
-            StreamErrorKind::Other => write!(f, "failed: {}", self.format_source()),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StreamErrorKind {
     TimedOut,
     Other,
 }
+
+impl std::fmt::Display for StreamErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "failed"),
+        }
+    }
+}
+
+pub type StreamError = Error<StreamErrorKind>;

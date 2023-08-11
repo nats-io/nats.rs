@@ -15,7 +15,7 @@ mod object_store {
 
     use std::{io, time::Duration};
 
-    use async_nats::jetstream::object_store::ObjectMeta;
+    use async_nats::jetstream::{object_store::ObjectMeta, stream::DirectGetErrorKind};
     use base64::Engine;
     use futures::StreamExt;
     use rand::RngCore;
@@ -282,7 +282,6 @@ mod object_store {
                 ObjectMeta {
                     name: "Foo".to_string(),
                     description: Some("foo desc".to_string()),
-                    ..Default::default()
                 },
                 &mut "dadada".as_bytes(),
             )
@@ -342,5 +341,60 @@ mod object_store {
             .put("DATA", &mut "some data".as_bytes())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_metadata() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        bucket
+            .put("old_object", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+
+        let given_metadata = ObjectMeta {
+            name: "new_object".to_owned(),
+            description: Some("description".to_string()),
+        };
+
+        bucket
+            .update_metadata("old_object", given_metadata.clone())
+            .await
+            .unwrap();
+
+        let stream = jetstream.get_stream("OBJ_bucket").await.unwrap();
+
+        stream
+            .direct_get_last_for_subject(format!(
+                "$O.bucket.M.{}",
+                base64::engine::general_purpose::URL_SAFE.encode("new_object")
+            ))
+            .await
+            .unwrap();
+
+        let old_meta_subject = stream
+            .direct_get_last_for_subject(format!(
+                "$O.bucket.M.{}",
+                base64::engine::general_purpose::URL_SAFE.encode("old_object")
+            ))
+            .await
+            .unwrap_err();
+
+        assert_eq!(old_meta_subject.kind(), DirectGetErrorKind::NotFound);
+
+        let info = bucket.info("new_object").await.unwrap();
+
+        assert_eq!(info.name, given_metadata.name);
+        assert_eq!(info.description, given_metadata.description);
     }
 }

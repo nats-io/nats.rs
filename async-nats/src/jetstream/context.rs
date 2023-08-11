@@ -13,6 +13,7 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
 
+use crate::error::Error;
 use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
@@ -713,7 +714,7 @@ impl Context {
             .await
     }
 
-    // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), Error> {
+    // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), crate::Error> {
     //     let config = config.borrow();
     //     if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
     //         return Err(Box::new(std::io::Error::new(
@@ -884,7 +885,7 @@ impl Context {
         })
     }
 
-    /// Creates a new object store bucket.
+    /// Get an existing object store bucket.
     ///
     /// # Examples
     ///
@@ -944,29 +945,7 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
-pub struct PublishError {
-    kind: PublishErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(PublishError, PublishErrorKind);
-
-impl Display for PublishError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.format_source();
-        match self.kind {
-            PublishErrorKind::StreamNotFound => write!(f, "no stream found for given subject"),
-            PublishErrorKind::TimedOut => write!(f, "timed out: didn't receive ack in time"),
-            PublishErrorKind::Other => write!(f, "publish failed: {}", source),
-            PublishErrorKind::BrokenPipe => write!(f, "broken pipe"),
-            PublishErrorKind::WrongLastMessageId => write!(f, "wrong last message id"),
-            PublishErrorKind::WrongLastSequence => write!(f, "wrong last sequence"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PublishErrorKind {
     StreamNotFound,
     WrongLastMessageId,
@@ -975,6 +954,21 @@ pub enum PublishErrorKind {
     BrokenPipe,
     Other,
 }
+
+impl Display for PublishErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StreamNotFound => write!(f, "no stream found for given subject"),
+            Self::TimedOut => write!(f, "timed out: didn't receive ack in time"),
+            Self::Other => write!(f, "publish failed"),
+            Self::BrokenPipe => write!(f, "broken pipe"),
+            Self::WrongLastMessageId => write!(f, "wrong last message id"),
+            Self::WrongLastSequence => write!(f, "wrong last sequence"),
+        }
+    }
+}
+
+pub type PublishError = Error<PublishErrorKind>;
 
 #[derive(Debug)]
 pub struct PublishAckFuture {
@@ -1060,7 +1054,7 @@ impl futures::Stream for StreamNames<'_> {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
                     let page = page
-                        .map_err(|err| StreamsError::with_source(RequestErrorKind::Other, err))?;
+                        .map_err(|err| StreamsError::with_source(StreamsErrorKind::Other, err))?;
                     if let Some(streams) = page.streams {
                         self.offset += streams.len();
                         self.streams = streams;
@@ -1111,18 +1105,8 @@ impl futures::Stream for StreamNames<'_> {
 
 type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, RequestError>>;
 
-#[derive(Debug)]
-pub struct StreamsError {
-    kind: RequestErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(StreamsError, RequestErrorKind);
-
-impl Display for StreamsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self::Display::fmt(&self, f)
-    }
-}
+pub type StreamsErrorKind = RequestErrorKind;
+pub type StreamsError = RequestError;
 
 pub struct Streams<'a> {
     context: Context,
@@ -1144,7 +1128,7 @@ impl futures::Stream for Streams<'_> {
                 std::task::Poll::Ready(page) => {
                     self.page_request = None;
                     let page = page
-                        .map_err(|err| StreamsError::with_source(RequestErrorKind::Other, err))?;
+                        .map_err(|err| StreamsError::with_source(StreamsErrorKind::Other, err))?;
                     if let Some(streams) = page.streams {
                         self.offset += streams.len();
                         self.streams = streams;
@@ -1259,26 +1243,24 @@ impl Publish {
     }
 }
 
-#[derive(Debug)]
-pub struct RequestError {
-    kind: RequestErrorKind,
-    source: Option<crate::Error>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RequestErrorKind {
+    NoResponders,
+    TimedOut,
+    Other,
 }
 
-crate::error_impls!(RequestError, RequestErrorKind);
-
-impl Display for RequestError {
+impl Display for RequestErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.format_source();
-        match &self.kind {
-            RequestErrorKind::TimedOut => write!(f, "timed out"),
-            RequestErrorKind::Other => write!(f, "request failed: {}", source),
-            RequestErrorKind::NoResponders => {
-                write!(f, "requested JetStream resource does not exist: {}", source)
-            }
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Other => write!(f, "request failed"),
+            Self::NoResponders => write!(f, "requested JetStream resource does not exist"),
         }
     }
 }
+
+pub type RequestError = Error<RequestErrorKind>;
 
 impl From<crate::RequestError> for RequestError {
     fn from(error: crate::RequestError) -> Self {
@@ -1302,43 +1284,34 @@ impl From<super::errors::Error> for RequestError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum RequestErrorKind {
-    NoResponders,
+#[derive(Clone, Debug, PartialEq)]
+pub enum CreateStreamErrorKind {
+    EmptyStreamName,
+    InvalidStreamName,
+    DomainAndExternalSet,
+    JetStreamUnavailable,
+    JetStream(super::errors::Error),
     TimedOut,
-    Other,
+    Response,
+    ResponseParse,
 }
 
-#[derive(Debug)]
-pub struct CreateStreamError {
-    kind: CreateStreamErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(CreateStreamError, CreateStreamErrorKind);
-
-impl Display for CreateStreamError {
+impl Display for CreateStreamErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind {
-            CreateStreamErrorKind::EmptyStreamName => write!(f, "stream name cannot be empty"),
-            CreateStreamErrorKind::InvalidStreamName => {
-                write!(f, "stream name cannot contain `.`, `_`")
-            }
-            CreateStreamErrorKind::DomainAndExternalSet => {
-                write!(f, "domain and external are both set")
-            }
-            CreateStreamErrorKind::JetStream(err) => {
-                write!(f, "jetstream error: {}", err)
-            }
-            CreateStreamErrorKind::TimedOut => write!(f, "jetstream request timed out"),
-            CreateStreamErrorKind::JetStreamUnavailable => write!(f, "jetstream unavailable"),
-            CreateStreamErrorKind::ResponseParse => write!(f, "failed to parse server response"),
-            CreateStreamErrorKind::Response => {
-                write!(f, "response error: {}", self.format_source())
-            }
+        match self {
+            Self::EmptyStreamName => write!(f, "stream name cannot be empty"),
+            Self::InvalidStreamName => write!(f, "stream name cannot contain `.`, `_`"),
+            Self::DomainAndExternalSet => write!(f, "domain and external are both set"),
+            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::TimedOut => write!(f, "jetstream request timed out"),
+            Self::JetStreamUnavailable => write!(f, "jetstream unavailable"),
+            Self::ResponseParse => write!(f, "failed to parse server response"),
+            Self::Response => write!(f, "response error"),
         }
     }
 }
+
+pub type CreateStreamError = Error<CreateStreamErrorKind>;
 
 impl From<super::errors::Error> for CreateStreamError {
     fn from(error: super::errors::Error) -> Self {
@@ -1360,84 +1333,50 @@ impl From<RequestError> for CreateStreamError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateStreamErrorKind {
-    EmptyStreamName,
-    InvalidStreamName,
-    DomainAndExternalSet,
-    JetStreamUnavailable,
-    JetStream(super::errors::Error),
-    TimedOut,
-    Response,
-    ResponseParse,
-}
-
-#[derive(Debug)]
-pub struct GetStreamError {
-    kind: GetStreamErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(GetStreamError, GetStreamErrorKind);
-
-impl Display for GetStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            GetStreamErrorKind::EmptyName => write!(f, "empty name cannot be empty"),
-            GetStreamErrorKind::Request => {
-                write!(f, "request error: {}", self.format_source())
-            }
-            GetStreamErrorKind::JetStream(err) => write!(f, "jetstream error: {}", err),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GetStreamErrorKind {
     EmptyName,
     Request,
     JetStream(super::errors::Error),
 }
 
+impl Display for GetStreamErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyName => write!(f, "empty name cannot be empty"),
+            Self::Request => write!(f, "request error"),
+            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+        }
+    }
+}
+
+pub type GetStreamError = Error<GetStreamErrorKind>;
+
 pub type UpdateStreamError = CreateStreamError;
 pub type UpdateStreamErrorKind = CreateStreamErrorKind;
 pub type DeleteStreamError = GetStreamError;
 pub type DeleteStreamErrorKind = GetStreamErrorKind;
 
-#[derive(Debug)]
-pub struct KeyValueError {
-    kind: KeyValueErrorKind,
-    source: Option<crate::Error>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KeyValueErrorKind {
     InvalidStoreName,
     GetBucket,
     JetStream,
 }
 
-crate::error_impls!(KeyValueError, KeyValueErrorKind);
-
-impl Display for KeyValueError {
+impl Display for KeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            KeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
-            KeyValueErrorKind::GetBucket => write!(f, "failed to get the bucket"),
-            KeyValueErrorKind::JetStream => {
-                write!(f, "JetStream error: {}", self.format_source())
-            }
+        match self {
+            Self::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            Self::GetBucket => write!(f, "failed to get the bucket"),
+            Self::JetStream => write!(f, "JetStream error"),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct CreateKeyValueError {
-    kind: CreateKeyValueErrorKind,
-    source: Option<crate::Error>,
-}
+pub type KeyValueError = Error<KeyValueErrorKind>;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CreateKeyValueErrorKind {
     InvalidStoreName,
     TooLongHistory,
@@ -1446,62 +1385,44 @@ pub enum CreateKeyValueErrorKind {
     TimedOut,
 }
 
-crate::error_impls!(CreateKeyValueError, CreateKeyValueErrorKind);
-
-impl Display for CreateKeyValueError {
+impl Display for CreateKeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.format_source();
-        match self.kind() {
-            CreateKeyValueErrorKind::InvalidStoreName => write!(f, "invalid Key Value Store name"),
-            CreateKeyValueErrorKind::TooLongHistory => write!(f, "too long history"),
-            CreateKeyValueErrorKind::JetStream => {
-                write!(f, "JetStream error: {}", source)
-            }
-            CreateKeyValueErrorKind::BucketCreate => {
-                write!(f, "bucket creation failed: {}", source)
-            }
-            CreateKeyValueErrorKind::TimedOut => write!(f, "timed out"),
+        match self {
+            Self::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            Self::TooLongHistory => write!(f, "too long history"),
+            Self::JetStream => write!(f, "JetStream error"),
+            Self::BucketCreate => write!(f, "bucket creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
         }
     }
 }
 
+pub type CreateKeyValueError = Error<CreateKeyValueErrorKind>;
+
 pub type CreateObjectStoreError = CreateKeyValueError;
 pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
 
-#[derive(Debug)]
-pub struct ObjectStoreError {
-    kind: ObjectStoreErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(ObjectStoreError, ObjectStoreErrorKind);
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ObjectStoreErrorKind {
     InvalidBucketName,
     GetStore,
 }
 
-impl Display for ObjectStoreError {
+impl Display for ObjectStoreErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.kind() {
-            ObjectStoreErrorKind::InvalidBucketName => {
-                write!(f, "invalid Object Store bucket name")
-            }
-            ObjectStoreErrorKind::GetStore => write!(f, "failed to get Object Store"),
+        match self {
+            Self::InvalidBucketName => write!(f, "invalid Object Store bucket name"),
+            Self::GetStore => write!(f, "failed to get Object Store"),
         }
     }
 }
 
+pub type ObjectStoreError = Error<ObjectStoreErrorKind>;
+
 pub type DeleteObjectStore = ObjectStoreError;
 pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
 
-#[derive(Debug)]
-pub struct AccountError {
-    kind: AccountErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AccountErrorKind {
     TimedOut,
     JetStream(super::errors::Error),
@@ -1509,18 +1430,18 @@ pub enum AccountErrorKind {
     Other,
 }
 
-crate::error_impls!(AccountError, AccountErrorKind);
-
-impl Display for AccountError {
+impl Display for AccountErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind {
-            AccountErrorKind::TimedOut => write!(f, "timed out"),
-            AccountErrorKind::JetStream(err) => write!(f, "JetStream error: {}", err),
-            AccountErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            AccountErrorKind::JetStreamUnavailable => write!(f, "JetStream unavailable"),
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::Other => write!(f, "error"),
+            Self::JetStreamUnavailable => write!(f, "JetStream unavailable"),
         }
     }
 }
+
+pub type AccountError = Error<AccountErrorKind>;
 
 impl From<RequestError> for AccountError {
     fn from(err: RequestError) -> Self {

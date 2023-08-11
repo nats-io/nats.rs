@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt, StreamExt, TryFutureExt};
+use futures::{
+    future::{BoxFuture, Either},
+    FutureExt, StreamExt, TryFutureExt,
+};
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
@@ -24,8 +27,9 @@ use tracing::{debug, trace};
 
 use crate::{
     connection::State,
+    error::Error,
     jetstream::{self, Context},
-    Error, StatusCode, SubscribeError, Subscriber,
+    StatusCode, SubscribeError, Subscriber,
 };
 
 use crate::subject::Subject;
@@ -82,7 +86,7 @@ impl Consumer<Config> {
         Stream::stream(
             BatchConfig {
                 batch: 200,
-                expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
+                expires: Some(Duration::from_secs(30)),
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
@@ -307,7 +311,7 @@ impl Consumer<Config> {
 
         let request = serde_json::to_vec(&BatchConfig {
             batch,
-            expires: Some(Duration::from_secs(60).as_nanos().try_into().unwrap()),
+            expires: Some(Duration::from_secs(60)),
             ..Default::default()
         })
         .map(Bytes::from)
@@ -337,9 +341,9 @@ impl<'a> Batch {
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
 
-        let sleep = batch.expires.map(|e| {
+        let sleep = batch.expires.map(|expires| {
             Box::pin(tokio::time::sleep(
-                Duration::from_nanos(e).saturating_add(Duration::from_secs(5)),
+                expires.saturating_add(Duration::from_secs(5)),
             ))
         });
 
@@ -354,7 +358,7 @@ impl<'a> Batch {
 }
 
 impl futures::Stream for Batch {
-    type Item = Result<jetstream::Message, Error>;
+    type Item = Result<jetstream::Message, crate::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -546,7 +550,7 @@ impl<'a> Consumer<OrderedConfig> {
         let stream = Stream::stream(
             BatchConfig {
                 batch: 500,
-                expires: Some(Duration::from_secs(30).as_nanos().try_into().unwrap()),
+                expires: Some(Duration::from_secs(30)),
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
@@ -658,7 +662,9 @@ impl From<OrderedConfig> for Config {
 }
 
 impl FromConsumer for OrderedConfig {
-    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    fn try_from_consumer_config(
+        config: crate::jetstream::consumer::Config,
+    ) -> Result<Self, crate::Error>
     where
         Self: Sized,
     {
@@ -860,13 +866,16 @@ impl Stream {
                     // this is just in edge case of missing response for some reason.
                     let expires = batch_config
                         .expires
-                        .map(|expires| match expires {
-                            0 => futures::future::Either::Left(future::pending()),
-                            t => futures::future::Either::Right(tokio::time::sleep(
-                                Duration::from_nanos(t).saturating_add(Duration::from_secs(5)),
-                            )),
+                        .map(|expires| {
+                            if expires.is_zero() {
+                                Either::Left(future::pending())
+                            } else {
+                                Either::Right(tokio::time::sleep(
+                                    expires.saturating_add(Duration::from_secs(5)),
+                                ))
+                            }
                         })
-                        .unwrap_or_else(|| futures::future::Either::Left(future::pending()));
+                        .unwrap_or_else(|| Either::Left(future::pending()));
                     // Need to check previous state, as `changed` will always fire on first
                     // call.
                     let prev_state = context.client.state.borrow().to_owned();
@@ -940,28 +949,31 @@ impl Stream {
         })
     }
 }
-#[derive(Debug)]
-pub struct OrderedError {
-    kind: OrderedErrorKind,
-    source: Option<crate::Error>,
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    Pull,
+    PushBasedConsumer,
+    Recreate,
+    Other,
 }
 
-impl std::fmt::Display for OrderedError {
+impl std::fmt::Display for OrderedErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            OrderedErrorKind::Pull => {
-                write!(f, "pull request failed: {}", self.format_source())
-            }
-            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            OrderedErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
-            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Pull => write!(f, "pull request failed"),
+            Self::Other => write!(f, "error"),
+            Self::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+            Self::Recreate => write!(f, "consumer recreation failed"),
         }
     }
 }
 
-crate::error_impls!(OrderedError, OrderedErrorKind);
+pub type OrderedError = Error<OrderedErrorKind>;
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -987,39 +999,7 @@ impl From<MessagesError> for OrderedError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum OrderedErrorKind {
-    MissingHeartbeat,
-    ConsumerDeleted,
-    Pull,
-    PushBasedConsumer,
-    Recreate,
-    Other,
-}
-
-#[derive(Debug)]
-pub struct MessagesError {
-    kind: MessagesErrorKind,
-    source: Option<crate::Error>,
-}
-
-impl std::fmt::Display for MessagesError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            MessagesErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            MessagesErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            MessagesErrorKind::Pull => {
-                write!(f, "pull request failed: {}", self.format_source())
-            }
-            MessagesErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            MessagesErrorKind::PushBasedConsumer => write!(f, "cannot use with push consumer"),
-        }
-    }
-}
-
-crate::error_impls!(MessagesError, MessagesErrorKind);
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MessagesErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
@@ -1027,6 +1007,20 @@ pub enum MessagesErrorKind {
     PushBasedConsumer,
     Other,
 }
+
+impl std::fmt::Display for MessagesErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Pull => write!(f, "pull request failed"),
+            Self::Other => write!(f, "error"),
+            Self::PushBasedConsumer => write!(f, "cannot use with push consumer"),
+        }
+    }
+}
+
+pub type MessagesError = Error<MessagesErrorKind>;
 
 impl futures::Stream for Stream {
     type Item = Result<jetstream::Message, MessagesError>;
@@ -1128,24 +1122,20 @@ impl futures::Stream for Stream {
                                     .headers
                                     .as_ref()
                                     .and_then(|headers| headers.get("Nats-Pending-Messages"))
-                                    .map(|h| h.iter())
-                                    .and_then(|mut i| i.next())
-                                    .map(|e| e.parse::<usize>())
-                                    .unwrap_or(Ok(self.batch_config.batch))
+                                    .map_or(Ok(self.batch_config.batch), |x| x.as_str().parse())
                                     .map_err(|err| {
                                         MessagesError::with_source(MessagesErrorKind::Other, err)
                                     })?;
+
                                 let pending_bytes = message
                                     .headers
                                     .as_ref()
                                     .and_then(|headers| headers.get("Nats-Pending-Bytes"))
-                                    .map(|h| h.iter())
-                                    .and_then(|mut i| i.next())
-                                    .map(|e| e.parse::<usize>())
-                                    .unwrap_or(Ok(self.batch_config.max_bytes))
+                                    .map_or(Ok(self.batch_config.max_bytes), |x| x.as_str().parse())
                                     .map_err(|err| {
                                         MessagesError::with_source(MessagesErrorKind::Other, err)
                                     })?;
+
                                 debug!(
                                     "timeout reached. remaining messages: {}, bytes {}",
                                     pending_messages, pending_bytes
@@ -1228,7 +1218,7 @@ pub struct StreamBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: u64,
+    expires: Duration,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1238,7 +1228,7 @@ impl<'a> StreamBuilder<'a> {
             consumer,
             batch: 200,
             max_bytes: 0,
-            expires: Duration::from_secs(30).as_nanos().try_into().unwrap(),
+            expires: Duration::from_secs(30),
             heartbeat: Duration::default(),
         }
     }
@@ -1400,7 +1390,7 @@ impl<'a> StreamBuilder<'a> {
     /// # }
     /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
-        self.expires = expires.as_nanos().try_into().unwrap();
+        self.expires = expires;
         self
     }
 
@@ -1488,7 +1478,7 @@ pub struct FetchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: Option<u64>,
+    expires: Option<Duration>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1651,7 +1641,7 @@ impl<'a> FetchBuilder<'a> {
     /// # }
     /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
-        self.expires = Some(expires.as_nanos().try_into().unwrap());
+        self.expires = Some(expires);
         self
     }
 
@@ -1735,7 +1725,7 @@ pub struct BatchBuilder<'a> {
     batch: usize,
     max_bytes: usize,
     heartbeat: Duration,
-    expires: u64,
+    expires: Duration,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1745,7 +1735,7 @@ impl<'a> BatchBuilder<'a> {
             consumer,
             batch: 200,
             max_bytes: 0,
-            expires: 0,
+            expires: Duration::ZERO,
             heartbeat: Duration::default(),
         }
     }
@@ -1899,7 +1889,7 @@ impl<'a> BatchBuilder<'a> {
     /// # }
     /// ```
     pub fn expires(mut self, expires: Duration) -> Self {
-        self.expires = expires.as_nanos().try_into().unwrap();
+        self.expires = expires;
         self
     }
 
@@ -1953,8 +1943,8 @@ pub struct BatchConfig {
     pub batch: usize,
     /// The optional number of nanoseconds that the server will store this next request for
     /// before forgetting about the pending batch size.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "serde_nanos")]
+    pub expires: Option<Duration>,
     /// This optionally causes the server not to store this pending request at all, but when there are no
     /// messages to deliver will send a nil bytes message with a Status header of 404, this way you
     /// can know when you reached the end of the stream for example. A 409 is returned if the
@@ -2108,7 +2098,7 @@ impl IntoConsumerConfig for Config {
     }
 }
 impl FromConsumer for Config {
-    fn try_from_consumer_config(config: consumer::Config) -> Result<Self, Error> {
+    fn try_from_consumer_config(config: consumer::Config) -> Result<Self, crate::Error> {
         if config.deliver_subject.is_some() {
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -2145,59 +2135,45 @@ impl FromConsumer for Config {
     }
 }
 
-#[derive(Debug)]
-pub struct BatchRequestError {
-    kind: BatchRequestErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(BatchRequestError, BatchRequestErrorKind);
-
-impl std::fmt::Display for BatchRequestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            BatchRequestErrorKind::Publish => {
-                write!(f, "publish failed: {}", self.format_source())
-            }
-            BatchRequestErrorKind::Flush => {
-                write!(f, "flush failed: {}", self.format_source())
-            }
-            BatchRequestErrorKind::Serialize => {
-                write!(f, "serialize failed: {}", self.format_source())
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BatchRequestErrorKind {
     Publish,
     Flush,
     Serialize,
 }
 
-#[derive(Debug)]
-pub struct BatchError {
-    kind: BatchErrorKind,
-    source: Option<crate::Error>,
-}
-crate::error_impls!(BatchError, BatchErrorKind);
-
-impl std::fmt::Display for BatchError {
+impl std::fmt::Display for BatchRequestErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            BatchErrorKind::Pull => {
-                write!(f, "pull request failed: {}", self.format_source())
-            }
-            BatchErrorKind::Flush => {
-                write!(f, "flush failed: {}", self.format_source())
-            }
-            BatchErrorKind::Serialize => {
-                write!(f, "serialize failed: {}", self.format_source())
-            }
-            BatchErrorKind::Subscribe => write!(f, "subscribe failed: {}", self.format_source()),
+        match self {
+            Self::Publish => write!(f, "publish failed"),
+            Self::Flush => write!(f, "flush failed"),
+            Self::Serialize => write!(f, "serialize failed"),
         }
     }
 }
+
+pub type BatchRequestError = Error<BatchRequestErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BatchErrorKind {
+    Subscribe,
+    Pull,
+    Flush,
+    Serialize,
+}
+
+impl std::fmt::Display for BatchErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pull => write!(f, "pull request failed"),
+            Self::Flush => write!(f, "flush failed"),
+            Self::Serialize => write!(f, "serialize failed"),
+            Self::Subscribe => write!(f, "subscribe failed"),
+        }
+    }
+}
+
+pub type BatchError = Error<BatchErrorKind>;
 
 impl From<SubscribeError> for BatchError {
     fn from(err: SubscribeError) -> Self {
@@ -2211,42 +2187,24 @@ impl From<BatchRequestError> for BatchError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BatchErrorKind {
-    Subscribe,
-    Pull,
-    Flush,
-    Serialize,
-}
-
-#[derive(Debug)]
-pub struct ConsumerRecreateError {
-    kind: ConsumerRecreateErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
-
-impl std::fmt::Display for ConsumerRecreateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            ConsumerRecreateErrorKind::GetStream => {
-                write!(f, "error getting stream: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::Recreate => {
-                write!(f, "consumer creation failed: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConsumerRecreateErrorKind {
     GetStream,
     Recreate,
     TimedOut,
 }
+
+impl std::fmt::Display for ConsumerRecreateErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GetStream => write!(f, "error getting stream"),
+            Self::Recreate => write!(f, "consumer creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
+pub type ConsumerRecreateError = Error<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_stream(
     context: Context,

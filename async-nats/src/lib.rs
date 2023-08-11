@@ -174,6 +174,7 @@ pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
+pub mod error;
 pub mod header;
 pub mod jetstream;
 pub mod message;
@@ -858,55 +859,26 @@ pub enum ConnectErrorKind {
     Io,
 }
 
+impl Display for ConnectErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ServerParse => write!(f, "failed to parse server or server list"),
+            Self::Dns => write!(f, "DNS error"),
+            Self::Authentication => write!(f, "failed signing nonce"),
+            Self::AuthorizationViolation => write!(f, "authorization violation"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Tls => write!(f, "TLS error"),
+            Self::Io => write!(f, "IO error"),
+        }
+    }
+}
+
 /// Returned when initial connection fails.
 /// To be enumerate over the variants, call [ConnectError::kind].
-#[derive(Debug, Error)]
-pub struct ConnectError {
-    kind: ConnectErrorKind,
-    source: Option<crate::Error>,
-}
+pub type ConnectError = error::Error<ConnectErrorKind>;
 
-impl Display for ConnectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let source_info = self
-            .source
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "no details".to_string());
-        match self.kind {
-            ConnectErrorKind::ServerParse => {
-                write!(f, "failed to parse server or server list: {}", source_info)
-            }
-            ConnectErrorKind::Dns => write!(f, "DNS error: {}", source_info),
-            ConnectErrorKind::Authentication => write!(f, "failed signing nonce"),
-            ConnectErrorKind::AuthorizationViolation => write!(f, "authorization violation"),
-            ConnectErrorKind::TimedOut => write!(f, "timed out"),
-            ConnectErrorKind::Tls => write!(f, "TLS error: {}", source_info),
-            ConnectErrorKind::Io => write!(f, "{}", source_info),
-        }
-    }
-}
-
-impl ConnectError {
-    fn with_source<E>(kind: ConnectErrorKind, source: E) -> ConnectError
-    where
-        E: Into<crate::Error>,
-    {
-        ConnectError {
-            kind,
-            source: Some(source.into()),
-        }
-    }
-    fn new(kind: ConnectErrorKind) -> ConnectError {
-        ConnectError { kind, source: None }
-    }
-    pub fn kind(&self) -> ConnectErrorKind {
-        self.kind
-    }
-}
-
-impl From<std::io::Error> for ConnectError {
-    fn from(err: std::io::Error) -> Self {
+impl From<io::Error> for ConnectError {
+    fn from(err: io::Error) -> Self {
         ConnectError::with_source(ConnectErrorKind::Io, err)
     }
 }
@@ -1344,49 +1316,6 @@ macro_rules! from_with_timeout {
     };
 }
 pub(crate) use from_with_timeout;
-
-// TODO: rewrite into derivable proc macro.
-macro_rules! error_impls {
-    ($t:ty, $k:ty) => {
-        impl $t {
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub(crate) fn new(kind: $k) -> $t {
-                Self { kind, source: None }
-            }
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub(crate) fn with_source<S>(kind: $k, source: S) -> $t
-            where
-                S: Into<crate::Error>,
-            {
-                Self {
-                    kind,
-                    source: Some(source.into()),
-                }
-            }
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub fn kind(&self) -> $k {
-                // ALmost all `kind` types implement `Copy`, so it's almost always copy.
-                // We need to clone, as some more complex one may have nested other errors, that
-                // implement Clone only.
-                self.kind.clone()
-            }
-            #[allow(dead_code)]
-            #[allow(unreachable_pub)]
-            pub(crate) fn format_source(&self) -> String {
-                self.source
-                    .as_ref()
-                    .map(|err| err.to_string())
-                    .unwrap_or("unknown".to_string())
-            }
-        }
-        impl std::error::Error for $t {}
-    };
-}
-
-pub(crate) use error_impls;
 
 #[cfg(test)]
 mod tests {

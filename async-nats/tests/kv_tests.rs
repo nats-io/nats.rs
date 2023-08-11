@@ -757,6 +757,10 @@ mod kv {
         let name = test.get("name").await.unwrap();
         assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan");
 
+        test.purge("name").await.unwrap();
+        let name = test.get("name").await.unwrap();
+        assert!(name.is_none());
+
         // Shutdown HUB and test get still work.
         drop(hub_server);
 

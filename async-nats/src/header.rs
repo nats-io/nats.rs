@@ -20,7 +20,7 @@
 
 //! NATS [Message][crate::Message] headers, modeled loosely after the [http::header] crate.
 
-use std::{collections::HashMap, fmt, slice, str::FromStr};
+use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
 pub struct HeaderMap {
-    inner: HashMap<HeaderName, HeaderValue>,
+    inner: HashMap<HeaderName, Vec<HeaderValue>>,
 }
 
 impl FromIterator<(HeaderName, HeaderValue)> for HeaderMap {
@@ -60,8 +60,20 @@ impl FromIterator<(HeaderName, HeaderValue)> for HeaderMap {
 }
 
 impl HeaderMap {
-    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, HeaderName, HeaderValue> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, HeaderName, Vec<HeaderValue>> {
         self.inner.iter()
+    }
+}
+
+pub struct GetAll<'a, T> {
+    inner: Iter<'a, T>,
+}
+
+impl<'a, T> Iterator for GetAll<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
     }
 }
 
@@ -113,7 +125,7 @@ impl HeaderMap {
     /// ```
     pub fn insert<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         self.inner
-            .insert(name.into_header_name(), value.into_header_value());
+            .insert(name.into_header_name(), vec![value.into_header_value()]);
     }
 
     /// Appends a new value to the list of values to a given key.
@@ -127,16 +139,15 @@ impl HeaderMap {
     /// let mut headers = HeaderMap::new();
     /// headers.append("Key", "Value");
     /// headers.append("Key", "Another");
-    /// ```
-    pub fn append<K: IntoHeaderName, V: ToString>(&mut self, name: K, value: V) {
+    pub fn append<K: IntoHeaderName, V: IntoHeaderValue>(&mut self, name: K, value: V) {
         let key = name.into_header_name();
         let v = self.inner.get_mut(&key);
         match v {
             Some(v) => {
-                v.value.push(value.to_string());
+                v.push(value.into_header_value());
             }
             None => {
-                self.insert(key, value.to_string().into_header_value());
+                self.insert(key, value.into_header_value());
             }
         }
     }
@@ -150,10 +161,36 @@ impl HeaderMap {
     ///
     /// let mut headers = HeaderMap::new();
     /// headers.append("Key", "Value");
-    /// let key = headers.get("Key").unwrap();
+    /// let values = headers.get("Key").unwrap();
     /// ```
-    pub fn get<T: IntoHeaderName>(&self, name: T) -> Option<&HeaderValue> {
-        self.inner.get(&name.into_header_name())
+    pub fn get<K: IntoHeaderName>(&self, key: K) -> Option<&HeaderValue> {
+        self.inner
+            .get(&key.into_header_name())
+            .and_then(|x| x.first())
+    }
+
+    /// Gets an iterator to the values for a given key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use async_nats::HeaderMap;
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// headers.append("Key", "Value1");
+    /// headers.append("Key", "Value2");
+    /// let mut values = headers.get_all("Key");
+    /// let value1 = values.next();
+    /// let value2 = values.next();
+    /// ```
+    pub fn get_all<K: IntoHeaderName>(&self, key: K) -> GetAll<HeaderValue> {
+        let inner = self
+            .inner
+            .get(&key.into_header_name())
+            .map(|x| x.iter())
+            .unwrap_or([].iter());
+
+        GetAll { inner }
     }
 
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
@@ -163,7 +200,7 @@ impl HeaderMap {
             for v in vs.iter() {
                 buf.extend_from_slice(k.as_str().as_bytes());
                 buf.extend_from_slice(b": ");
-                buf.extend_from_slice(v.as_bytes());
+                buf.extend_from_slice(v.inner.as_bytes());
                 buf.extend_from_slice(b"\r\n");
             }
         }
@@ -172,8 +209,7 @@ impl HeaderMap {
     }
 }
 
-/// A struct representing value of a given header.
-/// Can contain one or more elements.
+/// Represents NATS header field value.
 ///
 /// # Examples
 ///
@@ -186,15 +222,12 @@ impl HeaderMap {
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct HeaderValue {
-    value: Vec<String>,
+    inner: String,
 }
 
 impl ToString for HeaderValue {
     fn to_string(&self) -> String {
-        self.iter()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| String::from(""))
+        self.inner.to_string()
     }
 }
 
@@ -203,6 +236,7 @@ impl From<HeaderValue> for String {
         header.to_string()
     }
 }
+
 impl From<&HeaderValue> for String {
     fn from(header: &HeaderValue) -> Self {
         header.to_string()
@@ -211,11 +245,7 @@ impl From<&HeaderValue> for String {
 
 impl<'a> From<&'a HeaderValue> for &'a str {
     fn from(header: &'a HeaderValue) -> Self {
-        header
-            .iter()
-            .next()
-            .map(|v| v.as_str())
-            .unwrap_or_else(|| "")
+        header.inner.as_str()
     }
 }
 
@@ -227,44 +257,31 @@ impl FromStr for HeaderValue {
             return Err(ParseHeaderValueError);
         }
 
-        let mut set = HeaderValue::new();
-        set.value.push(s.to_string());
-        Ok(set)
+        Ok(HeaderValue {
+            inner: s.to_string(),
+        })
     }
 }
 
 impl From<u64> for HeaderValue {
     fn from(v: u64) -> Self {
-        let mut set = HeaderValue::new();
-        set.value.push(v.to_string());
-        set
+        Self {
+            inner: v.to_string(),
+        }
     }
 }
+
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
-        let mut set = HeaderValue::new();
-        set.value.push(v.to_string());
-        set
-    }
-}
-
-impl IntoIterator for HeaderValue {
-    type Item = String;
-
-    type IntoIter = std::vec::IntoIter<String>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.value.into_iter()
+        Self {
+            inner: v.to_string(),
+        }
     }
 }
 
 impl HeaderValue {
-    pub fn new() -> HeaderValue {
+    pub fn new() -> Self {
         HeaderValue::default()
-    }
-
-    pub fn iter(&self) -> slice::Iter<String> {
-        self.value.iter()
     }
 
     pub fn as_str(&self) -> &str {
@@ -307,11 +324,12 @@ impl IntoHeaderName for HeaderName {
 pub trait IntoHeaderValue {
     fn into_header_value(self) -> HeaderValue;
 }
+
 impl IntoHeaderValue for &str {
     fn into_header_value(self) -> HeaderValue {
-        let mut set = HeaderValue::new();
-        set.value.push(self.to_string());
-        set
+        HeaderValue {
+            inner: self.to_string(),
+        }
     }
 }
 
@@ -404,7 +422,7 @@ standard_headers! {
     /// The last known sequence number of the message.
     (NatsLastSequence, NATS_LAST_SEQUENCE, b"Nats-Last-Sequence");
     /// The expected last sequence number of the subject.
-    (NatsExpectgedLastSubjectSequence, NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, b"Nats-Expected-Last-Subject-Sequence");
+    (NatsExpectedLastSubjectSequence, NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, b"Nats-Expected-Last-Subject-Sequence");
     /// The expected last message ID within the stream.
     (NatsExpectedLastMessageId, NATS_EXPECTED_LAST_MESSAGE_ID, b"Nats-Expected-Last-Msg-Id");
     /// The expected last sequence number within the stream.
@@ -561,10 +579,19 @@ mod tests {
         headers.append("Key", "value");
         headers.append("Key", "second_value");
 
+        let mut result = headers.get_all("Key");
+
         assert_eq!(
-            headers.get("Key").unwrap().value,
-            Vec::from_iter(["value".to_string(), "second_value".to_string()])
+            result.next().unwrap(),
+            &HeaderValue::from_str("value").unwrap()
         );
+
+        assert_eq!(
+            result.next().unwrap(),
+            &HeaderValue::from_str("second_value").unwrap()
+        );
+
+        assert_eq!(result.next(), None);
     }
 
     #[test]
@@ -589,10 +616,13 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("Key", "Value");
 
+        let mut result = headers.get_all("Key");
+
         assert_eq!(
-            headers.get("Key").unwrap().value,
-            Vec::from_iter(["Value".to_string()])
+            result.next().unwrap(),
+            &HeaderValue::from_str("Value").unwrap()
         );
+        assert_eq!(result.next(), None);
     }
 
     #[test]

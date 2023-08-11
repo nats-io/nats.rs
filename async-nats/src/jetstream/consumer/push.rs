@@ -17,8 +17,9 @@ use super::{
 };
 use crate::{
     connection::State,
+    error::Error,
     jetstream::{self, Context, Message},
-    Error, StatusCode, Subscriber,
+    StatusCode, Subscriber,
 };
 
 use bytes::Bytes;
@@ -274,7 +275,7 @@ pub struct Config {
 }
 
 impl FromConsumer for Config {
-    fn try_from_consumer_config(config: super::Config) -> Result<Self, Error> {
+    fn try_from_consumer_config(config: super::Config) -> Result<Self, crate::Error> {
         if config.deliver_subject.is_none() {
             return Err(Box::new(io::Error::new(
                 ErrorKind::Other,
@@ -402,7 +403,9 @@ pub struct OrderedConfig {
 }
 
 impl FromConsumer for OrderedConfig {
-    fn try_from_consumer_config(config: crate::jetstream::consumer::Config) -> Result<Self, Error>
+    fn try_from_consumer_config(
+        config: crate::jetstream::consumer::Config,
+    ) -> Result<Self, crate::Error>
     where
         Self: Sized,
     {
@@ -652,14 +655,12 @@ impl<'a> futures::Stream for Ordered<'a> {
                                             headers.get(crate::header::NATS_LAST_CONSUMER)
                                         {
                                             let sequence: u64 =
-                                                sequence.iter().next().unwrap().parse().map_err(
-                                                    |err| {
-                                                        OrderedError::with_source(
-                                                            OrderedErrorKind::Other,
-                                                            err,
-                                                        )
-                                                    },
-                                                )?;
+                                                sequence.as_str().parse().map_err(|err| {
+                                                    OrderedError::with_source(
+                                                        OrderedErrorKind::Other,
+                                                        err,
+                                                    )
+                                                })?;
 
                                             let last_sequence =
                                                 self.consumer_sequence.load(Ordering::Relaxed);
@@ -733,25 +734,29 @@ impl<'a> futures::Stream for Ordered<'a> {
         }
     }
 }
-#[derive(Debug)]
-pub struct OrderedError {
-    kind: OrderedErrorKind,
-    source: Option<crate::Error>,
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum OrderedErrorKind {
+    MissingHeartbeat,
+    ConsumerDeleted,
+    PullBasedConsumer,
+    Recreate,
+    Other,
 }
 
-impl std::fmt::Display for OrderedError {
+impl std::fmt::Display for OrderedErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            OrderedErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            OrderedErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            OrderedErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            OrderedErrorKind::PullBasedConsumer => write!(f, "cannot use with push consumer"),
-            OrderedErrorKind::Recreate => write!(f, "consumer recreation failed"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Other => write!(f, "error"),
+            Self::PullBasedConsumer => write!(f, "cannot use with push consumer"),
+            Self::Recreate => write!(f, "consumer recreation failed"),
         }
     }
 }
 
-crate::error_impls!(OrderedError, OrderedErrorKind);
+pub type OrderedError = Error<OrderedErrorKind>;
 
 impl From<MessagesError> for OrderedError {
     fn from(err: MessagesError) -> Self {
@@ -773,35 +778,7 @@ impl From<MessagesError> for OrderedError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum OrderedErrorKind {
-    MissingHeartbeat,
-    ConsumerDeleted,
-    PullBasedConsumer,
-    Recreate,
-    Other,
-}
-
-#[derive(Debug)]
-pub struct MessagesError {
-    kind: MessagesErrorKind,
-    source: Option<crate::Error>,
-}
-
-impl std::fmt::Display for MessagesError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            MessagesErrorKind::MissingHeartbeat => write!(f, "missed idle heartbeat"),
-            MessagesErrorKind::ConsumerDeleted => write!(f, "consumer deleted"),
-            MessagesErrorKind::Other => write!(f, "error: {}", self.format_source()),
-            MessagesErrorKind::PullBasedConsumer => write!(f, "cannot use with pull consumer"),
-        }
-    }
-}
-
-crate::error_impls!(MessagesError, MessagesErrorKind);
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MessagesErrorKind {
     MissingHeartbeat,
     ConsumerDeleted,
@@ -809,36 +786,39 @@ pub enum MessagesErrorKind {
     Other,
 }
 
-#[derive(Debug)]
-pub struct ConsumerRecreateError {
-    kind: ConsumerRecreateErrorKind,
-    source: Option<crate::Error>,
-}
-
-crate::error_impls!(ConsumerRecreateError, ConsumerRecreateErrorKind);
-
-impl std::fmt::Display for ConsumerRecreateError {
+impl std::fmt::Display for MessagesErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind() {
-            ConsumerRecreateErrorKind::GetStream => {
-                write!(f, "error getting stream: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::Recreate => {
-                write!(f, "consumer creation failed: {}", self.format_source())
-            }
-            ConsumerRecreateErrorKind::TimedOut => write!(f, "timed out"),
-            ConsumerRecreateErrorKind::Subscription => write!(f, "failed to resubscribe"),
+        match self {
+            Self::MissingHeartbeat => write!(f, "missed idle heartbeat"),
+            Self::ConsumerDeleted => write!(f, "consumer deleted"),
+            Self::Other => write!(f, "error"),
+            Self::PullBasedConsumer => write!(f, "cannot use with pull consumer"),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+pub type MessagesError = Error<MessagesErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConsumerRecreateErrorKind {
     GetStream,
     Subscription,
     Recreate,
     TimedOut,
 }
+
+impl std::fmt::Display for ConsumerRecreateErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GetStream => write!(f, "error getting stream"),
+            Self::Recreate => write!(f, "consumer creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Subscription => write!(f, "failed to resubscribe"),
+        }
+    }
+}
+
+pub type ConsumerRecreateError = Error<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_and_subscription(
     context: Context,

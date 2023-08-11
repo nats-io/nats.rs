@@ -307,9 +307,7 @@ mod service {
                 .unwrap()
                 .get(async_nats::service::NATS_SERVICE_ERROR_CODE)
                 .unwrap()
-                .iter()
-                .next()
-                .unwrap()
+                .as_str()
                 .parse::<usize>()
                 .unwrap(),
             503
@@ -320,10 +318,8 @@ mod service {
                 .unwrap()
                 .get(async_nats::service::NATS_SERVICE_ERROR)
                 .unwrap()
-                .iter()
-                .next()
-                .unwrap(),
-            "error"
+                .to_string(),
+            "error".to_string()
         );
 
         // service should not respond anymore, as its stopped.
