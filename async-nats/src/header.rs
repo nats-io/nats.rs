@@ -232,7 +232,7 @@ pub struct HeaderValue {
 
 impl ToString for HeaderValue {
     fn to_string(&self) -> String {
-        unsafe { String::from_utf8_unchecked(self.inner.as_ref().to_vec()) }
+        self.as_str().to_owned()
     }
 }
 
