@@ -20,7 +20,12 @@
 
 //! NATS [Message][crate::Message] headers, modeled loosely after the [http::header] crate.
 
-use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
+use std::{
+    collections::HashMap,
+    fmt,
+    slice::Iter,
+    str::{self, FromStr},
+};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -200,7 +205,7 @@ impl HeaderMap {
             for v in vs.iter() {
                 buf.extend_from_slice(k.as_str().as_bytes());
                 buf.extend_from_slice(b": ");
-                buf.extend_from_slice(v.inner.as_bytes());
+                buf.extend_from_slice(v.inner.as_ref());
                 buf.extend_from_slice(b"\r\n");
             }
         }
@@ -222,12 +227,12 @@ impl HeaderMap {
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct HeaderValue {
-    inner: String,
+    inner: Bytes,
 }
 
 impl ToString for HeaderValue {
     fn to_string(&self) -> String {
-        self.inner.to_string()
+        self.as_str().to_owned()
     }
 }
 
@@ -245,7 +250,7 @@ impl From<&HeaderValue> for String {
 
 impl<'a> From<&'a HeaderValue> for &'a str {
     fn from(header: &'a HeaderValue) -> Self {
-        header.inner.as_str()
+        unsafe { str::from_utf8_unchecked(header.inner.as_ref()) }
     }
 }
 
@@ -258,7 +263,7 @@ impl FromStr for HeaderValue {
         }
 
         Ok(HeaderValue {
-            inner: s.to_string(),
+            inner: Bytes::copy_from_slice(s.as_bytes()),
         })
     }
 }
@@ -266,7 +271,7 @@ impl FromStr for HeaderValue {
 impl From<u64> for HeaderValue {
     fn from(v: u64) -> Self {
         Self {
-            inner: v.to_string(),
+            inner: Bytes::from(v.to_string()),
         }
     }
 }
@@ -274,7 +279,7 @@ impl From<u64> for HeaderValue {
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
         Self {
-            inner: v.to_string(),
+            inner: Bytes::from(v.to_string()),
         }
     }
 }
@@ -282,6 +287,17 @@ impl From<&str> for HeaderValue {
 impl HeaderValue {
     pub fn new() -> Self {
         HeaderValue::default()
+    }
+
+    /// Convert a static string to a `HeaderValue`.
+    ///
+    /// This function will not perform any copying, however the string is
+    /// checked to ensure that no invalid characters are present.
+    pub const fn from_static(s: &'static str) -> HeaderValue {
+        // TODO(caspervonb) do a static range check
+        HeaderValue {
+            inner: Bytes::from_static(s.as_bytes()),
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -328,7 +344,7 @@ pub trait IntoHeaderValue {
 impl IntoHeaderValue for &str {
     fn into_header_value(self) -> HeaderValue {
         HeaderValue {
-            inner: self.to_string(),
+            inner: Bytes::from(self.to_string()),
         }
     }
 }
@@ -707,6 +723,14 @@ mod tests {
     fn from_static_eq() {
         let a = HeaderName::from_static("NATS-Stream");
         let b = HeaderName::from_static("NATS-Stream");
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn header_value_from_static_eq() {
+        let a = HeaderValue::from_static("NATS-Stream");
+        let b = HeaderValue::from_static("NATS-Stream");
 
         assert_eq!(a, b);
     }
