@@ -237,6 +237,12 @@ impl AsRef<[u8]> for HeaderValue {
     }
 }
 
+impl AsRef<str> for HeaderValue {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl From<HeaderValue> for String {
     fn from(header: HeaderValue) -> Self {
         header.to_string()
