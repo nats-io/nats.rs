@@ -243,24 +243,6 @@ impl AsRef<str> for HeaderValue {
     }
 }
 
-impl From<HeaderValue> for String {
-    fn from(header: HeaderValue) -> Self {
-        header.to_string()
-    }
-}
-
-impl From<&HeaderValue> for String {
-    fn from(header: &HeaderValue) -> Self {
-        header.to_string()
-    }
-}
-
-impl<'a> From<&'a HeaderValue> for &'a str {
-    fn from(header: &'a HeaderValue) -> Self {
-        header.inner.as_str()
-    }
-}
-
 impl FromStr for HeaderValue {
     type Err = ParseHeaderValueError;
 
@@ -297,7 +279,7 @@ impl HeaderValue {
     }
 
     pub fn as_str(&self) -> &str {
-        self.into()
+        self.inner.as_str()
     }
 }
 
@@ -614,10 +596,10 @@ mod tests {
 
         assert_eq!(headers.get("Key").unwrap().to_string(), "value");
 
-        let key: String = headers.get("Key").unwrap().into();
+        let key: String = headers.get("Key").unwrap().as_str().into();
         assert_eq!(key, "value".to_string());
 
-        let key: String = headers.get("Key").unwrap().to_owned().into();
+        let key: String = headers.get("Key").unwrap().as_str().to_owned();
         assert_eq!(key, "value".to_string());
 
         assert_eq!(headers.get("Key").unwrap().as_str(), "value");
