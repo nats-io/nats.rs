@@ -318,7 +318,7 @@ impl Service {
                 "service name is not a valid string (only A-Z, a-z, 0-9, _, - are allowed)",
             )));
         }
-        let id = nuid::next();
+        let id = nuid::next().to_string();
         let started = time::OffsetDateTime::now_utc();
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {

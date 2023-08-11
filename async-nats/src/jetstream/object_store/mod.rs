@@ -323,7 +323,7 @@ impl ObjectStore {
             description: object_meta.description,
             link: None,
             bucket: self.name.clone(),
-            nuid: object_nuid,
+            nuid: object_nuid.to_string(),
             chunks: object_chunks,
             size: object_size,
             digest: Some(format!("SHA-256={}", URL_SAFE.encode(digest))),

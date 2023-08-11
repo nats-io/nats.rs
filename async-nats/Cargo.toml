@@ -29,7 +29,7 @@ itoa = "1"
 url = { version = "2"}
 tokio-rustls = "0.24"
 rustls-pemfile = "1.0.2"
-nuid = "0.4.1"
+nuid = "0.5"
 serde_nanos = "0.1.3"
 time = { version = "0.3.24", features = ["parsing", "formatting", "serde", "serde-well-known"] }
 rustls-native-certs = "0.6"

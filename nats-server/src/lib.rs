@@ -240,7 +240,7 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
 }
 
 fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
-    let id = id.unwrap_or_else(nuid::next);
+    let id = id.unwrap_or_else(|| nuid::next().to_string());
     let logfile = env::temp_dir().join(format!("nats-server-{id}.log"));
     let pidfile = env::temp_dir().join(format!("nats-server-{id}.pid"));
     let store_dir = env::temp_dir().join(format!("store-dir-{id}"));
@@ -268,7 +268,7 @@ fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
     Inner {
         port: port.map(ToString::to_string),
         cfg: cfg.to_string(),
-        id,
+        id: id.to_string(),
         child,
         logfile,
         pidfile,
@@ -327,7 +327,7 @@ fn run_cluster_node_with_port(
         inner: Inner {
             port: port.map(ToString::to_string),
             cfg: cfg.to_string(),
-            id,
+            id: id.to_string(),
             child,
             logfile,
             pidfile,
