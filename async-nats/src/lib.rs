@@ -152,6 +152,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const MAX_PENDING_PINGS: usize = 2;
+const MULTIPLEXER_SID: u64 = 0;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -267,6 +268,13 @@ pub(crate) enum Command {
         respond: Option<String>,
         headers: Option<HeaderMap>,
     },
+    Request {
+        subject: String,
+        payload: Bytes,
+        respond: String,
+        headers: Option<HeaderMap>,
+        sender: oneshot::Sender<Message>,
+    },
     Subscribe {
         sid: u64,
         subject: String,
@@ -315,11 +323,19 @@ struct Subscription {
     max: Option<u64>,
 }
 
+#[derive(Debug)]
+struct Multiplexer {
+    subject: String,
+    prefix: String,
+    senders: HashMap<String, oneshot::Sender<Message>>,
+}
+
 /// A connection handler which facilitates communication from channels to a single shared connection.
 pub(crate) struct ConnectionHandler {
     connection: Connection,
     connector: Connector,
     subscriptions: HashMap<u64, Subscription>,
+    multiplexer: Option<Multiplexer>,
     pending_pings: usize,
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
@@ -344,6 +360,7 @@ impl ConnectionHandler {
             connection,
             connector,
             subscriptions: HashMap::new(),
+            multiplexer: None,
             pending_pings: 0,
             info_sender,
             ping_interval,
@@ -484,6 +501,28 @@ impl ConnectionHandler {
                             self.handle_flush().await?;
                         }
                     }
+                } else if sid == MULTIPLEXER_SID {
+                    if let Some(multiplexer) = self.multiplexer.as_mut() {
+                        let maybe_token = subject.strip_prefix(&multiplexer.prefix).to_owned();
+
+                        if let Some(token) = maybe_token {
+                            if let Some(sender) = multiplexer.senders.remove(token) {
+                                let message = Message {
+                                    subject,
+                                    reply,
+                                    payload,
+                                    headers,
+                                    status,
+                                    description,
+                                    length,
+                                };
+
+                                sender.send(message).map_err(|_| {
+                                    io::Error::new(io::ErrorKind::Other, "request receiver closed")
+                                })?;
+                            }
+                        }
+                    }
                 }
             }
             // TODO: we should probably update advertised server list here too.
@@ -591,6 +630,58 @@ impl ConnectionHandler {
                     error!("Sending Subscribe failed with {:?}", err);
                 }
             }
+            Command::Request {
+                subject,
+                payload,
+                respond,
+                headers,
+                sender,
+            } => {
+                let (prefix, token) = respond.rsplit_once('.').ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::Other, "malformed request subject")
+                })?;
+
+                let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
+                    multiplexer
+                } else {
+                    let subject = format!("{}.*", prefix);
+
+                    if let Err(err) = self
+                        .connection
+                        .write_op(&ClientOp::Subscribe {
+                            sid: MULTIPLEXER_SID,
+                            subject: subject.clone(),
+                            queue_group: None,
+                        })
+                        .await
+                    {
+                        error!("Sending Subscribe failed with {:?}", err);
+                    }
+
+                    self.multiplexer.insert(Multiplexer {
+                        subject,
+                        prefix: format!("{}.", prefix),
+                        senders: HashMap::new(),
+                    })
+                };
+
+                multiplexer.senders.insert(token.to_owned(), sender);
+
+                let pub_op = ClientOp::Publish {
+                    subject,
+                    payload,
+                    respond: Some(respond),
+                    headers,
+                };
+
+                while let Err(err) = self.connection.write_op(&pub_op).await {
+                    self.handle_disconnect().await?;
+                    error!("Sending Publish failed with {:?}", err);
+                }
+
+                self.connection.flush().await?;
+            }
+
             Command::Publish {
                 subject,
                 payload,
@@ -645,6 +736,18 @@ impl ConnectionHandler {
                 .await
                 .unwrap();
         }
+
+        if let Some(multiplexer) = &self.multiplexer {
+            self.connection
+                .write_op(&ClientOp::Subscribe {
+                    sid: MULTIPLEXER_SID,
+                    subject: multiplexer.subject.to_owned(),
+                    queue_group: None,
+                })
+                .await
+                .unwrap();
+        }
+
         self.connector.events_tx.try_send(Event::Connected).ok();
 
         Ok(())
