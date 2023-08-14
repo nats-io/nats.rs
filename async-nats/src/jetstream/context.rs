@@ -29,6 +29,7 @@ use std::borrow::Borrow;
 use std::fmt::Display;
 use std::future::IntoFuture;
 use std::io::ErrorKind;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::str::from_utf8;
 use std::task::Poll;
@@ -127,13 +128,8 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(
-        &self,
-        subject: String,
-        payload: Bytes,
-    ) -> Result<PublishAckFuture, PublishError> {
-        self.send_publish(subject, Publish::build().payload(payload))
-            .await
+    pub fn publish(&self, subject: String, payload: Bytes) -> Publish {
+        Publish::new(self.clone(), subject, payload)
     }
 
     /// Publish a message with headers to a given subject associated with a stream and returns an acknowledgment from
@@ -163,67 +159,8 @@ impl Context {
         headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
-        self.send_publish(subject, Publish::build().payload(payload).headers(headers))
-            .await
-    }
-
-    /// Publish a message built by [Publish] and returns an acknowledgment future.
-    ///
-    /// If the stream does not exist, `no responders` error will be returned.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # use async_nats::jetstream::context::Publish;
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let client = async_nats::connect("localhost:4222").await?;
-    /// let jetstream = async_nats::jetstream::new(client);
-    ///
-    /// let ack = jetstream
-    ///     .send_publish(
-    ///         "events".to_string(),
-    ///         Publish::build().payload("data".into()).message_id("uuid"),
-    ///     )
-    ///     .await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send_publish(
-        &self,
-        subject: String,
-        publish: Publish,
-    ) -> Result<PublishAckFuture, PublishError> {
-        let inbox = self.client.new_inbox();
-        let response = self
-            .client
-            .subscribe(inbox.clone())
-            .await
-            .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?;
-        tokio::time::timeout(self.timeout, async {
-            if let Some(headers) = publish.headers {
-                self.client
-                    .publish_with_reply_and_headers(
-                        subject,
-                        inbox.clone(),
-                        headers,
-                        publish.payload,
-                    )
-                    .await
-            } else {
-                self.client
-                    .publish_with_reply(subject, inbox.clone(), publish.payload)
-                    .await
-            }
-        })
-        .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))
-        .await?
-        .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?;
-
-        Ok(PublishAckFuture {
-            timeout: self.timeout,
-            subscription: response,
-        })
+        let ack_future = self.publish(subject, payload).headers(headers).await?;
+        Ok(ack_future)
     }
 
     /// Query the server for account information
@@ -811,30 +748,12 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<V, RequestError>
+    pub fn request<T, V>(&self, subject: String, payload: T) -> Request<T, V>
     where
-        T: ?Sized + Serialize,
+        T: Sized + Serialize,
         V: DeserializeOwned,
     {
-        let request = serde_json::to_vec(&payload)
-            .map(Bytes::from)
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
-
-        debug!("JetStream request sent: {:?}", request);
-
-        let message = self
-            .client
-            .request(format!("{}.{}", self.prefix, subject), request)
-            .await;
-        let message = message?;
-        debug!(
-            "JetStream request response: {:?}",
-            from_utf8(&message.payload)
-        );
-        let response = serde_json::from_slice(message.payload.as_ref())
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
-
-        Ok(response)
+        Request::new(self.clone(), subject, payload)
     }
 
     /// Creates a new object store bucket.
@@ -1186,15 +1105,23 @@ impl futures::Stream for Streams<'_> {
     }
 }
 /// Used for building customized `publish` message.
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Publish {
+    context: Context,
+    subject: String,
     payload: Bytes,
     headers: Option<header::HeaderMap>,
 }
+
 impl Publish {
     /// Creates a new custom Publish struct to be used with.
-    pub fn build() -> Self {
-        Default::default()
+    pub(crate) fn new(context: Context, subject: String, payload: Bytes) -> Self {
+        Publish {
+            context,
+            subject,
+            payload,
+            headers: None,
+        }
     }
 
     /// Sets the payload for the message.
@@ -1249,6 +1176,106 @@ impl Publish {
             header::NATS_EXPECTED_STREAM,
             HeaderValue::from(stream.as_ref()),
         )
+    }
+}
+
+impl IntoFuture for Publish {
+    type Output = Result<PublishAckFuture, PublishError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<PublishAckFuture, PublishError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(std::future::IntoFuture::into_future(async move {
+            let inbox = self.context.client.new_inbox();
+            let subscription = self
+                .context
+                .client
+                .subscribe(inbox.clone())
+                .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))
+                .await?;
+
+            let mut publish = self
+                .context
+                .client
+                .publish(self.subject, self.payload)
+                .reply(inbox);
+
+            if let Some(headers) = self.headers {
+                publish = publish.headers(headers);
+            }
+
+            let timeout = self.context.timeout;
+
+            tokio::time::timeout(timeout, publish.into_future())
+                .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))
+                .await?
+                .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))?;
+
+            Ok(PublishAckFuture {
+                timeout,
+                subscription,
+            })
+        }))
+    }
+}
+
+#[derive(Debug)]
+pub struct Request<T: Sized + Serialize, V: DeserializeOwned> {
+    context: Context,
+    subject: String,
+    payload: T,
+    timeout: Option<Duration>,
+    response_type: PhantomData<V>,
+}
+
+impl<T: Sized + Serialize, V: DeserializeOwned> Request<T, V> {
+    pub fn new(context: Context, subject: String, payload: T) -> Self {
+        Self {
+            context,
+            subject,
+            payload,
+            timeout: None,
+            response_type: PhantomData,
+        }
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+}
+
+impl<T: Sized + Serialize, V: DeserializeOwned> IntoFuture for Request<T, V> {
+    type Output = Result<Response<V>, RequestError>;
+
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response<V>, RequestError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let payload_result = serde_json::to_vec(&self.payload).map(Bytes::from);
+
+        let prefix = self.context.prefix;
+        let client = self.context.client;
+        let subject = self.subject;
+        let timeout = self.timeout;
+
+        Box::pin(std::future::IntoFuture::into_future(async move {
+            let payload = payload_result
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
+
+            debug!("JetStream request sent: {:?}", payload);
+
+            let request = client.request(format!("{}.{}", prefix, subject), payload);
+            let request = request.timeout(timeout);
+            let message = request.await?;
+
+            debug!(
+                "JetStream request response: {:?}",
+                from_utf8(&message.payload)
+            );
+            let response = serde_json::from_slice(message.payload.as_ref())
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
+
+            Ok(response)
+        }))
     }
 }
 

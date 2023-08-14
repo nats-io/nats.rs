@@ -577,6 +577,7 @@ impl Stream {
         let response: Response<GetRawMessage> = self
             .context
             .request(subject, &payload)
+            .into_future()
             .map_err(|err| LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err))
             .await?;
         match response {
@@ -627,6 +628,7 @@ impl Stream {
         let response: Response<DeleteStatus> = self
             .context
             .request(subject, &payload)
+            .into_future()
             .map_err(|err| match err.kind() {
                 RequestErrorKind::TimedOut => {
                     DeleteMessageError::new(DeleteMessageErrorKind::TimedOut)
@@ -1561,6 +1563,7 @@ where
                 .stream
                 .context
                 .request(request_subject, &self.inner)
+                .into_future()
                 .map_err(|err| match err.kind() {
                     RequestErrorKind::TimedOut => PurgeError::new(PurgeErrorKind::TimedOut),
                     _ => PurgeError::with_source(PurgeErrorKind::Request, err),

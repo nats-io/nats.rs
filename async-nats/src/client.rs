@@ -17,17 +17,18 @@ use crate::ServerInfo;
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
 use bytes::Bytes;
-use futures::future::TryFutureExt;
 use futures::stream::StreamExt;
+use futures::{Future, TryFutureExt};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
+use std::future::IntoFuture;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap());
@@ -41,6 +42,63 @@ pub struct PublishError(#[source] crate::Error);
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
         PublishError(Box::new(err))
+    }
+}
+
+#[must_use]
+pub struct Publish {
+    sender: mpsc::Sender<Command>,
+    subject: String,
+    payload: Bytes,
+    headers: Option<HeaderMap>,
+    respond: Option<String>,
+}
+
+impl Publish {
+    pub(crate) fn new(sender: mpsc::Sender<Command>, subject: String, payload: Bytes) -> Publish {
+        Publish {
+            sender,
+            subject,
+            payload,
+            headers: None,
+            respond: None,
+        }
+    }
+
+    pub fn headers(mut self, headers: HeaderMap) -> Publish {
+        self.headers = Some(headers);
+        self
+    }
+
+    pub fn reply(mut self, subject: String) -> Publish {
+        self.respond = Some(subject);
+        self
+    }
+}
+
+impl IntoFuture for Publish {
+    type Output = Result<(), PublishError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let sender = self.sender;
+        let subject = self.subject;
+        let payload = self.payload;
+        let respond = self.respond;
+        let headers = self.headers;
+
+        Box::pin(async move {
+            sender
+                .send(Command::Publish {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                })
+                .await?;
+
+            Ok(())
+        })
     }
 }
 
@@ -149,16 +207,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: None,
-            })
-            .await?;
-        Ok(())
+    pub fn publish(&self, subject: String, payload: Bytes) -> Publish {
+        Publish::new(self.sender.clone(), subject, payload)
     }
 
     /// Publish a [Message] with headers to a given subject.
@@ -186,14 +236,7 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: None,
-                headers: Some(headers),
-            })
-            .await?;
+        self.publish(subject, payload).headers(headers).await?;
         Ok(())
     }
 
@@ -223,14 +266,7 @@ impl Client {
         reply: String,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: None,
-            })
-            .await?;
+        self.publish(subject, payload).reply(reply).await?;
         Ok(())
     }
 
@@ -264,13 +300,9 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        self.sender
-            .send(Command::Publish {
-                subject,
-                payload,
-                respond: Some(reply),
-                headers: Some(headers),
-            })
+        self.publish(subject, payload)
+            .headers(headers)
+            .reply(reply)
             .await?;
         Ok(())
     }
@@ -286,10 +318,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, RequestError> {
-        trace!("request sent to subject: {} ({})", subject, payload.len());
-        let request = Request::new().payload(payload);
-        self.send_request(subject, request).await
+    pub fn request(&self, subject: String, payload: Bytes) -> Request {
+        Request::new(self.clone(), subject, payload)
     }
 
     /// Sends the request with headers.
@@ -313,65 +343,11 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let request = Request::new().headers(headers).payload(payload);
-        self.send_request(subject, request).await
-    }
+        let message = Request::new(self.clone(), subject, payload)
+            .headers(headers)
+            .await?;
 
-    /// Sends the request created by the [Request].
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new().payload("data".into());
-    /// let response = client.send_request("service".into(), request).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send_request(
-        &self,
-        subject: String,
-        request: Request,
-    ) -> Result<Message, RequestError> {
-        let inbox = request.inbox.unwrap_or_else(|| self.new_inbox());
-        let timeout = request.timeout.unwrap_or(self.request_timeout);
-        let mut sub = self.subscribe(inbox.clone()).await?;
-        let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
-        match request.headers {
-            Some(headers) => {
-                self.publish_with_reply_and_headers(subject, inbox, headers, payload)
-                    .await?
-            }
-            None => self.publish_with_reply(subject, inbox, payload).await?,
-        }
-        self.flush()
-            .await
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
-        let request = match timeout {
-            Some(timeout) => {
-                tokio::time::timeout(timeout, sub.next())
-                    .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
-                    .await?
-            }
-            None => sub.next().await,
-        };
-        match request {
-            Some(message) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(RequestError::with_source(
-                        RequestErrorKind::NoResponders,
-                        "no responders",
-                    ));
-                }
-                Ok(message)
-            }
-            None => Err(RequestError::with_source(
-                RequestErrorKind::Other,
-                "broken pipe",
-            )),
-        }
+        Ok(message)
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -503,8 +479,10 @@ impl Client {
 }
 
 /// Used for building customized requests.
-#[derive(Default)]
+#[derive(Debug)]
 pub struct Request {
+    client: Client,
+    subject: String,
     payload: Option<Bytes>,
     headers: Option<HeaderMap>,
     timeout: Option<Option<Duration>>,
@@ -512,8 +490,15 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new() -> Request {
-        Default::default()
+    pub fn new(client: Client, subject: String, payload: Bytes) -> Request {
+        Request {
+            client,
+            subject,
+            payload: Some(payload),
+            headers: None,
+            timeout: None,
+            inbox: None,
+        }
     }
 
     /// Sets the payload of the request. If not used, empty payload will be sent.
@@ -523,8 +508,7 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new().payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.request("service".into(), "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -546,10 +530,11 @@ impl Request {
     ///     "X-Example",
     ///     async_nats::HeaderValue::from_str("Value").unwrap(),
     /// );
-    /// let request = async_nats::Request::new()
+    /// client
+    ///     .request("subject".into(), "data".into())
     ///     .headers(headers)
-    ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    ///     .await?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
@@ -567,10 +552,11 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new()
+    /// client
+    ///     .request("service".into(), "data".into())
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
-    ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    ///     .await?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
@@ -587,16 +573,66 @@ impl Request {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use std::str::FromStr;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let request = async_nats::Request::new()
+    /// client
+    ///     .request("subject".into(), "data".into())
     ///     .inbox("custom_inbox".into())
-    ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    ///     .await?;
+    ///
     /// # Ok(())
     /// # }
     /// ```
     pub fn inbox(mut self, inbox: String) -> Request {
         self.inbox = Some(inbox);
         self
+    }
+
+    async fn send(self) -> Result<Message, RequestError> {
+        let inbox = self.inbox.unwrap_or_else(|| self.client.new_inbox());
+        let mut subscriber = self.client.subscribe(inbox.clone()).await?;
+        let mut publish = self
+            .client
+            .publish(self.subject, self.payload.unwrap_or_else(Bytes::new));
+
+        if let Some(headers) = self.headers {
+            publish = publish.headers(headers);
+        }
+
+        publish = publish.reply(inbox);
+        publish.into_future().await?;
+
+        self.client
+            .flush()
+            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))
+            .await?;
+
+        let period = self.timeout.unwrap_or(self.client.request_timeout);
+        let message = match period {
+            Some(period) => {
+                tokio::time::timeout(period, subscriber.next())
+                    .map_err(|_| RequestError::new(RequestErrorKind::TimedOut))
+                    .await?
+            }
+            None => subscriber.next().await,
+        };
+
+        match message {
+            Some(message) => {
+                if message.status == Some(StatusCode::NO_RESPONDERS) {
+                    return Err(RequestError::new(RequestErrorKind::NoResponders));
+                }
+                Ok(message)
+            }
+            None => Err(RequestError::new(RequestErrorKind::Other)),
+        }
+    }
+}
+
+impl IntoFuture for Request {
+    type Output = Result<Message, RequestError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Message, RequestError>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.send())
     }
 }
 
