@@ -501,24 +501,26 @@ impl ConnectionHandler {
                             self.handle_flush().await?;
                         }
                     }
-                } else if let Some(multiplexer) = self.multiplexer.as_mut() {
-                    let maybe_token = subject.strip_prefix(&multiplexer.prefix).to_owned();
+                } else if sid == MULTIPLEXER_SID {
+                    if let Some(multiplexer) = self.multiplexer.as_mut() {
+                        let maybe_token = subject.strip_prefix(&multiplexer.prefix).to_owned();
 
-                    if let Some(token) = maybe_token {
-                        if let Some(sender) = multiplexer.senders.remove(token) {
-                            let message = Message {
-                                subject,
-                                reply,
-                                payload,
-                                headers,
-                                status,
-                                description,
-                                length,
-                            };
+                        if let Some(token) = maybe_token {
+                            if let Some(sender) = multiplexer.senders.remove(token) {
+                                let message = Message {
+                                    subject,
+                                    reply,
+                                    payload,
+                                    headers,
+                                    status,
+                                    description,
+                                    length,
+                                };
 
-                            sender.send(message).map_err(|_| {
-                                io::Error::new(io::ErrorKind::Other, "request receiver closed")
-                            })?;
+                                sender.send(message).map_err(|_| {
+                                    io::Error::new(io::ErrorKind::Other, "request receiver closed")
+                                })?;
+                            }
                         }
                     }
                 }
