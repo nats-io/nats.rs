@@ -649,15 +649,16 @@ impl ObjectStore {
     /// let jetstream = async_nats::jetstream::new(client);
     /// let bucket = jetstream.get_object_store("bucket").await?;
     /// let object = bucket.get("object").await?;
-    /// bucket.add_link("link_to_object", &object.info).await?;
+    /// bucket.add_link("link_to_object", &object).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn add_link<T: ToString>(
-        &self,
-        name: T,
-        object: &ObjectInfo,
-    ) -> Result<ObjectInfo, AddLinkError> {
+    pub async fn add_link<'a, T, O>(&self, name: T, object: O) -> Result<ObjectInfo, AddLinkError>
+    where
+        T: ToString,
+        O: AsObjectInfo,
+    {
+        let object = object.as_info();
         let name = name.to_string();
         if name.is_empty() {
             return Err(AddLinkError::new(AddLinkErrorKind::EmptyName));
@@ -714,16 +715,18 @@ impl ObjectStore {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use async_nats::jetstream::object_store;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let jetstream = async_nats::jetstream::new(client);    
+    /// let jetstream = async_nats::jetstream::new(client);
     /// let bucket = jetstream.get_object_store("bucket").await?;
-    /// bucket.add_bucket_link("link_to_object", "another_bucket").await?;
+    /// bucket
+    ///     .add_bucket_link("link_to_object", "another_bucket")
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn add_bucket_link<T: ToString>(
+    pub async fn add_bucket_link<T: ToString, U: ToString>(
         &self,
         name: T,
-        bucket: T,
+        bucket: U,
     ) -> Result<ObjectInfo, AddLinkError> {
         let name = name.to_string();
         let bucket = bucket.to_string();
@@ -1083,6 +1086,21 @@ impl From<&str> for ObjectMeta {
             name: s.to_string(),
             ..Default::default()
         }
+    }
+}
+
+pub trait AsObjectInfo {
+    fn as_info(&self) -> &ObjectInfo;
+}
+
+impl AsObjectInfo for &Object<'_> {
+    fn as_info(&self) -> &ObjectInfo {
+        &self.info
+    }
+}
+impl AsObjectInfo for &ObjectInfo {
+    fn as_info(&self) -> &ObjectInfo {
+        self
     }
 }
 
