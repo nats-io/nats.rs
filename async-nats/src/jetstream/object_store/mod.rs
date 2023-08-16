@@ -36,7 +36,6 @@ use super::context::{PublishError, PublishErrorKind};
 use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
-use async_recursion::async_recursion;
 use time::{serde::rfc3339, OffsetDateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
@@ -638,6 +637,22 @@ impl ObjectStore {
     /// Adds a link to an [Object].
     /// It creates a new [Object] in the [ObjectStore] that points to another [Object]
     /// and does not have any contents on it's own.
+    /// Links are automatically followed (one level deep) when calling [ObjectStore::get].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::object_store;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.get_object_store("bucket").await?;
+    /// let object = bucket.get("object").await?;
+    /// bucket.add_link("link_to_object", &object.info).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn add_link<T: ToString>(
         &self,
         name: T,
@@ -691,6 +706,20 @@ impl ObjectStore {
     /// Adds a link to another [ObjectStore] bucket by creating a new [Object]
     /// in the current [ObjectStore] that points to another [ObjectStore] and
     /// does not contain any data.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::object_store;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);    
+    /// let bucket = jetstream.get_object_store("bucket").await?;
+    /// bucket.add_bucket_link("link_to_object", "another_bucket").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn add_bucket_link<T: ToString>(
         &self,
         name: T,

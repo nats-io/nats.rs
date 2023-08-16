@@ -40,7 +40,6 @@ tokio-retry = "0.3"
 ring = "0.16"
 rand = "0.8"
 webpki = { package = "rustls-webpki", version = "0.101.2", features = ["alloc", "std"] }
-async-recursion = "1.0.4"
 
 [dev-dependencies]
 criterion =  { version = "0.5", features = ["async_tokio"]}
