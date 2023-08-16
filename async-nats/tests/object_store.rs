@@ -15,7 +15,10 @@ mod object_store {
 
     use std::{io, time::Duration};
 
-    use async_nats::jetstream::{object_store::ObjectMeta, stream::DirectGetErrorKind};
+    use async_nats::jetstream::{
+        object_store::{AddLinkErrorKind, ObjectMeta},
+        stream::DirectGetErrorKind,
+    };
     use base64::Engine;
     use futures::StreamExt;
     use rand::RngCore;
@@ -456,5 +459,59 @@ mod object_store {
 
         assert_eq!(info.name, given_metadata.name);
         assert_eq!(info.description, given_metadata.description);
+    }
+
+    #[tokio::test]
+    async fn add_link() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let object = bucket
+            .put("object", &mut "some data".as_bytes())
+            .await
+            .unwrap();
+
+        let another_object = bucket
+            .put("another_object", &mut "other data".as_bytes())
+            .await
+            .unwrap();
+
+        bucket.add_link("link", &object).await.unwrap();
+
+        let link_info = bucket.info("link").await.unwrap();
+
+        assert_eq!(
+            link_info
+                .link
+                .as_ref()
+                .unwrap()
+                .name
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "object"
+        );
+        assert_eq!(link_info.link.as_ref().unwrap().bucket.as_str(), "bucket");
+
+        let result = bucket
+            .add_link("object", &another_object)
+            .await
+            .unwrap_err();
+        assert_eq!(result.kind(), AddLinkErrorKind::AlreadyExists);
+
+        let result = bucket.add_link("", &another_object).await.unwrap_err();
+        assert_eq!(result.kind(), AddLinkErrorKind::EmptyName);
+
+        let result = bucket.add_link("new_link", &link_info).await.unwrap_err();
+        assert_eq!(result.kind(), AddLinkErrorKind::LinkToLink);
     }
 }
