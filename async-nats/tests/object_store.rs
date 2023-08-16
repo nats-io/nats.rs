@@ -70,6 +70,17 @@ mod object_store {
             object.info.digest
         );
         assert_eq!(result, bytes);
+
+        // Check if following a link works.
+        bucket.add_link("link", &object.info).await.unwrap();
+
+        tracing::info!("getting link");
+        let mut object_link = bucket.get("link").await.unwrap();
+        let mut contents = Vec::new();
+
+        tracing::info!("reading content");
+        object_link.read_to_end(&mut contents).await.unwrap();
+        assert_eq!(contents, result);
     }
 
     #[tokio::test]

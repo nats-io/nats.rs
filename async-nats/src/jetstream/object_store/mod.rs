@@ -36,6 +36,7 @@ use super::context::{PublishError, PublishErrorKind};
 use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
+use async_recursion::async_recursion;
 use time::{serde::rfc3339, OffsetDateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
@@ -108,13 +109,39 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get<T: AsRef<str>>(&self, object_name: T) -> Result<Object<'_>, GetError> {
-        let object_info = self.info(object_name).await?;
-        // if let Some(link) = object_info.link {
-        //     return self.get(link.name).await;
-        // }
-
-        Ok(Object::new(object_info, self.stream.clone()))
+    pub fn get<'bucket, 'object, 'future, T>(
+        &'bucket self,
+        object_name: T,
+    ) -> BoxFuture<'future, Result<Object<'object>, GetError>>
+    where
+        T: AsRef<str> + Send + 'future,
+        'bucket: 'future,
+    {
+        Box::pin(async move {
+            let object_info = self.info(object_name).await?;
+            if let Some(link) = object_info.link.as_ref() {
+                if let Some(link_name) = link.name.as_ref() {
+                    let link_name = link_name.clone();
+                    debug!("getting object via link");
+                    if link.bucket == self.name {
+                        return self.get(link_name).await;
+                    } else {
+                        let bucket = self
+                            .stream
+                            .context
+                            .get_object_store(&link_name)
+                            .await
+                            .map_err(|err| GetError::with_source(GetErrorKind::Other, err))?;
+                        let object = bucket.get(&link_name).await?;
+                        return Ok(object);
+                    }
+                } else {
+                    return Err(GetError::new(GetErrorKind::BucketLink));
+                }
+            }
+            debug!("not a link. Getting the object");
+            Ok(Object::new(object_info, self.stream.clone()))
+        })
     }
 
     /// Gets an [Object] from the [ObjectStore].
@@ -643,11 +670,11 @@ impl ObjectStore {
         }
 
         let info = ObjectInfo {
-            name: name.clone(),
+            name,
             description: None,
             link: Some(ObjectLink {
                 name: Some(object.name.clone()),
-                bucket: object.bucket.to_string(),
+                bucket: object.bucket.clone(),
             }),
             bucket: self.name.clone(),
             nuid: nuid::next().to_string(),
@@ -657,7 +684,7 @@ impl ObjectStore {
             digest: None,
             deleted: false,
         };
-        publish_meta(&self, &info).await?;
+        publish_meta(self, &info).await?;
         Ok(info)
     }
 
@@ -690,10 +717,7 @@ impl ObjectStore {
         let info = ObjectInfo {
             name: name.clone(),
             description: None,
-            link: Some(ObjectLink {
-                name: None,
-                bucket: bucket.to_string(),
-            }),
+            link: Some(ObjectLink { name: None, bucket }),
             bucket: self.name.clone(),
             nuid: nuid::next().to_string(),
             size: 0,
@@ -702,7 +726,7 @@ impl ObjectStore {
             digest: None,
             deleted: false,
         };
-        publish_meta(&self, &info).await?;
+        publish_meta(self, &info).await?;
         Ok(info)
     }
 }
@@ -1114,6 +1138,7 @@ pub enum GetErrorKind {
     InvalidName,
     ConsumerCreate,
     NotFound,
+    BucketLink,
     Other,
     TimedOut,
 }
@@ -1126,6 +1151,7 @@ impl Display for GetErrorKind {
             Self::NotFound => write!(f, "object not found"),
             Self::TimedOut => write!(f, "timed out"),
             Self::InvalidName => write!(f, "invalid object name"),
+            Self::BucketLink => write!(f, "object is a link to a bucket"),
         }
     }
 }
