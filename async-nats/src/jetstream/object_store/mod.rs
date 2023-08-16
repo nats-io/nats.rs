@@ -673,6 +673,52 @@ impl ObjectStore {
         Ok(info)
     }
 
+    /// Adds a link to another [ObjectStore] bucket by creating a new [Object]
+    /// in the current [ObjectStore] that points to another [ObjectStore] and
+    /// does not contain any data.
+    pub async fn add_bucket_link<T: ToString>(
+        &self,
+        name: T,
+        bucket: T,
+    ) -> Result<ObjectInfo, AddLinkError> {
+        let name = name.to_string();
+        let bucket = bucket.to_string();
+        if name.is_empty() {
+            return Err(AddLinkError::new(AddLinkErrorKind::EmptyName));
+        }
+
+        match self.info(&name).await {
+            Ok(info) => {
+                if info.link.is_none() {
+                    return Err(AddLinkError::new(AddLinkErrorKind::AlreadyExists));
+                }
+            }
+            Err(err) if err.kind() != InfoErrorKind::NotFound => {
+                return Err(AddLinkError::with_source(AddLinkErrorKind::Other, err))
+            }
+            _ => (),
+        }
+
+        let info = ObjectInfo {
+            name: name.clone(),
+            description: None,
+            link: Some(ObjectLink {
+                name: None,
+                bucket: bucket.to_string(),
+            }),
+            bucket: self.name.clone(),
+            nuid: nuid::next().to_string(),
+            size: 0,
+            chunks: 0,
+            modified: OffsetDateTime::now_utc(),
+            digest: None,
+            deleted: false,
+        };
+        publish_meta(&self, &info).await?;
+        Ok(info)
+    }
+}
+
 async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), PublishMetadataError> {
     let encoded_object_name = encode_object_name(&info.name);
     let subject = format!("$O.{}.M.{}", &store.name, &encoded_object_name);

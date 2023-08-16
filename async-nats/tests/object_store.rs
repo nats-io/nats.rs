@@ -514,4 +514,33 @@ mod object_store {
         let result = bucket.add_link("new_link", &link_info).await.unwrap_err();
         assert_eq!(result.kind(), AddLinkErrorKind::LinkToLink);
     }
+
+    #[tokio::test]
+    async fn add_bucket_link() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "another".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket.add_bucket_link("link", "another").await.unwrap();
+
+        let link_info = bucket.info("link").await.unwrap();
+        assert!(link_info.link.as_ref().unwrap().name.is_none());
+        assert_eq!(link_info.link.as_ref().unwrap().bucket.as_str(), "another");
+    }
 }
