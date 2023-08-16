@@ -20,6 +20,7 @@ use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use base64::engine::Engine;
 use bytes::BytesMut;
+use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
@@ -29,10 +30,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 
-use super::consumer::push::OrderedError;
+use super::consumer::push::{OrderedConfig, OrderedError};
 use super::consumer::{DeliverPolicy, StreamError, StreamErrorKind};
 use super::context::{PublishError, PublishErrorKind};
-use super::stream::{ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
+use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -113,20 +114,7 @@ impl ObjectStore {
         //     return self.get(link.name).await;
         // }
 
-        let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
-
-        let subscription = self
-            .stream
-            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
-                filter_subject: chunk_subject,
-                deliver_subject: self.stream.context.client.new_inbox(),
-                ..Default::default()
-            })
-            .await?
-            .messages()
-            .await?;
-
-        Ok(Object::new(subscription, object_info))
+        Ok(Object::new(object_info, self.stream.clone()))
     }
 
     /// Gets an [Object] from the [ObjectStore].
@@ -217,7 +205,7 @@ impl ObjectStore {
             .get_last_raw_message_by_subject(subject.as_str())
             .await
             .map_err(|err| match err.kind() {
-                super::stream::LastRawMessageErrorKind::NoMessageFound => {
+                stream::LastRawMessageErrorKind::NoMessageFound => {
                     InfoError::new(InfoErrorKind::NotFound)
                 }
                 _ => InfoError::with_source(InfoErrorKind::Other, err),
@@ -852,16 +840,20 @@ pub struct Object<'a> {
     has_pending_messages: bool,
     digest: Option<ring::digest::Context>,
     subscription: Option<crate::jetstream::consumer::push::Ordered<'a>>,
+    subscription_future: Option<BoxFuture<'a, Result<Ordered<'a>, StreamError>>>,
+    stream: crate::jetstream::stream::Stream,
 }
 
 impl<'a> Object<'a> {
-    pub(crate) fn new(subscription: Ordered<'a>, info: ObjectInfo) -> Self {
+    pub(crate) fn new(info: ObjectInfo, stream: stream::Stream) -> Self {
         Object {
-            subscription: Some(subscription),
+            subscription: None,
             info,
             remaining_bytes: VecDeque::new(),
             has_pending_messages: true,
             digest: Some(ring::digest::Context::new(&SHA256)),
+            subscription_future: None,
+            stream,
         }
     }
 
@@ -886,6 +878,34 @@ impl tokio::io::AsyncRead for Object<'_> {
         }
 
         if self.has_pending_messages {
+            if self.subscription.is_none() {
+                let future = match self.subscription_future.as_mut() {
+                    Some(future) => future,
+                    None => {
+                        let stream = self.stream.clone();
+                        let bucket = self.info.bucket.clone();
+                        let nuid = self.info.nuid.clone();
+                        self.subscription_future.insert(Box::pin(async move {
+                            stream
+                                .create_consumer(OrderedConfig {
+                                    deliver_subject: stream.context.client.new_inbox(),
+                                    filter_subject: format!("$O.{}.C.{}", bucket, nuid),
+                                    ..Default::default()
+                                })
+                                .await
+                                .unwrap()
+                                .messages()
+                                .await
+                        }))
+                    }
+                };
+                match future.as_mut().poll(cx) {
+                    Poll::Ready(subscription) => {
+                        self.subscription = Some(subscription.unwrap());
+                    }
+                    Poll::Pending => (),
+                }
+            }
             if let Some(subscription) = self.subscription.as_mut() {
                 match subscription.poll_next_unpin(cx) {
                     Poll::Ready(message) => match message {
@@ -946,7 +966,7 @@ impl tokio::io::AsyncRead for Object<'_> {
                     Poll::Pending => Poll::Pending,
                 }
             } else {
-                Poll::Ready(Ok(()))
+                Poll::Pending
             }
         } else {
             Poll::Ready(Ok(()))
