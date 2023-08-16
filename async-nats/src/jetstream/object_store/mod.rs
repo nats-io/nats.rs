@@ -619,6 +619,100 @@ impl ObjectStore {
 
         Ok(info)
     }
+
+    /// Adds a link to an [Object].
+    /// It creates a new [Object] in the [ObjectStore] that points to another [Object]
+    /// and does not have any contents on it's own.
+    pub async fn add_link<T: ToString>(
+        &self,
+        name: T,
+        object: &ObjectInfo,
+    ) -> Result<ObjectInfo, AddLinkError> {
+        let name = name.to_string();
+        if name.is_empty() {
+            return Err(AddLinkError::new(AddLinkErrorKind::EmptyName));
+        }
+        if object.name.is_empty() {
+            return Err(AddLinkError::new(AddLinkErrorKind::ObjectRequired));
+        }
+        if object.deleted {
+            return Err(AddLinkError::new(AddLinkErrorKind::Deleted));
+        }
+        if object.link.is_some() {
+            return Err(AddLinkError::new(AddLinkErrorKind::LinkToLink));
+        }
+
+        match self.info(&name).await {
+            Ok(info) => {
+                if info.link.is_none() {
+                    return Err(AddLinkError::new(AddLinkErrorKind::AlreadyExists));
+                }
+            }
+            Err(err) if err.kind() != InfoErrorKind::NotFound => {
+                return Err(AddLinkError::with_source(AddLinkErrorKind::Other, err))
+            }
+            _ => (),
+        }
+
+        let info = ObjectInfo {
+            name: name.clone(),
+            description: None,
+            link: Some(ObjectLink {
+                name: Some(object.name.clone()),
+                bucket: object.bucket.to_string(),
+            }),
+            bucket: self.name.clone(),
+            nuid: nuid::next().to_string(),
+            size: 0,
+            chunks: 0,
+            modified: OffsetDateTime::now_utc(),
+            digest: None,
+            deleted: false,
+        };
+        publish_meta(&self, &info).await?;
+        Ok(info)
+    }
+
+async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), PublishMetadataError> {
+    let encoded_object_name = encode_object_name(&info.name);
+    let subject = format!("$O.{}.M.{}", &store.name, &encoded_object_name);
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        NATS_ROLLUP,
+        ROLLUP_SUBJECT.parse::<HeaderValue>().map_err(|err| {
+            PublishMetadataError::with_source(
+                PublishMetadataErrorKind::Other,
+                format!("failed parsing header: {}", err),
+            )
+        })?,
+    );
+    let data = serde_json::to_vec(&info).map_err(|err| {
+        PublishMetadataError::with_source(
+            PublishMetadataErrorKind::Other,
+            format!("failed serializing object info: {}", err),
+        )
+    })?;
+
+    store
+        .stream
+        .context
+        .publish_with_headers(subject, headers, data.into())
+        .await
+        .map_err(|err| {
+            PublishMetadataError::with_source(
+                PublishMetadataErrorKind::PublishMetadata,
+                format!("failed publishing metadata: {}", err),
+            )
+        })?
+        .await
+        .map_err(|err| {
+            PublishMetadataError::with_source(
+                PublishMetadataErrorKind::PublishMetadata,
+                format!("failed ack from metadata publish: {}", err),
+            )
+        })?;
+    Ok(())
 }
 
 pub struct Watch<'a> {
@@ -850,9 +944,9 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ObjectLink {
     /// Name of the object
-    pub name: String,
+    pub name: Option<String>,
     /// Name of the bucket the object is stored in.
-    pub bucket: Option<String>,
+    pub bucket: String,
 }
 
 /// Meta information about an object.
@@ -1051,6 +1145,73 @@ impl Display for PutErrorKind {
 }
 
 pub type PutError = Error<PutErrorKind>;
+
+pub type AddLinkError = Error<AddLinkErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AddLinkErrorKind {
+    EmptyName,
+    ObjectRequired,
+    Deleted,
+    LinkToLink,
+    PublishMetadata,
+    AlreadyExists,
+    Other,
+}
+
+impl Display for AddLinkErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddLinkErrorKind::ObjectRequired => write!(f, "cannot link to empty Object"),
+            AddLinkErrorKind::Deleted => write!(f, "cannot link a deleted Object"),
+            AddLinkErrorKind::LinkToLink => write!(f, "cannot link to another link"),
+            AddLinkErrorKind::EmptyName => write!(f, "link name cannot be empty"),
+            AddLinkErrorKind::PublishMetadata => write!(f, "failed publishing link metadata"),
+            AddLinkErrorKind::Other => write!(f, "error"),
+            AddLinkErrorKind::AlreadyExists => write!(f, "object already exists"),
+        }
+    }
+}
+
+type PublishMetadataError = Error<PublishMetadataErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PublishMetadataErrorKind {
+    PublishMetadata,
+    Other,
+}
+
+impl Display for PublishMetadataErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PublishMetadataErrorKind::PublishMetadata => write!(f, "failed to publish metadata"),
+            PublishMetadataErrorKind::Other => write!(f, "error"),
+        }
+    }
+}
+
+impl From<PublishMetadataError> for AddLinkError {
+    fn from(error: PublishMetadataError) -> Self {
+        match error.kind {
+            PublishMetadataErrorKind::PublishMetadata => {
+                AddLinkError::new(AddLinkErrorKind::PublishMetadata)
+            }
+            PublishMetadataErrorKind::Other => {
+                AddLinkError::with_source(AddLinkErrorKind::Other, error)
+            }
+        }
+    }
+}
+impl From<PublishMetadataError> for PutError {
+    fn from(error: PublishMetadataError) -> Self {
+        match error.kind {
+            PublishMetadataErrorKind::PublishMetadata => {
+                PutError::new(PutErrorKind::PublishMetadata)
+            }
+            PublishMetadataErrorKind::Other => PutError::with_source(PutErrorKind::Other, error),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {
