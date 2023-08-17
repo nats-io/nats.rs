@@ -26,34 +26,54 @@ mod compatibility {
     use tokio::io::AsyncReadExt;
 
     #[tokio::test]
-    async fn run() {
+    async fn kv() {
+        panic!("kv suite not implemented yet")
+    }
+
+    #[tokio::test]
+    async fn object_store() {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "demo.nats.io".to_string());
+        tracing::info!("staring client for object store tests at {}", url);
         let client = async_nats::connect(url).await.unwrap();
 
-        let tests = client.subscribe("tests.>".into()).await.unwrap().peekable();
+        let tests = client
+            .subscribe("tests.object-store.>".into())
+            .await
+            .unwrap()
+            .peekable();
         pin_mut!(tests);
 
-        while let Some(message) = tests.as_mut().peek().await {
-            if message.subject.split_once('.').unwrap().1 == "done" {
-                println!("DONE");
-                break;
-            }
-            let test: Test = Test::try_from(message).unwrap();
-            match test.suite.as_str() {
-                "object-store" => {
-                    let object_store = ObjectStore {
-                        client: client.clone(),
-                    };
-                    match test.test.as_str() {
-                        "default-bucket" => object_store.default_bucket(tests.as_mut()).await,
-                        "custom-bucket" => object_store.custom_bucket(tests.as_mut()).await,
-                        "get-object" => object_store.get_object(tests.as_mut()).await,
-                        "put-object" => object_store.put_object(tests.as_mut()).await,
-                        "update-metadata" => object_store.update_metadata(tests.as_mut()).await,
-                        unknown => panic!("unkown test: {}", unknown),
+        let mut done = client.subscribe("tests.done".into()).await.unwrap();
+
+        loop {
+            tokio::select! {
+                _ = done.next() => {
+                tracing::info!("object store tests done");
+                 return;
+                }
+                message = tests.as_mut().peek() => {
+                let test: Test = Test::try_from(message.unwrap()).unwrap();
+                    match test.suite.as_str() {
+                        "object-store" => {
+                            let object_store = ObjectStore {
+                                client: client.clone(),
+                            };
+                            match test.test.as_str() {
+                                "default-bucket" => object_store.default_bucket(tests.as_mut()).await,
+                                "custom-bucket" => object_store.custom_bucket(tests.as_mut()).await,
+                                "get-object" => object_store.get_object(tests.as_mut()).await,
+                                "put-object" => object_store.put_object(tests.as_mut()).await,
+                                "update-metadata" => object_store.update_metadata(tests.as_mut()).await,
+                                "watch" => object_store.watch(tests.as_mut()).await,
+                                unknown => panic!("unkown test: {}", unknown),
+                            }
+                        }
+                        unknown => panic!("not an object store suite: {}", unknown),
                     }
                 }
-                unknown => panic!("unkown suite: {}", unknown),
             }
         }
     }
@@ -243,6 +263,37 @@ mod compatibility {
 
             self.client
                 .publish(update_command.reply.unwrap(), "".into())
+                .await
+                .unwrap();
+
+            let done = commands.next().await.unwrap();
+            if done.headers.is_some() {
+                panic!("test failed: {:?}", done.headers);
+            } else {
+                println!("test update-metadata PASS");
+            }
+        }
+        async fn watch(&self, mut commands: PinnedSubscriber<'_>) {
+            #[derive(Deserialize)]
+            struct Command {
+                #[allow(dead_code)]
+                object: String,
+                bucket: String,
+            }
+            let get_request = commands.as_mut().next().await.unwrap();
+
+            let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
+            let bucket = async_nats::jetstream::new(self.client.clone())
+                .get_object_store(request.bucket)
+                .await
+                .unwrap();
+
+            let mut watch = bucket.watch().await.unwrap();
+
+            let info = watch.next().await.unwrap().unwrap();
+
+            self.client
+                .publish(get_request.reply.unwrap(), info.digest.unwrap().into())
                 .await
                 .unwrap();
 
