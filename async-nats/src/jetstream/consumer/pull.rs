@@ -398,7 +398,7 @@ impl futures::Stream for Batch {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => {
-                        debug!("recived timeout. Iterator done.");
+                        debug!("received timeout. Iterator done.");
                         self.terminated = true;
                         Poll::Ready(None)
                     }
