@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "compatibility_tests")]
 mod compatibility {
     use futures::{pin_mut, stream::Peekable, StreamExt};
 
