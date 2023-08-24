@@ -14,6 +14,7 @@
 //! Object Store module
 use std::collections::VecDeque;
 use std::fmt::Display;
+use std::future::IntoFuture;
 use std::{cmp, str::FromStr, task::Poll, time::Duration};
 
 use crate::{HeaderMap, HeaderValue};
@@ -395,6 +396,14 @@ impl ObjectStore {
         Ok(object_info)
     }
 
+    pub fn new_watch(&self) -> WatchFuture<None, NoObject> {
+        WatchFuture {
+            deliver_policy: None {},
+            object: NoObject {},
+            bucket: &self,
+        }
+    }
+
     /// Creates a [Watch] stream over changes in the [ObjectStore].
     ///
     /// # Examples
@@ -423,6 +432,31 @@ impl ObjectStore {
     pub async fn watch_with_history(&self) -> Result<Watch<'_>, WatchError> {
         self.watch_with_deliver_policy(DeliverPolicy::LastPerSubject)
             .await
+    }
+
+    async fn watch_with_deliver_and_object(
+        &self,
+        deliver_policy: DeliverPolicy,
+        object: Option<String>,
+    ) -> Result<Watch<'_>, WatchError> {
+        let subject = if let Some(object) = object {
+            format!("$O.{}.M.{}", self.name, encode_object_name(object.as_str()))
+        } else {
+            format!("$O.{}.M.>", self.name)
+        };
+        let ordered = self
+            .stream
+            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
+                deliver_policy,
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("object store watcher".to_string()),
+                filter_subject: subject,
+                ..Default::default()
+            })
+            .await?;
+        Ok(Watch {
+            subscription: ordered.messages().await?,
+        })
     }
 
     async fn watch_with_deliver_policy(
@@ -1434,3 +1468,99 @@ impl From<OrderedError> for WatcherError {
 
 pub type ListerError = WatcherError;
 pub type ListerErrorKind = WatcherErrorKind;
+
+// Object
+pub trait WithObject {
+    fn object(&self) -> Option<String> {
+        None
+    }
+}
+pub struct HasObject(String);
+impl WithObject for HasObject {
+    fn object(&self) -> Option<String> {
+        Some(self.0.clone())
+    }
+}
+pub struct NoObject {}
+impl WithObject for NoObject {}
+
+// Deliver policy
+pub trait WithDeliver {
+    fn deliver(&self) -> DeliverPolicy {
+        DeliverPolicy::New
+    }
+}
+pub struct New {}
+impl WithDeliver for New {
+    fn deliver(&self) -> DeliverPolicy {
+        DeliverPolicy::New
+    }
+}
+pub struct LastBySubject {}
+impl WithDeliver for LastBySubject {
+    fn deliver(&self) -> DeliverPolicy {
+        DeliverPolicy::LastPerSubject
+    }
+}
+pub struct All {}
+impl WithDeliver for All {
+    fn deliver(&self) -> DeliverPolicy {
+        DeliverPolicy::All
+    }
+}
+pub struct None {}
+impl WithDeliver for None {}
+
+// Builder
+pub struct WatchFuture<'a, D: WithDeliver, O: WithObject> {
+    deliver_policy: D,
+    object: O,
+    bucket: &'a ObjectStore,
+}
+
+impl<'a, O: WithObject> WatchFuture<'a, None, O> {
+    pub fn include_history(self) -> WatchFuture<'a, All, O> {
+        WatchFuture {
+            bucket: self.bucket,
+            object: self.object,
+            deliver_policy: All {},
+        }
+    }
+    pub fn only_new(self) -> WatchFuture<'a, New, O> {
+        WatchFuture {
+            bucket: self.bucket,
+            object: self.object,
+            deliver_policy: New {},
+        }
+    }
+    pub fn with_last(self) -> WatchFuture<'a, LastBySubject, O> {
+        WatchFuture {
+            bucket: self.bucket,
+            object: self.object,
+            deliver_policy: LastBySubject {},
+        }
+    }
+}
+
+impl<'a, D: WithDeliver> WatchFuture<'a, D, NoObject> {
+    pub fn object<N: ToString>(self, name: N) -> WatchFuture<'a, D, HasObject> {
+        WatchFuture {
+            deliver_policy: self.deliver_policy,
+            object: HasObject(name.to_string()),
+            bucket: self.bucket,
+        }
+    }
+}
+
+impl<'a, D: WithDeliver, O: WithObject> IntoFuture for WatchFuture<'a, D, O> {
+    type Output = Result<Watch<'a>, WatchError>;
+
+    type IntoFuture = BoxFuture<'a, Result<Watch<'a>, WatchError>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(
+            self.bucket
+                .watch_with_deliver_and_object(self.deliver_policy.deliver(), self.object.object()),
+        )
+    }
+}
