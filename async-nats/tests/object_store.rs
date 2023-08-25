@@ -556,7 +556,7 @@ mod object_store {
     }
 
     #[tokio::test]
-    async fn object_api() {
+    async fn hide_deleted() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
@@ -577,12 +577,23 @@ mod object_store {
             .await
             .unwrap();
 
-        bucket.new_watch().include_history().await.unwrap();
-        bucket
-            .new_watch()
-            .object("data")
+        let bucket = bucket.clone();
+        bucket.put("delete", &mut "data".as_bytes()).await.unwrap();
+        bucket.delete("delete").await.unwrap();
+        bucket.put("new", &mut "new".as_bytes()).await.unwrap();
+
+        let mut watch = bucket
+            .watch()
             .include_history()
+            .hide_deleted()
             .await
             .unwrap();
+
+        let mut watch_all = bucket.watch().include_history().await.unwrap();
+
+        assert_eq!("new", watch.next().await.unwrap().unwrap().name);
+
+        assert_eq!("delete", watch_all.next().await.unwrap().unwrap().name);
+        assert_eq!("new", watch_all.next().await.unwrap().unwrap().name);
     }
 }

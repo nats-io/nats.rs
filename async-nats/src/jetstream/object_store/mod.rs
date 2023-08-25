@@ -396,15 +396,9 @@ impl ObjectStore {
         Ok(object_info)
     }
 
-    pub fn new_watch(&self) -> WatchFuture<None, NoObject> {
-        WatchFuture {
-            deliver_policy: None {},
-            object: NoObject {},
-            bucket: &self,
-        }
-    }
-
     /// Creates a [Watch] stream over changes in the [ObjectStore].
+    /// Can be customized with follow up builder methods to set specific
+    /// object to watch, or change default watch policy.
     ///
     /// # Examples
     ///
@@ -423,8 +417,13 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch(&self) -> Result<Watch<'_>, WatchError> {
-        self.watch_with_deliver_policy(DeliverPolicy::New).await
+    pub fn watch(&self) -> WatchBuilder<None, NoObject> {
+        WatchBuilder {
+            hide_deleted: false,
+            deliver_policy: None {},
+            object: NoObject {},
+            bucket: &self,
+        }
     }
 
     /// Creates a [Watch] stream over changes in the [ObjectStore] which yields values whenever
@@ -434,10 +433,11 @@ impl ObjectStore {
             .await
     }
 
-    async fn watch_with_deliver_and_object(
+    async fn watch_with_options(
         &self,
         deliver_policy: DeliverPolicy,
         object: Option<String>,
+        hide_deleted: bool,
     ) -> Result<Watch<'_>, WatchError> {
         let subject = if let Some(object) = object {
             format!("$O.{}.M.{}", self.name, encode_object_name(object.as_str()))
@@ -455,6 +455,7 @@ impl ObjectStore {
             })
             .await?;
         Ok(Watch {
+            hide_deleted,
             subscription: ordered.messages().await?,
         })
     }
@@ -475,6 +476,7 @@ impl ObjectStore {
             })
             .await?;
         Ok(Watch {
+            hide_deleted: false,
             subscription: ordered.messages().await?,
         })
     }
@@ -841,6 +843,7 @@ async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), Publ
 
 pub struct Watch<'a> {
     subscription: crate::jetstream::consumer::push::Ordered<'a>,
+    hide_deleted: bool,
 }
 
 impl Stream for Watch<'_> {
@@ -850,21 +853,27 @@ impl Stream for Watch<'_> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        match self.subscription.poll_next_unpin(cx) {
-            Poll::Ready(message) => match message {
-                Some(message) => Poll::Ready(
-                    serde_json::from_slice::<ObjectInfo>(&message?.payload)
-                        .map_err(|err| {
-                            WatcherError::with_source(
-                                WatcherErrorKind::Other,
-                                format!("failed to deserialize object info: {}", err),
-                            )
-                        })
-                        .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
-                ),
-                None => Poll::Ready(None),
-            },
-            Poll::Pending => Poll::Pending,
+        loop {
+            match self.subscription.poll_next_unpin(cx) {
+                Poll::Ready(message) => match message {
+                    Some(message) => {
+                        let info = serde_json::from_slice::<ObjectInfo>(&message?.payload)
+                            .map_err(|err| {
+                                WatcherError::with_source(
+                                    WatcherErrorKind::Other,
+                                    format!("failed to deserialize object info: {}", err),
+                                )
+                            })?;
+                        if info.deleted && self.hide_deleted {
+                            continue;
+                        } else {
+                            return Poll::Ready(Some(Ok(info)));
+                        }
+                    }
+                    None => return Poll::Ready(None),
+                },
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }
@@ -1469,7 +1478,6 @@ impl From<OrderedError> for WatcherError {
 pub type ListerError = WatcherError;
 pub type ListerErrorKind = WatcherErrorKind;
 
-// Object
 pub trait WithObject {
     fn object(&self) -> Option<String> {
         None
@@ -1512,55 +1520,77 @@ pub struct None {}
 impl WithDeliver for None {}
 
 // Builder
-pub struct WatchFuture<'a, D: WithDeliver, O: WithObject> {
+pub struct WatchBuilder<'a, D: WithDeliver, O: WithObject> {
     deliver_policy: D,
     object: O,
     bucket: &'a ObjectStore,
+    hide_deleted: bool,
 }
 
-impl<'a, O: WithObject> WatchFuture<'a, None, O> {
-    pub fn include_history(self) -> WatchFuture<'a, All, O> {
-        WatchFuture {
+impl<'a, O: WithObject> WatchBuilder<'a, None, O> {
+    /// [Watch] will return all objects, including historical deleted ones.
+    pub fn include_history(self) -> WatchBuilder<'a, All, O> {
+        WatchBuilder {
             bucket: self.bucket,
             object: self.object,
             deliver_policy: All {},
+            hide_deleted: self.hide_deleted,
         }
     }
-    pub fn only_new(self) -> WatchFuture<'a, New, O> {
-        WatchFuture {
+    /// [Watch] will return only new changes in the [ObjectStore].
+    pub fn only_new(self) -> WatchBuilder<'a, New, O> {
+        WatchBuilder {
             bucket: self.bucket,
             object: self.object,
             deliver_policy: New {},
+            hide_deleted: self.hide_deleted,
         }
     }
-    pub fn with_last(self) -> WatchFuture<'a, LastBySubject, O> {
-        WatchFuture {
+    /// [Watch] will return all [Objects][Object] in the bucket
+    // and then watch for new changes.
+    pub fn with_last(self) -> WatchBuilder<'a, LastBySubject, O> {
+        WatchBuilder {
             bucket: self.bucket,
             object: self.object,
             deliver_policy: LastBySubject {},
+            hide_deleted: self.hide_deleted,
         }
     }
 }
 
-impl<'a, D: WithDeliver> WatchFuture<'a, D, NoObject> {
-    pub fn object<N: ToString>(self, name: N) -> WatchFuture<'a, D, HasObject> {
-        WatchFuture {
+impl<'a, D: WithDeliver> WatchBuilder<'a, D, NoObject> {
+    // [Watch] will only look for changes in given [Object].
+    pub fn object<N: ToString>(self, name: N) -> WatchBuilder<'a, D, HasObject> {
+        WatchBuilder {
             deliver_policy: self.deliver_policy,
             object: HasObject(name.to_string()),
             bucket: self.bucket,
+            hide_deleted: self.hide_deleted,
         }
     }
 }
 
-impl<'a, D: WithDeliver, O: WithObject> IntoFuture for WatchFuture<'a, D, O> {
-    type Output = Result<Watch<'a>, WatchError>;
+impl<'a, D: WithDeliver, O: WithObject> WatchBuilder<'a, D, O> {
+    /// [Watch] will skip [Objects][Object] that have `deleted` field set to true.
+    pub fn hide_deleted(self) -> Self {
+        WatchBuilder {
+            deliver_policy: self.deliver_policy,
+            object: self.object,
+            bucket: self.bucket,
+            hide_deleted: true,
+        }
+    }
+}
 
+impl<'a, D: WithDeliver, O: WithObject> IntoFuture for WatchBuilder<'a, D, O> {
+    type Output = Result<Watch<'a>, WatchError>;
     type IntoFuture = BoxFuture<'a, Result<Watch<'a>, WatchError>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        Box::pin(
-            self.bucket
-                .watch_with_deliver_and_object(self.deliver_policy.deliver(), self.object.object()),
-        )
+        Box::pin(self.bucket.watch_with_options(
+            self.deliver_policy.deliver(),
+            self.object.object(),
+            self.hide_deleted,
+        ))
     }
 }
