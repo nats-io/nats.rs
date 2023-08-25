@@ -68,7 +68,7 @@ mod compatibility {
                                 "get-object" => object_store.get_object(tests.as_mut()).await,
                                 "put-object" => object_store.put_object(tests.as_mut()).await,
                                 "update-metadata" => object_store.update_metadata(tests.as_mut()).await,
-                                "watch" => object_store.watch(tests.as_mut()).await,
+                                "watch-updates" => object_store.watch_updates(tests.as_mut()).await,
                                 unknown => panic!("unkown test: {}", unknown),
                             }
                         }
@@ -274,7 +274,7 @@ mod compatibility {
                 println!("test update-metadata PASS");
             }
         }
-        async fn watch(&self, mut commands: PinnedSubscriber<'_>) {
+        async fn watch_updates(&self, mut commands: PinnedSubscriber<'_>) {
             #[derive(Deserialize)]
             struct Command {
                 #[allow(dead_code)]
