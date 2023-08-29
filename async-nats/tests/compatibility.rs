@@ -20,7 +20,7 @@ mod compatibility {
 
     use async_nats::jetstream::{
         self,
-        object_store::{self, ObjectMeta},
+        object_store::{self, ObjectMetadata, UpdateMetadata},
     };
     use ring::digest::{self, SHA256};
     use serde::{Deserialize, Serialize};
@@ -69,6 +69,9 @@ mod compatibility {
                                 "put-object" => object_store.put_object(tests.as_mut()).await,
                                 "update-metadata" => object_store.update_metadata(tests.as_mut()).await,
                                 "watch-updates" => object_store.watch_updates(tests.as_mut()).await,
+                                "watch" => object_store.watch(tests.as_mut()).await,
+                                "get-link" => object_store.get_link(tests.as_mut()).await,
+                                "put-link" => object_store.put_link(tests.as_mut()).await,
                                 unknown => panic!("unkown test: {}", unknown),
                             }
                         }
@@ -170,7 +173,7 @@ mod compatibility {
                 url: String,
                 bucket: String,
                 #[serde(flatten)]
-                test_request: TestRequest<ObjectMeta>,
+                test_request: TestRequest<ObjectMetadata>,
             }
 
             let object_request = commands.as_mut().next().await.unwrap();
@@ -240,17 +243,86 @@ mod compatibility {
             }
         }
 
-        async fn update_metadata(&self, mut commands: PinnedSubscriber<'_>) {
-            #[derive(Deserialize)]
-            struct UpdateMetadata {
+        async fn put_link(&self, mut commands: PinnedSubscriber<'_>) {
+            #[derive(Deserialize, Debug)]
+            struct Command {
                 object: String,
                 bucket: String,
-                config: ObjectMeta,
+                link_name: String,
+            }
+            let get_request = commands.as_mut().next().await.unwrap();
+
+            let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
+
+            let bucket = async_nats::jetstream::new(self.client.clone())
+                .get_object_store(request.bucket)
+                .await
+                .unwrap();
+            let object = bucket.get(request.object).await.unwrap();
+
+            bucket.add_link(request.link_name, &object).await.unwrap();
+
+            self.client
+                .publish(get_request.reply.unwrap(), "".into())
+                .await
+                .unwrap();
+
+            let done = commands.next().await.unwrap();
+            if done.headers.is_some() {
+                panic!("test failed: {:?}", done.headers);
+            } else {
+                println!("test put-link PASS");
+            }
+        }
+
+        async fn get_link(&self, mut commands: PinnedSubscriber<'_>) {
+            #[derive(Deserialize, Debug)]
+            struct Command {
+                object: String,
+                bucket: String,
+            }
+            let get_request = commands.as_mut().next().await.unwrap();
+
+            let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
+
+            let bucket = async_nats::jetstream::new(self.client.clone())
+                .get_object_store(request.bucket)
+                .await
+                .unwrap();
+            let mut object = bucket.get(request.object).await.unwrap();
+            let mut contents = vec![];
+
+            object.read_to_end(&mut contents).await.unwrap();
+
+            let digest = digest::digest(&SHA256, &contents);
+
+            self.client
+                .publish(
+                    get_request.reply.unwrap(),
+                    digest.as_ref().to_owned().into(),
+                )
+                .await
+                .unwrap();
+
+            let done = commands.next().await.unwrap();
+            if done.headers.is_some() {
+                panic!("test failed: {:?}", done.headers);
+            } else {
+                println!("test get-object PASS");
+            }
+        }
+
+        async fn update_metadata(&self, mut commands: PinnedSubscriber<'_>) {
+            #[derive(Deserialize)]
+            struct Metadata {
+                object: String,
+                bucket: String,
+                config: UpdateMetadata,
             }
 
             let update_command = commands.as_mut().next().await.unwrap();
 
-            let given: UpdateMetadata = serde_json::from_slice(&update_command.payload).unwrap();
+            let given: Metadata = serde_json::from_slice(&update_command.payload).unwrap();
 
             let object_store = jetstream::new(self.client.clone())
                 .get_object_store(given.bucket)
@@ -274,6 +346,7 @@ mod compatibility {
                 println!("test update-metadata PASS");
             }
         }
+
         async fn watch_updates(&self, mut commands: PinnedSubscriber<'_>) {
             #[derive(Deserialize)]
             struct Command {
@@ -295,6 +368,41 @@ mod compatibility {
 
             self.client
                 .publish(get_request.reply.unwrap(), info.digest.unwrap().into())
+                .await
+                .unwrap();
+
+            let done = commands.next().await.unwrap();
+            if done.headers.is_some() {
+                panic!("test failed: {:?}", done.headers);
+            } else {
+                println!("test update-metadata PASS");
+            }
+        }
+
+        async fn watch(&self, mut commands: PinnedSubscriber<'_>) {
+            #[derive(Deserialize)]
+            struct Command {
+                #[allow(dead_code)]
+                object: String,
+                bucket: String,
+            }
+            let get_request = commands.as_mut().next().await.unwrap();
+
+            let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
+            let bucket = async_nats::jetstream::new(self.client.clone())
+                .get_object_store(request.bucket)
+                .await
+                .unwrap();
+
+            let mut watch = bucket.watch_with_history().await.unwrap();
+
+            let info = watch.next().await.unwrap().unwrap();
+            let second_info = watch.next().await.unwrap().unwrap();
+
+            let response = [info.digest.unwrap(), second_info.digest.unwrap()].join(",");
+
+            self.client
+                .publish(get_request.reply.unwrap(), response.into())
                 .await
                 .unwrap();
 
