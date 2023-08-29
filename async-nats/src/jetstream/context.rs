@@ -265,7 +265,6 @@ impl Context {
         Config: From<S>,
     {
         let mut config: Config = stream_config.into();
-        println!("CONFIG IN STREAM CREATE: {:?}", config);
         if config.name.is_empty() {
             return Err(CreateStreamError::new(
                 CreateStreamErrorKind::EmptyStreamName,
