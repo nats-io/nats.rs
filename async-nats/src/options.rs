@@ -597,7 +597,7 @@ impl ConnectOptions {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new()
-    ///     .flush_interval(Duration::from_millis(100))
+    ///     .ping_interval(Duration::from_secs(24))
     ///     .connect("demo.nats.io")
     ///     .await?;
     /// # Ok(())
