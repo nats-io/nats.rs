@@ -342,7 +342,7 @@ impl PushSubscription {
                 self.0.stream, self.0.consumer,
             ))
             .spawn(move || {
-                for m in sub.iter() {
+                for m in &sub {
                     if let Err(e) = handler(m) {
                         // TODO(dlc) - Capture for last error?
                         log::error!("Error in callback! {:?}", e);
@@ -394,7 +394,7 @@ impl PushSubscription {
                 self.0.consumer, self.0.stream
             ))
             .spawn(move || {
-                for message in sub.iter() {
+                for message in &sub {
                     if let Err(err) = handler(&message) {
                         log::error!("Error in callback! {:?}", err);
                     }
