@@ -246,7 +246,7 @@ impl Subscription {
         thread::Builder::new()
             .name(format!("nats_subscriber_{}_{}", self.0.sid, self.0.subject))
             .spawn(move || {
-                for m in sub.iter() {
+                for m in &sub {
                     if let Err(e) = handler(m) {
                         // TODO(dlc) - Capture for last error?
                         log::error!("Error in callback! {:?}", e);
