@@ -38,7 +38,7 @@ struct Inner {
 
 lazy_static! {
     static ref SD_RE: Regex = Regex::new(r#".+\sStore Directory:\s+"([^"]+)""#).unwrap();
-    static ref CLIENT_RE: Regex = Regex::new(r#".+\sclient connections on\s+(\S+)"#).unwrap();
+    static ref CLIENT_RE: Regex = Regex::new(r".+\sclient connections on\s+(\S+)").unwrap();
 }
 
 impl Drop for Server {
@@ -179,7 +179,7 @@ impl<'a> IntoConfig<'a> for [&'a str; 3] {
 pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
     let cfg = cfg.into_config();
     let port = rand::thread_rng().gen_range(3000..50_000);
-    let ports = vec![port, port + 100, port + 200];
+    let ports = [port, port + 100, port + 200];
 
     let ports = ports
         .iter()
@@ -191,7 +191,7 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
             new_port
         })
         .collect::<Vec<usize>>();
-    let cluster = vec![port + 1, port + 101, port + 201];
+    let cluster = [port + 1, port + 101, port + 201];
 
     let s1 = run_cluster_node_with_port(
         cfg.0[0],
