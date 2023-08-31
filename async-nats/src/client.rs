@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap());
+    Lazy::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
