@@ -2734,6 +2734,65 @@ mod jetstream {
     }
 
     #[tokio::test]
+    #[cfg(feature = "server_2_10")]
+    async fn stream_subject_transforms() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let subject_transform = stream::SubjectTransform {
+            source: "foo".to_string(),
+            destination: "bar".to_string(),
+        };
+
+        let source = stream::Source {
+            name: "source".to_string(),
+            filter_subject: Some("stream1.foo".to_string()),
+            subject_transform_destination: Some("foo".to_string()),
+            ..Default::default()
+        };
+
+        let sources = vec![
+            source.clone(),
+            stream::Source {
+                name: "multi_source".to_string(),
+                subject_transforms: vec![stream::SubjectTransform {
+                    source: "stream2.foo.>".to_string(),
+                    destination: "foo.>".to_string(),
+                }],
+                ..Default::default()
+            },
+        ];
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "filtered".to_string(),
+                subject_transform: Some(subject_transform.clone()),
+                sources: Some(sources.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(info.config.sources, Some(sources.clone()));
+        assert_eq!(info.config.subject_transform, Some(subject_transform));
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "mirror".to_string(),
+                mirror: Some(source.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+
+        assert_eq!(info.config.mirror, Some(source));
+    }
+
+    #[tokio::test]
     async fn pull_by_bytes() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
