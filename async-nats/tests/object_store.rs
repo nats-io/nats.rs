@@ -502,6 +502,9 @@ mod object_store {
 
         assert_eq!(
             link_info
+                .options
+                .as_ref()
+                .unwrap()
                 .link
                 .as_ref()
                 .unwrap()
@@ -511,7 +514,18 @@ mod object_store {
                 .as_str(),
             "object"
         );
-        assert_eq!(link_info.link.as_ref().unwrap().bucket.as_str(), "bucket");
+        assert_eq!(
+            link_info
+                .options
+                .as_ref()
+                .unwrap()
+                .link
+                .as_ref()
+                .unwrap()
+                .bucket
+                .as_str(),
+            "bucket"
+        );
 
         let result = bucket
             .add_link("object", &another_object)
@@ -551,7 +565,26 @@ mod object_store {
         bucket.add_bucket_link("link", "another").await.unwrap();
 
         let link_info = bucket.info("link").await.unwrap();
-        assert!(link_info.link.as_ref().unwrap().name.is_none());
-        assert_eq!(link_info.link.as_ref().unwrap().bucket.as_str(), "another");
+        assert!(link_info
+            .options
+            .as_ref()
+            .unwrap()
+            .link
+            .as_ref()
+            .unwrap()
+            .name
+            .is_none());
+        assert_eq!(
+            link_info
+                .options
+                .as_ref()
+                .unwrap()
+                .link
+                .as_ref()
+                .unwrap()
+                .bucket
+                .as_str(),
+            "another"
+        );
     }
 }
