@@ -16,7 +16,7 @@ mod object_store {
     use std::{io, time::Duration};
 
     use async_nats::jetstream::{
-        object_store::{AddLinkErrorKind, ObjectMeta},
+        object_store::{AddLinkErrorKind, ObjectMetadata, UpdateMetadata},
         stream::DirectGetErrorKind,
     };
     use base64::Engine;
@@ -81,6 +81,24 @@ mod object_store {
         tracing::info!("reading content");
         object_link.read_to_end(&mut contents).await.unwrap();
         assert_eq!(contents, result);
+
+        bucket
+            .put(
+                ObjectMetadata {
+                    name: "BAR".to_string(),
+                    description: Some("custom object".to_string()),
+                    chunk_size: Some(64 * 1024),
+                },
+                &mut bytes.as_slice(),
+            )
+            .await
+            .unwrap();
+
+        let meta = bucket.get("BAR").await.unwrap();
+        assert_eq!(
+            64 * 1024,
+            meta.info.options.unwrap().max_chunk_size.unwrap()
+        );
     }
 
     #[tokio::test]
@@ -353,9 +371,10 @@ mod object_store {
             .unwrap();
         bucket
             .put(
-                ObjectMeta {
+                ObjectMetadata {
                     name: "Foo".to_string(),
                     description: Some("foo desc".to_string()),
+                    chunk_size: None,
                 },
                 &mut "dadada".as_bytes(),
             )
@@ -436,7 +455,7 @@ mod object_store {
             .await
             .unwrap();
 
-        let given_metadata = ObjectMeta {
+        let given_metadata = UpdateMetadata {
             name: "new_object".to_owned(),
             description: Some("description".to_string()),
         };

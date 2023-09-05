@@ -276,9 +276,9 @@ impl ObjectStore {
         data: &mut (impl tokio::io::AsyncRead + std::marker::Unpin),
     ) -> Result<ObjectInfo, PutError>
     where
-        ObjectMeta: From<T>,
+        ObjectMetadata: From<T>,
     {
-        let object_meta: ObjectMeta = meta.into();
+        let object_meta: ObjectMetadata = meta.into();
 
         let encoded_object_name = encode_object_name(&object_meta.name);
         if !is_valid_object_name(&encoded_object_name) {
@@ -296,7 +296,8 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
-        let mut buffer = BytesMut::with_capacity(DEFAULT_CHUNK_SIZE);
+        let chunk_size = object_meta.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE);
+        let mut buffer = BytesMut::with_capacity(chunk_size);
         let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
@@ -338,7 +339,10 @@ impl ObjectStore {
         let object_info = ObjectInfo {
             name: object_meta.name,
             description: object_meta.description,
-            options: None,
+            options: Some(ObjectOptions {
+                max_chunk_size: Some(chunk_size),
+                link: None,
+            }),
             bucket: self.name.clone(),
             nuid: object_nuid.to_string(),
             chunks: object_chunks,
@@ -518,7 +522,7 @@ impl ObjectStore {
         Ok(())
     }
 
-    /// Updates [Object] [ObjectMeta].
+    /// Updates [Object] [ObjectMetadata].
     ///
     /// # Examples
     ///
@@ -533,7 +537,7 @@ impl ObjectStore {
     /// bucket
     ///     .update_metadata(
     ///         "object",
-    ///         object_store::ObjectMeta {
+    ///         object_store::UpdateMetadata {
     ///             name: "new_name".to_string(),
     ///             description: Some("a new description".to_string()),
     ///         },
@@ -545,7 +549,7 @@ impl ObjectStore {
     pub async fn update_metadata<A: AsRef<str>>(
         &self,
         object: A,
-        metadata: ObjectMeta,
+        metadata: UpdateMetadata,
     ) -> Result<ObjectInfo, UpdateMetadataError> {
         let mut info = self.info(object.as_ref()).await?;
 
@@ -1049,7 +1053,7 @@ impl tokio::io::AsyncRead for Object<'_> {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ObjectOptions {
     pub link: Option<ObjectLink>,
-    pub max_chunk_size: Option<u64>,
+    pub max_chunk_size: Option<usize>,
 }
 
 /// Meta and instance information about an object.
@@ -1093,18 +1097,28 @@ pub struct ObjectLink {
     pub bucket: String,
 }
 
-/// Meta information about an object.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
-pub struct ObjectMeta {
+pub struct UpdateMetadata {
     /// Name of the object
     pub name: String,
     /// A short human readable description of the object.
     pub description: Option<String>,
 }
 
-impl From<&str> for ObjectMeta {
-    fn from(s: &str) -> ObjectMeta {
-        ObjectMeta {
+/// Meta information about an object.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ObjectMetadata {
+    /// Name of the object
+    pub name: String,
+    /// A short human readable description of the object.
+    pub description: Option<String>,
+    /// Max chunk size. Default is 128k.
+    pub chunk_size: Option<usize>,
+}
+
+impl From<&str> for ObjectMetadata {
+    fn from(s: &str) -> ObjectMetadata {
+        ObjectMetadata {
             name: s.to_string(),
             ..Default::default()
         }
@@ -1126,11 +1140,12 @@ impl AsObjectInfo for &ObjectInfo {
     }
 }
 
-impl From<ObjectInfo> for ObjectMeta {
+impl From<ObjectInfo> for ObjectMetadata {
     fn from(info: ObjectInfo) -> Self {
-        ObjectMeta {
+        ObjectMetadata {
             name: info.name,
             description: info.description,
+            chunk_size: None,
         }
     }
 }
