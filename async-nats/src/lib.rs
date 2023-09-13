@@ -118,6 +118,7 @@
 #![deny(rustdoc::private_intra_doc_links)]
 #![deny(rustdoc::invalid_codeblock_attributes)]
 #![deny(rustdoc::invalid_rust_codeblocks)]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 use thiserror::Error;
 

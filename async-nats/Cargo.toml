@@ -63,3 +63,7 @@ compatibility_tests = []
 name = "main"
 harness = false
 lto = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
