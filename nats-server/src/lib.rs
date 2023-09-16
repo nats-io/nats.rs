@@ -22,6 +22,7 @@ use std::{thread, time::Duration};
 use lazy_static::lazy_static;
 use rand::Rng;
 use regex::Regex;
+use serde_json::{self, Value};
 
 pub struct Server {
     inner: Inner,
@@ -77,8 +78,8 @@ impl Server {
         let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
         let mut line = String::new();
         r.read_line(&mut line).expect("did not receive INFO");
-        let si = json::parse(&line["INFO".len()..]).unwrap();
-        let port = si["port"].as_u16().expect("could not parse port");
+        let si: Value = serde_json::from_str(&line["INFO".len()..]).expect("could not parse INFO");
+        let port = si["port"].as_u64().expect("could not parse port") as u16;
         let mut scheme = "nats://";
         if si["tls_required"].as_bool().unwrap_or(false) {
             scheme = "tls://";
@@ -91,8 +92,8 @@ impl Server {
         let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
         let mut line = String::new();
         r.read_line(&mut line).expect("did not receive INFO");
-        let si = json::parse(&line["INFO".len()..]).unwrap();
-        si["port"].as_u16().expect("could not parse port")
+        let si: Value = serde_json::from_str(&line["INFO".len()..]).expect("could not parse INFO");
+        si["port"].as_u64().expect("could not parse port") as u16
     }
 
     // Allow user/pass override.
