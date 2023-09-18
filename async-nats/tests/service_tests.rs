@@ -53,6 +53,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
+                queue_group: None,
             })
             .await
             .unwrap_err()
@@ -69,6 +70,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
+                queue_group: None,
             })
             .await
             .unwrap_err()
@@ -143,6 +145,7 @@ mod service {
                 version: "1.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
+                queue_group: None,
             })
             .await
             .unwrap();
@@ -154,6 +157,7 @@ mod service {
                 version: "2.0.0".to_string(),
                 stats_handler: None,
                 metadata: None,
+                queue_group: None,
             })
             .await
             .unwrap();
@@ -180,6 +184,7 @@ mod service {
                 description: None,
                 stats_handler: None,
                 metadata: None,
+                queue_group: None,
             })
             .await
             .unwrap();
@@ -219,6 +224,7 @@ mod service {
                 description: None,
                 stats_handler: None,
                 metadata: None,
+                queue_group: None,
             })
             .await
             .unwrap();
@@ -327,6 +333,140 @@ mod service {
             .request("$SRV.PING".to_string(), "".into())
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn custom_queue_groups() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service_with_custom_queue = client
+            .service_builder()
+            .queue_group("custom")
+            .start("custom", "1.0.0")
+            .await
+            .unwrap();
+
+        let mut endpoint = service_with_custom_queue.endpoint("data").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let info: service::Stats = serde_json::from_slice(
+            &client
+                .request("$SRV.STATS".into(), "".into())
+                .await
+                .unwrap()
+                .payload,
+        )
+        .unwrap();
+
+        assert_eq!(info.endpoints[0].queue_group, "custom".to_string());
+
+        let standard_service = client
+            .service_builder()
+            .start("custom", "1.0.0")
+            .await
+            .unwrap();
+
+        let mut standard_endpoint = standard_service.endpoint("data").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = standard_endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        // Check if we get response from each service instance, as each have different
+        // queue groups.
+        let reply_subject = client.new_inbox();
+        let responses = client.subscribe(reply_subject.clone()).await.unwrap();
+        client
+            .publish_with_reply("data".into(), reply_subject, "request".into())
+            .await
+            .unwrap();
+
+        assert_eq!(responses.take(2).count().await, 2);
+
+        // Now set different queue_group on a group level.
+        let group_1 = standard_service.group_with_queue_group("group", "group_custom");
+        let mut endpoint = group_1.endpoint("grouped").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+        // Create another group under the same endpoint.
+        let group_2 = service_with_custom_queue.group_with_queue_group("group", "another_group");
+        let mut endpoint = group_2.endpoint("grouped").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+        // Check the stats.
+        let standard_service_stats = standard_service.stats().await;
+        assert_eq!(
+            standard_service_stats
+                .get("group.grouped")
+                .unwrap()
+                .queue_group,
+            "group_custom"
+        );
+        let custom_service_stats = service_with_custom_queue.stats().await;
+        assert_eq!(
+            custom_service_stats
+                .get("group.grouped")
+                .unwrap()
+                .queue_group,
+            "another_group"
+        );
+
+        // Check if we get reply from both group endpoints.
+        let reply_subject = client.new_inbox();
+        let responses = client.subscribe(reply_subject.clone()).await.unwrap();
+        client
+            .publish_with_reply("group.grouped".into(), reply_subject, "request".into())
+            .await
+            .unwrap();
+        assert_eq!(responses.take(2).count().await, 2);
+
+        // Now we test per-endpoint queue groups.
+        let mut endpoint = standard_service
+            .endpoint_builder()
+            // On purpose use the queue group from custom queue group service to see
+            // if its endpoint properly overrides it.
+            .queue_group("queue")
+            .add("endpoint")
+            .await
+            .unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+        // Now we test per-endpoint queue groups.
+        let mut endpoint = service_with_custom_queue
+            .endpoint_builder()
+            // Override the default queue group.
+            .queue_group("endpoint_queue")
+            .add("endpoint")
+            .await
+            .unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+        // Check if we get reply from both group endpoints.
+        let reply_subject = client.new_inbox();
+        let responses = client.subscribe(reply_subject.clone()).await.unwrap();
+        client
+            .publish_with_reply("endpoint".into(), reply_subject, "request".into())
+            .await
+            .unwrap();
+        assert_eq!(responses.take(2).count().await, 2);
     }
 
     #[tokio::test]

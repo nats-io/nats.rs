@@ -131,6 +131,8 @@ pub(crate) struct Inner {
     pub(crate) last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
     pub(crate) data: String,
+    /// Queue group to which this endpoint is assigned to.
+    pub(crate) queue_group: String,
 }
 
 impl From<Inner> for Stats {
@@ -146,6 +148,7 @@ impl From<Inner> for Stats {
             average_processing_time: inner.average_processing_time,
             last_error: inner.last_error,
             data: inner.data,
+            queue_group: inner.queue_group,
         }
     }
 }
@@ -177,4 +180,6 @@ pub struct Stats {
     pub last_error: Option<error::Error>,
     /// Custom data added by [crate::service::Config::stats_handler]
     pub data: String,
+    /// Queue group to which this endpoint is assigned to.
+    pub queue_group: String,
 }
