@@ -137,6 +137,8 @@ use std::option;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
@@ -344,6 +346,7 @@ pub(crate) struct ConnectionHandler {
     ping_interval: Interval,
     is_flushing: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
+    dropped_unsubscribe: Arc<AtomicBool>,
 }
 
 impl ConnectionHandler {
@@ -352,6 +355,7 @@ impl ConnectionHandler {
         connector: Connector,
         info_sender: tokio::sync::watch::Sender<ServerInfo>,
         ping_period: Duration,
+        dropped_unsubscribe: Arc<AtomicBool>,
     ) -> ConnectionHandler {
         let mut ping_interval = interval(ping_period);
         ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -366,6 +370,7 @@ impl ConnectionHandler {
             ping_interval,
             is_flushing: false,
             flush_observers: Vec::new(),
+            dropped_unsubscribe,
         }
     }
 
@@ -398,6 +403,22 @@ impl ConnectionHandler {
                     Poll::Pending
                 }
             }
+
+            #[cold]
+            #[inline(never)]
+            fn unsubscribe_dropped(&mut self) {
+                self.handler.subscriptions.retain(|&sid, subscription| {
+                    if subscription.sender.is_closed() {
+                        self.handler
+                            .connection
+                            .enqueue_write_op(&ClientOp::Unsubscribe { sid, max: None });
+
+                        false
+                    } else {
+                        true
+                    }
+                });
+            }
         }
 
         impl<'a> Future for ProcessFut<'a> {
@@ -421,6 +442,14 @@ impl ConnectionHandler {
                     if let Poll::Ready(exit) = self.ping() {
                         return Poll::Ready(exit);
                     }
+                }
+
+                if self
+                    .handler
+                    .dropped_unsubscribe
+                    .swap(false, Ordering::AcqRel)
+                {
+                    self.unsubscribe_dropped();
                 }
 
                 loop {
@@ -821,10 +850,12 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
     let (sender, mut receiver) = mpsc::channel(options.sender_capacity);
 
+    let dropped_unsubscribe = Arc::new(AtomicBool::new(false));
     let client = Client::new(
         info_watcher,
         state_rx,
         sender,
+        Arc::clone(&dropped_unsubscribe),
         options.subscription_capacity,
         options.inbox_prefix,
         options.request_timeout,
@@ -843,9 +874,15 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             connection = Some(connection_ok);
         }
         let connection = connection.unwrap();
-        let mut connection_handler =
-            ConnectionHandler::new(connection, connector, info_sender, ping_period);
-        connection_handler.process(&mut receiver).await
+
+        let mut connection_handler = ConnectionHandler::new(
+            connection,
+            connector,
+            info_sender,
+            ping_period,
+            dropped_unsubscribe,
+        );
+        connection_handler.process(&mut receiver).await;
     });
 
     Ok(client)
@@ -1004,6 +1041,7 @@ pub struct Subscriber {
     sid: u64,
     receiver: mpsc::Receiver<Message>,
     sender: mpsc::Sender<Command>,
+    dropped_unsubscribe: Arc<AtomicBool>,
 }
 
 impl Subscriber {
@@ -1011,11 +1049,13 @@ impl Subscriber {
         sid: u64,
         sender: mpsc::Sender<Command>,
         receiver: mpsc::Receiver<Message>,
+        dropped_unsubscribe: Arc<AtomicBool>,
     ) -> Subscriber {
         Subscriber {
             sid,
             sender,
             receiver,
+            dropped_unsubscribe,
         }
     }
 
@@ -1093,16 +1133,17 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
 impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
-        tokio::spawn({
-            let sender = self.sender.clone();
-            let sid = self.sid;
-            async move {
-                sender
-                    .send(Command::Unsubscribe { sid, max: None })
-                    .await
-                    .ok();
-            }
-        });
+
+        if self
+            .sender
+            .try_send(Command::Unsubscribe {
+                sid: self.sid,
+                max: None,
+            })
+            .is_err()
+        {
+            self.dropped_unsubscribe.store(true, Ordering::Release);
+        }
     }
 }
 

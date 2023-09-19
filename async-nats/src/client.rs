@@ -24,7 +24,7 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -54,6 +54,7 @@ pub struct Client {
     info: tokio::sync::watch::Receiver<ServerInfo>,
     pub(crate) state: tokio::sync::watch::Receiver<State>,
     pub(crate) sender: mpsc::Sender<Command>,
+    dropped_unsubscribe: Arc<AtomicBool>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
     inbox_prefix: String,
@@ -65,6 +66,7 @@ impl Client {
         info: tokio::sync::watch::Receiver<ServerInfo>,
         state: tokio::sync::watch::Receiver<State>,
         sender: mpsc::Sender<Command>,
+        dropped_unsubscribe: Arc<AtomicBool>,
         capacity: usize,
         inbox_prefix: String,
         request_timeout: Option<Duration>,
@@ -73,6 +75,7 @@ impl Client {
             info,
             state,
             sender,
+            dropped_unsubscribe,
             next_subscription_id: Arc::new(AtomicU64::new(1)),
             subscription_capacity: capacity,
             inbox_prefix,
@@ -467,7 +470,12 @@ impl Client {
             })
             .await?;
 
-        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+        Ok(Subscriber::new(
+            sid,
+            self.sender.clone(),
+            receiver,
+            Arc::clone(&self.dropped_unsubscribe),
+        ))
     }
 
     /// Subscribes to a subject with a queue group to receive [messages][Message].
@@ -505,7 +513,12 @@ impl Client {
             })
             .await?;
 
-        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+        Ok(Subscriber::new(
+            sid,
+            self.sender.clone(),
+            receiver,
+            Arc::clone(&self.dropped_unsubscribe),
+        ))
     }
 
     /// Flushes the internal buffer ensuring that all messages are sent.
