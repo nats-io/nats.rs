@@ -2748,7 +2748,6 @@ mod jetstream {
         let source = stream::Source {
             name: "source".to_string(),
             filter_subject: Some("stream1.foo".to_string()),
-            subject_transform_destination: Some("foo".to_string()),
             ..Default::default()
         };
 
@@ -3225,6 +3224,8 @@ mod jetstream {
     #[cfg(feature = "server_2_10")]
     #[tokio::test]
     async fn subject_transform() {
+        use async_nats::jetstream::stream::SubjectTransform;
+
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client.clone());
@@ -3254,7 +3255,10 @@ mod jetstream {
                 name: "sourcing".to_string(),
                 sources: Some(vec![async_nats::jetstream::stream::Source {
                     name: "origin".to_string(),
-                    subject_transform_destination: Some("fromtest.>".to_string()),
+                    subject_transforms: vec![SubjectTransform {
+                        source: ">".to_string(),
+                        destination: "fromtest.>".to_string(),
+                    }],
                     ..Default::default()
                 }]),
                 ..Default::default()
