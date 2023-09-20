@@ -1065,6 +1065,24 @@ pub struct Config {
     /// Allow applying a subject transform to incoming messages
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_transform: Option<SubjectTransform>,
+
+    #[cfg(feature = "server_2_10")]
+    /// Override compression config for this stream.
+    /// Wrapping enum that has `None` type with [Option] is there
+    /// because [Stream] can override global compression set to [Compression::S2]
+    /// to [Compression::None], which is different from not overriding global config with anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression: Option<Compression>,
+
+    #[cfg(feature = "server_2_10")]
+    /// Set limits on consumers that are created on this stream.
+    #[serde(default, deserialize_with = "default_consumer_limits_as_none")]
+    pub consumer_limits: Option<ConsumerLimits>,
+
+    #[cfg(feature = "server_2_10")]
+    /// Sets the first sequence for the stream.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "first_seq")]
+    pub first_sequence: Option<u64>,
 }
 
 impl From<&Config> for Config {
@@ -1080,6 +1098,39 @@ impl From<&str> for Config {
             ..Default::default()
         }
     }
+}
+
+#[cfg(feature = "server_2_10")]
+fn default_consumer_limits_as_none<'de, D>(
+    deserializer: D,
+) -> Result<Option<ConsumerLimits>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let consumer_limits = ConsumerLimits::deserialize(deserializer)?;
+    if consumer_limits == ConsumerLimits::default() {
+        Ok(None)
+    } else {
+        Ok(Some(consumer_limits))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct ConsumerLimits {
+    /// Sets the maximum [crate::jetstream::consumer::Config::inactive_threshold] that can be set on the consumer.
+    #[serde(default, with = "serde_nanos")]
+    pub inactive_threshold: std::time::Duration,
+    /// Sets the maximum [crate::jetstream::consumer::Config::max_ack_pending] that can be set on the consumer.
+    #[serde(default)]
+    pub max_ack_pending: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub enum Compression {
+    #[serde(rename = "s2")]
+    S2,
+    #[serde(rename = "none")]
+    None,
 }
 
 // SubjectTransform is for applying a subject transform (to matching messages) when a new message is received

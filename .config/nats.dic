@@ -143,3 +143,6 @@ IoT
 ObjectMeta
 128k
 ObjectMetadata
+S2
+inactive_threshold
+max_ack_pending
