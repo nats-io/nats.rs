@@ -276,15 +276,15 @@ pub struct Config {
 
 impl FromConsumer for Config {
     fn try_from_consumer_config(config: super::Config) -> Result<Self, crate::Error> {
-        if config.deliver_subject.is_none() {
-            return Err(Box::new(io::Error::new(
+        let deliver_subject = config.deliver_subject.ok_or_else(|| {
+            Box::new(io::Error::new(
                 ErrorKind::Other,
                 "push consumer must have delivery subject",
-            )));
-        }
+            ))
+        })?;
 
         Ok(Config {
-            deliver_subject: config.deliver_subject.unwrap(),
+            deliver_subject,
             durable_name: config.durable_name,
             name: config.name,
             description: config.description,
@@ -511,7 +511,7 @@ impl Consumer<OrderedConfig> {
                         recreate_ephemeral_consumer(
                             context.clone(),
                             config.clone(),
-                            stream_name.clone(),
+                            &stream_name,
                             last_sequence.load(Ordering::Relaxed),
                         )
                     })
@@ -563,24 +563,22 @@ impl<'a> futures::Stream for Ordered<'a> {
     type Item = Result<Message, OrderedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        match self
-            .heartbeat_sleep
-            .get_or_insert_with(|| {
-                Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
-            })
-            .poll_unpin(cx)
-        {
-            Poll::Ready(_) => {
-                self.heartbeat_sleep = None;
-                return Poll::Ready(Some(Err(OrderedError::new(
-                    OrderedErrorKind::MissingHeartbeat,
-                ))));
-            }
-            Poll::Pending => (),
+        let this = self.as_mut().get_mut();
+
+        let heartbeat_sleep = this.heartbeat_sleep.get_or_insert_with(|| {
+            Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
+        });
+
+        if heartbeat_sleep.poll_unpin(cx).is_ready() {
+            this.heartbeat_sleep = None;
+
+            return Poll::Ready(Some(Err(OrderedError::new(
+                OrderedErrorKind::MissingHeartbeat,
+            ))));
         }
 
         loop {
-            match self.shutdown.try_recv() {
+            match this.shutdown.try_recv() {
                 Ok(err) => {
                     return Poll::Ready(Some(Err(OrderedError::with_source(
                         OrderedErrorKind::Other,
@@ -595,140 +593,118 @@ impl<'a> futures::Stream for Ordered<'a> {
                 }
                 Err(TryRecvError::Empty) => {}
             }
-            if self.subscriber.is_none() {
-                match self.subscriber_future.as_mut() {
-                    None => {
-                        trace!(
-                            "subscriber and subscriber future are None. Recreating the consumer"
-                        );
-                        let context = self.context.clone();
-                        let sequence = self.stream_sequence.clone();
-                        let config = self.consumer.config.clone();
-                        let stream_name = self.consumer.info.stream_name.clone();
-                        let subscriber_future =
-                            self.subscriber_future.insert(Box::pin(async move {
-                                recreate_consumer_and_subscription(
-                                    context,
-                                    config,
-                                    stream_name,
-                                    sequence.load(Ordering::Relaxed),
-                                )
-                                .await
-                            }));
-                        match subscriber_future.as_mut().poll(cx) {
-                            Poll::Ready(subscriber) => {
-                                self.subscriber_future = None;
-                                self.consumer_sequence.store(0, Ordering::Relaxed);
-                                self.subscriber = Some(subscriber.map_err(|err| {
-                                    OrderedError::with_source(OrderedErrorKind::Recreate, err)
-                                })?);
-                            }
-                            Poll::Pending => {
-                                return Poll::Pending;
-                            }
-                        }
-                    }
-                    Some(subscriber) => match subscriber.as_mut().poll(cx) {
+
+            let subscriber = match &mut this.subscriber {
+                Some(subscriber) => subscriber,
+                None => {
+                    let subscriber_future = this.subscriber_future.get_or_insert_with(|| {
+                        let context = this.context.clone();
+                        let sequence = this.stream_sequence.clone();
+                        let config = this.consumer.config.clone();
+                        let stream_name = this.consumer.info.stream_name.clone();
+
+                        Box::pin(async move {
+                            recreate_consumer_and_subscription(
+                                context,
+                                config,
+                                stream_name,
+                                sequence.load(Ordering::Relaxed),
+                            )
+                            .await
+                        })
+                    });
+
+                    match subscriber_future.as_mut().poll(cx) {
                         Poll::Ready(subscriber) => {
-                            self.subscriber_future = None;
-                            self.consumer_sequence.store(0, Ordering::Relaxed);
-                            self.subscriber = Some(subscriber.map_err(|err| {
+                            this.subscriber_future = None;
+                            this.consumer_sequence.store(0, Ordering::Relaxed);
+                            this.subscriber.insert(subscriber.map_err(|err| {
                                 OrderedError::with_source(OrderedErrorKind::Recreate, err)
-                            })?);
+                            })?)
                         }
-                        Poll::Pending => {
-                            return Poll::Pending;
-                        }
-                    },
+                        Poll::Pending => return Poll::Pending,
+                    }
                 }
-            }
-            if let Some(subscriber) = self.subscriber.as_mut() {
-                match subscriber.receiver.poll_recv(cx) {
-                    Poll::Ready(maybe_message) => match maybe_message {
-                        Some(message) => {
-                            self.heartbeat_sleep = None;
-                            match message.status {
-                                Some(StatusCode::IDLE_HEARTBEAT) => {
-                                    debug!("received idle heartbeats");
-                                    if let Some(headers) = message.headers.as_ref() {
-                                        if let Some(sequence) =
-                                            headers.get(crate::header::NATS_LAST_CONSUMER)
-                                        {
-                                            let sequence: u64 =
-                                                sequence.as_str().parse().map_err(|err| {
-                                                    OrderedError::with_source(
-                                                        OrderedErrorKind::Other,
-                                                        err,
-                                                    )
-                                                })?;
+            };
 
-                                            let last_sequence =
-                                                self.consumer_sequence.load(Ordering::Relaxed);
+            match subscriber.receiver.poll_recv(cx) {
+                Poll::Ready(Some(message)) => {
+                    this.heartbeat_sleep = None;
 
-                                            if sequence != last_sequence {
-                                                debug!("hearbeats sequence mismatch. got {}, expected {}, resetting consumer", sequence, last_sequence);
-                                                self.subscriber = None;
-                                            }
-                                        }
-                                    }
-                                    // flow control.
-                                    if let Some(subject) = message.reply.clone() {
-                                        trace!("received flow control message");
-                                        let client = self.context.client.clone();
-                                        tokio::task::spawn(async move {
-                                            client
-                                                .publish(subject, Bytes::from_static(b""))
-                                                .await
-                                                .ok();
-                                        });
-                                    }
-                                    continue;
-                                }
-                                Some(status) => {
-                                    debug!("received status message: {}", status);
-                                    continue;
-                                }
-                                None => {
-                                    trace!("received a message");
-                                    let jetstream_message = jetstream::message::Message {
-                                        message,
-                                        context: self.context.clone(),
-                                    };
+                    match message.status {
+                        Some(StatusCode::IDLE_HEARTBEAT) => {
+                            debug!("received idle heartbeats");
+                            if let Some(headers) = message.headers.as_ref() {
+                                if let Some(sequence) =
+                                    headers.get(crate::header::NATS_LAST_CONSUMER)
+                                {
+                                    let sequence: u64 =
+                                        sequence.as_str().parse().map_err(|err| {
+                                            OrderedError::with_source(OrderedErrorKind::Other, err)
+                                        })?;
 
-                                    let info = jetstream_message.info().map_err(|err| {
-                                        OrderedError::with_source(OrderedErrorKind::Other, err)
-                                    })?;
-                                    trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
-                                               self.consumer_sequence,
-                                               self.stream_sequence,
-                                               info.consumer_sequence,
-                                               info.stream_sequence);
-                                    if info.consumer_sequence
-                                        != self.consumer_sequence.load(Ordering::Relaxed) + 1
-                                    {
-                                        debug!(
-                                            "ordered consumer mismatch. current {}, info: {}",
-                                            self.consumer_sequence.load(Ordering::Relaxed),
-                                            info.consumer_sequence
-                                        );
-                                        self.subscriber = None;
-                                        self.consumer_sequence.store(0, Ordering::Relaxed);
-                                        continue;
+                                    let last_sequence =
+                                        this.consumer_sequence.load(Ordering::Relaxed);
+
+                                    if sequence != last_sequence {
+                                        debug!("hearbeats sequence mismatch. got {}, expected {}, resetting consumer", sequence, last_sequence);
+                                        this.subscriber = None;
                                     }
-                                    self.stream_sequence
-                                        .store(info.stream_sequence, Ordering::Relaxed);
-                                    self.consumer_sequence
-                                        .store(info.consumer_sequence, Ordering::Relaxed);
-                                    return Poll::Ready(Some(Ok(jetstream_message)));
                                 }
                             }
+                            // flow control.
+                            if let Some(subject) = message.reply.clone() {
+                                trace!("received flow control message");
+                                let client = this.context.client.clone();
+
+                                tokio::task::spawn(async move {
+                                    client.publish(subject, Bytes::from_static(b"")).await.ok();
+                                    client.flush().await.ok();
+                                });
+                            }
+                            continue;
+                        }
+                        Some(status) => {
+                            debug!("received status message: {}", status);
+                            continue;
                         }
                         None => {
-                            return Poll::Ready(None);
+                            trace!("received a message");
+                            let jetstream_message = jetstream::message::Message {
+                                message,
+                                context: this.context.clone(),
+                            };
+
+                            let info = jetstream_message.info().map_err(|err| {
+                                OrderedError::with_source(OrderedErrorKind::Other, err)
+                            })?;
+                            trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
+                                               this.consumer_sequence,
+                                               this.stream_sequence,
+                                               info.consumer_sequence,
+                                               info.stream_sequence);
+                            if info.consumer_sequence
+                                != this.consumer_sequence.load(Ordering::Relaxed) + 1
+                            {
+                                debug!(
+                                    "ordered consumer mismatch. current {}, info: {}",
+                                    this.consumer_sequence.load(Ordering::Relaxed),
+                                    info.consumer_sequence
+                                );
+                                this.subscriber = None;
+                                this.consumer_sequence.store(0, Ordering::Relaxed);
+                                continue;
+                            }
+                            this.stream_sequence
+                                .store(info.stream_sequence, Ordering::Relaxed);
+                            this.consumer_sequence
+                                .store(info.consumer_sequence, Ordering::Relaxed);
+                            return Poll::Ready(Some(Ok(jetstream_message)));
                         }
-                    },
-                    Poll::Pending => return Poll::Pending,
+                    }
                 }
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
             }
         }
     }
@@ -836,21 +812,18 @@ async fn recreate_consumer_and_subscription(
             ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Subscription, err)
         })?;
 
-    recreate_ephemeral_consumer(context, config, stream_name, sequence).await?;
+    recreate_ephemeral_consumer(context, config, &stream_name, sequence).await?;
     Ok(subscriber)
 }
 async fn recreate_ephemeral_consumer(
     context: Context,
     config: OrderedConfig,
-    stream_name: String,
+    stream_name: &str,
     sequence: u64,
 ) -> Result<(), ConsumerRecreateError> {
-    let stream = context
-        .get_stream(stream_name.clone())
-        .await
-        .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
-        })?;
+    let stream = context.get_stream(stream_name).await.map_err(|err| {
+        ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
+    })?;
 
     let deliver_policy = {
         if sequence == 0 {
