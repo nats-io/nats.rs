@@ -3459,4 +3459,39 @@ mod jetstream {
         let stream = jetstream.create_stream(config.clone()).await.unwrap();
         assert_eq!(config, stream.cached_info().to_owned().config);
     }
+
+    #[tokio::test]
+    async fn limits() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        stream
+            .create_consumer(async_nats::jetstream::consumer::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut config = stream.cached_info().config.clone();
+        config.consumer_limits = Some(ConsumerLimits {
+            inactive_threshold: Duration::from_secs(2),
+            max_ack_pending: 10,
+        });
+
+        jetstream
+            .update_stream(config)
+            .await
+            .expect_err("cannot update stream. consumer `name` exceeds new limits");
+    }
 }
