@@ -470,6 +470,45 @@ mod service {
     }
 
     #[tokio::test]
+    async fn info() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+
+        let endpoint_info = service::endpoint::Info {
+            name: "endpoint_1".to_string(),
+            subject: "subject".to_string(),
+            queue_group: "queue".to_string(),
+            metadata: HashMap::from([("key".to_string(), "value".to_string())]),
+        };
+
+        service
+            .endpoint_builder()
+            .name(&endpoint_info.name)
+            .metadata(endpoint_info.metadata.clone())
+            .queue_group(&endpoint_info.queue_group)
+            .add(&endpoint_info.subject)
+            .await
+            .unwrap();
+
+        let info: service::Info = serde_json::from_slice(
+            &client
+                .request("$SRV.INFO".into(), "".into())
+                .await
+                .unwrap()
+                .payload,
+        )
+        .unwrap();
+
+        assert_eq!(&endpoint_info, info.endpoints.first().unwrap());
+    }
+
+    #[tokio::test]
     #[cfg(not(target_os = "windows"))]
     async fn cross_clients_tests() {
         use std::process::Command;
