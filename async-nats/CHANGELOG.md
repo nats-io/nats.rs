@@ -1,3 +1,64 @@
+# 0.32.0
+## Overview
+
+This release primarily focuses on two things:
+* adding remaining **nats server 2.10** features and enabling `server_2_10` feature by default
+* rework of connection handling (huge thanks to @paolobarbolini for the effort! 🚀 )
+
+An important change introduced by a reworked connection handler is that users should not need
+to manually flush by calling `client.flush().await` to reduce latency.
+
+## Added
+* Add stream subject mappings by @Jarema in https://github.com/nats-io/nats.rs/pull/1103
+* Add new Stream Config 2.10 fields by @Jarema in https://github.com/nats-io/nats.rs/pull/1113
+* Add customization of Object Store chunk size by @Jarema in https://github.com/nats-io/nats.rs/pull/1105
+* Add update metadata by @Jarema in https://github.com/nats-io/nats.rs/pull/1064
+* Add jetstream benchmarks by @Jarema in https://github.com/nats-io/nats.rs/pull/1080
+* Introduce `get` and `get_all` semantics to `HeaderMap` by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/1071
+* Change `Header::append` value to `IntoHeaderValue` by @caspervonb in https://github.com/nats-io/nats.rs/pull/1076
+* Implement `fmt::Display` for `HeaderValue` by @caspervonb in https://github.com/nats-io/nats.rs/pull/1086
+* Add watch_with_history method by @tinou98 in https://github.com/nats-io/nats.rs/pull/1082
+* Implement `AsRef` for `HeaderValue` by @caspervonb in https://github.com/nats-io/nats.rs/pull/1087
+* Implement `From` for `HeaderValue` on integer types by @caspervonb in https://github.com/nats-io/nats.rs/pull/1083
+* Multiplex requests over a single subscription by @caspervonb in https://github.com/nats-io/nats.rs/pull/1069
+* Add object store link by @Jarema in https://github.com/nats-io/nats.rs/pull/1091
+* Add customizable queue groups to service API by @Jarema in https://github.com/nats-io/nats.rs/pull/1109
+
+## Changed
+* Enable 2.10 features by default by @Jarema in https://github.com/nats-io/nats.rs/pull/1114
+* Refactor connection handling by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1060
+* Tidy up `ServerOp` parsing by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1052
+* Remove link from metadata update by @Jarema in https://github.com/nats-io/nats.rs/pull/1067
+* Bump msrv & dependencies by @Jarema in https://github.com/nats-io/nats.rs/pull/1065
+* Take `impl AsRef<Path>` instead of `PathBuf` in credentials APIs by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1012
+* Optimize `GET`ting and object's payload by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1040
+* Implement `FromStr` for `jetstream::kv::Operation` by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/1056
+* Clear documentation for Context::get_object_store by @nmandery in https://github.com/nats-io/nats.rs/pull/1059
+* Use `Duration` in a few more places by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1038
+* [Refactoring] Use a generic error type instead of the macro `error_impls` by @nepalez in https://github.com/nats-io/nats.rs/pull/1047
+* Remove some allocations from benchmarks by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1073
+* Update nuid crate to 0.5 by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1084
+* Switch dependency: json->serde_json in nats-server by @nepalez in https://github.com/nats-io/nats.rs/pull/1106
+* Bump Go to 1.20 by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1110
+
+## Fixed
+* Correct spelling mistake in jetstream/consumer/pull by @SohumB in https://github.com/nats-io/nats.rs/pull/1097
+* Fix potentially ambiguous `.as_ref()` by @robjtede in https://github.com/nats-io/nats.rs/pull/1062
+* Fix rustls deprecation warning by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1074
+* Fix typo in ping_interval example by @sravan-s in https://github.com/nats-io/nats.rs/pull/1100
+* Show features behind feature flags in docs by @Jarema in https://github.com/nats-io/nats.rs/pull/1107
+* Fix minimal versions by @nepalez in https://github.com/nats-io/nats.rs/pull/1108
+
+## New Contributors
+* @nepalez made their first contribution in https://github.com/nats-io/nats.rs/pull/1047
+* @nmandery made their first contribution in https://github.com/nats-io/nats.rs/pull/1059
+* @robjtede made their first contribution in https://github.com/nats-io/nats.rs/pull/1062
+* @SohumB made their first contribution in https://github.com/nats-io/nats.rs/pull/1097
+* @bruth made their first contribution in https://github.com/nats-io/nats.rs/pull/1096
+* @sravan-s made their first contribution in https://github.com/nats-io/nats.rs/pull/1100
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.30.1...async-nats/v0.32.0
+
 # 0.31.0
 This release focuses on improvements of heartbeats in JetStream Consumers.
 
