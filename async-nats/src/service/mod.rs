@@ -93,10 +93,10 @@ pub struct Info {
     pub description: Option<String>,
     /// Service version.
     pub version: String,
-    /// All service endpoints.
-    pub subjects: Vec<String>,
     /// Additional metadata
     pub metadata: HashMap<String, String>,
+    /// Info about all service endpoints.
+    pub endpoints: Vec<endpoint::Info>,
 }
 
 /// Configuration of the [Service].
@@ -322,6 +322,10 @@ impl Service {
                 "service name is not a valid string (only A-Z, a-z, 0-9, _, - are allowed)",
             )));
         }
+        let endpoints_state = Arc::new(Mutex::new(Endpoints {
+            endpoints: HashMap::new(),
+        }));
+
         let queue_group = config
             .queue_group
             .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
@@ -334,14 +338,11 @@ impl Service {
             id: id.clone(),
             description: config.description.clone(),
             version: config.version.clone(),
-            subjects: Vec::default(),
             metadata: config.metadata.clone().unwrap_or_default(),
+            endpoints: Vec::new(),
         };
 
         let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
-
-        let endpoints = HashMap::new();
-        let endpoints_state = Arc::new(Mutex::new(Endpoints { endpoints }));
 
         // create subscriptions for all verbs.
         let mut pings =
@@ -355,7 +356,6 @@ impl Service {
         let handle = tokio::task::spawn({
             let mut stats_callback = config.stats_handler;
             let info = info.clone();
-            let subjects = subjects.clone();
             let endpoints_state = endpoints_state.clone();
             let client = client.clone();
             async move {
@@ -371,10 +371,20 @@ impl Service {
                             client.publish(ping.reply.unwrap(), pong.into()).await?;
                         },
                         Some(info_request) = infos.next() => {
-                            let subjects = subjects.clone();
                             let info = info.clone();
+
+                            let endpoints: Vec<endpoint::Info> = {
+                                endpoints_state.lock().unwrap().endpoints.values().map(|value| {
+                                    endpoint::Info {
+                                        name: value.name.to_owned(),
+                                        subject: value.subject.to_owned(),
+                                        queue_group: value.queue_group.to_owned(),
+                                        metadata: value.metadata.to_owned()
+                                    }
+                                }).collect()
+                            };
                             let info = Info {
-                                subjects: subjects.lock().unwrap().to_vec(),
+                                endpoints,
                                 ..info
                             };
                             let info_json = serde_json::to_vec(&info).map(Bytes::from)?;

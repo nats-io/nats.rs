@@ -183,3 +183,15 @@ pub struct Stats {
     /// Queue group to which this endpoint is assigned to.
     pub queue_group: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct Info {
+    /// Name of the endpoint.
+    pub name: String,
+    /// Endpoint subject.
+    pub subject: String,
+    /// Queue group to which this endpoint is assigned.
+    pub queue_group: String,
+    /// Endpoint-specific metadata.
+    pub metadata: HashMap<String, String>,
+}
