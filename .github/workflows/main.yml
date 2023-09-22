@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  CARGO_INCREMENTAL: 0
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
