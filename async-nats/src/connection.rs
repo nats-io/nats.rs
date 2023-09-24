@@ -643,10 +643,6 @@ impl Connection {
     ///
     /// no-op if the write stream didn't need to be flushed.
     pub(crate) fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if !self.can_flush {
-            return Poll::Ready(Ok(()));
-        }
-
         match Pin::new(&mut self.stream).poll_flush(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(())) => {

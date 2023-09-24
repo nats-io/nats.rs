@@ -392,7 +392,6 @@ impl ConnectionHandler {
                     Poll::Ready(ExitReason::Disconnected(None))
                 } else {
                     self.handler.connection.enqueue_write_op(&ClientOp::Ping);
-                    self.handler.is_flushing = true;
 
                     Poll::Pending
                 }
@@ -484,11 +483,7 @@ impl ConnectionHandler {
                     }
                 }
 
-                if !self.handler.is_flushing && self.handler.connection.should_flush() {
-                    self.handler.is_flushing = true;
-                }
-
-                if self.handler.is_flushing {
+                if self.handler.is_flushing || self.handler.connection.should_flush() {
                     match self.handler.connection.poll_flush(cx) {
                         Poll::Pending => {}
                         Poll::Ready(Ok(())) => {
