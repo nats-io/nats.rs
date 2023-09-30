@@ -684,7 +684,8 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    let subject = format!("{}.*", prefix);
+                    let prefix = format!("{}.{}.", prefix, nuid::next());
+                    let subject = format!("{}*", prefix);
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
                         sid: MULTIPLEXER_SID,
@@ -694,7 +695,7 @@ impl ConnectionHandler {
 
                     self.multiplexer.insert(Multiplexer {
                         subject,
-                        prefix: format!("{}.", prefix),
+                        prefix,
                         senders: HashMap::new(),
                     })
                 };
@@ -704,7 +705,7 @@ impl ConnectionHandler {
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
-                    respond: Some(respond),
+                    respond: Some(format!("{}{}", multiplexer.prefix, token)),
                     headers,
                 };
 
