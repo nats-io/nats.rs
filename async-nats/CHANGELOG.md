@@ -1,3 +1,13 @@
+# 0.32.1
+## Overview
+This is a patch release for the new 0.32 muxer, as it could subscribe to more messages than necessary, properly dispatching
+them but potentially increasing traffic.
+
+## Fixed
+* Fix muxer prefix by @Jarema in https://github.com/nats-io/nats.rs/pull/1124
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.32.0...async-nats/v0.32.1
+
 # 0.32.0
 ## Overview
 
