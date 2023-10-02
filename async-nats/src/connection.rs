@@ -13,19 +13,30 @@
 
 //! This module provides a connection implementation for communicating with a NATS server.
 
-use std::fmt::Display;
+use std::collections::VecDeque;
+use std::fmt::{self, Display, Write as _};
+use std::future::{self, Future};
+use std::io::IoSlice;
+use std::pin::Pin;
 use std::str::{self, FromStr};
+use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncWriteExt};
-use tokio::io::{AsyncReadExt, AsyncWrite};
-
-use bytes::{Buf, BytesMut};
-use tokio::io;
+use bytes::{Buf, Bytes, BytesMut};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
 use crate::subject::Subject;
 use crate::{ClientOp, ServerError, ServerOp};
+
+/// Soft limit for the amount of bytes in [`Connection::write_buf`]
+/// and [`Connection::flattened_writes`].
+const SOFT_WRITE_BUF_LIMIT: usize = 65535;
+/// How big a single buffer must be before it's written separately
+/// instead of being flattened.
+const WRITE_FLATTEN_THRESHOLD: usize = 4096;
+/// How many buffers to write in a single vectored write call.
+const WRITE_VECTORED_CHUNKS: usize = 64;
 
 /// Supertrait enabling trait object for containing both TLS and non TLS `TcpStream` connection.
 pub(crate) trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
@@ -54,57 +65,82 @@ impl Display for State {
 /// A framed connection
 pub(crate) struct Connection {
     pub(crate) stream: Box<dyn AsyncReadWrite>,
-    pub(crate) buffer: BytesMut,
+    read_buf: BytesMut,
+    write_buf: VecDeque<Bytes>,
+    write_buf_len: usize,
+    flattened_writes: BytesMut,
+    can_flush: bool,
 }
 
 /// Internal representation of the connection.
 /// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
+    pub(crate) fn new(stream: Box<dyn AsyncReadWrite>, read_buffer_capacity: usize) -> Self {
+        Self {
+            stream,
+            read_buf: BytesMut::with_capacity(read_buffer_capacity),
+            write_buf: VecDeque::new(),
+            write_buf_len: 0,
+            flattened_writes: BytesMut::new(),
+            can_flush: false,
+        }
+    }
+
+    /// Returns `true` if no more calls to [`Self::enqueue_write_op`] _should_ be made.
+    pub(crate) fn is_write_buf_full(&self) -> bool {
+        self.write_buf_len >= SOFT_WRITE_BUF_LIMIT
+    }
+
+    /// Returns `true` if [`Self::poll_flush`] should be polled.
+    pub(crate) fn should_flush(&self) -> bool {
+        self.can_flush && self.write_buf.is_empty() && self.flattened_writes.is_empty()
+    }
+
     /// Attempts to read a server operation from the read buffer.
     /// Returns `None` if there is not enough data to parse an entire operation.
     pub(crate) fn try_read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
-        let len = match memchr::memmem::find(&self.buffer, b"\r\n") {
+        let len = match memchr::memmem::find(&self.read_buf, b"\r\n") {
             Some(len) => len,
             None => return Ok(None),
         };
 
-        if self.buffer.starts_with(b"+OK") {
-            self.buffer.advance(len + 2);
+        if self.read_buf.starts_with(b"+OK") {
+            self.read_buf.advance(len + 2);
             return Ok(Some(ServerOp::Ok));
         }
 
-        if self.buffer.starts_with(b"PING") {
-            self.buffer.advance(len + 2);
+        if self.read_buf.starts_with(b"PING") {
+            self.read_buf.advance(len + 2);
             return Ok(Some(ServerOp::Ping));
         }
 
-        if self.buffer.starts_with(b"PONG") {
-            self.buffer.advance(len + 2);
+        if self.read_buf.starts_with(b"PONG") {
+            self.read_buf.advance(len + 2);
             return Ok(Some(ServerOp::Pong));
         }
 
-        if self.buffer.starts_with(b"-ERR") {
-            let description = str::from_utf8(&self.buffer[5..len])
+        if self.read_buf.starts_with(b"-ERR") {
+            let description = str::from_utf8(&self.read_buf[5..len])
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
                 .to_owned();
 
-            self.buffer.advance(len + 2);
+            self.read_buf.advance(len + 2);
 
             return Ok(Some(ServerOp::Error(ServerError::new(description))));
         }
 
-        if self.buffer.starts_with(b"INFO ") {
-            let info = serde_json::from_slice(&self.buffer[4..len])
+        if self.read_buf.starts_with(b"INFO ") {
+            let info = serde_json::from_slice(&self.read_buf[4..len])
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
-            self.buffer.advance(len + 2);
+            self.read_buf.advance(len + 2);
 
             return Ok(Some(ServerOp::Info(Box::new(info))));
         }
 
-        if self.buffer.starts_with(b"MSG ") {
-            let line = str::from_utf8(&self.buffer[4..len]).unwrap();
+        if self.read_buf.starts_with(b"MSG ") {
+            let line = str::from_utf8(&self.read_buf[4..len]).unwrap();
             let mut args = line.split(' ').filter(|s| !s.is_empty());
 
             // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
@@ -140,7 +176,7 @@ impl Connection {
 
             // Return early without advancing if there is not enough data read the entire
             // message
-            if len + payload_len + 4 > self.buffer.remaining() {
+            if len + payload_len + 4 > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -151,9 +187,9 @@ impl Connection {
             let subject = Subject::from(subject);
             let reply = reply_to.map(Subject::from);
 
-            self.buffer.advance(len + 2);
-            let payload = self.buffer.split_to(payload_len).freeze();
-            self.buffer.advance(2);
+            self.read_buf.advance(len + 2);
+            let payload = self.read_buf.split_to(payload_len).freeze();
+            self.read_buf.advance(2);
 
             return Ok(Some(ServerOp::Message {
                 sid,
@@ -167,9 +203,9 @@ impl Connection {
             }));
         }
 
-        if self.buffer.starts_with(b"HMSG ") {
+        if self.read_buf.starts_with(b"HMSG ") {
             // Extract whitespace-delimited arguments that come after "HMSG".
-            let line = std::str::from_utf8(&self.buffer[5..len]).unwrap();
+            let line = std::str::from_utf8(&self.read_buf[5..len]).unwrap();
             let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
@@ -239,17 +275,14 @@ impl Connection {
                 ));
             }
 
-            if len + total_len + 4 > self.buffer.remaining() {
+            if len + total_len + 4 > self.read_buf.remaining() {
                 return Ok(None);
             }
 
-            let length =
-                reply_to.as_ref().map_or(0, |reply| reply.len()) + subject.len() + total_len;
-
-            self.buffer.advance(len + 2);
-            let header = self.buffer.split_to(header_len);
-            let payload = self.buffer.split_to(total_len - header_len).freeze();
-            self.buffer.advance(2);
+            self.read_buf.advance(len + 2);
+            let header = self.read_buf.split_to(header_len);
+            let payload = self.read_buf.split_to(total_len - header_len).freeze();
+            self.read_buf.advance(2);
 
             let mut lines = std::str::from_utf8(&header)
                 .map_err(|_| {
@@ -313,7 +346,7 @@ impl Connection {
             }
 
             return Ok(Some(ServerOp::Message {
-                length,
+                length: reply.as_ref().map_or(0, |reply| reply.len()) + subject.len() + total_len,
                 sid,
                 reply,
                 subject,
@@ -324,7 +357,7 @@ impl Connection {
             }));
         }
 
-        let buffer = self.buffer.split_to(len + 2);
+        let buffer = self.read_buf.split_to(len + 2);
         let line = str::from_utf8(&buffer).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidInput, "unable to parse unknown input")
         })?;
@@ -335,35 +368,62 @@ impl Connection {
         ))
     }
 
+    pub(crate) fn read_op(&mut self) -> impl Future<Output = io::Result<Option<ServerOp>>> + '_ {
+        future::poll_fn(|cx| self.poll_read_op(cx))
+    }
+
     // TODO: do we want an custom error here?
     /// Read a server operation from read buffer.
     /// Blocks until an operation ca be parsed.
-    pub(crate) async fn read_op(&mut self) -> Result<Option<ServerOp>, io::Error> {
+    pub(crate) fn poll_read_op(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<Option<ServerOp>>> {
         loop {
             if let Some(op) = self.try_read_op()? {
-                return Ok(Some(op));
+                return Poll::Ready(Ok(Some(op)));
             }
 
-            if 0 == self.stream.read_buf(&mut self.buffer).await? {
-                if self.buffer.is_empty() {
-                    return Ok(None);
-                } else {
-                    return Err(io::Error::new(io::ErrorKind::ConnectionReset, ""));
-                }
-            }
+            let read_buf = self.stream.read_buf(&mut self.read_buf);
+            tokio::pin!(read_buf);
+            return match read_buf.poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Ok(0)) if self.read_buf.is_empty() => Poll::Ready(Ok(None)),
+                Poll::Ready(Ok(0)) => Poll::Ready(Err(io::ErrorKind::ConnectionReset.into())),
+                Poll::Ready(Ok(_n)) => continue,
+                Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+            };
         }
     }
 
+    pub(crate) async fn easy_write_and_flush<'a>(
+        &mut self,
+        items: impl Iterator<Item = &'a ClientOp>,
+    ) -> io::Result<()> {
+        for item in items {
+            self.enqueue_write_op(item);
+        }
+
+        future::poll_fn(|cx| self.poll_write(cx)).await?;
+        future::poll_fn(|cx| self.poll_flush(cx)).await?;
+        Ok(())
+    }
+
     /// Writes a client operation to the write buffer.
-    pub(crate) async fn write_op<'a>(&mut self, item: &'a ClientOp) -> Result<(), io::Error> {
+    pub(crate) fn enqueue_write_op(&mut self, item: &ClientOp) {
+        macro_rules! small_write {
+            ($dst:expr) => {
+                write!(self.small_write(), $dst).expect("do small write to Connection");
+            };
+        }
+
         match item {
             ClientOp::Connect(connect_info) => {
-                let op = format!(
-                    "CONNECT {}\r\n",
-                    serde_json::to_string(&connect_info)
-                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
-                );
-                self.stream.write_all(op.as_bytes()).await?;
+                let json = serde_json::to_vec(&connect_info).expect("serialize `ConnectInfo`");
+
+                self.write("CONNECT ");
+                self.write(json);
+                self.write("\r\n");
             }
             ClientOp::Publish {
                 subject,
@@ -371,99 +431,230 @@ impl Connection {
                 respond,
                 headers,
             } => {
-                match headers.as_ref() {
-                    Some(headers) if !headers.is_empty() => {
-                        self.stream.write_all(b"HPUB ").await?;
-                    }
-                    _ => {
-                        self.stream.write_all(b"PUB ").await?;
-                    }
-                }
+                let verb = match headers.as_ref() {
+                    Some(headers) if !headers.is_empty() => "HPUB",
+                    _ => "PUB",
+                };
 
-                self.stream.write_all(subject.as_bytes()).await?;
-                self.stream.write_all(b" ").await?;
+                small_write!("{verb} {subject} ");
 
                 if let Some(respond) = respond {
-                    self.stream.write_all(respond.as_bytes()).await?;
-                    self.stream.write_all(b" ").await?;
+                    small_write!("{respond} ");
                 }
 
                 match headers {
                     Some(headers) if !headers.is_empty() => {
                         let headers = headers.to_bytes();
 
-                        let mut header_len_buf = itoa::Buffer::new();
-                        self.stream
-                            .write_all(header_len_buf.format(headers.len()).as_bytes())
-                            .await?;
-
-                        self.stream.write_all(b" ").await?;
-
-                        let mut total_len_buf = itoa::Buffer::new();
-                        self.stream
-                            .write_all(
-                                total_len_buf
-                                    .format(headers.len() + payload.len())
-                                    .as_bytes(),
-                            )
-                            .await?;
-
-                        self.stream.write_all(b"\r\n").await?;
-                        self.stream.write_all(&headers).await?;
+                        let headers_len = headers.len();
+                        let total_len = headers_len + payload.len();
+                        small_write!("{headers_len} {total_len}\r\n");
+                        self.write(headers);
                     }
                     _ => {
-                        let mut len_buf = itoa::Buffer::new();
-                        self.stream
-                            .write_all(len_buf.format(payload.len()).as_bytes())
-                            .await?;
-                        self.stream.write_all(b"\r\n").await?;
+                        let payload_len = payload.len();
+                        small_write!("{payload_len}\r\n");
                     }
                 }
 
-                self.stream.write_all(payload).await?;
-                self.stream.write_all(b"\r\n").await?;
+                self.write(Bytes::clone(payload));
+                self.write("\r\n");
             }
 
             ClientOp::Subscribe {
                 sid,
                 subject,
                 queue_group,
-            } => {
-                self.stream.write_all(b"SUB ").await?;
-                self.stream.write_all(subject.as_bytes()).await?;
-                if let Some(queue_group) = queue_group {
-                    self.stream
-                        .write_all(format!(" {queue_group}").as_bytes())
-                        .await?;
+            } => match queue_group {
+                Some(queue_group) => {
+                    small_write!("SUB {subject} {queue_group} {sid}\r\n");
                 }
-                self.stream
-                    .write_all(format!(" {sid}\r\n").as_bytes())
-                    .await?;
-            }
+                None => {
+                    small_write!("SUB {subject} {sid}\r\n");
+                }
+            },
 
-            ClientOp::Unsubscribe { sid, max } => {
-                self.stream.write_all(b"UNSUB ").await?;
-                self.stream.write_all(format!("{sid}").as_bytes()).await?;
-                if let Some(max) = max {
-                    self.stream.write_all(format!(" {max}").as_bytes()).await?;
+            ClientOp::Unsubscribe { sid, max } => match max {
+                Some(max) => {
+                    small_write!("UNSUB {sid} {max}\r\n");
                 }
-                self.stream.write_all(b"\r\n").await?;
-            }
+                None => {
+                    small_write!("UNSUB {sid}\r\n");
+                }
+            },
             ClientOp::Ping => {
-                self.stream.write_all(b"PING\r\n").await?;
-                self.stream.flush().await?;
+                self.write("PING\r\n");
             }
             ClientOp::Pong => {
-                self.stream.write_all(b"PONG\r\n").await?;
+                self.write("PONG\r\n");
+            }
+        }
+    }
+
+    /// Write the internal buffers into the write stream
+    ///
+    /// Returns one of the following:
+    ///
+    /// * `Poll::Pending` means that we weren't able to fully empty
+    ///   the internal buffers. Compared to [`AsyncWrite::poll_write`],
+    ///   this implementation may do a partial write before yielding.
+    /// * `Poll::Ready(Ok())` means that the internal write buffers have
+    ///   been emptied or were already empty.
+    /// * `Poll::Ready(Err(err))` means that writing to the stream failed.
+    ///   Compared to [`AsyncWrite::poll_write`], this implementation
+    ///   may do a partial write before failing.
+    pub(crate) fn poll_write(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if !self.stream.is_write_vectored() {
+            self.poll_write_sequential(cx)
+        } else {
+            self.poll_write_vectored(cx)
+        }
+    }
+
+    /// Write the internal buffers into the write stream using sequential write operations
+    ///
+    /// Writes one chunk at a time. Less efficient.
+    fn poll_write_sequential(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        loop {
+            let buf = match self.write_buf.front() {
+                Some(buf) => &**buf,
+                None if !self.flattened_writes.is_empty() => &self.flattened_writes,
+                None => return Poll::Ready(Ok(())),
+            };
+
+            debug_assert!(!buf.is_empty());
+
+            match Pin::new(&mut self.stream).poll_write(cx, buf) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(n)) => {
+                    self.write_buf_len -= n;
+                    self.can_flush = true;
+
+                    match self.write_buf.front_mut() {
+                        Some(buf) if n < buf.len() => {
+                            buf.advance(n);
+                        }
+                        Some(_buf) => {
+                            self.write_buf.pop_front();
+                        }
+                        None => {
+                            self.flattened_writes.advance(n);
+                        }
+                    }
+                    continue;
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            }
+        }
+    }
+
+    /// Write the internal buffers into the write stream using vectored write operations
+    ///
+    /// Writes [`WRITE_VECTORED_CHUNKS`] at a time. More efficient _if_
+    /// the underlying writer supports it.
+    fn poll_write_vectored(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        'outer: loop {
+            let mut writes = [IoSlice::new(b""); WRITE_VECTORED_CHUNKS];
+            let mut writes_len = 0;
+
+            self.write_buf
+                .iter()
+                .take(WRITE_VECTORED_CHUNKS)
+                .enumerate()
+                .for_each(|(i, buf)| {
+                    writes[i] = IoSlice::new(buf);
+                    writes_len += 1;
+                });
+
+            if writes_len < WRITE_VECTORED_CHUNKS && !self.flattened_writes.is_empty() {
+                writes[writes_len] = IoSlice::new(&self.flattened_writes);
+                writes_len += 1;
+            }
+
+            if writes_len == 0 {
+                return Poll::Ready(Ok(()));
+            }
+
+            match Pin::new(&mut self.stream).poll_write_vectored(cx, &writes[..writes_len]) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(mut n)) => {
+                    self.write_buf_len -= n;
+                    self.can_flush = true;
+
+                    while let Some(buf) = self.write_buf.front_mut() {
+                        if n < buf.len() {
+                            buf.advance(n);
+                            continue 'outer;
+                        }
+
+                        n -= buf.len();
+                        self.write_buf.pop_front();
+                    }
+
+                    self.flattened_writes.advance(n);
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            }
+        }
+    }
+
+    /// Write `buf` into the writes buffer
+    ///
+    /// If `buf` is smaller than [`WRITE_FLATTEN_THRESHOLD`]
+    /// flattens it, otherwise appends it to the chunks queue.
+    ///
+    /// Empty `buf`s are a no-op.
+    fn write(&mut self, buf: impl Into<Bytes>) {
+        let buf = buf.into();
+        if buf.is_empty() {
+            return;
+        }
+
+        self.write_buf_len += buf.len();
+        if buf.len() < WRITE_FLATTEN_THRESHOLD {
+            self.flattened_writes.extend_from_slice(&buf);
+        } else {
+            if !self.flattened_writes.is_empty() {
+                let buf = self.flattened_writes.split().freeze();
+                self.write_buf.push_back(buf);
+            }
+
+            self.write_buf.push_back(buf);
+        }
+    }
+
+    /// Obtain an [`fmt::Write`]r for the small writes buffer.
+    fn small_write(&mut self) -> impl fmt::Write + '_ {
+        struct Writer<'a> {
+            this: &'a mut Connection,
+        }
+
+        impl<'a> fmt::Write for Writer<'a> {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                self.this.write_buf_len += s.len();
+                self.this.flattened_writes.write_str(s)
             }
         }
 
-        Ok(())
+        Writer { this: self }
     }
 
     /// Flush the write buffer, sending all pending data down the current write stream.
-    pub(crate) async fn flush(&mut self) -> Result<(), io::Error> {
-        self.stream.flush().await
+    ///
+    /// no-op if the write stream didn't need to be flushed.
+    pub(crate) fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if !self.can_flush {
+            return Poll::Ready(Ok(()));
+        }
+
+        match Pin::new(&mut self.stream).poll_flush(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(())) => {
+                self.can_flush = false;
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+        }
     }
 }
 
@@ -471,16 +662,12 @@ impl Connection {
 mod read_op {
     use super::Connection;
     use crate::{HeaderMap, ServerError, ServerInfo, ServerOp, StatusCode};
-    use bytes::BytesMut;
     use tokio::io::{self, AsyncWriteExt};
 
     #[tokio::test]
     async fn ok() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server.write_all(b"+OK\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -490,10 +677,7 @@ mod read_op {
     #[tokio::test]
     async fn ping() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server.write_all(b"PING\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -503,10 +687,7 @@ mod read_op {
     #[tokio::test]
     async fn pong() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server.write_all(b"PONG\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -516,10 +697,7 @@ mod read_op {
     #[tokio::test]
     async fn info() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server.write_all(b"INFO {}\r\n").await.unwrap();
         server.flush().await.unwrap();
@@ -546,10 +724,7 @@ mod read_op {
     #[tokio::test]
     async fn error() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server.write_all(b"INFO {}\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -571,10 +746,7 @@ mod read_op {
     #[tokio::test]
     async fn message() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server
             .write_all(b"MSG FOO.BAR 9 11\r\nHello World\r\n")
@@ -721,10 +893,7 @@ mod read_op {
     #[tokio::test]
     async fn unknown() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         server.write_all(b"ONE\r\n").await.unwrap();
         connection.read_op().await.unwrap_err();
@@ -776,27 +945,25 @@ mod read_op {
 mod write_op {
     use super::Connection;
     use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol};
-    use bytes::BytesMut;
     use tokio::io::{self, AsyncBufReadExt, BufReader};
 
     #[tokio::test]
     async fn publish() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         connection
-            .write_op(&ClientOp::Publish {
-                subject: "FOO.BAR".into(),
-                payload: "Hello World".into(),
-                respond: None,
-                headers: None,
-            })
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: None,
+                    headers: None,
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -805,15 +972,17 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR 11\r\nHello World\r\n");
 
         connection
-            .write_op(&ClientOp::Publish {
-                subject: "FOO.BAR".into(),
-                payload: "Hello World".into(),
-                respond: Some("INBOX.67".into()),
-                headers: None,
-            })
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: Some("INBOX.67".into()),
+                    headers: None,
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -821,18 +990,20 @@ mod write_op {
         assert_eq!(buffer, "PUB FOO.BAR INBOX.67 11\r\nHello World\r\n");
 
         connection
-            .write_op(&ClientOp::Publish {
-                subject: "FOO.BAR".into(),
-                payload: "Hello World".into(),
-                respond: Some("INBOX.67".into()),
-                headers: Some(HeaderMap::from_iter([(
-                    "Header".parse().unwrap(),
-                    "X".parse().unwrap(),
-                )])),
-            })
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: Some("INBOX.67".into()),
+                    headers: Some(HeaderMap::from_iter([(
+                        "Header".parse().unwrap(),
+                        "X".parse().unwrap(),
+                    )])),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -848,20 +1019,19 @@ mod write_op {
     #[tokio::test]
     async fn subscribe() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         connection
-            .write_op(&ClientOp::Subscribe {
-                sid: 11,
-                subject: "FOO.BAR".into(),
-                queue_group: None,
-            })
+            .easy_write_and_flush(
+                [ClientOp::Subscribe {
+                    sid: 11,
+                    subject: "FOO.BAR".into(),
+                    queue_group: None,
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -869,14 +1039,16 @@ mod write_op {
         assert_eq!(buffer, "SUB FOO.BAR 11\r\n");
 
         connection
-            .write_op(&ClientOp::Subscribe {
-                sid: 11,
-                subject: "FOO.BAR".into(),
-                queue_group: Some("QUEUE.GROUP".into()),
-            })
+            .easy_write_and_flush(
+                [ClientOp::Subscribe {
+                    sid: 11,
+                    subject: "FOO.BAR".into(),
+                    queue_group: Some("QUEUE.GROUP".into()),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -886,16 +1058,12 @@ mod write_op {
     #[tokio::test]
     async fn unsubscribe() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         connection
-            .write_op(&ClientOp::Unsubscribe { sid: 11, max: None })
+            .easy_write_and_flush([ClientOp::Unsubscribe { sid: 11, max: None }].iter())
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         let mut buffer = String::new();
         let mut reader = BufReader::new(server);
@@ -903,13 +1071,15 @@ mod write_op {
         assert_eq!(buffer, "UNSUB 11\r\n");
 
         connection
-            .write_op(&ClientOp::Unsubscribe {
-                sid: 11,
-                max: Some(2),
-            })
+            .easy_write_and_flush(
+                [ClientOp::Unsubscribe {
+                    sid: 11,
+                    max: Some(2),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         buffer.clear();
         reader.read_line(&mut buffer).await.unwrap();
@@ -919,16 +1089,15 @@ mod write_op {
     #[tokio::test]
     async fn ping() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(&ClientOp::Ping).await.unwrap();
-        connection.flush().await.unwrap();
+        connection
+            .easy_write_and_flush([ClientOp::Ping].iter())
+            .await
+            .unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
 
@@ -938,16 +1107,15 @@ mod write_op {
     #[tokio::test]
     async fn pong() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
-        connection.write_op(&ClientOp::Pong).await.unwrap();
-        connection.flush().await.unwrap();
+        connection
+            .easy_write_and_flush([ClientOp::Pong].iter())
+            .await
+            .unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
 
@@ -957,36 +1125,35 @@ mod write_op {
     #[tokio::test]
     async fn connect() {
         let (stream, server) = io::duplex(1024);
-        let mut connection = Connection {
-            stream: Box::new(stream),
-            buffer: BytesMut::new(),
-        };
+        let mut connection = Connection::new(Box::new(stream), 0);
 
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
 
         connection
-            .write_op(&ClientOp::Connect(ConnectInfo {
-                verbose: false,
-                pedantic: false,
-                user_jwt: None,
-                nkey: None,
-                signature: None,
-                name: None,
-                echo: false,
-                lang: "Rust".into(),
-                version: "1.0.0".into(),
-                protocol: Protocol::Dynamic,
-                tls_required: false,
-                user: None,
-                pass: None,
-                auth_token: None,
-                headers: false,
-                no_responders: false,
-            }))
+            .easy_write_and_flush(
+                [ClientOp::Connect(ConnectInfo {
+                    verbose: false,
+                    pedantic: false,
+                    user_jwt: None,
+                    nkey: None,
+                    signature: None,
+                    name: None,
+                    echo: false,
+                    lang: "Rust".into(),
+                    version: "1.0.0".into(),
+                    protocol: Protocol::Dynamic,
+                    tls_required: false,
+                    user: None,
+                    pass: None,
+                    auth_token: None,
+                    headers: false,
+                    no_responders: false,
+                })]
+                .iter(),
+            )
             .await
             .unwrap();
-        connection.flush().await.unwrap();
 
         reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(

@@ -680,7 +680,6 @@ impl<'a> futures::Stream for Ordered<'a> {
                                                 .publish(subject, Bytes::from_static(b""))
                                                 .await
                                                 .ok();
-                                            client.flush().await.ok();
                                         });
                                     }
                                     continue;

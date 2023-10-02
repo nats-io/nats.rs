@@ -39,6 +39,8 @@ mod jetstream {
     use async_nats::jetstream::context::{Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
+    #[cfg(feature = "server_2_10")]
+    use async_nats::jetstream::stream::{Compression, ConsumerLimits, Source, SubjectTransform};
     use async_nats::jetstream::AckKind;
     use async_nats::ConnectOptions;
     use futures::stream::{StreamExt, TryStreamExt};
@@ -2718,6 +2720,64 @@ mod jetstream {
     }
 
     #[tokio::test]
+    #[cfg(feature = "server_2_10")]
+    async fn stream_subject_transforms() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let subject_transform = stream::SubjectTransform {
+            source: "foo".to_string(),
+            destination: "bar".to_string(),
+        };
+
+        let source = stream::Source {
+            name: "source".to_string(),
+            filter_subject: Some("stream1.foo".to_string()),
+            ..Default::default()
+        };
+
+        let sources = vec![
+            source.clone(),
+            stream::Source {
+                name: "multi_source".to_string(),
+                subject_transforms: vec![stream::SubjectTransform {
+                    source: "stream2.foo.>".to_string(),
+                    destination: "foo.>".to_string(),
+                }],
+                ..Default::default()
+            },
+        ];
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "filtered".to_string(),
+                subject_transform: Some(subject_transform.clone()),
+                sources: Some(sources.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(info.config.sources, Some(sources.clone()));
+        assert_eq!(info.config.subject_transform, Some(subject_transform));
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "mirror".to_string(),
+                mirror: Some(source.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+
+        assert_eq!(info.config.mirror, Some(source));
+    }
+
+    #[tokio::test]
     async fn pull_by_bytes() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -3146,6 +3206,8 @@ mod jetstream {
     #[cfg(feature = "server_2_10")]
     #[tokio::test]
     async fn subject_transform() {
+        use async_nats::jetstream::stream::SubjectTransform;
+
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client.clone());
@@ -3175,7 +3237,10 @@ mod jetstream {
                 name: "sourcing".into(),
                 sources: Some(vec![async_nats::jetstream::stream::Source {
                     name: "origin".into(),
-                    subject_transform_destination: Some("fromtest.>".into()),
+                    subject_transforms: vec![SubjectTransform {
+                        source: ">".into(),
+                        destination: "fromtest.>".into(),
+                    }],
                     ..Default::default()
                 }]),
                 ..Default::default()
@@ -3303,5 +3368,110 @@ mod jetstream {
         })
         .await
         .unwrap();
+    }
+
+    #[cfg(feature = "server_2_10")]
+    #[tokio::test]
+    async fn stream_config() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let config = async_nats::jetstream::stream::Config {
+            name: "EVENTS".to_string(),
+            max_bytes: 1024 * 1024,
+            max_messages: 1_000_000,
+            max_messages_per_subject: 100,
+            discard: DiscardPolicy::New,
+            discard_new_per_subject: true,
+            subjects: vec!["events.>".to_string()],
+            retention: stream::RetentionPolicy::WorkQueue,
+            max_consumers: 10,
+            max_age: Duration::from_secs(900),
+            max_message_size: 1024 * 1024,
+            storage: StorageType::Memory,
+            num_replicas: 1,
+            no_ack: true,
+            duplicate_window: Duration::from_secs(90),
+            template_owner: "".to_string(),
+            sealed: false,
+            description: Some("A Stream".to_string()),
+            allow_rollup: true,
+            deny_delete: false,
+            deny_purge: false,
+            republish: Some(stream::Republish {
+                source: "data.>".to_string(),
+                destination: "dest.>".to_string(),
+                headers_only: true,
+            }),
+            allow_direct: true,
+            mirror_direct: false,
+            mirror: None,
+            sources: Some(vec![Source {
+                name: "source_one_of_many".to_string(),
+                start_sequence: Some(5),
+                start_time: Some(OffsetDateTime::now_utc()),
+                filter_subject: Some("filter".to_string()),
+                external: Some(stream::External {
+                    api_prefix: "API.PREFIX".to_string(),
+                    delivery_prefix: Some("delivery_prefix".to_string()),
+                }),
+                domain: None,
+                subject_transforms: vec![SubjectTransform {
+                    source: "source".to_string(),
+                    destination: "dest".to_string(),
+                }],
+            }]),
+            metadata: HashMap::from([("key".to_string(), "value".to_string())]),
+            subject_transform: Some(SubjectTransform {
+                source: "source".to_string(),
+                destination: "dest".to_string(),
+            }),
+            compression: Some(Compression::S2),
+            consumer_limits: Some(ConsumerLimits {
+                inactive_threshold: Duration::from_secs(120),
+                max_ack_pending: 150,
+            }),
+            first_sequence: Some(505),
+        };
+
+        let stream = jetstream.create_stream(config.clone()).await.unwrap();
+        assert_eq!(config, stream.cached_info().to_owned().config);
+    }
+
+    #[tokio::test]
+    async fn limits() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        stream
+            .create_consumer(async_nats::jetstream::consumer::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut config = stream.cached_info().config.clone();
+        config.consumer_limits = Some(ConsumerLimits {
+            inactive_threshold: Duration::from_secs(2),
+            max_ack_pending: 10,
+        });
+
+        jetstream
+            .update_stream(config)
+            .await
+            .expect_err("cannot update stream. consumer `name` exceeds new limits");
     }
 }

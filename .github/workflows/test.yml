@@ -19,17 +19,12 @@ defaults:
 
 jobs:
   test_matrix:
-    name: test (${{ matrix.os }}, nats-${{ matrix.nats_server }})
+    name: test (${{ matrix.os }}, nats-main
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        nats_server: [main, dev]
-        include:
-          - nats_server: dev
-            features: server_2_10
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -66,10 +61,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.19'
+          go-version: '1.20'
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@${{ matrix.nats_server }}
+        run: go install github.com/nats-io/nats-server/v2@main
 
       - name: Setup deno for service tests
         if: ${{ matrix.os }} != windows-latest
@@ -206,14 +201,14 @@ jobs:
       - name: Set up go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.19'
+          go-version: '1.20'
 
       - name: Set up rust
         run: |
           rustup install stable
 
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@dev
+        run: go install github.com/nats-io/nats-server/v2@main
       - name: Check examples
         env:
           RUST_LOG: trace

@@ -225,27 +225,85 @@ pub struct HeaderValue {
     inner: String,
 }
 
-impl ToString for HeaderValue {
-    fn to_string(&self) -> String {
-        self.inner.to_string()
+impl fmt::Display for HeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.as_str(), f)
     }
 }
 
-impl From<HeaderValue> for String {
-    fn from(header: HeaderValue) -> Self {
-        header.to_string()
+impl AsRef<[u8]> for HeaderValue {
+    fn as_ref(&self) -> &[u8] {
+        self.inner.as_ref()
     }
 }
 
-impl From<&HeaderValue> for String {
-    fn from(header: &HeaderValue) -> Self {
-        header.to_string()
+impl AsRef<str> for HeaderValue {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 
-impl<'a> From<&'a HeaderValue> for &'a str {
-    fn from(header: &'a HeaderValue) -> Self {
-        header.inner.as_str()
+impl From<i16> for HeaderValue {
+    fn from(v: i16) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<i32> for HeaderValue {
+    fn from(v: i32) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<i64> for HeaderValue {
+    fn from(v: i64) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<isize> for HeaderValue {
+    fn from(v: isize) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<u16> for HeaderValue {
+    fn from(v: u16) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<u32> for HeaderValue {
+    fn from(v: u32) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<u64> for HeaderValue {
+    fn from(v: u64) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
+    }
+}
+
+impl From<usize> for HeaderValue {
+    fn from(v: usize) -> Self {
+        Self {
+            inner: v.to_string(),
+        }
     }
 }
 
@@ -263,14 +321,6 @@ impl FromStr for HeaderValue {
     }
 }
 
-impl From<u64> for HeaderValue {
-    fn from(v: u64) -> Self {
-        Self {
-            inner: v.to_string(),
-        }
-    }
-}
-
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
         Self {
@@ -285,7 +335,7 @@ impl HeaderValue {
     }
 
     pub fn as_str(&self) -> &str {
-        self.into()
+        self.inner.as_str()
     }
 }
 
@@ -602,10 +652,10 @@ mod tests {
 
         assert_eq!(headers.get("Key").unwrap().to_string(), "value");
 
-        let key: String = headers.get("Key").unwrap().into();
+        let key: String = headers.get("Key").unwrap().as_str().into();
         assert_eq!(key, "value".to_string());
 
-        let key: String = headers.get("Key").unwrap().to_owned().into();
+        let key: String = headers.get("Key").unwrap().as_str().to_owned();
         assert_eq!(key, "value".to_string());
 
         assert_eq!(headers.get("Key").unwrap().as_str(), "value");

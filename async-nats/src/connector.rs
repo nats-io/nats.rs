@@ -33,7 +33,6 @@ use crate::LANG;
 use crate::VERSION;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
-use bytes::BytesMut;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp;
@@ -41,7 +40,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::BufWriter;
 use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
@@ -102,10 +100,10 @@ impl Connector {
         })
     }
 
-    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn connect(&mut self) -> (ServerInfo, Connection) {
         loop {
             match self.try_connect().await {
-                Ok(inner) => return Ok(inner),
+                Ok(inner) => return inner,
                 Err(error) => {
                     self.events_tx
                         .send(Event::ClientError(ClientError::Other(error.to_string())))
@@ -238,10 +236,10 @@ impl Connector {
                         }
 
                         connection
-                            .write_op(&ClientOp::Connect(connect_info))
+                            .easy_write_and_flush(
+                                [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
+                            )
                             .await?;
-                        connection.write_op(&ClientOp::Ping).await?;
-                        connection.flush().await?;
 
                         match connection.read_op().await? {
                             Some(ServerOp::Error(err)) => match err {
@@ -296,10 +294,10 @@ impl Connector {
 
         tcp_stream.set_nodelay(true)?;
 
-        let mut connection = Connection {
-            stream: Box::new(BufWriter::new(tcp_stream)),
-            buffer: BytesMut::with_capacity(self.options.read_buffer_capacity.into()),
-        };
+        let mut connection = Connection::new(
+            Box::new(tcp_stream),
+            self.options.read_buffer_capacity.into(),
+        );
 
         let op = connection.read_op().await?;
         let info = match op {
@@ -336,10 +334,10 @@ impl Connector {
             let domain = rustls::ServerName::try_from(tls_host)
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
-            connection = Connection {
-                stream: Box::new(tls_connector.connect(domain, connection.stream).await?),
-                buffer: BytesMut::new(),
-            };
+            connection = Connection::new(
+                Box::new(tls_connector.connect(domain, connection.stream).await?),
+                0,
+            );
         };
 
         Ok((*info, connection))

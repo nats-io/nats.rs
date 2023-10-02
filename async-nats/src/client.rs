@@ -20,7 +20,7 @@ use super::{
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
-use futures::stream::StreamExt;
+use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
@@ -28,11 +28,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?"#).unwrap());
+    Lazy::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
@@ -73,7 +73,7 @@ impl Client {
             info,
             state,
             sender,
-            next_subscription_id: Arc::new(AtomicU64::new(0)),
+            next_subscription_id: Arc::new(AtomicU64::new(1)),
             subscription_capacity: capacity,
             inbox_prefix,
             request_timeout,
@@ -341,42 +341,83 @@ impl Client {
         subject: Subject,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let inbox = Subject::from(request.inbox.unwrap_or_else(|| self.new_inbox()));
-        let timeout = request.timeout.unwrap_or(self.request_timeout);
-        let mut sub = self.subscribe(inbox.clone()).await?;
-        let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
-        match request.headers {
-            Some(headers) => {
-                self.publish_with_reply_and_headers(subject, inbox, headers, payload)
-                    .await?
-            }
-            None => self.publish_with_reply(subject, inbox, payload).await?,
-        }
-        self.flush()
-            .await
-            .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
-        let request = match timeout {
-            Some(timeout) => {
-                tokio::time::timeout(timeout, sub.next())
-                    .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
-                    .await?
-            }
-            None => sub.next().await,
-        };
-        match request {
-            Some(message) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Err(RequestError::with_source(
-                        RequestErrorKind::NoResponders,
-                        "no responders",
-                    ));
+        if let Some(inbox) = request.inbox {
+            let timeout = request.timeout.unwrap_or(self.request_timeout);
+            let mut subscriber = self.subscribe(inbox.clone().into()).await?;
+            let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
+            match request.headers {
+                Some(headers) => {
+                    self.publish_with_reply_and_headers(subject, inbox.into(), headers, payload)
+                        .await?
                 }
-                Ok(message)
+                None => {
+                    self.publish_with_reply(subject, inbox.into(), payload)
+                        .await?
+                }
             }
-            None => Err(RequestError::with_source(
-                RequestErrorKind::Other,
-                "broken pipe",
-            )),
+            let request = match timeout {
+                Some(timeout) => {
+                    tokio::time::timeout(timeout, subscriber.next())
+                        .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
+                        .await?
+                }
+                None => subscriber.next().await,
+            };
+            match request {
+                Some(message) => {
+                    if message.status == Some(StatusCode::NO_RESPONDERS) {
+                        return Err(RequestError::with_source(
+                            RequestErrorKind::NoResponders,
+                            "no responders",
+                        ));
+                    }
+                    Ok(message)
+                }
+                None => Err(RequestError::with_source(
+                    RequestErrorKind::Other,
+                    "broken pipe",
+                )),
+            }
+        } else {
+            let (sender, receiver) = oneshot::channel();
+
+            let payload = request.payload.unwrap_or_else(Bytes::new);
+            let respond = self.new_inbox().into();
+            let headers = request.headers;
+
+            self.sender
+                .send(Command::Request {
+                    subject,
+                    payload,
+                    respond,
+                    headers,
+                    sender,
+                })
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))
+                .await?;
+
+            let timeout = request.timeout.unwrap_or(self.request_timeout);
+            let request = match timeout {
+                Some(timeout) => {
+                    tokio::time::timeout(timeout, receiver)
+                        .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
+                        .await?
+                }
+                None => receiver.await,
+            };
+
+            match request {
+                Ok(message) => {
+                    if message.status == Some(StatusCode::NO_RESPONDERS) {
+                        return Err(RequestError::with_source(
+                            RequestErrorKind::NoResponders,
+                            "no responders",
+                        ));
+                    }
+                    Ok(message)
+                }
+                Err(err) => Err(RequestError::with_source(RequestErrorKind::Other, err)),
+            }
         }
     }
 
@@ -482,12 +523,11 @@ impl Client {
     pub async fn flush(&self) -> Result<(), FlushError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sender
-            .send(Command::Flush { result: tx })
+            .send(Command::Flush { observer: tx })
             .await
             .map_err(|err| FlushError::with_source(FlushErrorKind::SendError, err))?;
-        // first question mark is an error from rx itself, second for error from flush.
+
         rx.await
-            .map_err(|err| FlushError::with_source(FlushErrorKind::FlushError, err))?
             .map_err(|err| FlushError::with_source(FlushErrorKind::FlushError, err))?;
         Ok(())
     }

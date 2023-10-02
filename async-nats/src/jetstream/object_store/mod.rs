@@ -21,6 +21,7 @@ use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use base64::engine::Engine;
 use bytes::BytesMut;
+use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
 use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
@@ -30,10 +31,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 
-use super::consumer::push::OrderedError;
-use super::consumer::{StreamError, StreamErrorKind};
+use super::consumer::push::{OrderedConfig, OrderedError};
+use super::consumer::{DeliverPolicy, StreamError, StreamErrorKind};
 use super::context::{PublishError, PublishErrorKind};
-use super::stream::{ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
+use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -42,8 +43,8 @@ const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
 const ROLLUP_SUBJECT: &str = "sub";
 
-static BUCKET_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[a-zA-Z0-9_-]+\z"#).unwrap());
-static OBJECT_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\A[-/_=\.a-zA-Z0-9]+\z"#).unwrap());
+static BUCKET_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
+static OBJECT_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
 
 pub(crate) fn is_valid_bucket_name(bucket_name: &str) -> bool {
     BUCKET_NAME_RE.is_match(bucket_name)
@@ -69,7 +70,7 @@ pub struct Config {
     /// A short description of the purpose of this storage bucket.
     pub description: Option<String>,
     /// Maximum age of any value in the bucket, expressed in nanoseconds
-    #[serde(with = "serde_nanos")]
+    #[serde(default, with = "serde_nanos")]
     pub max_age: Duration,
     /// The type of storage backend, `File` (default) and `Memory`
     pub storage: StorageType,
@@ -108,26 +109,42 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get<T: AsRef<str>>(&self, object_name: T) -> Result<Object<'_>, GetError> {
-        let object_info = self.info(object_name).await?;
-        // if let Some(link) = object_info.link {
-        //     return self.get(link.name).await;
-        // }
+    pub fn get<'bucket, 'object, 'future, T>(
+        &'bucket self,
+        object_name: T,
+    ) -> BoxFuture<'future, Result<Object<'object>, GetError>>
+    where
+        T: AsRef<str> + Send + 'future,
+        'bucket: 'future,
+    {
+        Box::pin(async move {
+            let object_info = self.info(object_name).await?;
+            if let Some(ref options) = object_info.options {
+                if let Some(link) = options.link.as_ref() {
+                    if let Some(link_name) = link.name.as_ref() {
+                        let link_name = link_name.clone();
+                        debug!("getting object via link");
+                        if link.bucket == self.name {
+                            return self.get(link_name).await;
+                        } else {
+                            let bucket = self
+                                .stream
+                                .context
+                                .get_object_store(&link_name)
+                                .await
+                                .map_err(|err| GetError::with_source(GetErrorKind::Other, err))?;
+                            let object = bucket.get(&link_name).await?;
+                            return Ok(object);
+                        }
+                    } else {
+                        return Err(GetError::new(GetErrorKind::BucketLink));
+                    }
+                }
+            }
 
-        let chunk_subject = format!("$O.{}.C.{}", self.name, object_info.nuid);
-
-        let subscription = self
-            .stream
-            .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
-                filter_subject: chunk_subject,
-                deliver_subject: self.stream.context.client.new_inbox(),
-                ..Default::default()
-            })
-            .await?
-            .messages()
-            .await?;
-
-        Ok(Object::new(subscription, object_info))
+            debug!("not a link. Getting the object");
+            Ok(Object::new(object_info, self.stream.clone()))
+        })
     }
 
     /// Gets an [Object] from the [ObjectStore].
@@ -218,7 +235,7 @@ impl ObjectStore {
             .get_last_raw_message_by_subject(subject.as_str())
             .await
             .map_err(|err| match err.kind() {
-                super::stream::LastRawMessageErrorKind::NoMessageFound => {
+                stream::LastRawMessageErrorKind::NoMessageFound => {
                     InfoError::new(InfoErrorKind::NotFound)
                 }
                 _ => InfoError::with_source(InfoErrorKind::Other, err),
@@ -260,9 +277,9 @@ impl ObjectStore {
         data: &mut (impl tokio::io::AsyncRead + std::marker::Unpin),
     ) -> Result<ObjectInfo, PutError>
     where
-        ObjectMeta: From<T>,
+        ObjectMetadata: From<T>,
     {
-        let object_meta: ObjectMeta = meta.into();
+        let object_meta: ObjectMetadata = meta.into();
 
         let encoded_object_name = encode_object_name(&object_meta.name);
         if !is_valid_object_name(&encoded_object_name) {
@@ -280,7 +297,8 @@ impl ObjectStore {
         let mut object_chunks = 0;
         let mut object_size = 0;
 
-        let mut buffer = BytesMut::with_capacity(DEFAULT_CHUNK_SIZE);
+        let chunk_size = object_meta.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE);
+        let mut buffer = BytesMut::with_capacity(chunk_size);
         let mut context = ring::digest::Context::new(&SHA256);
 
         loop {
@@ -322,9 +340,12 @@ impl ObjectStore {
         let object_info = ObjectInfo {
             name: object_meta.name,
             description: object_meta.description,
-            link: None,
+            options: Some(ObjectOptions {
+                max_chunk_size: Some(chunk_size),
+                link: None,
+            }),
             bucket: self.name.clone(),
-            nuid: object_nuid,
+            nuid: object_nuid.to_string(),
             chunks: object_chunks,
             size: object_size,
             digest: Some(format!("SHA-256={}", URL_SAFE.encode(digest))),
@@ -402,11 +423,25 @@ impl ObjectStore {
     /// # }
     /// ```
     pub async fn watch(&self) -> Result<Watch<'_>, WatchError> {
+        self.watch_with_deliver_policy(DeliverPolicy::New).await
+    }
+
+    /// Creates a [Watch] stream over changes in the [ObjectStore] which yields values whenever
+    /// there are changes for that key with as well as last value.
+    pub async fn watch_with_history(&self) -> Result<Watch<'_>, WatchError> {
+        self.watch_with_deliver_policy(DeliverPolicy::LastPerSubject)
+            .await
+    }
+
+    async fn watch_with_deliver_policy(
+        &self,
+        deliver_policy: DeliverPolicy,
+    ) -> Result<Watch<'_>, WatchError> {
         let subject = format!("$O.{}.M.>", self.name);
         let ordered = self
             .stream
             .create_consumer(crate::jetstream::consumer::push::OrderedConfig {
-                deliver_policy: super::consumer::DeliverPolicy::New,
+                deliver_policy,
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("object store watcher".to_string()),
                 filter_subject: subject,
@@ -488,7 +523,7 @@ impl ObjectStore {
         Ok(())
     }
 
-    /// Updates [Object] [ObjectMeta].
+    /// Updates [Object] [ObjectMetadata].
     ///
     /// # Examples
     ///
@@ -503,7 +538,7 @@ impl ObjectStore {
     /// bucket
     ///     .update_metadata(
     ///         "object",
-    ///         object_store::ObjectMeta {
+    ///         object_store::UpdateMetadata {
     ///             name: "new_name".to_string(),
     ///             description: Some("a new description".to_string()),
     ///         },
@@ -515,7 +550,7 @@ impl ObjectStore {
     pub async fn update_metadata<A: AsRef<str>>(
         &self,
         object: A,
-        metadata: ObjectMeta,
+        metadata: UpdateMetadata,
     ) -> Result<ObjectInfo, UpdateMetadataError> {
         let mut info = self.info(object.as_ref()).await?;
 
@@ -606,6 +641,189 @@ impl ObjectStore {
 
         Ok(info)
     }
+
+    /// Adds a link to an [Object].
+    /// It creates a new [Object] in the [ObjectStore] that points to another [Object]
+    /// and does not have any contents on it's own.
+    /// Links are automatically followed (one level deep) when calling [ObjectStore::get].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::object_store;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.get_object_store("bucket").await?;
+    /// let object = bucket.get("object").await?;
+    /// bucket.add_link("link_to_object", &object).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn add_link<'a, T, O>(&self, name: T, object: O) -> Result<ObjectInfo, AddLinkError>
+    where
+        T: ToString,
+        O: AsObjectInfo,
+    {
+        let object = object.as_info();
+        let name = name.to_string();
+        if name.is_empty() {
+            return Err(AddLinkError::new(AddLinkErrorKind::EmptyName));
+        }
+        if object.name.is_empty() {
+            return Err(AddLinkError::new(AddLinkErrorKind::ObjectRequired));
+        }
+        if object.deleted {
+            return Err(AddLinkError::new(AddLinkErrorKind::Deleted));
+        }
+        if let Some(ref options) = object.options {
+            if options.link.is_some() {
+                return Err(AddLinkError::new(AddLinkErrorKind::LinkToLink));
+            }
+        }
+        match self.info(&name).await {
+            Ok(info) => {
+                if let Some(options) = info.options {
+                    if options.link.is_none() {
+                        return Err(AddLinkError::new(AddLinkErrorKind::AlreadyExists));
+                    }
+                } else {
+                    return Err(AddLinkError::new(AddLinkErrorKind::AlreadyExists));
+                }
+            }
+            Err(err) if err.kind() != InfoErrorKind::NotFound => {
+                return Err(AddLinkError::with_source(AddLinkErrorKind::Other, err))
+            }
+            _ => (),
+        }
+
+        let info = ObjectInfo {
+            name,
+            description: None,
+            options: Some(ObjectOptions {
+                link: Some(ObjectLink {
+                    name: Some(object.name.clone()),
+                    bucket: object.bucket.clone(),
+                }),
+                max_chunk_size: None,
+            }),
+            bucket: self.name.clone(),
+            nuid: nuid::next().to_string(),
+            size: 0,
+            chunks: 0,
+            modified: OffsetDateTime::now_utc(),
+            digest: None,
+            deleted: false,
+        };
+        publish_meta(self, &info).await?;
+        Ok(info)
+    }
+
+    /// Adds a link to another [ObjectStore] bucket by creating a new [Object]
+    /// in the current [ObjectStore] that points to another [ObjectStore] and
+    /// does not contain any data.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::object_store;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let bucket = jetstream.get_object_store("bucket").await?;
+    /// bucket
+    ///     .add_bucket_link("link_to_object", "another_bucket")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn add_bucket_link<T: ToString, U: ToString>(
+        &self,
+        name: T,
+        bucket: U,
+    ) -> Result<ObjectInfo, AddLinkError> {
+        let name = name.to_string();
+        let bucket = bucket.to_string();
+        if name.is_empty() {
+            return Err(AddLinkError::new(AddLinkErrorKind::EmptyName));
+        }
+
+        match self.info(&name).await {
+            Ok(info) => {
+                if let Some(options) = info.options {
+                    if options.link.is_none() {
+                        return Err(AddLinkError::new(AddLinkErrorKind::AlreadyExists));
+                    }
+                }
+            }
+            Err(err) if err.kind() != InfoErrorKind::NotFound => {
+                return Err(AddLinkError::with_source(AddLinkErrorKind::Other, err))
+            }
+            _ => (),
+        }
+
+        let info = ObjectInfo {
+            name: name.clone(),
+            description: None,
+            options: Some(ObjectOptions {
+                link: Some(ObjectLink { name: None, bucket }),
+                max_chunk_size: None,
+            }),
+            bucket: self.name.clone(),
+            nuid: nuid::next().to_string(),
+            size: 0,
+            chunks: 0,
+            modified: OffsetDateTime::now_utc(),
+            digest: None,
+            deleted: false,
+        };
+        publish_meta(self, &info).await?;
+        Ok(info)
+    }
+}
+
+async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), PublishMetadataError> {
+    let encoded_object_name = encode_object_name(&info.name);
+    let subject = format!("$O.{}.M.{}", &store.name, &encoded_object_name).into();
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        NATS_ROLLUP,
+        ROLLUP_SUBJECT.parse::<HeaderValue>().map_err(|err| {
+            PublishMetadataError::with_source(
+                PublishMetadataErrorKind::Other,
+                format!("failed parsing header: {}", err),
+            )
+        })?,
+    );
+    let data = serde_json::to_vec(&info).map_err(|err| {
+        PublishMetadataError::with_source(
+            PublishMetadataErrorKind::Other,
+            format!("failed serializing object info: {}", err),
+        )
+    })?;
+
+    store
+        .stream
+        .context
+        .publish_with_headers(subject, headers, data.into())
+        .await
+        .map_err(|err| {
+            PublishMetadataError::with_source(
+                PublishMetadataErrorKind::PublishMetadata,
+                format!("failed publishing metadata: {}", err),
+            )
+        })?
+        .await
+        .map_err(|err| {
+            PublishMetadataError::with_source(
+                PublishMetadataErrorKind::PublishMetadata,
+                format!("failed ack from metadata publish: {}", err),
+            )
+        })?;
+    Ok(())
 }
 
 pub struct Watch<'a> {
@@ -699,16 +917,20 @@ pub struct Object<'a> {
     has_pending_messages: bool,
     digest: Option<ring::digest::Context>,
     subscription: Option<crate::jetstream::consumer::push::Ordered<'a>>,
+    subscription_future: Option<BoxFuture<'a, Result<Ordered<'a>, StreamError>>>,
+    stream: crate::jetstream::stream::Stream,
 }
 
 impl<'a> Object<'a> {
-    pub(crate) fn new(subscription: Ordered<'a>, info: ObjectInfo) -> Self {
+    pub(crate) fn new(info: ObjectInfo, stream: stream::Stream) -> Self {
         Object {
-            subscription: Some(subscription),
+            subscription: None,
             info,
             remaining_bytes: VecDeque::new(),
             has_pending_messages: true,
             digest: Some(ring::digest::Context::new(&SHA256)),
+            subscription_future: None,
+            stream,
         }
     }
 
@@ -733,6 +955,34 @@ impl tokio::io::AsyncRead for Object<'_> {
         }
 
         if self.has_pending_messages {
+            if self.subscription.is_none() {
+                let future = match self.subscription_future.as_mut() {
+                    Some(future) => future,
+                    None => {
+                        let stream = self.stream.clone();
+                        let bucket = self.info.bucket.clone();
+                        let nuid = self.info.nuid.clone();
+                        self.subscription_future.insert(Box::pin(async move {
+                            stream
+                                .create_consumer(OrderedConfig {
+                                    deliver_subject: stream.context.client.new_inbox(),
+                                    filter_subject: format!("$O.{}.C.{}", bucket, nuid),
+                                    ..Default::default()
+                                })
+                                .await
+                                .unwrap()
+                                .messages()
+                                .await
+                        }))
+                    }
+                };
+                match future.as_mut().poll(cx) {
+                    Poll::Ready(subscription) => {
+                        self.subscription = Some(subscription.unwrap());
+                    }
+                    Poll::Pending => (),
+                }
+            }
             if let Some(subscription) = self.subscription.as_mut() {
                 match subscription.poll_next_unpin(cx) {
                     Poll::Ready(message) => match message {
@@ -793,12 +1043,18 @@ impl tokio::io::AsyncRead for Object<'_> {
                     Poll::Pending => Poll::Pending,
                 }
             } else {
-                Poll::Ready(Ok(()))
+                Poll::Pending
             }
         } else {
             Poll::Ready(Ok(()))
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ObjectOptions {
+    pub link: Option<ObjectLink>,
+    pub max_chunk_size: Option<usize>,
 }
 
 /// Meta and instance information about an object.
@@ -809,7 +1065,7 @@ pub struct ObjectInfo {
     /// A short human readable description of the object.
     pub description: Option<String>,
     /// Link this object points to, if any.
-    pub link: Option<ObjectLink>,
+    pub options: Option<ObjectOptions>,
     /// Name of the bucket the object is stored in.
     pub bucket: String,
     /// Unique identifier used to uniquely identify this version of the object.
@@ -837,34 +1093,60 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ObjectLink {
     /// Name of the object
-    pub name: String,
+    pub name: Option<String>,
     /// Name of the bucket the object is stored in.
-    pub bucket: Option<String>,
+    pub bucket: String,
 }
 
-/// Meta information about an object.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
-pub struct ObjectMeta {
+pub struct UpdateMetadata {
     /// Name of the object
     pub name: String,
     /// A short human readable description of the object.
     pub description: Option<String>,
 }
 
-impl From<&str> for ObjectMeta {
-    fn from(s: &str) -> ObjectMeta {
-        ObjectMeta {
+/// Meta information about an object.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ObjectMetadata {
+    /// Name of the object
+    pub name: String,
+    /// A short human readable description of the object.
+    pub description: Option<String>,
+    /// Max chunk size. Default is 128k.
+    pub chunk_size: Option<usize>,
+}
+
+impl From<&str> for ObjectMetadata {
+    fn from(s: &str) -> ObjectMetadata {
+        ObjectMetadata {
             name: s.to_string(),
             ..Default::default()
         }
     }
 }
 
-impl From<ObjectInfo> for ObjectMeta {
+pub trait AsObjectInfo {
+    fn as_info(&self) -> &ObjectInfo;
+}
+
+impl AsObjectInfo for &Object<'_> {
+    fn as_info(&self) -> &ObjectInfo {
+        &self.info
+    }
+}
+impl AsObjectInfo for &ObjectInfo {
+    fn as_info(&self) -> &ObjectInfo {
+        self
+    }
+}
+
+impl From<ObjectInfo> for ObjectMetadata {
     fn from(info: ObjectInfo) -> Self {
-        ObjectMeta {
+        ObjectMetadata {
             name: info.name,
             description: info.description,
+            chunk_size: None,
         }
     }
 }
@@ -941,6 +1223,7 @@ pub enum GetErrorKind {
     InvalidName,
     ConsumerCreate,
     NotFound,
+    BucketLink,
     Other,
     TimedOut,
 }
@@ -953,6 +1236,7 @@ impl Display for GetErrorKind {
             Self::NotFound => write!(f, "object not found"),
             Self::TimedOut => write!(f, "timed out"),
             Self::InvalidName => write!(f, "invalid object name"),
+            Self::BucketLink => write!(f, "object is a link to a bucket"),
         }
     }
 }
@@ -1038,6 +1322,73 @@ impl Display for PutErrorKind {
 }
 
 pub type PutError = Error<PutErrorKind>;
+
+pub type AddLinkError = Error<AddLinkErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AddLinkErrorKind {
+    EmptyName,
+    ObjectRequired,
+    Deleted,
+    LinkToLink,
+    PublishMetadata,
+    AlreadyExists,
+    Other,
+}
+
+impl Display for AddLinkErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddLinkErrorKind::ObjectRequired => write!(f, "cannot link to empty Object"),
+            AddLinkErrorKind::Deleted => write!(f, "cannot link a deleted Object"),
+            AddLinkErrorKind::LinkToLink => write!(f, "cannot link to another link"),
+            AddLinkErrorKind::EmptyName => write!(f, "link name cannot be empty"),
+            AddLinkErrorKind::PublishMetadata => write!(f, "failed publishing link metadata"),
+            AddLinkErrorKind::Other => write!(f, "error"),
+            AddLinkErrorKind::AlreadyExists => write!(f, "object already exists"),
+        }
+    }
+}
+
+type PublishMetadataError = Error<PublishMetadataErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PublishMetadataErrorKind {
+    PublishMetadata,
+    Other,
+}
+
+impl Display for PublishMetadataErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PublishMetadataErrorKind::PublishMetadata => write!(f, "failed to publish metadata"),
+            PublishMetadataErrorKind::Other => write!(f, "error"),
+        }
+    }
+}
+
+impl From<PublishMetadataError> for AddLinkError {
+    fn from(error: PublishMetadataError) -> Self {
+        match error.kind {
+            PublishMetadataErrorKind::PublishMetadata => {
+                AddLinkError::new(AddLinkErrorKind::PublishMetadata)
+            }
+            PublishMetadataErrorKind::Other => {
+                AddLinkError::with_source(AddLinkErrorKind::Other, error)
+            }
+        }
+    }
+}
+impl From<PublishMetadataError> for PutError {
+    fn from(error: PublishMetadataError) -> Self {
+        match error.kind {
+            PublishMetadataErrorKind::PublishMetadata => {
+                PutError::new(PutErrorKind::PublishMetadata)
+            }
+            PublishMetadataErrorKind::Other => PutError::with_source(PutErrorKind::Other, error),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatchErrorKind {

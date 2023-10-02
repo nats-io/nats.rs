@@ -335,7 +335,7 @@ mod kv {
             .await
             .unwrap();
 
-        let context = async_nats::jetstream::new(client);
+        let context = async_nats::jetstream::new(client.clone());
 
         let kv = context
             .create_key_value(async_nats::jetstream::kv::Config {
@@ -352,6 +352,7 @@ mod kv {
         // check if we get only updated values. This should not pop up in watcher.
         kv.put("foo", 22.to_string().into()).await.unwrap();
         let mut watch = kv.watch("foo").await.unwrap().enumerate();
+        client.flush().await.unwrap();
 
         tokio::task::spawn({
             let kv = kv.clone();

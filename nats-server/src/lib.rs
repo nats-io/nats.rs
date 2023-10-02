@@ -22,6 +22,7 @@ use std::{thread, time::Duration};
 use lazy_static::lazy_static;
 use rand::Rng;
 use regex::Regex;
+use serde_json::{self, Value};
 
 pub struct Server {
     inner: Inner,
@@ -38,7 +39,7 @@ struct Inner {
 
 lazy_static! {
     static ref SD_RE: Regex = Regex::new(r#".+\sStore Directory:\s+"([^"]+)""#).unwrap();
-    static ref CLIENT_RE: Regex = Regex::new(r#".+\sclient connections on\s+(\S+)"#).unwrap();
+    static ref CLIENT_RE: Regex = Regex::new(r".+\sclient connections on\s+(\S+)").unwrap();
 }
 
 impl Drop for Server {
@@ -77,8 +78,8 @@ impl Server {
         let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
         let mut line = String::new();
         r.read_line(&mut line).expect("did not receive INFO");
-        let si = json::parse(&line["INFO".len()..]).unwrap();
-        let port = si["port"].as_u16().expect("could not parse port");
+        let si: Value = serde_json::from_str(&line["INFO".len()..]).expect("could not parse INFO");
+        let port = si["port"].as_u64().expect("could not parse port") as u16;
         let mut scheme = "nats://";
         if si["tls_required"].as_bool().unwrap_or(false) {
             scheme = "tls://";
@@ -91,8 +92,8 @@ impl Server {
         let mut r = BufReader::with_capacity(1024, TcpStream::connect(addr).unwrap());
         let mut line = String::new();
         r.read_line(&mut line).expect("did not receive INFO");
-        let si = json::parse(&line["INFO".len()..]).unwrap();
-        si["port"].as_u16().expect("could not parse port")
+        let si: Value = serde_json::from_str(&line["INFO".len()..]).expect("could not parse INFO");
+        si["port"].as_u64().expect("could not parse port") as u16
     }
 
     // Allow user/pass override.
@@ -179,7 +180,7 @@ impl<'a> IntoConfig<'a> for [&'a str; 3] {
 pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
     let cfg = cfg.into_config();
     let port = rand::thread_rng().gen_range(3000..50_000);
-    let ports = vec![port, port + 100, port + 200];
+    let ports = [port, port + 100, port + 200];
 
     let ports = ports
         .iter()
@@ -191,7 +192,7 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
             new_port
         })
         .collect::<Vec<usize>>();
-    let cluster = vec![port + 1, port + 101, port + 201];
+    let cluster = [port + 1, port + 101, port + 201];
 
     let s1 = run_cluster_node_with_port(
         cfg.0[0],
@@ -240,7 +241,7 @@ pub fn run_server_with_port(cfg: &str, port: Option<&str>) -> Server {
 }
 
 fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
-    let id = id.unwrap_or_else(nuid::next);
+    let id = id.unwrap_or_else(|| nuid::next().to_string());
     let logfile = env::temp_dir().join(format!("nats-server-{id}.log"));
     let pidfile = env::temp_dir().join(format!("nats-server-{id}.pid"));
     let store_dir = env::temp_dir().join(format!("store-dir-{id}"));
@@ -268,7 +269,7 @@ fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
     Inner {
         port: port.map(ToString::to_string),
         cfg: cfg.to_string(),
-        id,
+        id: id.to_string(),
         child,
         logfile,
         pidfile,
@@ -327,7 +328,7 @@ fn run_cluster_node_with_port(
         inner: Inner {
             port: port.map(ToString::to_string),
             cfg: cfg.to_string(),
-            id,
+            id: id.to_string(),
             child,
             logfile,
             pidfile,

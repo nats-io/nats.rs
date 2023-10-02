@@ -19,7 +19,7 @@ use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::Subject;
-use crate::{header, Client, Command, HeaderMap, HeaderValue, StatusCode};
+use crate::{header, Client, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
@@ -978,7 +978,6 @@ pub struct PublishAckFuture {
 
 impl PublishAckFuture {
     async fn next_with_timeout(mut self) -> Result<PublishAck, PublishError> {
-        self.subscription.sender.send(Command::TryFlush).await.ok();
         let next = tokio::time::timeout(self.timeout, self.subscription.next())
             .await
             .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))?;

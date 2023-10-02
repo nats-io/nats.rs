@@ -153,11 +153,6 @@ impl Consumer<Config> {
             .publish_with_reply(subject.into(), inbox, payload.into())
             .await
             .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Publish, err))?;
-        self.context
-            .client
-            .flush()
-            .await
-            .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Flush, err))?;
         debug!("batch request sent");
         Ok(())
     }
@@ -390,7 +385,7 @@ impl futures::Stream for Batch {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => {
-                        debug!("recived timeout. Iterator done.");
+                        debug!("received timeout. Iterator done.");
                         self.terminated = true;
                         Poll::Ready(None)
                     }
@@ -918,9 +913,6 @@ impl Stream {
                         )
                         .await
                         .map(|_| pending_reset);
-                    if let Err(err) = consumer.context.client.flush().await {
-                        debug!("flush failed: {err:?}");
-                    }
                     // TODO: add tracing instead of ignoring this.
                     request_result_tx
                         .send(result.map(|_| pending_reset).map_err(|err| {
