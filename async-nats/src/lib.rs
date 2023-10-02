@@ -394,7 +394,6 @@ impl ConnectionHandler {
                     Poll::Ready(ExitReason::Disconnected(None))
                 } else {
                     self.handler.connection.enqueue_write_op(&ClientOp::Ping);
-                    self.handler.is_flushing = true;
 
                     Poll::Pending
                 }
@@ -486,11 +485,7 @@ impl ConnectionHandler {
                     }
                 }
 
-                if !self.handler.is_flushing && self.handler.connection.should_flush() {
-                    self.handler.is_flushing = true;
-                }
-
-                if self.handler.is_flushing {
+                if self.handler.is_flushing || self.handler.connection.should_flush() {
                     match self.handler.connection.poll_flush(cx) {
                         Poll::Pending => {}
                         Poll::Ready(Ok(())) => {
@@ -687,7 +682,8 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    let subject = Subject::from(format!("{}.*", prefix));
+                    let prefix = Subject::from(format!("{}.{}.", prefix, nuid::next()));
+                    let subject = Subject::from(format!("{}*", prefix));
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
                         sid: MULTIPLEXER_SID,
@@ -697,7 +693,7 @@ impl ConnectionHandler {
 
                     self.multiplexer.insert(Multiplexer {
                         subject,
-                        prefix: Subject::from(format!("{}.", prefix)),
+                        prefix,
                         senders: HashMap::new(),
                     })
                 };
@@ -707,7 +703,7 @@ impl ConnectionHandler {
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
-                    respond: Some(respond),
+                    respond: Some(format!("{}{}", multiplexer.prefix, token).into()),
                     headers,
                 };
 
