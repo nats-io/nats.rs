@@ -82,7 +82,7 @@
 //!
 //! // Publish messages to the NATS server
 //! for _ in 0..10 {
-//!     client.publish(subject.clone(), data.clone()).await?;
+//!     client.publish(subject.clone().into(), data.clone()).await?;
 //! }
 //! #    Ok(())
 //! # }
@@ -164,6 +164,7 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
+pub use subject::Subject;
 
 mod auth;
 pub(crate) mod auth_utils;
@@ -183,6 +184,7 @@ pub mod message;
 #[cfg(feature = "service")]
 pub mod service;
 pub mod status;
+pub mod subject;
 mod tls;
 
 pub use message::Message;
@@ -252,8 +254,8 @@ pub(crate) enum ServerOp {
     Error(ServerError),
     Message {
         sid: u64,
-        subject: String,
-        reply: Option<String>,
+        subject: Subject,
+        reply: Option<Subject>,
         payload: Bytes,
         headers: Option<HeaderMap>,
         status: Option<StatusCode>,
@@ -265,21 +267,21 @@ pub(crate) enum ServerOp {
 #[derive(Debug)]
 pub(crate) enum Command {
     Publish {
-        subject: String,
+        subject: Subject,
         payload: Bytes,
-        respond: Option<String>,
+        respond: Option<Subject>,
         headers: Option<HeaderMap>,
     },
     Request {
-        subject: String,
+        subject: Subject,
         payload: Bytes,
-        respond: String,
+        respond: Subject,
         headers: Option<HeaderMap>,
         sender: oneshot::Sender<Message>,
     },
     Subscribe {
         sid: u64,
-        subject: String,
+        subject: Subject,
         queue_group: Option<String>,
         sender: mpsc::Sender<Message>,
     },
@@ -296,14 +298,14 @@ pub(crate) enum Command {
 #[derive(Debug)]
 pub(crate) enum ClientOp {
     Publish {
-        subject: String,
+        subject: Subject,
         payload: Bytes,
-        respond: Option<String>,
+        respond: Option<Subject>,
         headers: Option<HeaderMap>,
     },
     Subscribe {
         sid: u64,
-        subject: String,
+        subject: Subject,
         queue_group: Option<String>,
     },
     Unsubscribe {
@@ -317,7 +319,7 @@ pub(crate) enum ClientOp {
 
 #[derive(Debug)]
 struct Subscription {
-    subject: String,
+    subject: Subject,
     sender: mpsc::Sender<Message>,
     queue_group: Option<String>,
     delivered: u64,
@@ -326,8 +328,8 @@ struct Subscription {
 
 #[derive(Debug)]
 struct Multiplexer {
-    subject: String,
-    prefix: String,
+    subject: Subject,
+    prefix: Subject,
     senders: HashMap<String, oneshot::Sender<Message>>,
 }
 
@@ -548,7 +550,7 @@ impl ConnectionHandler {
                 length,
             } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
-                    let message = Message {
+                    let message: Message = Message {
                         subject,
                         reply,
                         payload,
@@ -586,7 +588,8 @@ impl ConnectionHandler {
                     }
                 } else if sid == MULTIPLEXER_SID {
                     if let Some(multiplexer) = self.multiplexer.as_mut() {
-                        let maybe_token = subject.strip_prefix(&multiplexer.prefix).to_owned();
+                        let maybe_token =
+                            subject.strip_prefix(multiplexer.prefix.as_ref()).to_owned();
 
                         if let Some(token) = maybe_token {
                             if let Some(sender) = multiplexer.senders.remove(token) {
@@ -679,8 +682,8 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    let prefix = format!("{}.{}.", prefix, nuid::next());
-                    let subject = format!("{}*", prefix);
+                    let prefix = Subject::from(format!("{}.{}.", prefix, nuid::next()));
+                    let subject = Subject::from(format!("{}*", prefix));
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
                         sid: MULTIPLEXER_SID,
@@ -700,7 +703,7 @@ impl ConnectionHandler {
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
-                    respond: Some(format!("{}{}", multiplexer.prefix, token)),
+                    respond: Some(format!("{}{}", multiplexer.prefix, token).into()),
                     headers,
                 };
 

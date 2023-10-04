@@ -69,7 +69,7 @@ mod jetstream {
 
         let _stream = context
             .create_stream(stream::Config {
-                name: "TEST".to_string(),
+                name: "TEST".into(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
                 ..Default::default()
             })
@@ -98,7 +98,7 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "TEST".to_string(),
+                name: "TEST".into(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
                 ..Default::default()
             })
@@ -106,12 +106,12 @@ mod jetstream {
             .unwrap();
 
         let ack = context
-            .publish("foo".to_string(), "payload".into())
+            .publish("foo".into(), "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_ok());
         let ack = context
-            .publish("not_stream".to_string(), "payload".into())
+            .publish("not_stream".into(), "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_err());
@@ -125,7 +125,7 @@ mod jetstream {
 
         let mut stream = context
             .create_stream(stream::Config {
-                name: "TEST".to_string(),
+                name: "TEST".into(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
                 allow_direct: true,
                 ..Default::default()
@@ -137,7 +137,7 @@ mod jetstream {
         // Publish first message
         context
             .send_publish(
-                "foo".to_string(),
+                "foo".into(),
                 Publish::build()
                     .message_id(id.clone())
                     .payload("data".into()),
@@ -148,7 +148,7 @@ mod jetstream {
             .unwrap();
         // Publish second message, a duplicate.
         context
-            .send_publish("foo".to_string(), Publish::build().message_id(id.clone()))
+            .send_publish("foo".into(), Publish::build().message_id(id.clone()))
             .await
             .unwrap()
             .await
@@ -165,7 +165,7 @@ mod jetstream {
         // Publish message with different ID and expect error.
         let err = context
             .send_publish(
-                "foo".to_string(),
+                "foo".into(),
                 Publish::build().expected_last_message_id("BAD_ID"),
             )
             .await
@@ -177,7 +177,7 @@ mod jetstream {
         // Publish a new message with expected ID.
         context
             .send_publish(
-                "foo".to_string(),
+                "foo".into(),
                 Publish::build().expected_last_message_id(id.clone()),
             )
             .await
@@ -187,10 +187,7 @@ mod jetstream {
 
         // We should have now two messages. Check it.
         context
-            .send_publish(
-                "foo".to_string(),
-                Publish::build().expected_last_sequence(2),
-            )
+            .send_publish("foo".into(), Publish::build().expected_last_sequence(2))
             .await
             .unwrap()
             .await
@@ -198,10 +195,7 @@ mod jetstream {
         // 3 messages should be there, so this should error.
         assert_eq!(
             context
-                .send_publish(
-                    "foo".to_string(),
-                    Publish::build().expected_last_sequence(2),
-                )
+                .send_publish("foo".into(), Publish::build().expected_last_sequence(2),)
                 .await
                 .unwrap()
                 .await
@@ -212,7 +206,7 @@ mod jetstream {
         // 3 messages there, should be ok for this subject too.
         context
             .send_publish(
-                "foo".to_string(),
+                "foo".into(),
                 Publish::build().expected_last_subject_sequence(3),
             )
             .await
@@ -223,7 +217,7 @@ mod jetstream {
         assert_eq!(
             context
                 .send_publish(
-                    "foo".to_string(),
+                    "foo".into(),
                     Publish::build().expected_last_subject_sequence(3),
                 )
                 .await
@@ -237,7 +231,7 @@ mod jetstream {
         // Check if it works for the other subjects in the stream.
         context
             .send_publish(
-                "bar".to_string(),
+                "bar".into(),
                 Publish::build().expected_last_subject_sequence(0),
             )
             .await
@@ -247,7 +241,7 @@ mod jetstream {
         // Sequence is now 1, so this should fail.
         context
             .send_publish(
-                "bar".to_string(),
+                "bar".into(),
                 Publish::build().expected_last_subject_sequence(0),
             )
             .await
@@ -258,7 +252,7 @@ mod jetstream {
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
             .send_publish(
-                "foo".to_string(),
+                "foo".into(),
                 Publish::build().header(NATS_MESSAGE_ID, id.as_str()),
             )
             .await
@@ -268,7 +262,7 @@ mod jetstream {
         // above message should be ignored.
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
-            .send_publish("bar".to_string(), Publish::build().expected_stream("TEST"))
+            .send_publish("bar".into(), Publish::build().expected_stream("TEST"))
             .await
             .unwrap()
             .await
@@ -283,7 +277,7 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "TEST".to_string(),
+                name: "TEST".into(),
                 subjects: vec!["foo".into(), "bar".into(), "baz".into()],
                 ..Default::default()
             })
@@ -309,8 +303,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let response: Response<AccountInfo> =
-            context.request("INFO".to_string(), &()).await.unwrap();
+        let response: Response<AccountInfo> = context.request("INFO".into(), &()).await.unwrap();
 
         assert!(matches!(response, Response::Ok { .. }));
     }
@@ -322,7 +315,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         let response: Response<AccountInfo> = context
-            .request("STREAM.INFO.nonexisting".to_string(), &())
+            .request("STREAM.INFO.nonexisting".into(), &())
             .await
             .unwrap();
 
@@ -339,7 +332,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         let response: Response<AccountInfo> =
-            context.request("API.FONI".to_string(), &()).await.unwrap();
+            context.request("API.FONI".into(), &()).await.unwrap();
 
         assert!(matches!(response, Response::Err { .. }));
     }
@@ -354,7 +347,7 @@ mod jetstream {
 
         context
             .create_stream(&stream::Config {
-                name: "events2".to_string(),
+                name: "events2".into(),
                 ..Default::default()
             })
             .await
@@ -400,7 +393,7 @@ mod jetstream {
 
         let consumer = stream
             .create_consumer(jetstream::consumer::pull::Config {
-                durable_name: Some("name".to_string()),
+                durable_name: Some("name".into()),
                 ..Default::default()
             })
             .await
@@ -430,7 +423,7 @@ mod jetstream {
                 .unwrap()
                 .config
                 .name,
-            "events".to_string()
+            "events"
         );
     }
 
@@ -444,7 +437,7 @@ mod jetstream {
 
         for _ in 0..3 {
             context
-                .publish("events".to_string(), "data".into())
+                .publish("events".into(), "data".into())
                 .await
                 .unwrap()
                 .await
@@ -466,8 +459,8 @@ mod jetstream {
 
         context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events.*".to_string()],
+                name: "events".into(),
+                subjects: vec!["events.*".into()],
                 ..Default::default()
             })
             .await
@@ -475,7 +468,7 @@ mod jetstream {
 
         for _ in 0..3 {
             context
-                .publish("events.one".to_string(), "data".into())
+                .publish("events.one".into(), "data".into())
                 .await
                 .unwrap()
                 .await
@@ -483,7 +476,7 @@ mod jetstream {
         }
         for _ in 0..4 {
             context
-                .publish("events.two".to_string(), "data".into())
+                .publish("events.two".into(), "data".into())
                 .await
                 .unwrap()
                 .await
@@ -504,8 +497,8 @@ mod jetstream {
 
         context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events.*".to_string()],
+                name: "events".into(),
+                subjects: vec!["events.*".into()],
                 ..Default::default()
             })
             .await
@@ -513,7 +506,7 @@ mod jetstream {
 
         for _ in 0..100 {
             context
-                .publish("events.two".to_string(), "data".into())
+                .publish("events.two".into(), "data".into())
                 .await
                 .unwrap()
                 .await
@@ -542,13 +535,13 @@ mod jetstream {
                 .cached_info()
                 .config
                 .name,
-            "events".to_string()
+            "events"
         );
 
         assert_eq!(
             context
                 .get_or_create_stream(&stream::Config {
-                    name: "events2".to_string(),
+                    name: "events2".into(),
                     ..Default::default()
                 })
                 .await
@@ -556,7 +549,7 @@ mod jetstream {
                 .cached_info()
                 .config
                 .name,
-            "events2".to_string()
+            "events2"
         );
     }
 
@@ -579,7 +572,7 @@ mod jetstream {
         let _stream = context.create_stream("events").await.unwrap();
         let info = context
             .update_stream(stream::Config {
-                name: "events".to_string(),
+                name: "events".into(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
                 ..Default::default()
@@ -618,8 +611,8 @@ mod jetstream {
 
         let stream = context
             .get_or_create_stream(stream::Config {
-                subjects: vec!["events".to_string(), "entries".to_string()],
-                name: "events".to_string(),
+                subjects: vec!["events".into(), "entries".into()],
+                name: "events".into(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
                 ..Default::default()
@@ -658,8 +651,8 @@ mod jetstream {
 
         let stream = context
             .get_or_create_stream(stream::Config {
-                subjects: vec!["events".to_string(), "entries".to_string()],
-                name: "events".to_string(),
+                subjects: vec!["events".into(), "entries".into()],
+                name: "events".into(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
                 allow_direct: true,
@@ -715,8 +708,8 @@ mod jetstream {
 
         let stream = context
             .get_or_create_stream(stream::Config {
-                subjects: vec!["events".to_string(), "entries".to_string()],
-                name: "events".to_string(),
+                subjects: vec!["events".into(), "entries".into()],
+                name: "events".into(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
                 allow_direct: true,
@@ -774,8 +767,8 @@ mod jetstream {
 
         let stream = context
             .get_or_create_stream(stream::Config {
-                subjects: vec!["events".to_string(), "entries".to_string()],
-                name: "events".to_string(),
+                subjects: vec!["events".into(), "entries".into()],
+                name: "events".into(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
                 allow_direct: true,
@@ -851,8 +844,8 @@ mod jetstream {
 
         let stream = context
             .get_or_create_stream(stream::Config {
-                subjects: vec!["events".to_string(), "entries".to_string()],
-                name: "events".to_string(),
+                subjects: vec!["events".into(), "entries".into()],
+                name: "events".into(),
                 max_messages: 1000,
                 max_messages_per_subject: 100,
                 allow_direct: true,
@@ -977,7 +970,7 @@ mod jetstream {
             .await
             .unwrap()
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("durable".to_string()),
+                durable_name: Some("durable".into()),
                 deliver_policy: DeliverPolicy::ByStartSequence { start_sequence: 10 },
                 ..Default::default()
             })
@@ -1002,7 +995,7 @@ mod jetstream {
             .await
             .unwrap()
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull_explicit".to_string()),
+                durable_name: Some("pull_explicit".into()),
                 ..Default::default()
             })
             .await
@@ -1013,21 +1006,21 @@ mod jetstream {
             .await
             .unwrap()
             .create_consumer(consumer::pull::Config {
-                name: Some("name".to_string()),
+                name: Some("name".into()),
                 ..Default::default()
             })
             .await
             .unwrap();
 
-        assert_eq!("name".to_string(), consumer.cached_info().name);
+        assert_eq!("name", consumer.cached_info().name);
 
         context
             .get_or_create_stream("events")
             .await
             .unwrap()
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("namex".to_string()),
-                name: Some("namey".to_string()),
+                durable_name: Some("namex".into()),
+                name: Some("namey".into()),
                 ..Default::default()
             })
             .await
@@ -1042,7 +1035,7 @@ mod jetstream {
         let stream = context.get_or_create_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("consumer".to_string()),
+                durable_name: Some("consumer".into()),
                 ..Default::default()
             })
             .await
@@ -1063,7 +1056,7 @@ mod jetstream {
         let stream = context.get_or_create_stream("stream").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1071,8 +1064,8 @@ mod jetstream {
 
         stream
             .create_consumer(consumer::push::Config {
-                deliver_subject: "subject".to_string(),
-                durable_name: Some("push".to_string()),
+                deliver_subject: "subject".into(),
+                durable_name: Some("push".into()),
                 ..Default::default()
             })
             .await
@@ -1093,15 +1086,15 @@ mod jetstream {
         let stream = context.get_or_create_stream("stream").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
             .unwrap();
         stream
             .create_consumer(consumer::push::Config {
-                durable_name: Some("push".to_string()),
-                deliver_subject: "subject".to_string(),
+                durable_name: Some("push".into()),
+                deliver_subject: "subject".into(),
                 ..Default::default()
             })
             .await
@@ -1126,7 +1119,7 @@ mod jetstream {
             .get_or_create_consumer::<consumer::pull::Config>(
                 "consumer",
                 consumer::pull::Config {
-                    durable_name: Some("consumer".to_string()),
+                    durable_name: Some("consumer".into()),
                     ..Default::default()
                 },
             )
@@ -1144,7 +1137,7 @@ mod jetstream {
             .get_or_create_consumer::<consumer::pull::Config>(
                 "consumer",
                 consumer::pull::Config {
-                    durable_name: Some("consumer".to_string()),
+                    durable_name: Some("consumer".into()),
                     ..Default::default()
                 },
             )
@@ -1161,8 +1154,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1171,7 +1164,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         let consumer = stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1179,7 +1172,7 @@ mod jetstream {
 
         for _ in 0..1000 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap();
         }
@@ -1199,8 +1192,8 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1209,7 +1202,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("push".to_string()),
+                durable_name: Some("push".into()),
                 ..Default::default()
             })
             .await
@@ -1219,7 +1212,7 @@ mod jetstream {
 
         for _ in 0..100 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap();
         }
@@ -1246,8 +1239,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1256,8 +1249,8 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::push::Config {
-                deliver_subject: "push".to_string(),
-                durable_name: Some("push".to_string()),
+                deliver_subject: "push".into(),
+                durable_name: Some("push".into()),
                 ..Default::default()
             })
             .await
@@ -1267,7 +1260,7 @@ mod jetstream {
 
         for _ in 0..1000 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap();
         }
@@ -1287,8 +1280,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 storage: StorageType::Memory,
                 ..Default::default()
             })
@@ -1298,7 +1291,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         let consumer: OrderedPushConsumer = stream
             .create_consumer(consumer::push::OrderedConfig {
-                deliver_subject: "push".to_string(),
+                deliver_subject: "push".into(),
                 ..Default::default()
             })
             .await
@@ -1312,7 +1305,7 @@ mod jetstream {
                         tokio::time::sleep(Duration::from_secs(6)).await
                     }
                     context
-                        .publish("events".to_string(), "dat".into())
+                        .publish("events".into(), "dat".into())
                         .await
                         .unwrap();
                 }
@@ -1360,7 +1353,7 @@ mod jetstream {
                         tokio::time::sleep(Duration::from_secs(6)).await
                     }
                     context
-                        .publish("events".to_string(), "dat".into())
+                        .publish("events".into(), "dat".into())
                         .await
                         .unwrap();
                 }
@@ -1384,8 +1377,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events.>".to_string()],
+                name: "events".into(),
+                subjects: vec!["events.>".into()],
                 storage: StorageType::File,
                 ..Default::default()
             })
@@ -1395,7 +1388,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         let consumer: OrderedPushConsumer = stream
             .create_consumer(consumer::push::OrderedConfig {
-                deliver_subject: "push".to_string(),
+                deliver_subject: "push".into(),
                 ..Default::default()
             })
             .await
@@ -1417,7 +1410,7 @@ mod jetstream {
                     }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     context
-                        .publish(format!("events.{i}"), i.to_string().into())
+                        .publish(format!("events.{i}").into(), i.to_string().into())
                         .await
                         .ok();
                 }
@@ -1448,8 +1441,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 storage: StorageType::Memory,
                 ..Default::default()
             })
@@ -1459,7 +1452,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         let consumer: OrderedPushConsumer = stream
             .create_consumer(consumer::push::OrderedConfig {
-                deliver_subject: "push".to_string(),
+                deliver_subject: "push".into(),
                 ..Default::default()
             })
             .await
@@ -1467,7 +1460,7 @@ mod jetstream {
 
         for _ in 0..1000 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap()
                 .await
@@ -1492,8 +1485,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 storage: StorageType::Memory,
                 discard: DiscardPolicy::Old,
                 max_messages: 500,
@@ -1505,7 +1498,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         let consumer: OrderedPushConsumer = stream
             .create_consumer(consumer::push::OrderedConfig {
-                deliver_subject: "push".to_string(),
+                deliver_subject: "push".into(),
                 ..Default::default()
             })
             .await
@@ -1513,7 +1506,7 @@ mod jetstream {
 
         for i in 0..1000 {
             context
-                .publish("events".to_string(), format!("{i}").into())
+                .publish("events".into(), format!("{i}").into())
                 .await
                 .unwrap()
                 .await
@@ -1549,8 +1542,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1559,8 +1552,8 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::push::Config {
-                deliver_subject: "push".to_string(),
-                durable_name: Some("push".to_string()),
+                deliver_subject: "push".into(),
+                durable_name: Some("push".into()),
                 flow_control: true,
                 idle_heartbeat: Duration::from_millis(100),
                 ..Default::default()
@@ -1574,7 +1567,7 @@ mod jetstream {
 
         for _ in 0..1000 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap();
         }
@@ -1594,8 +1587,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1604,8 +1597,8 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::push::Config {
-                deliver_subject: "push".to_string(),
-                durable_name: Some("push".to_string()),
+                deliver_subject: "push".into(),
+                durable_name: Some("push".into()),
                 idle_heartbeat: Duration::from_millis(100),
                 ..Default::default()
             })
@@ -1619,7 +1612,7 @@ mod jetstream {
 
         for _ in 0..1000 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap();
         }
@@ -1669,8 +1662,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1679,7 +1672,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1689,7 +1682,7 @@ mod jetstream {
         tokio::task::spawn(async move {
             for i in 0..1000 {
                 context
-                    .publish("events".to_string(), format!("i: {i}").into())
+                    .publish("events".into(), format!("i: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1715,8 +1708,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1725,7 +1718,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1736,10 +1729,7 @@ mod jetstream {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 let ack = context
-                    .publish(
-                        "events".to_string(),
-                        format!("timeout test message: {i}").into(),
-                    )
+                    .publish("events".into(), format!("timeout test message: {i}").into())
                     .await
                     .unwrap();
                 println!("ack from publish {i}: {ack:?}");
@@ -1768,8 +1758,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1778,7 +1768,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1789,10 +1779,7 @@ mod jetstream {
             for i in 0..10 {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 context
-                    .publish(
-                        "events".to_string(),
-                        format!("heartbeat message: {i}").into(),
-                    )
+                    .publish("events".into(), format!("heartbeat message: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1860,8 +1847,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1870,7 +1857,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1881,10 +1868,7 @@ mod jetstream {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
                 context
-                    .publish(
-                        "events".to_string(),
-                        format!("heartbeat message: {i}").into(),
-                    )
+                    .publish("events".into(), format!("heartbeat message: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1916,8 +1900,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1926,7 +1910,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -1935,7 +1919,7 @@ mod jetstream {
 
         for _ in 0..10 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap()
                 .await
@@ -1965,8 +1949,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -1975,7 +1959,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         let consumer = stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ack_policy: AckPolicy::Explicit,
                 max_ack_pending: 10000,
                 ..Default::default()
@@ -1988,7 +1972,7 @@ mod jetstream {
             let mut interval = tokio::time::interval(Duration::from_millis(20));
             for i in 0..=num_messages {
                 context
-                    .publish("events".to_string(), i.to_string().into())
+                    .publish("events".into(), i.to_string().into())
                     .await
                     .unwrap()
                     .await
@@ -2040,8 +2024,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2050,7 +2034,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2058,7 +2042,7 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         context
-            .publish("events".to_string(), "dat".into())
+            .publish("events".into(), "dat".into())
             .await
             .unwrap();
 
@@ -2092,8 +2076,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2102,7 +2086,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2116,7 +2100,7 @@ mod jetstream {
             // Publish something.
             debug!("publishing the message");
             context
-                .publish("events".to_string(), "data".into())
+                .publish("events".into(), "data".into())
                 .await
                 .unwrap()
                 .await
@@ -2147,8 +2131,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2157,7 +2141,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2186,7 +2170,7 @@ mod jetstream {
         debug!("recreating the consumer");
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2194,7 +2178,7 @@ mod jetstream {
         // Publish something.
         debug!("publishing the message");
         context
-            .publish("events".to_string(), "data".into())
+            .publish("events".into(), "data".into())
             .await
             .unwrap()
             .await
@@ -2220,8 +2204,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2230,7 +2214,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2238,7 +2222,7 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
         context
-            .publish("events".to_string(), "dat".into())
+            .publish("events".into(), "dat".into())
             .await
             .unwrap();
 
@@ -2269,8 +2253,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2279,7 +2263,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2305,8 +2289,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2315,7 +2299,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2324,7 +2308,7 @@ mod jetstream {
 
         for _ in 0..10 {
             context
-                .publish("events".to_string(), "dat".into())
+                .publish("events".into(), "dat".into())
                 .await
                 .unwrap()
                 .await
@@ -2393,8 +2377,8 @@ mod jetstream {
         let retry_strategy = tokio_retry::strategy::FibonacciBackoff::from_millis(500).take(5);
         let stream = Retry::spawn(retry_strategy, || {
             jetstream.create_stream(async_nats::jetstream::stream::Config {
-                name: "reconnect".to_string(),
-                subjects: vec!["reconnect.>".to_string()],
+                name: "reconnect".into(),
+                subjects: vec!["reconnect.>".into()],
                 num_replicas: 1,
                 ..Default::default()
             })
@@ -2404,7 +2388,7 @@ mod jetstream {
 
         let consumer = stream
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("durable_reconnect".to_string()),
+                durable_name: Some("durable_reconnect".into()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(5),
                 ..Default::default()
@@ -2415,7 +2399,7 @@ mod jetstream {
 
         for i in 0..1000 {
             jetstream
-                .publish(format!("reconnect.{i}"), i.to_string().into())
+                .publish(format!("reconnect.{i}").into(), i.to_string().into())
                 .await
                 .unwrap()
                 .await
@@ -2488,12 +2472,12 @@ mod jetstream {
 
         let _source_stream = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "source".to_string(),
+                name: "source".into(),
                 max_messages: 1000,
-                subjects: vec!["source.>".to_string()],
+                subjects: vec!["source.>".into()],
                 republish: Some(async_nats::jetstream::stream::Republish {
-                    source: ">".to_string(),
-                    destination: "dest.>".to_string(),
+                    source: ">".into(),
+                    destination: "dest.>".into(),
                     headers_only: false,
                 }),
                 ..Default::default()
@@ -2502,9 +2486,9 @@ mod jetstream {
             .unwrap();
         let destination_stream = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "dest".to_string(),
+                name: "dest".into(),
                 max_messages: 2000,
-                subjects: vec!["dest.>".to_string()],
+                subjects: vec!["dest.>".into()],
                 ..Default::default()
             })
             .await
@@ -2512,7 +2496,7 @@ mod jetstream {
 
         let consumer = destination_stream
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("dest".to_string()),
+                durable_name: Some("dest".into()),
                 deliver_policy: DeliverPolicy::All,
                 ack_policy: consumer::AckPolicy::Explicit,
                 ..Default::default()
@@ -2522,14 +2506,14 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(100).enumerate();
         for i in 0..100 {
             jetstream
-                .publish(format!("source.{i}"), format!("{i}").into())
+                .publish(format!("source.{i}").into(), format!("{i}").into())
                 .await
                 .unwrap();
         }
 
         while let Some((i, message)) = messages.next().await {
             let message = message.unwrap();
-            assert_eq!(format!("dest.source.{i}"), message.subject);
+            assert_eq!(format!("dest.source.{i}"), message.subject.as_str());
             assert_eq!(i.to_string(), from_utf8(&message.payload).unwrap());
             message.ack().await.unwrap();
         }
@@ -2544,11 +2528,11 @@ mod jetstream {
 
         let _source_stream = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "source".to_string(),
+                name: "source".into(),
                 max_messages: 10,
                 max_messages_per_subject: 2,
                 discard_new_per_subject: true,
-                subjects: vec!["events.>".to_string()],
+                subjects: vec!["events.>".into()],
                 discard: DiscardPolicy::New,
                 ..Default::default()
             })
@@ -2556,19 +2540,19 @@ mod jetstream {
             .unwrap();
 
         jetstream
-            .publish("events.1".to_string(), "data".into())
+            .publish("events.1".into(), "data".into())
             .await
             .unwrap()
             .await
             .unwrap();
         jetstream
-            .publish("events.1".to_string(), "data".into())
+            .publish("events.1".into(), "data".into())
             .await
             .unwrap()
             .await
             .unwrap();
         jetstream
-            .publish("events.1".to_string(), "data".into())
+            .publish("events.1".into(), "data".into())
             .await
             .unwrap()
             .await
@@ -2584,25 +2568,25 @@ mod jetstream {
 
         let stream = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "TEST".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "TEST".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
             .unwrap();
 
         jetstream
-            .publish("events".to_string(), "skipped".into())
+            .publish("events".into(), "skipped".into())
             .await
             .unwrap();
         jetstream
-            .publish("events".to_string(), "data".into())
+            .publish("events".into(), "data".into())
             .await
             .unwrap();
 
         let mut mirror = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "MIRROR".to_string(),
+                name: "MIRROR".into(),
                 mirror: Some(async_nats::jetstream::stream::Source {
                     name: stream.cached_info().config.name.clone(),
                     start_sequence: Some(2),
@@ -2621,7 +2605,7 @@ mod jetstream {
 
         let mut messages = mirror
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                name: Some("consumer".to_string()),
+                name: Some("consumer".into()),
                 ..Default::default()
             })
             .await
@@ -2632,7 +2616,7 @@ mod jetstream {
 
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".to_string(),
+            "data"
         )
     }
     #[tokio::test]
@@ -2644,41 +2628,41 @@ mod jetstream {
 
         let stream = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "TEST".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "TEST".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
             .unwrap();
         let stream2 = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "TEST2".to_string(),
-                subjects: vec!["events2".to_string()],
+                name: "TEST2".into(),
+                subjects: vec!["events2".into()],
                 ..Default::default()
             })
             .await
             .unwrap();
 
         jetstream
-            .publish("events".to_string(), "skipped".into())
+            .publish("events".into(), "skipped".into())
             .await
             .unwrap();
         jetstream
-            .publish("events".to_string(), "data".into())
+            .publish("events".into(), "data".into())
             .await
             .unwrap();
         jetstream
-            .publish("events2".to_string(), "data".into())
+            .publish("events2".into(), "data".into())
             .await
             .unwrap();
         jetstream
-            .publish("events2".to_string(), "data".into())
+            .publish("events2".into(), "data".into())
             .await
             .unwrap();
 
         let mut source = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "SOURCE".to_string(),
+                name: "SOURCE".into(),
                 sources: Some(vec![
                     async_nats::jetstream::stream::Source {
                         name: stream.cached_info().config.name.clone(),
@@ -2712,7 +2696,7 @@ mod jetstream {
 
         let mut messages = source
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                name: Some("consumer".to_string()),
+                name: Some("consumer".into()),
                 ..Default::default()
             })
             .await
@@ -2723,15 +2707,15 @@ mod jetstream {
 
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".to_string(),
+            "data"
         );
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".to_string(),
+            "data"
         );
         assert_eq!(
             from_utf8(&messages.next().await.unwrap().unwrap().message.payload).unwrap(),
-            "data".to_string(),
+            "data"
         );
     }
 
@@ -2801,8 +2785,8 @@ mod jetstream {
 
         context
             .create_stream(stream::Config {
-                name: "events".to_string(),
-                subjects: vec!["events".to_string()],
+                name: "events".into(),
+                subjects: vec!["events".into()],
                 ..Default::default()
             })
             .await
@@ -2811,7 +2795,7 @@ mod jetstream {
         let stream = context.get_stream("events").await.unwrap();
         stream
             .create_consumer(consumer::pull::Config {
-                durable_name: Some("pull".to_string()),
+                durable_name: Some("pull".into()),
                 ..Default::default()
             })
             .await
@@ -2822,7 +2806,7 @@ mod jetstream {
             for i in 0..1000 {
                 context
                     .publish(
-                        "events".to_string(),
+                        "events".into(),
                         format!("Some bytes to sent with sequence number included: {i}").into(),
                     )
                     .await
@@ -2895,8 +2879,8 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "TEST".to_string(),
-                subjects: vec!["test".to_string()],
+                name: "TEST".into(),
+                subjects: vec!["test".into()],
                 ..Default::default()
             })
             .await
@@ -2905,7 +2889,7 @@ mod jetstream {
         for i in 0..235 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                    name: Some(format!("consumer_{i}").to_string()),
+                    name: Some(format!("consumer_{i}")),
                     ..Default::default()
                 })
                 .await
@@ -2936,8 +2920,8 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "TEST".to_string(),
-                subjects: vec!["test".to_string()],
+                name: "TEST".into(),
+                subjects: vec!["test".into()],
                 ..Default::default()
             })
             .await
@@ -2946,7 +2930,7 @@ mod jetstream {
         for i in 0..1200 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                    durable_name: Some(format!("consumer_{i}").to_string()),
+                    durable_name: Some(format!("consumer_{i}")),
                     ..Default::default()
                 })
                 .await
@@ -2973,8 +2957,8 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                subjects: vec!["filter".to_string()],
-                name: "filter".to_string(),
+                subjects: vec!["filter".into()],
+                name: "filter".into(),
                 ..Default::default()
             })
             .await
@@ -2982,7 +2966,7 @@ mod jetstream {
 
         for i in 0..50 {
             context
-                .publish("filter".to_string(), format!("{i}").into())
+                .publish("filter".into(), format!("{i}").into())
                 .await
                 .unwrap()
                 .await
@@ -2991,8 +2975,8 @@ mod jetstream {
 
         let consumer = stream
             .create_consumer(async_nats::jetstream::consumer::push::Config {
-                deliver_group: Some("group".to_string()),
-                durable_name: Some("group".to_string()),
+                deliver_group: Some("group".into()),
+                durable_name: Some("group".into()),
                 deliver_subject: client.new_inbox(),
                 ..Default::default()
             })
@@ -3022,7 +3006,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client.clone());
         assert_eq!(
             context
-                .publish("test".to_owned(), "jghf".into())
+                .publish("test".into(), "jghf".into())
                 .await
                 .unwrap()
                 .await
@@ -3041,37 +3025,33 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                subjects: vec![
-                    "events".to_string(),
-                    "data".to_string(),
-                    "other".to_string(),
-                ],
-                name: "filter".to_string(),
+                subjects: vec!["events".into(), "data".into(), "other".into()],
+                name: "filter".into(),
                 ..Default::default()
             })
             .await
             .unwrap();
 
         context
-            .publish("events".to_string(), "0".into())
+            .publish("events".into(), "0".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("other".to_string(), "100".into())
+            .publish("other".into(), "100".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("data".to_string(), "1".into())
+            .publish("data".into(), "1".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("events".to_string(), "2".into())
+            .publish("events".into(), "2".into())
             .await
             .unwrap()
             .await
@@ -3079,8 +3059,8 @@ mod jetstream {
 
         let consumer = stream
             .create_consumer(async_nats::jetstream::consumer::push::Config {
-                filter_subjects: vec!["events".to_string(), "data".to_string()],
-                durable_name: Some("group".to_string()),
+                filter_subjects: vec!["events".into(), "data".into()],
+                durable_name: Some("group".into()),
                 deliver_subject: client.new_inbox(),
                 ..Default::default()
             })
@@ -3103,14 +3083,14 @@ mod jetstream {
         let context = async_nats::jetstream::new(client.clone());
 
         let metadata = HashMap::from([
-            ("key".to_string(), "value".to_string()),
-            ("other".to_string(), "value".to_string()),
+            ("key".into(), "value".into()),
+            ("other".into(), "value".into()),
         ]);
 
         let mut stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                subjects: vec!["events".to_string()],
-                name: "filter".to_string(),
+                subjects: vec!["events".into()],
+                name: "filter".into(),
                 metadata: metadata.clone(),
                 ..Default::default()
             })
@@ -3121,7 +3101,7 @@ mod jetstream {
 
         let mut consumer = stream
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                name: Some("consumer".to_string()),
+                name: Some("consumer".into()),
                 metadata: metadata.clone(),
                 ..Default::default()
             })
@@ -3139,7 +3119,7 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "stream".to_string(),
+                name: "stream".into(),
                 ..Default::default()
             })
             .await
@@ -3171,7 +3151,7 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "stream".to_string(),
+                name: "stream".into(),
                 ..Default::default()
             })
             .await
@@ -3179,7 +3159,7 @@ mod jetstream {
 
         let consumer = stream
             .create_consumer(async_nats::jetstream::consumer::push::Config {
-                deliver_subject: "deliver".to_string(),
+                deliver_subject: "deliver".into(),
                 max_deliver: 30,
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(5),
@@ -3189,7 +3169,7 @@ mod jetstream {
             .unwrap();
 
         context
-            .publish("stream".to_string(), "data".into())
+            .publish("stream".into(), "data".into())
             .await
             .unwrap()
             .await
@@ -3234,11 +3214,11 @@ mod jetstream {
 
         context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "origin".to_string(),
-                subjects: vec!["test".to_string()],
+                name: "origin".into(),
+                subjects: vec!["test".into()],
                 subject_transform: Some(async_nats::jetstream::stream::SubjectTransform {
-                    source: ">".to_string(),
-                    destination: "transformed.>".to_string(),
+                    source: ">".into(),
+                    destination: "transformed.>".into(),
                 }),
                 ..Default::default()
             })
@@ -3246,7 +3226,7 @@ mod jetstream {
             .unwrap();
 
         context
-            .publish("test".to_string(), "data".into())
+            .publish("test".into(), "data".into())
             .await
             .unwrap()
             .await
@@ -3254,12 +3234,12 @@ mod jetstream {
 
         let stream = context
             .create_stream(async_nats::jetstream::stream::Config {
-                name: "sourcing".to_string(),
+                name: "sourcing".into(),
                 sources: Some(vec![async_nats::jetstream::stream::Source {
-                    name: "origin".to_string(),
+                    name: "origin".into(),
                     subject_transforms: vec![SubjectTransform {
-                        source: ">".to_string(),
-                        destination: "fromtest.>".to_string(),
+                        source: ">".into(),
+                        destination: "fromtest.>".into(),
                     }],
                     ..Default::default()
                 }]),
@@ -3270,8 +3250,8 @@ mod jetstream {
 
         context
             .get_or_create_stream(async_nats::jetstream::stream::Config {
-                subjects: vec!["fromtest.>".to_string()],
-                name: "events".to_string(),
+                subjects: vec!["fromtest.>".into()],
+                name: "events".into(),
 
                 ..Default::default()
             })
@@ -3292,7 +3272,7 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(1000);
         let message = messages.next().await.unwrap().unwrap();
 
-        assert_eq!(message.subject, "fromtest.transformed.test");
+        assert_eq!(message.subject.as_str(), "fromtest.transformed.test");
     }
 
     #[tokio::test]

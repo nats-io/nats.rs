@@ -691,13 +691,13 @@ async fn verb_subscription(
     id: String,
 ) -> Result<futures::stream::Fuse<SelectAll<Subscriber>>, Error> {
     let verb_all = client
-        .subscribe(format!("{SERVICE_API_PREFIX}.{verb}"))
+        .subscribe(format!("{SERVICE_API_PREFIX}.{verb}").into())
         .await?;
     let verb_name = client
-        .subscribe(format!("{SERVICE_API_PREFIX}.{verb}.{name}"))
+        .subscribe(format!("{SERVICE_API_PREFIX}.{verb}.{name}").into())
         .await?;
     let verb_id = client
-        .subscribe(format!("{SERVICE_API_PREFIX}.{verb}.{name}.{id}"))
+        .subscribe(format!("{SERVICE_API_PREFIX}.{verb}.{name}.{id}").into())
         .await?;
     Ok(stream::select_all([verb_all, verb_id, verb_name]).fuse())
 }
@@ -822,7 +822,7 @@ impl EndpointBuilder {
         let name = self.name.clone().unwrap_or_else(|| subject.clone());
         let requests = self
             .client
-            .queue_subscribe(subject.clone(), self.queue_group.clone())
+            .queue_subscribe(subject.to_string().into(), self.queue_group.to_string())
             .await?;
         debug!("created service for endpoint {subject}");
 

@@ -18,6 +18,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
+use crate::subject::Subject;
 use crate::{header, Client, HeaderMap, HeaderValue, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -95,12 +96,10 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// let ack = jetstream.publish("events".into(), "data".into()).await?;
     /// ack.await?;
     /// jetstream
-    ///     .publish("events".to_string(), "data".into())
+    ///     .publish("events".into(), "data".into())
     ///     .await?
     ///     .await?;
     /// # Ok(())
@@ -116,12 +115,8 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let first_ack = jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
-    /// let second_ack = jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// let first_ack = jetstream.publish("events".into(), "data".into()).await?;
+    /// let second_ack = jetstream.publish("events".into(), "data".into()).await?;
     /// first_ack.await?;
     /// second_ack.await?;
     /// # Ok(())
@@ -129,7 +124,7 @@ impl Context {
     /// ```
     pub async fn publish(
         &self,
-        subject: String,
+        subject: Subject,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
         self.send_publish(subject, Publish::build().payload(payload))
@@ -152,14 +147,14 @@ impl Context {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", "Value");
     /// let ack = jetstream
-    ///     .publish_with_headers("events".to_string(), headers, "data".into())
+    ///     .publish_with_headers("events".into(), headers, "data".into())
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn publish_with_headers(
         &self,
-        subject: String,
+        subject: Subject,
         headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
@@ -182,7 +177,7 @@ impl Context {
     ///
     /// let ack = jetstream
     ///     .send_publish(
-    ///         "events".to_string(),
+    ///         "events".into(),
     ///         Publish::build().payload("data".into()).message_id("uuid"),
     ///     )
     ///     .await?;
@@ -191,10 +186,10 @@ impl Context {
     /// ```
     pub async fn send_publish(
         &self,
-        subject: String,
+        subject: Subject,
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
-        let inbox = self.client.new_inbox();
+        let inbox = Subject::from(self.client.new_inbox());
         let response = self
             .client
             .subscribe(inbox.clone())
@@ -203,12 +198,7 @@ impl Context {
         tokio::time::timeout(self.timeout, async {
             if let Some(headers) = publish.headers {
                 self.client
-                    .publish_with_reply_and_headers(
-                        subject,
-                        inbox.clone(),
-                        headers,
-                        publish.payload,
-                    )
+                    .publish_with_reply_and_headers(subject, inbox, headers, publish.payload)
                     .await
             } else {
                 self.client
@@ -305,7 +295,7 @@ impl Context {
             }
         }
         let subject = format!("STREAM.CREATE.{}", config.name);
-        let response: Response<Info> = self.request(subject, &config).await?;
+        let response: Response<Info> = self.request(subject.into(), &config).await?;
 
         match response {
             Response::Err { error } => Err(error.into()),
@@ -339,7 +329,7 @@ impl Context {
 
         let subject = format!("STREAM.INFO.{stream}");
         let request: Response<Info> = self
-            .request(subject, &())
+            .request(subject.into(), &())
             .await
             .map_err(|err| GetStreamError::with_source(GetStreamErrorKind::Request, err))?;
         match request {
@@ -386,7 +376,7 @@ impl Context {
         let config: Config = stream_config.into();
         let subject = format!("STREAM.INFO.{}", config.name);
 
-        let request: Response<Info> = self.request(subject, &()).await?;
+        let request: Response<Info> = self.request(subject.into(), &()).await?;
         match request {
             Response::Err { error } if error.code() == 404 => self.create_stream(&config).await,
             Response::Err { error } => Err(error.into()),
@@ -422,7 +412,7 @@ impl Context {
         }
         let subject = format!("STREAM.DELETE.{stream}");
         match self
-            .request(subject, &json!({}))
+            .request(subject.into(), &json!({}))
             .await
             .map_err(|err| DeleteStreamError::with_source(DeleteStreamErrorKind::Request, err))?
         {
@@ -463,7 +453,7 @@ impl Context {
     {
         let config = config.borrow();
         let subject = format!("STREAM.UPDATE.{}", config.name);
-        match self.request(subject, config).await? {
+        match self.request(subject.into(), config).await? {
             Response::Err { error } => Err(error.into()),
             Response::Ok(info) => Ok(info),
         }
@@ -773,7 +763,7 @@ impl Context {
     {
         let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
 
-        let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
+        let info: super::consumer::Info = match self.request(subject.into(), &json!({})).await? {
             Response::Ok(info) => info,
             Response::Err { error } => {
                 return Err(Box::new(std::io::Error::new(
@@ -805,13 +795,11 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let response: Response<Info> = jetstream
-    ///     .request("STREAM.INFO.events".to_string(), &())
-    ///     .await?;
+    /// let response: Response<Info> = jetstream.request("STREAM.INFO.events".into(), &()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: String, payload: &T) -> Result<V, RequestError>
+    pub async fn request<T, V>(&self, subject: Subject, payload: &T) -> Result<V, RequestError>
     where
         T: ?Sized + Serialize,
         V: DeserializeOwned,
@@ -824,7 +812,10 @@ impl Context {
 
         let message = self
             .client
-            .request(format!("{}.{}", self.prefix, subject), request)
+            .request(
+                format!("{}.{}", self.prefix, subject.as_ref()).into(),
+                request,
+            )
             .await;
         let message = message?;
         debug!(
@@ -1091,7 +1082,7 @@ impl futures::Stream for StreamNames<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.NAMES".to_string(),
+                                "STREAM.NAMES".into(),
                                 &json!({
                                     "offset": offset,
                                 }),
@@ -1165,7 +1156,7 @@ impl futures::Stream for Streams<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.LIST".to_string(),
+                                "STREAM.LIST".into(),
                                 &json!({
                                     "offset": offset,
                                 }),

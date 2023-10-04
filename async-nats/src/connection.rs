@@ -26,6 +26,7 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
+use crate::subject::Subject;
 use crate::{ClientOp, ServerError, ServerOp};
 
 /// Soft limit for the amount of bytes in [`Connection::write_buf`]
@@ -179,20 +180,21 @@ impl Connection {
                 return Ok(None);
             }
 
-            let subject = subject.to_owned();
-            let reply_to = reply_to.map(ToOwned::to_owned);
+            let length = payload_len
+                + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
+                + subject.len();
+
+            let subject = Subject::from(subject);
+            let reply = reply_to.map(Subject::from);
 
             self.read_buf.advance(len + 2);
             let payload = self.read_buf.split_to(payload_len).freeze();
             self.read_buf.advance(2);
 
-            let length = payload_len
-                + reply_to.as_ref().map(|reply| reply.len()).unwrap_or(0)
-                + subject.len();
             return Ok(Some(ServerOp::Message {
                 sid,
                 length,
-                reply: reply_to,
+                reply,
                 headers: None,
                 subject,
                 payload,
@@ -234,8 +236,8 @@ impl Connection {
                 }
             };
 
-            // Convert the slice into an owned string.
-            let subject = subject.to_owned();
+            // Convert the slice into a subject
+            let subject = Subject::from(subject);
 
             // Parse the subject ID.
             let sid = sid.parse::<u64>().map_err(|_| {
@@ -245,8 +247,8 @@ impl Connection {
                 )
             })?;
 
-            // Convert the slice into an owned string.
-            let reply_to = reply_to.map(ToOwned::to_owned);
+            // Convert the slice into a subject.
+            let reply = reply_to.map(Subject::from);
 
             // Parse the number of payload bytes.
             let header_len = header_len.parse::<usize>().map_err(|_| {
@@ -344,11 +346,9 @@ impl Connection {
             }
 
             return Ok(Some(ServerOp::Message {
-                length: reply_to.as_ref().map_or(0, |reply| reply.len())
-                    + subject.len()
-                    + total_len,
+                length: reply.as_ref().map_or(0, |reply| reply.len()) + subject.len() + total_len,
                 sid,
-                reply: reply_to,
+                reply,
                 subject,
                 headers: Some(headers),
                 payload,

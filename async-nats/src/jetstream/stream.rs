@@ -136,7 +136,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn info(&mut self) -> Result<&Info, InfoError> {
-        let subject = format!("STREAM.INFO.{}", self.info.config.name);
+        let subject = format!("STREAM.INFO.{}", self.info.config.name).into();
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok::<Info>(info) => {
@@ -235,7 +235,7 @@ impl Stream {
             .context
             .client
             .request(
-                request_subject,
+                request_subject.into(),
                 serde_json::to_vec(&payload).map(Bytes::from)?,
             )
             .await
@@ -317,7 +317,7 @@ impl Stream {
             .context
             .client
             .request(
-                request_subject,
+                request_subject.into(),
                 serde_json::to_vec(&payload).map(Bytes::from)?,
             )
             .await
@@ -392,7 +392,10 @@ impl Stream {
         let response = self
             .context
             .client
-            .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
+            .request(
+                subject.into(),
+                serde_json::to_vec(&payload).map(Bytes::from)?,
+            )
             .await
             .map(|message| Message {
                 context: self.context.clone(),
@@ -468,7 +471,7 @@ impl Stream {
         let response = self
             .context
             .client
-            .request(subject, "".into())
+            .request(subject.into(), "".into())
             .await
             .map(|message| Message {
                 context: self.context.clone(),
@@ -516,7 +519,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".into(), "data".into()).await?;
     /// let raw_message = stream.get_raw_message(publish_ack.await?.sequence).await?;
     /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
@@ -528,7 +531,8 @@ impl Stream {
             "seq": sequence,
         });
 
-        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        let response: Response<GetRawMessage> =
+            self.context.request(subject.into(), &payload).await?;
         match response {
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -559,7 +563,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".into(), "data".into()).await?;
     /// let raw_message = stream.get_last_raw_message_by_subject("events").await?;
     /// println!("Retrieved raw message {:?}", raw_message);
     /// # Ok(())
@@ -576,7 +580,7 @@ impl Stream {
 
         let response: Response<GetRawMessage> = self
             .context
-            .request(subject, &payload)
+            .request(subject.into(), &payload)
             .map_err(|err| LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err))
             .await?;
         match response {
@@ -613,7 +617,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let publish_ack = context.publish("events".to_string(), "data".into()).await?;
+    /// let publish_ack = context.publish("events".into(), "data".into()).await?;
     /// stream.delete_message(publish_ack.await?.sequence).await?;
     /// # Ok(())
     /// # }
@@ -626,7 +630,7 @@ impl Stream {
 
         let response: Response<DeleteStatus> = self
             .context
-            .request(subject, &payload)
+            .request(subject.into(), &payload)
             .map_err(|err| match err.kind() {
                 RequestErrorKind::TimedOut => {
                     DeleteMessageError::new(DeleteMessageErrorKind::TimedOut)
@@ -753,7 +757,7 @@ impl Stream {
         match self
             .context
             .request(
-                subject,
+                subject.into(),
                 &json!({"stream_name": self.info.config.name.clone(), "config": config}),
             )
             .await?
@@ -792,7 +796,7 @@ impl Stream {
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
-        match self.context.request(subject, &json!({})).await? {
+        match self.context.request(subject.into(), &json!({})).await? {
             Response::Ok(info) => Ok(info),
             Response::Err { error } => Err(Box::new(std::io::Error::new(
                 ErrorKind::Other,
@@ -866,7 +870,7 @@ impl Stream {
     ) -> Result<Consumer<T>, ConsumerError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
 
-        match self.context.request(subject, &json!({})).await? {
+        match self.context.request(subject.into(), &json!({})).await? {
             Response::Err { error } if error.code() == 404 => self.create_consumer(config).await,
             Response::Err { error } => Err(error.into()),
             Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
@@ -902,7 +906,7 @@ impl Stream {
     pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, ConsumerError> {
         let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
 
-        match self.context.request(subject, &json!({})).await? {
+        match self.context.request(subject.into(), &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),
             Response::Err { error } => Err(error.into()),
         }
@@ -1295,7 +1299,7 @@ impl TryFrom<RawMessage> for crate::Message {
             decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
 
         Ok(crate::Message {
-            subject: value.subject,
+            subject: value.subject.into(),
             reply: None,
             payload: decoded_payload.into(),
             headers,
@@ -1646,7 +1650,7 @@ where
             let response: Response<PurgeResponse> = self
                 .stream
                 .context
-                .request(request_subject, &self.inner)
+                .request(request_subject.into(), &self.inner)
                 .map_err(|err| match err.kind() {
                     RequestErrorKind::TimedOut => PurgeError::new(PurgeErrorKind::TimedOut),
                     _ => PurgeError::with_source(PurgeErrorKind::Request, err),
@@ -1730,7 +1734,7 @@ impl futures::Stream for ConsumerNames<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                format!("CONSUMER.NAMES.{stream}"),
+                                format!("CONSUMER.NAMES.{stream}").into(),
                                 &json!({
                                     "offset": offset,
                                 }),
@@ -1807,7 +1811,7 @@ impl futures::Stream for Consumers<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                format!("CONSUMER.LIST.{stream}"),
+                                format!("CONSUMER.LIST.{stream}").into(),
                                 &json!({
                                     "offset": offset,
                                 }),

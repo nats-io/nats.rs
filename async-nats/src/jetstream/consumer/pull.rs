@@ -32,6 +32,8 @@ use crate::{
     StatusCode, SubscribeError, Subscriber,
 };
 
+use crate::subject::Subject;
+
 use super::{
     AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
     StreamError, StreamErrorKind,
@@ -60,9 +62,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -137,7 +137,7 @@ impl Consumer<Config> {
     pub(crate) async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
-        inbox: String,
+        inbox: Subject,
     ) -> Result<(), BatchRequestError> {
         debug!("sending batch");
         let subject = format!(
@@ -150,7 +150,7 @@ impl Consumer<Config> {
 
         self.context
             .client
-            .publish_with_reply(subject, inbox, payload.into())
+            .publish_with_reply(subject.into(), inbox, payload.into())
             .await
             .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Publish, err))?;
         debug!("batch request sent");
@@ -179,9 +179,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -194,9 +192,7 @@ impl Consumer<Config> {
     ///     .await?;
     ///
     /// for _ in 0..100 {
-    ///     jetstream
-    ///         .publish("events".to_string(), "data".into())
-    ///         .await?;
+    ///     jetstream.publish("events".into(), "data".into()).await?;
     /// }
     ///
     /// let mut messages = consumer.fetch().max_messages(200).messages().await?;
@@ -234,9 +230,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -282,9 +276,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -340,7 +332,7 @@ pub struct Batch {
 
 impl<'a> Batch {
     async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, BatchError> {
-        let inbox = consumer.context.client.new_inbox();
+        let inbox = Subject::from(consumer.context.client.new_inbox());
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch, inbox.clone()).await?;
 
@@ -454,13 +446,13 @@ impl<'a> futures::Stream for Sequence<'a> {
                     let inbox = context.client.new_inbox();
                     let subscriber = context
                         .client
-                        .subscribe(inbox.clone())
+                        .subscribe(inbox.clone().into())
                         .await
                         .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
                     context
                         .client
-                        .publish_with_reply(subject, inbox, request)
+                        .publish_with_reply(subject.into(), inbox.into(), request)
                         .await
                         .map_err(|err| MessagesError::with_source(MessagesErrorKind::Pull, err))?;
 
@@ -524,9 +516,7 @@ impl<'a> Consumer<OrderedConfig> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -850,7 +840,7 @@ impl Stream {
         let subscription = consumer
             .context
             .client
-            .subscribe(inbox.clone())
+            .subscribe(inbox.clone().into())
             .await
             .map_err(|err| StreamError::with_source(StreamErrorKind::Other, err))?;
         let subject = format!(
@@ -916,7 +906,11 @@ impl Stream {
                     let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
                     let result = context
                         .client
-                        .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
+                        .publish_with_reply(
+                            subject.clone().into(),
+                            inbox.clone().into(),
+                            request.clone(),
+                        )
                         .await
                         .map(|_| pending_reset);
                     // TODO: add tracing instead of ignoring this.

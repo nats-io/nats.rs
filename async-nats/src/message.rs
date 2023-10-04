@@ -17,15 +17,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::header::HeaderMap;
 use crate::status::StatusCode;
+use crate::subject::Subject;
 
 /// A Core NATS message.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     /// Subject to which message is published to.
-    pub subject: String,
+    pub subject: Subject,
     /// Optional reply subject to which response can be published by [crate::Subscriber].
     /// Used for request-response pattern with [crate::Client::request].
-    pub reply: Option<String>,
+    pub reply: Option<Subject>,
     /// Payload of the message. Can be any arbitrary data format.
     pub payload: Bytes,
     /// Optional headers.

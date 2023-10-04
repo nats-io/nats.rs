@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 /// let mut headers = async_nats::HeaderMap::new();
 /// headers.insert("Key", "Value");
 /// client
-///     .publish_with_headers("subject".to_string(), headers, "payload".into())
+///     .publish_with_headers("subject".into(), headers, "payload".into())
 ///     .await?;
 /// # Ok(())
 /// # }

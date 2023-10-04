@@ -66,9 +66,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events".to_string(), "data".into())
-    ///     .await?;
+    /// jetstream.publish("events".into(), "data".into()).await?;
     ///
     /// let consumer: PushConsumer = stream
     ///     .get_or_create_consumer(
@@ -90,7 +88,7 @@ impl Consumer<Config> {
     /// # }
     /// ```
     pub async fn messages(&self) -> Result<Messages, StreamError> {
-        let deliver_subject = self.info.config.deliver_subject.clone().unwrap();
+        let deliver_subject = self.info.config.deliver_subject.clone().unwrap().into();
         let subscriber = if let Some(ref group) = self.info.config.deliver_group {
             self.context
                 .client
@@ -477,7 +475,7 @@ impl Consumer<OrderedConfig> {
         let subscriber = self
             .context
             .client
-            .subscribe(self.info.config.deliver_subject.clone().unwrap())
+            .subscribe(self.info.config.deliver_subject.clone().unwrap().into())
             .await
             .map_err(|err| StreamError::with_source(StreamErrorKind::Other, err))?;
 
@@ -832,7 +830,7 @@ async fn recreate_consumer_and_subscription(
 
     let subscriber = context
         .client
-        .subscribe(config.deliver_subject.clone())
+        .subscribe(config.deliver_subject.clone().into())
         .await
         .map_err(|err| {
             ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Subscription, err)

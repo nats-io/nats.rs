@@ -50,7 +50,7 @@ pub fn publish(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
                     let nc = async_nats::connect(server.client_url()).await.unwrap();
-                    nc.publish("data".to_string(), "data".into()).await.unwrap();
+                    nc.publish("data".into(), "data".into()).await.unwrap();
                     nc
                 });
 
@@ -99,13 +99,13 @@ pub fn subscribe(c: &mut Criterion) {
                             started.send(()).unwrap();
                             loop {
                                 client
-                                    .publish("bench".to_string(), Bytes::from_static(&MSG[..size]))
+                                    .publish("bench".into(), Bytes::from_static(&MSG[..size]))
                                     .await
                                     .unwrap()
                             }
                         }
                     });
-                    nc.publish("data".to_string(), "data".into()).await.unwrap();
+                    nc.publish("data".into(), "data".into()).await.unwrap();
                     ready.await.unwrap();
                     nc
                 });
