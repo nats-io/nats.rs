@@ -119,7 +119,7 @@ pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
     loop {
         let cert = rustls_pemfile::read_one(&mut reader)?;
         match cert {
-            Some(rustls_pemfile::Item::RSAKey(key)) | Some(rustls_pemfile::Item::PKCS8Key(key)) => {
+            Some(rustls_pemfile::Item::RSAKey(key)) | Some(rustls_pemfile::Item::PKCS8Key(key)) | Some(rustls_pemfile::Item::ECKey(key)) => {
                 return Ok(PrivateKey(key))
             }
             // if public key is found, don't error, just skip it and hope to find client key next.
