@@ -436,10 +436,7 @@ impl Client {
                 let subject = parts.next().unwrap();
                 let sid = parts.next().unwrap();
                 assert_eq!(parts.next(), None);
-                let entry = self
-                    .subs
-                    .entry(subject.to_string())
-                    .or_insert_with(HashSet::new);
+                let entry = self.subs.entry(subject.to_string()).or_default();
                 entry.insert(sid.to_string());
                 ClientAction::None
             }

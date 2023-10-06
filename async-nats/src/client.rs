@@ -344,7 +344,7 @@ impl Client {
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
             let mut subscriber = self.subscribe(inbox.clone().into()).await?;
-            let payload: Bytes = request.payload.unwrap_or_else(Bytes::new);
+            let payload: Bytes = request.payload.unwrap_or_default();
             match request.headers {
                 Some(headers) => {
                     self.publish_with_reply_and_headers(subject, inbox.into(), headers, payload)
@@ -381,7 +381,7 @@ impl Client {
         } else {
             let (sender, receiver) = oneshot::channel();
 
-            let payload = request.payload.unwrap_or_else(Bytes::new);
+            let payload = request.payload.unwrap_or_default();
             let respond = self.new_inbox().into();
             let headers = request.headers;
 

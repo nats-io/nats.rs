@@ -854,7 +854,6 @@ impl Stream {
             let batch = batch_config;
             let consumer = consumer.clone();
             let mut context = consumer.context.clone();
-            let subject = subject;
             let inbox = inbox.clone();
             async move {
                 loop {
