@@ -53,7 +53,7 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
 pub struct Client {
     info: tokio::sync::watch::Receiver<ServerInfo>,
     pub(crate) state: tokio::sync::watch::Receiver<State>,
-    sender: mpsc::Sender<Command>,
+    pub(crate) sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
     inbox_prefix: String,
