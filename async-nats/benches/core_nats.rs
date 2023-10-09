@@ -5,6 +5,8 @@ use criterion::{criterion_group, Criterion};
 use futures::stream::StreamExt;
 
 static MSG: &[u8] = &[22; 32768];
+const CLIENT_CAPACITY: usize = 2048;
+const SUBSCRIBE_CAPACITY: usize = 8192;
 
 pub fn publish(c: &mut Criterion) {
     let messages_per_iter = 500_000;
@@ -22,8 +24,13 @@ pub fn publish(c: &mut Criterion) {
             &size,
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                let nc =
-                    rt.block_on(async { async_nats::connect(server.client_url()).await.unwrap() });
+                let nc = rt.block_on(async {
+                    async_nats::ConnectOptions::new()
+                        .client_capacity(CLIENT_CAPACITY)
+                        .connect(server.client_url())
+                        .await
+                        .unwrap()
+                });
 
                 b.to_async(rt).iter_with_large_drop(move || {
                     let nc = nc.clone();
@@ -49,7 +56,11 @@ pub fn publish(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
-                    let nc = async_nats::connect(server.client_url()).await.unwrap();
+                    let nc = async_nats::ConnectOptions::new()
+                        .client_capacity(CLIENT_CAPACITY)
+                        .connect(server.client_url())
+                        .await
+                        .unwrap();
                     nc.publish("data".into(), "data".into()).await.unwrap();
                     nc
                 });
@@ -85,6 +96,8 @@ pub fn subscribe(c: &mut Criterion) {
                 let url = url.clone();
                 let nc = rt.block_on(async move {
                     let nc = async_nats::ConnectOptions::new()
+                        .client_capacity(CLIENT_CAPACITY)
+                        .subscription_capacity(SUBSCRIBE_CAPACITY)
                         .connect(url.clone())
                         .await
                         .unwrap();
@@ -92,6 +105,8 @@ pub fn subscribe(c: &mut Criterion) {
                     tokio::task::spawn({
                         async move {
                             let client = async_nats::ConnectOptions::new()
+                                .client_capacity(CLIENT_CAPACITY)
+                                .subscription_capacity(SUBSCRIBE_CAPACITY)
                                 .connect(url)
                                 .await
                                 .unwrap();
@@ -138,6 +153,7 @@ pub fn request(c: &mut Criterion) {
                 let url = url.clone();
                 let nc = rt.block_on(async move {
                     let nc = async_nats::ConnectOptions::new()
+                        .client_capacity(CLIENT_CAPACITY)
                         .connect(url.clone())
                         .await
                         .unwrap();
@@ -145,6 +161,7 @@ pub fn request(c: &mut Criterion) {
                     tokio::task::spawn({
                         async move {
                             let client = async_nats::ConnectOptions::new()
+                                .client_capacity(CLIENT_CAPACITY)
                                 .connect(url)
                                 .await
                                 .unwrap();

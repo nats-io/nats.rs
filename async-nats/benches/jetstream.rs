@@ -5,6 +5,8 @@ use bytes::Bytes;
 use criterion::{criterion_group, Criterion};
 
 static MSG: &[u8] = &[22; 32768];
+const CLIENT_CAPACITY: usize = 2048;
+const SUBSCRIBE_CAPACITY: usize = 8192;
 
 pub fn jetstream_publish_sync(c: &mut Criterion) {
     let messages_per_iter = 50_000;
@@ -24,7 +26,12 @@ pub fn jetstream_publish_sync(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let context = rt.block_on(async {
                     let context = async_nats::jetstream::new(
-                        async_nats::connect(server.client_url()).await.unwrap(),
+                        async_nats::ConnectOptions::new()
+                            .client_capacity(CLIENT_CAPACITY)
+                            .subscription_capacity(SUBSCRIBE_CAPACITY)
+                            .connect(server.client_url())
+                            .await
+                            .unwrap(),
                     );
 
                     let stream = context
@@ -64,7 +71,12 @@ pub fn jetstream_publish_sync(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let context = rt.block_on(async {
                     let context = async_nats::jetstream::new(
-                        async_nats::connect(server.client_url()).await.unwrap(),
+                        async_nats::ConnectOptions::new()
+                            .client_capacity(CLIENT_CAPACITY)
+                            .subscription_capacity(SUBSCRIBE_CAPACITY)
+                            .connect(server.client_url())
+                            .await
+                            .unwrap(),
                     );
 
                     let stream = context
@@ -114,7 +126,12 @@ pub fn jetstream_publish_async(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let context = rt.block_on(async {
                     let context = async_nats::jetstream::new(
-                        async_nats::connect(server.client_url()).await.unwrap(),
+                        async_nats::ConnectOptions::new()
+                            .client_capacity(CLIENT_CAPACITY)
+                            .subscription_capacity(SUBSCRIBE_CAPACITY)
+                            .connect(server.client_url())
+                            .await
+                            .unwrap(),
                     );
 
                     let stream = context
@@ -155,7 +172,12 @@ pub fn jetstream_publish_async(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let context = rt.block_on(async {
                     let context = async_nats::jetstream::new(
-                        async_nats::connect(server.client_url()).await.unwrap(),
+                        async_nats::ConnectOptions::new()
+                            .client_capacity(CLIENT_CAPACITY)
+                            .subscription_capacity(SUBSCRIBE_CAPACITY)
+                            .connect(server.client_url())
+                            .await
+                            .unwrap(),
                     );
 
                     let stream = context
