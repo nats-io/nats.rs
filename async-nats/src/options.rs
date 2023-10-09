@@ -107,8 +107,8 @@ impl Default for ConnectOptions {
             client_key: None,
             tls_client_config: None,
             ping_interval: Duration::from_secs(60),
-            sender_capacity: 128,
-            subscription_capacity: 4096,
+            sender_capacity: 2048,
+            subscription_capacity: 1024 * 64,
             event_callback: CallbackArg1::<Event, ()>(Box::new(move |event| {
                 Box::pin(async move {
                     tracing::info!("event: {}", event);
