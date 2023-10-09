@@ -174,10 +174,10 @@ impl Message {
     pub async fn double_ack(&self) -> Result<(), Error> {
         if let Some(ref reply) = self.reply {
             let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone().into()).await?;
+            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
             self.context
                 .client
-                .publish_with_reply(reply.clone(), inbox.into(), AckKind::Ack.into())
+                .publish_with_reply(reply.clone(), inbox, AckKind::Ack.into())
                 .await?;
             match tokio::time::timeout(self.context.timeout, subscription.next())
                 .await
@@ -375,7 +375,7 @@ impl Acker {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string().into(), "".into())
+                .publish(reply.to_owned(), "".into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -423,7 +423,7 @@ impl Acker {
         if let Some(ref reply) = self.reply {
             self.context
                 .client
-                .publish(reply.to_string().into(), kind.into())
+                .publish(reply.to_owned(), kind.into())
                 .map_err(Error::from)
                 .await
         } else {
@@ -473,10 +473,10 @@ impl Acker {
     pub async fn double_ack(&self) -> Result<(), Error> {
         if let Some(ref reply) = self.reply {
             let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone().into()).await?;
+            let mut subscription = self.context.client.subscribe(inbox.to_owned()).await?;
             self.context
                 .client
-                .publish_with_reply(reply.to_string().into(), inbox.into(), AckKind::Ack.into())
+                .publish_with_reply(reply.to_owned(), inbox, AckKind::Ack.into())
                 .await?;
             match tokio::time::timeout(self.context.timeout, subscription.next())
                 .await

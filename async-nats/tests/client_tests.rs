@@ -29,10 +29,10 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+        let mut subscriber = client.subscribe("foo").await.unwrap();
 
         for _ in 0..10 {
-            client.publish("foo".into(), "data".into()).await.unwrap()
+            client.publish("foo", "data".into()).await.unwrap()
         }
         client.flush().await.unwrap();
 
@@ -61,14 +61,14 @@ mod client {
         for _i in 0..NUM_SUBSCRIBERS {
             subscribers.push(
                 client
-                    .queue_subscribe("qfoo".into(), "group".into())
+                    .queue_subscribe("qfoo", "group".into())
                     .await
                     .unwrap(),
             );
         }
 
         for _ in 0..NUM_ITEMS {
-            client.publish("qfoo".into(), "data".into()).await.unwrap();
+            client.publish("qfoo", "data".into()).await.unwrap();
         }
         client.flush().await.unwrap();
         let mut results = Vec::new();
@@ -101,14 +101,11 @@ mod client {
     async fn cloned_client() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
-        let mut subscriber = client.clone().subscribe("foo".into()).await.unwrap();
+        let mut subscriber = client.clone().subscribe("foo").await.unwrap();
 
         let cloned_client = client.clone();
         for _ in 0..10 {
-            cloned_client
-                .publish("foo".into(), "data".into())
-                .await
-                .unwrap();
+            cloned_client.publish("foo", "data".into()).await.unwrap();
         }
 
         let mut i = 0;
@@ -130,13 +127,13 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        let mut subscriber = client.subscribe("test").await.unwrap();
 
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("X-Test", HeaderValue::from_str("Test").unwrap());
 
         client
-            .publish_with_headers("test".into(), headers.clone(), b"".as_ref().into())
+            .publish_with_headers("test", headers.clone(), b"".as_ref().into())
             .await
             .unwrap();
 
@@ -150,7 +147,7 @@ mod client {
         headers.append("X-Test", "Second");
 
         client
-            .publish_with_headers("test".into(), headers.clone(), "test".into())
+            .publish_with_headers("test", headers.clone(), "test".into())
             .await
             .unwrap();
 
@@ -163,7 +160,7 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test").await.unwrap();
 
         tokio::spawn({
             let client = client.clone();
@@ -176,9 +173,9 @@ mod client {
             }
         });
         let inbox = client.new_inbox();
-        let mut insub = client.subscribe(inbox.clone().into()).await.unwrap();
+        let mut insub = client.subscribe(inbox.clone()).await.unwrap();
         client
-            .publish_with_reply("test".into(), inbox.into(), "data".into())
+            .publish_with_reply("test", inbox, "data".into())
             .await
             .unwrap();
         assert!(insub.next().await.is_some());
@@ -189,7 +186,7 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test").await.unwrap();
 
         tokio::spawn({
             let client = client.clone();
@@ -204,7 +201,7 @@ mod client {
 
         let resp = tokio::time::timeout(
             tokio::time::Duration::from_millis(500),
-            client.request("test".into(), "request".into()),
+            client.request("test", "request".into()),
         )
         .await
         .unwrap();
@@ -216,11 +213,11 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let _sub = client.subscribe("service".into()).await.unwrap();
+        let _sub = client.subscribe("service").await.unwrap();
         client.flush().await.unwrap();
 
         let err = client
-            .request("service".into(), "payload".into())
+            .request("service", "payload".into())
             .await
             .unwrap_err();
         assert_eq!(err.kind(), RequestErrorKind::TimedOut)
@@ -233,7 +230,7 @@ mod client {
 
         let err = tokio::time::timeout(
             tokio::time::Duration::from_millis(300),
-            client.request("test".into(), "request".into()),
+            client.request("test", "request".into()),
         )
         .await
         .unwrap()
@@ -247,7 +244,7 @@ mod client {
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
         let inbox: Subject = "CUSTOMIZED".into();
-        let mut sub = client.subscribe("service".into()).await.unwrap();
+        let mut sub = client.subscribe("service").await.unwrap();
 
         tokio::task::spawn({
             let client = client.clone();
@@ -262,10 +259,7 @@ mod client {
         });
 
         let request = Request::new().inbox(inbox.to_string());
-        client
-            .send_request("service".into(), request)
-            .await
-            .unwrap();
+        client.send_request("service", request).await.unwrap();
     }
 
     #[tokio::test]
@@ -274,9 +268,9 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test").await.unwrap();
 
-        client.publish("test".into(), "data".into()).await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
         assert!(sub.next().await.is_some());
@@ -289,8 +283,8 @@ mod client {
             }
         }
         // check if we can still send messages after unsubscribe.
-        let mut sub2 = client.subscribe("test2".into()).await.unwrap();
-        client.publish("test2".into(), "data".into()).await.unwrap();
+        let mut sub2 = client.subscribe("test2").await.unwrap();
+        client.publish("test2", "data".into()).await.unwrap();
         client.flush().await.unwrap();
         assert!(sub2.next().await.is_some());
     }
@@ -300,10 +294,10 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let mut sub = client.subscribe("test".into()).await.unwrap();
+        let mut sub = client.subscribe("test".await.unwrap();
 
         for _ in 0..2 {
-            client.publish("test".into(), "data".into()).await.unwrap();
+            client.publish("test", "data".into()).await.unwrap();
         }
 
         sub.unsubscribe_after(3).await.unwrap();

@@ -12,11 +12,10 @@
 // limitations under the License.
 
 use crate::connection::State;
+use crate::subject::AsSubject;
 use crate::ServerInfo;
 
-use super::{
-    header::HeaderMap, status::StatusCode, subject::Subject, Command, Message, Subscriber,
-};
+use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
@@ -151,7 +150,13 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: Subject, payload: Bytes) -> Result<(), PublishError> {
+    pub async fn publish<S: AsSubject>(
+        &self,
+        subject: S,
+        payload: Bytes,
+    ) -> Result<(), PublishError> {
+        let subject = subject.as_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -182,12 +187,14 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_headers(
+    pub async fn publish_with_headers<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let subject = subject.as_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -219,12 +226,15 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_reply(
+    pub async fn publish_with_reply<S: AsSubject, R: AsSubject>(
         &self,
-        subject: Subject,
-        reply: Subject,
+        subject: S,
+        reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let subject = subject.as_subject();
+        let reply = reply.as_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -259,13 +269,16 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_reply_and_headers(
+    pub async fn publish_with_reply_and_headers<S: AsSubject, R: AsSubject>(
         &self,
-        subject: Subject,
-        reply: Subject,
+        subject: S,
+        reply: R,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let subject = subject.as_subject();
+        let reply = reply.as_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -288,7 +301,13 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request(&self, subject: Subject, payload: Bytes) -> Result<Message, RequestError> {
+    pub async fn request<S: AsSubject>(
+        &self,
+        subject: S,
+        payload: Bytes,
+    ) -> Result<Message, RequestError> {
+        let subject = subject.as_subject();
+
         trace!(
             "request sent to subject: {} ({})",
             subject.as_ref(),
@@ -313,12 +332,14 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request_with_headers(
+    pub async fn request_with_headers<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
+        let subject = subject.as_subject();
+
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
@@ -336,24 +357,23 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_request(
+    pub async fn send_request<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
+        let subject = subject.as_subject();
+
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
-            let mut subscriber = self.subscribe(inbox.clone().into()).await?;
+            let mut subscriber = self.subscribe(inbox.clone()).await?;
             let payload: Bytes = request.payload.unwrap_or_default();
             match request.headers {
                 Some(headers) => {
-                    self.publish_with_reply_and_headers(subject, inbox.into(), headers, payload)
+                    self.publish_with_reply_and_headers(subject, inbox, headers, payload)
                         .await?
                 }
-                None => {
-                    self.publish_with_reply(subject, inbox.into(), payload)
-                        .await?
-                }
+                None => self.publish_with_reply(subject, inbox, payload).await?,
             }
             let request = match timeout {
                 Some(timeout) => {
@@ -454,7 +474,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn subscribe(&self, subject: Subject) -> Result<Subscriber, SubscribeError> {
+    pub async fn subscribe<S: AsSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
+        let subject = subject.as_subject();
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -488,11 +509,13 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn queue_subscribe(
+    pub async fn queue_subscribe<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
+        let subject = subject.as_subject();
+
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
