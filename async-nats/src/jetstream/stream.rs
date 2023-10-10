@@ -193,12 +193,8 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events.data", "data".into())
-    ///     .await?;
-    /// let pub_ack = jetstream
-    ///     .publish("events.data", "data".into())
-    ///     .await?;
+    /// jetstream.publish("events.data", "data".into()).await?;
+    /// let pub_ack = jetstream.publish("events.data", "data".into()).await?;
     ///
     /// let message = stream
     ///     .direct_get_next_for_subject("events.data", Some(pub_ack.await?.sequence))
@@ -289,9 +285,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let pub_ack = jetstream
-    ///     .publish("events.data", "data".into())
-    ///     .await?;
+    /// let pub_ack = jetstream.publish("events.data", "data".into()).await?;
     ///
     /// let message = stream.direct_get_first_for_subject("events.data").await?;
     ///
@@ -371,9 +365,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// let pub_ack = jetstream
-    ///     .publish("events.data", "data".into())
-    ///     .await?;
+    /// let pub_ack = jetstream.publish("events.data", "data".into()).await?;
     ///
     /// let message = stream.direct_get(pub_ack.await?.sequence).await?;
     ///
@@ -445,9 +437,7 @@ impl Stream {
     ///     })
     ///     .await?;
     ///
-    /// jetstream
-    ///     .publish("events.data", "data".into())
-    ///     .await?;
+    /// jetstream.publish("events.data", "data".into()).await?;
     ///
     /// let message = stream.direct_get_last_for_subject("events.data").await?;
     ///

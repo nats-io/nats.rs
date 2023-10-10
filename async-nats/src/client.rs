@@ -144,9 +144,7 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client
-    ///     .publish("events.data", "payload".into())
-    ///     .await?;
+    /// client.publish("events.data", "payload".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -500,9 +498,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut subscription = client
-    ///     .queue_subscribe("events.>", "queue".into())
-    ///     .await?;
+    /// let mut subscription = client.queue_subscribe("events.>", "queue".into()).await?;
     /// while let Some(message) = subscription.next().await {
     ///     println!("received message: {:?}", message);
     /// }

@@ -99,10 +99,7 @@ impl Context {
     ///
     /// let ack = jetstream.publish("events", "data".into()).await?;
     /// ack.await?;
-    /// jetstream
-    ///     .publish("events", "data".into())
-    ///     .await?
-    ///     .await?;
+    /// jetstream.publish("events", "data".into()).await?.await?;
     /// # Ok(())
     /// # }
     /// ```

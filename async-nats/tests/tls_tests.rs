@@ -117,10 +117,7 @@ mod client {
             .unwrap();
 
         let mut subscribe = client.subscribe("subject").await.unwrap();
-        client
-            .publish("subject", "data".into())
-            .await
-            .unwrap();
+        client.publish("subject", "data".into()).await.unwrap();
         assert!(subscribe.next().await.is_some());
     }
 
@@ -133,10 +130,7 @@ mod client {
             .unwrap();
 
         let mut subscription = client.subscribe("subject").await.unwrap();
-        client
-            .publish("subject", "data".into())
-            .await
-            .unwrap();
+        client.publish("subject", "data".into()).await.unwrap();
 
         client.flush().await.unwrap();
         assert!(subscription.next().await.is_some());
