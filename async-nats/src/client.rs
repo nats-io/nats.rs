@@ -215,11 +215,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// client
-    ///     .publish_with_reply(
-    ///         "events.data",
-    ///         "reply_subject",
-    ///         "payload".into(),
-    ///     )
+    ///     .publish_with_reply("events.data", "reply_subject", "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -257,12 +253,7 @@ impl Client {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// client
-    ///     .publish_with_reply_and_headers(
-    ///         "events.data",
-    ///         "reply_subject",
-    ///         headers,
-    ///         "payload".into(),
-    ///     )
+    ///     .publish_with_reply_and_headers("events.data", "reply_subject", headers, "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
