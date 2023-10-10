@@ -20,7 +20,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect(nats_url).await?;
 
     // Create a subscription that handles one message.
-    let mut subscriber = client.subscribe("foo".into()).await?.take(1);
+    let mut subscriber = client.subscribe("foo").await?.take(1);
 
     // Construct a Payload value and serialize it.
     let payload = Payload {

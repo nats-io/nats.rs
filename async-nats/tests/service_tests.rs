@@ -104,9 +104,9 @@ mod service {
             .unwrap();
 
         let info_reply = client.new_inbox();
-        let mut infos = client.subscribe(info_reply.clone().into()).await.unwrap();
+        let mut infos = client.subscribe(info_reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("$SRV.INFO".into(), info_reply.into(), "".into())
+            .publish_with_reply("$SRV.INFO", info_reply, "".into())
             .await
             .unwrap();
         let mut info = infos
@@ -149,9 +149,9 @@ mod service {
             .unwrap();
 
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
+        let mut responses = client.subscribe(reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("$SRV.PING".into(), reply.into(), "".into())
+            .publish_with_reply("$SRV.PING", reply, "".into())
             .await
             .unwrap();
         responses.next().await.unwrap();
@@ -177,9 +177,9 @@ mod service {
 
         let mut products = service.endpoint("products").await.unwrap();
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
+        let mut responses = client.subscribe(reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         let request = products.next().await.unwrap();
@@ -189,7 +189,7 @@ mod service {
         let v2 = service.group("v2");
         let mut v2product = v2.endpoint("products").await.unwrap();
         client
-            .publish_with_reply("v2.products".into(), reply.into(), "data".into())
+            .publish_with_reply("v2.products", reply, "data".into())
             .await
             .unwrap();
         let request = v2product.next().await.unwrap();
@@ -217,21 +217,21 @@ mod service {
 
         let mut endpoint = service.endpoint("products").await.unwrap().take(3);
         let reply = client.new_inbox();
-        let mut response = client.subscribe(reply.clone().into()).await.unwrap();
+        let mut response = client.subscribe(reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client.flush().await.unwrap();
@@ -315,10 +315,7 @@ mod service {
         );
 
         // service should not respond anymore, as its stopped.
-        client
-            .request("$SRV.PING", "".into())
-            .await
-            .unwrap_err();
+        client.request("$SRV.PING", "".into()).await.unwrap_err();
     }
 
     #[tokio::test]
@@ -367,12 +364,9 @@ mod service {
         // Check if we get response from each service instance, as each have different
         // queue groups.
         let reply_subject = client.new_inbox();
-        let responses = client
-            .subscribe(reply_subject.clone().into())
-            .await
-            .unwrap();
+        let responses = client.subscribe(reply_subject.to_owned()).await.unwrap();
         client
-            .publish_with_reply("data".into(), reply_subject.into(), "request".into())
+            .publish_with_reply("data", reply_subject, "request".into())
             .await
             .unwrap();
 
@@ -414,16 +408,9 @@ mod service {
 
         // Check if we get reply from both group endpoints.
         let reply_subject = client.new_inbox();
-        let responses = client
-            .subscribe(reply_subject.clone().into())
-            .await
-            .unwrap();
+        let responses = client.subscribe(reply_subject.to_owned()).await.unwrap();
         client
-            .publish_with_reply(
-                "group.grouped".into(),
-                reply_subject.into(),
-                "request".into(),
-            )
+            .publish_with_reply("group.grouped", reply_subject, "request".into())
             .await
             .unwrap();
         assert_eq!(responses.take(2).count().await, 2);
@@ -457,12 +444,9 @@ mod service {
         });
         // Check if we get reply from both group endpoints.
         let reply_subject = client.new_inbox();
-        let responses = client
-            .subscribe(reply_subject.clone().into())
-            .await
-            .unwrap();
+        let responses = client.subscribe(reply_subject.to_owned()).await.unwrap();
         client
-            .publish_with_reply("endpoint".into(), reply_subject.into(), "request".into())
+            .publish_with_reply("endpoint", reply_subject, "request".into())
             .await
             .unwrap();
         assert_eq!(responses.take(2).count().await, 2);

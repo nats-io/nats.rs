@@ -149,7 +149,7 @@ pub fn request(c: &mut Criterion) {
                                 .await
                                 .unwrap();
 
-                            let mut subscription = client.subscribe("bench".into()).await.unwrap();
+                            let mut subscription = client.subscribe("bench").await.unwrap();
                             tokio::time::sleep(Duration::from_secs(3)).await;
                             started.send(()).unwrap();
 
@@ -189,7 +189,7 @@ async fn publish_messages(nc: async_nats::Client, msg: Bytes, amount: u64) {
 }
 
 async fn subscribe_messages(nc: async_nats::Client, amount: u64) {
-    let mut sub = nc.subscribe("bench".into()).await.unwrap();
+    let mut sub = nc.subscribe("bench").await.unwrap();
     for _ in 0..amount {
         sub.next().await.unwrap();
     }

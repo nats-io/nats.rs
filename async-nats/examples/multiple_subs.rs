@@ -9,7 +9,7 @@ async fn main() -> Result<(), async_nats::Error> {
     tokio::task::spawn({
         let client = client.clone();
         async move {
-            let mut subscriber = client.subscribe("foo".into()).await?;
+            let mut subscriber = client.subscribe("foo").await?;
 
             println!("Awaiting messages on foo");
             while let Some(message) = subscriber.next().await {
@@ -24,7 +24,7 @@ async fn main() -> Result<(), async_nats::Error> {
     tokio::task::spawn({
         let client = client.clone();
         async move {
-            let mut subscriber = client.subscribe("bar".into()).await?;
+            let mut subscriber = client.subscribe("bar").await?;
 
             println!("Awaiting messages on bar");
             while let Some(message) = subscriber.next().await {

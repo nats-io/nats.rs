@@ -18,7 +18,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::subject::{AsSubject, Subject};
+use crate::subject::AsSubject;
 use crate::{header, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -148,7 +148,7 @@ impl Context {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", "Value");
     /// let ack = jetstream
-    ///     .publish_with_headers("events".into(), headers, "data".into())
+    ///     .publish_with_headers("events", headers, "data".into())
     ///     .await?;
     /// # Ok(())
     /// # }

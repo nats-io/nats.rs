@@ -47,7 +47,7 @@
 //!     let client = async_nats::connect("demo.nats.io").await?;
 //!
 //!     // Subscribe to the "messages" subject
-//!     let mut subscriber = client.subscribe("messages".into()).await?;
+//!     let mut subscriber = client.subscribe("messages").await?;
 //!
 //!     // Publish messages to the "messages" subject
 //!     for _ in 0..10 {
@@ -103,7 +103,7 @@
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! // Subscribe to the "foo" subject
-//! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//! let mut subscriber = client.subscribe("foo").await.unwrap();
 //!
 //! // Receive and process messages
 //! while let Some(message) = subscriber.next().await {
@@ -1027,7 +1027,7 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut subscriber = client.subscribe("foo".into()).await?;
+    /// let mut subscriber = client.subscribe("foo").await?;
     ///
     /// subscriber.unsubscribe().await?;
     /// # Ok(())
@@ -1055,7 +1055,7 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut subscriber = client.subscribe("test".into()).await?;
+    /// let mut subscriber = client.subscribe("test").await?;
     /// subscriber.unsubscribe_after(3).await?;
     ///
     /// for _ in 0..3 {

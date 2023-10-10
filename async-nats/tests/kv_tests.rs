@@ -693,7 +693,7 @@ mod kv {
             .await
             .unwrap();
 
-        let mut subscribe = client.subscribe("bar.>".into()).await.unwrap();
+        let mut subscribe = client.subscribe("bar.>").await.unwrap();
 
         kv.put("key", "data".into()).await.unwrap();
 

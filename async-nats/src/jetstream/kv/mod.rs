@@ -243,7 +243,7 @@ impl Store {
         let publish_ack = self
             .stream
             .context
-            .publish(subject.into(), value)
+            .publish(subject, value)
             .await
             .map_err(|err| PutError::with_source(PutErrorKind::Publish, err))?;
         let ack = publish_ack

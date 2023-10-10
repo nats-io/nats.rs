@@ -41,13 +41,13 @@ mod compatibility {
         let client = async_nats::connect(url).await.unwrap();
 
         let tests = client
-            .subscribe("tests.object-store.>".into())
+            .subscribe("tests.object-store.>")
             .await
             .unwrap()
             .peekable();
         pin_mut!(tests);
 
-        let mut done = client.subscribe("tests.done".into()).await.unwrap();
+        let mut done = client.subscribe("tests.done").await.unwrap();
 
         loop {
             tokio::select! {

@@ -182,7 +182,7 @@ impl Client {
     ///     async_nats::HeaderValue::from_str("Value").unwrap(),
     /// );
     /// client
-    ///     .publish_with_headers("events.data".into(), headers, "payload".into())
+    ///     .publish_with_headers("events.data", headers, "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -467,7 +467,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut subscription = client.subscribe("events.>".into()).await?;
+    /// let mut subscription = client.subscribe("events.>").await?;
     /// while let Some(message) = subscription.next().await {
     ///     println!("received message: {:?}", message);
     /// }
