@@ -175,7 +175,7 @@ impl Context {
     ///
     /// let ack = jetstream
     ///     .send_publish(
-    ///         "events".into(),
+    ///         "events",
     ///         Publish::build().payload("data".into()).message_id("uuid"),
     ///     )
     ///     .await?;

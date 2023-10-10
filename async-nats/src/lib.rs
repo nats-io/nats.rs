@@ -77,12 +77,12 @@
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! // Prepare the subject and data
-//! let subject = String::from("foo");
+//! let subject = "foo";
 //! let data = Bytes::from("bar");
 //!
 //! // Publish messages to the NATS server
 //! for _ in 0..10 {
-//!     client.publish(subject.clone().into(), data.clone()).await?;
+//!     client.publish(subject, data.clone()).await?;
 //! }
 //! #    Ok(())
 //! # }

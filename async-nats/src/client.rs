@@ -216,8 +216,8 @@ impl Client {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// client
     ///     .publish_with_reply(
-    ///         "events.data".into(),
-    ///         "reply_subject".into(),
+    ///         "events.data",
+    ///         "reply_subject",
     ///         "payload".into(),
     ///     )
     ///     .await?;
@@ -258,8 +258,8 @@ impl Client {
     /// let mut headers = async_nats::HeaderMap::new();
     /// client
     ///     .publish_with_reply_and_headers(
-    ///         "events.data".into(),
-    ///         "reply_subject".into(),
+    ///         "events.data",
+    ///         "reply_subject",
     ///         headers,
     ///         "payload".into(),
     ///     )
@@ -325,7 +325,7 @@ impl Client {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
     /// let response = client
-    ///     .request_with_headers("service".into(), headers, "data".into())
+    ///     .request_with_headers("service", headers, "data".into())
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -448,7 +448,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// # let mut nc = async_nats::connect("demo.nats.io").await?;
     /// let reply = nc.new_inbox();
-    /// let rsub = nc.subscribe(reply.into()).await?;
+    /// let rsub = nc.subscribe(reply).await?;
     /// # Ok(())
     /// # }
     /// ```
