@@ -145,7 +145,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// client
-    ///     .publish("events.data".into(), "payload".into())
+    ///     .publish("events.data", "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -297,7 +297,7 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let response = client.request("service".into(), "data".into()).await?;
+    /// let response = client.request("service", "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -353,7 +353,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let request = async_nats::Request::new().payload("data".into());
-    /// let response = client.send_request("service".into(), request).await?;
+    /// let response = client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -501,7 +501,7 @@ impl Client {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut subscription = client
-    ///     .queue_subscribe("events.>".into(), "queue".into())
+    ///     .queue_subscribe("events.>", "queue".into())
     ///     .await?;
     /// while let Some(message) = subscription.next().await {
     ///     println!("received message: {:?}", message);
@@ -593,7 +593,7 @@ impl Request {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let request = async_nats::Request::new().payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -618,7 +618,7 @@ impl Request {
     /// let request = async_nats::Request::new()
     ///     .headers(headers)
     ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -639,7 +639,7 @@ impl Request {
     /// let request = async_nats::Request::new()
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
     ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -659,7 +659,7 @@ impl Request {
     /// let request = async_nats::Request::new()
     ///     .inbox("custom_inbox".into())
     ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```

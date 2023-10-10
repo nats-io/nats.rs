@@ -301,7 +301,7 @@ mod client {
         }
 
         sub.unsubscribe_after(3).await.unwrap();
-        client.publish("test".into(), "data".into()).await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
         for _ in 0..3 {
@@ -316,8 +316,8 @@ mod client {
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
 
-        client.publish("test".into(), "data".into()).await.unwrap();
-        client.publish("test".into(), "data".into()).await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
 
         sub.unsubscribe_after(1).await.unwrap();
         client.flush().await.unwrap();
@@ -371,7 +371,7 @@ mod client {
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
             assert_eq!(State::Connected, client.connection_state());
-            client.publish("test".into(), "data".into()).await.unwrap();
+            client.publish("test", "data".into()).await.unwrap();
             client.flush().await.unwrap();
             assert!(subscriber.next().await.is_some());
 
@@ -389,7 +389,7 @@ mod client {
             .unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
-        client.publish("test".into(), "test".into()).await.unwrap();
+        client.publish("test", "test".into()).await.unwrap();
         client.flush().await.unwrap();
         assert!(sub.next().await.is_some());
     }
@@ -404,7 +404,7 @@ mod client {
                 .unwrap();
 
         let mut sub = client.subscribe("test".into()).await.unwrap();
-        client.publish("test".into(), "test".into()).await.unwrap();
+        client.publish("test", "test".into()).await.unwrap();
         client.flush().await.unwrap();
         assert!(sub.next().await.is_some());
     }
@@ -499,7 +499,7 @@ mod client {
             .unwrap();
 
         let mut sub = client.subscribe("data".into()).await.unwrap();
-        client.publish("data".into(), "data".into()).await.unwrap();
+        client.publish("data", "data".into()).await.unwrap();
         sub.next().await.unwrap();
 
         nats_server::set_lame_duck_mode(&server);
@@ -529,10 +529,10 @@ mod client {
             .unwrap();
 
         let _sub = client.subscribe("data".into()).await.unwrap();
-        client.publish("data".into(), "data".into()).await.unwrap();
-        client.publish("data".into(), "data".into()).await.unwrap();
+        client.publish("data", "data".into()).await.unwrap();
+        client.publish("data", "data".into()).await.unwrap();
         client.flush().await.unwrap();
-        client.publish("data".into(), "data".into()).await.unwrap();
+        client.publish("data", "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -555,7 +555,7 @@ mod client {
             .await
             .unwrap();
         let mut subscription = client.subscribe("echo".into()).await.unwrap();
-        client.publish("echo".into(), "data".into()).await.unwrap();
+        client.publish("echo", "data".into()).await.unwrap();
         tokio::time::timeout(Duration::from_millis(500), subscription.next())
             .await
             .unwrap();
@@ -568,7 +568,7 @@ mod client {
             .await
             .unwrap();
         let mut subscription = client.subscribe("echo".into()).await.unwrap();
-        client.publish("echo".into(), "data".into()).await.unwrap();
+        client.publish("echo", "data".into()).await.unwrap();
         tokio::time::timeout(Duration::from_millis(50), subscription.next())
             .await
             .expect_err("should timeout");
@@ -712,7 +712,7 @@ mod client {
         });
 
         client
-            .request("request".into(), "data".into())
+            .request("request", "data".into())
             .await
             .unwrap();
         inbox_wildcard_subscription.next().await.unwrap();
@@ -733,7 +733,7 @@ mod client {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let _error: Result<(), async_nats::PublishError> =
-            client.publish("foo".into(), "data".into()).await;
+            client.publish("foo", "data".into()).await;
     }
 
     #[tokio::test]
@@ -753,7 +753,7 @@ mod client {
 
         let mut sub = client.subscribe("DATA".into()).await.unwrap();
         client
-            .publish("DATA".into(), "payload".into())
+            .publish("DATA", "payload".into())
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -820,7 +820,7 @@ mod client {
 
         let mut subscriber = client.subscribe("test".into()).await.unwrap();
         while !servers.is_empty() {
-            client.publish("test".into(), "data".into()).await.unwrap();
+            client.publish("test", "data".into()).await.unwrap();
             client.flush().await.unwrap();
             assert!(subscriber.next().await.is_some());
 

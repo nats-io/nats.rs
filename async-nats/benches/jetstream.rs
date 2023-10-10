@@ -189,7 +189,7 @@ pub fn jetstream_publish_async(c: &mut Criterion) {
 async fn publish_sync_batch(context: async_nats::jetstream::Context, msg: Bytes, amount: u64) {
     for _i in 0..amount {
         context
-            .publish("bench".into(), msg.clone())
+            .publish("bench", msg.clone())
             .await
             .unwrap()
             .await
@@ -207,7 +207,7 @@ async fn publish_async_batch(context: async_nats::jetstream::Context, msg: Bytes
         }
     });
     for _ in 0..amount {
-        let ack = context.publish("bench".into(), msg.clone()).await.unwrap();
+        let ack = context.publish("bench", msg.clone()).await.unwrap();
         tx.send(ack.into_future()).await.unwrap();
     }
     handle.await.unwrap();

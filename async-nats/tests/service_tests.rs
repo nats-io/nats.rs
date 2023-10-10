@@ -254,7 +254,7 @@ mod service {
         }
 
         let info = client
-            .request("$SRV.INFO.serviceA".into(), "".into())
+            .request("$SRV.INFO.serviceA", "".into())
             .await
             .map(|message| serde_json::from_slice::<Info>(&message.payload))
             .unwrap()
@@ -263,7 +263,7 @@ mod service {
         assert_eq!(info.name, "serviceA");
 
         let stats = client
-            .request("$SRV.STATS".into(), "".into())
+            .request("$SRV.STATS", "".into())
             .await
             .map(|message| serde_json::from_slice::<Stats>(&message.payload))
             .unwrap()
@@ -316,7 +316,7 @@ mod service {
 
         // service should not respond anymore, as its stopped.
         client
-            .request("$SRV.PING".into(), "".into())
+            .request("$SRV.PING", "".into())
             .await
             .unwrap_err();
     }
@@ -342,7 +342,7 @@ mod service {
 
         let info: service::Stats = serde_json::from_slice(
             &client
-                .request("$SRV.STATS".into(), "".into())
+                .request("$SRV.STATS", "".into())
                 .await
                 .unwrap()
                 .payload,
@@ -497,7 +497,7 @@ mod service {
 
         let info: service::Info = serde_json::from_slice(
             &client
-                .request("$SRV.INFO".into(), "".into())
+                .request("$SRV.INFO", "".into())
                 .await
                 .unwrap()
                 .payload,

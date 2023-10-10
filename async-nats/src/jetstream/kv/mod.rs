@@ -616,7 +616,7 @@ impl Store {
 
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, value)
+            .publish_with_headers(subject, headers, value)
             .await?
             .await
             .map_err(|err| err.into())
@@ -668,7 +668,7 @@ impl Store {
 
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, "".into())
+            .publish_with_headers(subject, headers, "".into())
             .await?
             .await?;
         Ok(())
@@ -716,7 +716,7 @@ impl Store {
 
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, "".into())
+            .publish_with_headers(subject, headers, "".into())
             .await?
             .await?;
         Ok(())

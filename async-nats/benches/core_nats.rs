@@ -50,7 +50,7 @@ pub fn publish(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let nc = rt.block_on(async {
                     let nc = async_nats::connect(server.client_url()).await.unwrap();
-                    nc.publish("data".into(), "data".into()).await.unwrap();
+                    nc.publish("data", "data".into()).await.unwrap();
                     nc
                 });
 
@@ -99,13 +99,13 @@ pub fn subscribe(c: &mut Criterion) {
                             started.send(()).unwrap();
                             loop {
                                 client
-                                    .publish("bench".into(), Bytes::from_static(&MSG[..size]))
+                                    .publish("bench", Bytes::from_static(&MSG[..size]))
                                     .await
                                     .unwrap()
                             }
                         }
                     });
-                    nc.publish("data".into(), "data".into()).await.unwrap();
+                    nc.publish("data", "data".into()).await.unwrap();
                     ready.await.unwrap();
                     nc
                 });
@@ -178,13 +178,13 @@ pub fn request(c: &mut Criterion) {
 
 async fn requests(nc: async_nats::Client, msg: Bytes, amount: u64) {
     for _i in 0..amount {
-        nc.request("bench".into(), msg.clone()).await.unwrap();
+        nc.request("bench", msg.clone()).await.unwrap();
     }
 }
 
 async fn publish_messages(nc: async_nats::Client, msg: Bytes, amount: u64) {
     for _i in 0..amount {
-        nc.publish("bench".into(), msg.clone()).await.unwrap();
+        nc.publish("bench", msg.clone()).await.unwrap();
     }
 }
 

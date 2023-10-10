@@ -51,7 +51,7 @@
 //!
 //!     // Publish messages to the "messages" subject
 //!     for _ in 0..10 {
-//!         client.publish("messages".into(), "data".into()).await?;
+//!         client.publish("messages", "data".into()).await?;
 //!     }
 //!
 //!     // Receive and process messages
@@ -773,7 +773,7 @@ impl ConnectionHandler {
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc =
 ///     async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
-/// nc.publish("test".into(), "data".into()).await?;
+/// nc.publish("test", "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -887,7 +887,7 @@ impl fmt::Display for Event {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// nc.publish("test".into(), "data".into()).await?;
+/// nc.publish("test", "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -995,7 +995,7 @@ impl From<io::Error> for ConnectError {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// # nc.publish("test".into(), "data".into()).await?;
+/// # nc.publish("test", "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -1059,7 +1059,7 @@ impl Subscriber {
     /// subscriber.unsubscribe_after(3).await?;
     ///
     /// for _ in 0..3 {
-    ///     client.publish("test".into(), "data".into()).await?;
+    ///     client.publish("test", "data".into()).await?;
     /// }
     ///
     /// while let Some(message) = subscriber.next().await {

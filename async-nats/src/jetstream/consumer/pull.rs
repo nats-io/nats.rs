@@ -62,7 +62,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream.publish("events".into(), "data".into()).await?;
+    /// jetstream.publish("events", "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -179,7 +179,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream.publish("events".into(), "data".into()).await?;
+    /// jetstream.publish("events", "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -192,7 +192,7 @@ impl Consumer<Config> {
     ///     .await?;
     ///
     /// for _ in 0..100 {
-    ///     jetstream.publish("events".into(), "data".into()).await?;
+    ///     jetstream.publish("events", "data".into()).await?;
     /// }
     ///
     /// let mut messages = consumer.fetch().max_messages(200).messages().await?;
@@ -230,7 +230,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream.publish("events".into(), "data".into()).await?;
+    /// jetstream.publish("events", "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -276,7 +276,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream.publish("events".into(), "data".into()).await?;
+    /// jetstream.publish("events", "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(
@@ -516,7 +516,7 @@ impl<'a> Consumer<OrderedConfig> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream.publish("events".into(), "data".into()).await?;
+    /// jetstream.publish("events", "data".into()).await?;
     ///
     /// let consumer = stream
     ///     .get_or_create_consumer(

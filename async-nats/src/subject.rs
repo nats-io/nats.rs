@@ -111,7 +111,7 @@ impl fmt::Display for Subject {
     }
 }
 
-pub trait AsSubject: Into<Subject> {
+pub trait AsSubject {
     fn as_subject(self) -> Subject;
 }
 

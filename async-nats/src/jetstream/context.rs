@@ -97,10 +97,10 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream.publish("events".into(), "data".into()).await?;
+    /// let ack = jetstream.publish("events", "data".into()).await?;
     /// ack.await?;
     /// jetstream
-    ///     .publish("events".into(), "data".into())
+    ///     .publish("events", "data".into())
     ///     .await?
     ///     .await?;
     /// # Ok(())
@@ -116,16 +116,16 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let first_ack = jetstream.publish("events".into(), "data".into()).await?;
-    /// let second_ack = jetstream.publish("events".into(), "data".into()).await?;
+    /// let first_ack = jetstream.publish("events", "data".into()).await?;
+    /// let second_ack = jetstream.publish("events", "data".into()).await?;
     /// first_ack.await?;
     /// second_ack.await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(
+    pub async fn publish<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
         self.send_publish(subject, Publish::build().payload(payload))
@@ -153,9 +153,9 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_headers(
+    pub async fn publish_with_headers<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
@@ -185,11 +185,12 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_publish(
+    pub async fn send_publish<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
+        let subject = subject.as_subject();
         let (sender, receiver) = oneshot::channel();
 
         let respond = self.client.new_inbox().into();
@@ -795,7 +796,7 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let response: Response<Info> = jetstream.request("STREAM.INFO.events".into(), &()).await?;
+    /// let response: Response<Info> = jetstream.request("STREAM.INFO.events", &()).await?;
     /// # Ok(())
     /// # }
     /// ```

@@ -42,7 +42,7 @@ async fn main() -> Result<(), async_nats::Error> {
         async move {
             let now = Instant::now();
             for _ in 0..10_000 {
-                client.publish("foo".into(), "data".into()).await?;
+                client.publish("foo", "data".into()).await?;
             }
             Ok::<std::time::Duration, async_nats::Error>(now.elapsed())
         }
@@ -54,7 +54,7 @@ async fn main() -> Result<(), async_nats::Error> {
         async move {
             let now = Instant::now();
             for _ in 0..10_000 {
-                client.publish("bar".into(), "data".into()).await?;
+                client.publish("bar", "data".into()).await?;
             }
             Ok::<std::time::Duration, async_nats::Error>(now.elapsed())
         }

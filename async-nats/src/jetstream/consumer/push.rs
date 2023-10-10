@@ -66,7 +66,7 @@ impl Consumer<Config> {
     ///     })
     ///     .await?;
     ///
-    /// jetstream.publish("events".into(), "data".into()).await?;
+    /// jetstream.publish("events", "data".into()).await?;
     ///
     /// let consumer: PushConsumer = stream
     ///     .get_or_create_consumer(

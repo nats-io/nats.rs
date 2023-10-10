@@ -375,7 +375,7 @@ impl ObjectStore {
         // publish meta.
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, data.into())
+            .publish_with_headers(subject, headers, data.into())
             .await
             .map_err(|err| {
                 PutError::with_source(
@@ -625,7 +625,7 @@ impl ObjectStore {
         // publish meta.
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, data.into())
+            .publish_with_headers(subject, headers, data.into())
             .await
             .map_err(|err| {
                 UpdateMetadataError::with_source(
