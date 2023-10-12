@@ -51,6 +51,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
+    pub(crate) tls_first: bool,
     pub(crate) auth: Auth,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
@@ -299,24 +300,7 @@ impl Connector {
             self.options.read_buffer_capacity.into(),
         );
 
-        let op = connection.read_op().await?;
-        let info = match op {
-            Some(ServerOp::Info(info)) => info,
-            Some(op) => {
-                return Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::Io,
-                    format!("expected INFO, got {:?}", op),
-                ))
-            }
-            None => {
-                return Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::Io,
-                    "expected INFO, got nothing",
-                ))
-            }
-        };
-
-        if self.options.tls_required || info.tls_required || tls_required {
+        let tls_connection = |connection: Connection| async {
             let tls_config = Arc::new(
                 tls::config_tls(&self.options)
                     .await
@@ -334,10 +318,40 @@ impl Connector {
             let domain = rustls::ServerName::try_from(tls_host)
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
-            connection = Connection::new(
-                Box::new(tls_connector.connect(domain, connection.stream).await?),
-                0,
-            );
+            let tls_stream = tls_connector.connect(domain, connection.stream).await?;
+
+            Ok::<Connection, ConnectError>(Connection::new(Box::new(tls_stream), 0))
+        };
+
+        // If `tls_first` was set, establish TLS connection before getting INFO.
+        // There is no point in  checking if tls is required, because
+        // the connection has to be be upgraded to TLS anyway as it's different flow.
+        if self.options.tls_first {
+            connection = tls_connection(connection).await?;
+        }
+
+        let op = connection.read_op().await?;
+        let info = match op {
+            Some(ServerOp::Info(info)) => info,
+            Some(op) => {
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    format!("expected INFO, got {:?}", op),
+                ))
+            }
+            None => {
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    "expected INFO, got nothing",
+                ))
+            }
+        };
+
+        // If `tls_first` was not set, establish TLS connection if it is required.
+        if !self.options.tls_first
+            && (self.options.tls_required || info.tls_required || tls_required)
+        {
+            connection = tls_connection(connection).await?;
         };
 
         Ok((*info, connection))

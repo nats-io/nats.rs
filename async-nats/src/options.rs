@@ -51,6 +51,7 @@ pub struct ConnectOptions {
     pub(crate) connection_timeout: Duration,
     pub(crate) auth: Auth,
     pub(crate) tls_required: bool,
+    pub(crate) tls_first: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
@@ -83,6 +84,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"client_cert", &self.client_cert)
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
+            .entry(&"tls_first", &self.tls_first)
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
@@ -102,6 +104,7 @@ impl Default for ConnectOptions {
             max_reconnects: Some(60),
             connection_timeout: Duration::from_secs(5),
             tls_required: false,
+            tls_first: false,
             certificates: Vec::new(),
             client_cert: None,
             client_key: None,
@@ -562,6 +565,15 @@ impl ConnectOptions {
     /// ```
     pub fn require_tls(mut self, is_required: bool) -> ConnectOptions {
         self.tls_required = is_required;
+        self
+    }
+
+    /// Changes how tls connection is established. If `tls_first` is set,
+    /// client will try to establish tls before getting info from the server.
+    /// That requires the server to enable `handshake_first` option in the config.
+    pub fn tls_first(mut self) -> ConnectOptions {
+        self.tls_first = true;
+        self.tls_required = true;
         self
     }
 
