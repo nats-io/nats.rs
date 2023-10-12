@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use std::path::PathBuf;
+    use std::{path::PathBuf, time::Duration};
 
     use futures::StreamExt;
 
@@ -134,5 +134,79 @@ mod client {
 
         client.flush().await.unwrap();
         assert!(subscription.next().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn tls_first() {
+        let _server =
+            nats_server::run_server_with_port("tests/configs/tls_first.conf", Some("9090"));
+
+        // For some reason tls-first makes server starup longer.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let client =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+                .add_client_certificate(
+                    path.join("tests/configs/certs/client-cert.pem"),
+                    path.join("tests/configs/certs/client-key.pem"),
+                )
+                .require_tls(true)
+                .tls_first()
+                .connect("tls://localhost:9090")
+                .await
+                .unwrap();
+
+        assert!(client.server_info().tls_required);
+
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+            .add_client_certificate(
+                path.join("tests/configs/certs/client-cert.pem"),
+                path.join("tests/configs/certs/client-key.pem"),
+            )
+            .require_tls(true)
+            .connect("tls://localhost:9090")
+            .await
+            .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn tls_auto() {
+        let _server =
+            nats_server::run_server_with_port("tests/configs/tls_first_auto.conf", Some("9898"));
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        // For some reason tls-first makes server starup longer.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+            .add_client_certificate(
+                path.join("tests/configs/certs/client-cert.pem"),
+                path.join("tests/configs/certs/client-key.pem"),
+            )
+            .require_tls(true)
+            .connect("tls://localhost:9898")
+            .await
+            .unwrap();
+
+        let client =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+                .add_client_certificate(
+                    path.join("tests/configs/certs/client-cert.pem"),
+                    path.join("tests/configs/certs/client-key.pem"),
+                )
+                .require_tls(true)
+                .tls_first()
+                .connect("tls://localhost:9898")
+                .await
+                .unwrap();
+
+        assert!(client.server_info().tls_required);
     }
 }
