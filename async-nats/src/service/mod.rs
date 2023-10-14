@@ -735,7 +735,7 @@ impl Request {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn respond(self, response: Result<Bytes, error::Error>) -> Result<(), PublishError> {
+    pub async fn respond(&self, response: Result<Bytes, error::Error>) -> Result<(), PublishError> {
         let reply = self.message.reply.clone().unwrap();
         let result = match response {
             Ok(payload) => self.client.publish(reply, payload).await,
