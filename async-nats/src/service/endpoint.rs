@@ -19,7 +19,7 @@ use std::{
 };
 
 use futures::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tracing::{debug, trace};
 
 use crate::{Client, Subscriber};
@@ -130,7 +130,7 @@ pub(crate) struct Inner {
     /// Last error that occurred.
     pub(crate) last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
-    pub(crate) data: String,
+    pub(crate) data: Option<String>,
     /// Queue group to which this endpoint is assigned to.
     pub(crate) queue_group: String,
 }
@@ -138,10 +138,8 @@ pub(crate) struct Inner {
 impl From<Inner> for Stats {
     fn from(inner: Inner) -> Self {
         Stats {
-            kind: inner.kind,
             name: inner.name,
             subject: inner.subject,
-            metadata: inner.metadata,
             requests: inner.requests,
             errors: inner.errors,
             processing_time: inner.processing_time,
@@ -155,15 +153,10 @@ impl From<Inner> for Stats {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Stats {
-    // Response type.
-    #[serde(rename = "type")]
-    pub kind: String,
     /// Endpoint name.
     pub name: String,
     /// The subject on which the endpoint is registered
     pub subject: String,
-    /// Endpoint specific metadata
-    pub metadata: HashMap<String, String>,
     /// Number of requests handled.
     #[serde(rename = "num_requests")]
     pub requests: usize,
@@ -177,11 +170,57 @@ pub struct Stats {
     #[serde(default, with = "serde_nanos")]
     pub average_processing_time: std::time::Duration,
     /// Last error that occurred.
+    #[serde(with = "serde_error_string")]
     pub last_error: Option<error::Error>,
     /// Custom data added by [crate::service::Config::stats_handler]
-    pub data: String,
+    pub data: Option<String>,
     /// Queue group to which this endpoint is assigned to.
     pub queue_group: String,
+}
+
+mod serde_error_string {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::error;
+
+    pub(crate) fn serialize<S>(
+        error: &Option<error::Error>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match error {
+            Some(error) => serializer.serialize_str(&format!("{}:{}", error.code, error.status)),
+            None => serializer.serialize_str(""),
+        }
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Option<error::Error>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let string = String::deserialize(deserializer)?;
+        if string.is_empty() {
+            Ok(None)
+        } else if let Some((code, status)) = &string.split_once(':') {
+            let err_code: usize = code.parse().unwrap_or(0);
+            let status = if err_code == 0 {
+                string.clone()
+            } else {
+                status.to_string()
+            };
+            Ok(Some(error::Error {
+                code: err_code,
+                status,
+            }))
+        } else {
+            Ok(Some(error::Error {
+                code: 0,
+                status: string,
+            }))
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
@@ -193,5 +232,78 @@ pub struct Info {
     /// Queue group to which this endpoint is assigned.
     pub queue_group: String,
     /// Endpoint-specific metadata.
+    #[serde(default, deserialize_with = "null_meta_as_default")]
     pub metadata: HashMap<String, String>,
+}
+
+pub(crate) fn null_meta_as_default<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let metadata: Option<HashMap<String, String>> = Option::deserialize(deserializer)?;
+    Ok(metadata.unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_serde() {
+        #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+        struct WithOptionalError {
+            #[serde(with = "serde_error_string")]
+            error: Option<error::Error>,
+        }
+
+        // serialize and deserialize error with value.
+        let with_error = WithOptionalError {
+            error: Some(error::Error {
+                code: 500,
+                status: "error".to_string(),
+            }),
+        };
+
+        let serialized = serde_json::to_string(&with_error).unwrap();
+        assert_eq!(serialized, r#"{"error":"500:error"}"#);
+
+        let deserialized: WithOptionalError = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, with_error);
+
+        // serialize and deserialize error without value.
+        let without_error = WithOptionalError { error: None };
+        let serialized = serde_json::to_string(&without_error).unwrap();
+        assert_eq!(serialized, r#"{"error":""}"#);
+
+        let deserialized: WithOptionalError = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, without_error);
+
+        // deserialize error without code.
+        let serialized = r#"{"error":"error"}"#;
+        let deserialized: WithOptionalError = serde_json::from_str(serialized).unwrap();
+        assert_eq!(
+            deserialized,
+            WithOptionalError {
+                error: Some(error::Error {
+                    code: 0,
+                    status: "error".to_string(),
+                })
+            }
+        );
+
+        // deserialize error with invalid code.
+        let serialized = r#"{"error":"invalid:error"}"#;
+        let deserialized: WithOptionalError = serde_json::from_str(serialized).unwrap();
+        assert_eq!(
+            deserialized,
+            WithOptionalError {
+                error: Some(error::Error {
+                    code: 0,
+                    status: "invalid:error".to_string(),
+                })
+            }
+        );
+    }
 }

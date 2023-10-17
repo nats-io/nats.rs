@@ -2,3 +2,4 @@
 target/
 Cargo.lock
 .helix
+.DS_Store

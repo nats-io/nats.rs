@@ -269,7 +269,7 @@ fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
     Inner {
         port: port.map(ToString::to_string),
         cfg: cfg.to_string(),
-        id: id.to_string(),
+        id,
         child,
         logfile,
         pidfile,
