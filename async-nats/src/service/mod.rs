@@ -61,7 +61,7 @@ pub(crate) struct Endpoints {
 
 /// Response for `PING` requests.
 #[derive(Serialize, Deserialize)]
-pub struct Ping {
+pub struct PingResponse {
     /// Response type.
     #[serde(rename = "type")]
     pub kind: String,
@@ -380,7 +380,7 @@ impl Service {
                 loop {
                     tokio::select! {
                         Some(ping) = pings.next() => {
-                            let pong = serde_json::to_vec(&Ping{
+                            let pong = serde_json::to_vec(&PingResponse{
                                 kind: "io.nats.micro.v1.ping_response".to_string(),
                                 name: info.name.clone(),
                                 id: info.id.clone(),
