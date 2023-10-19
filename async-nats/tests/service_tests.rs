@@ -517,7 +517,7 @@ mod service {
 
         let service = client
             .service_builder()
-            .stats_handler(|endpoint, _| format!("custom data for {endpoint}"))
+            .stats_handler(|endpoint, _| serde_json::json!({ "endpoint": endpoint }))
             .description("a cross service")
             .start("cross", "1.0.0")
             .await

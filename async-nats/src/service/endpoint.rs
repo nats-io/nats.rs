@@ -130,7 +130,7 @@ pub(crate) struct Inner {
     /// Last error that occurred.
     pub(crate) last_error: Option<error::Error>,
     /// Custom data added by [Config::stats_handler]
-    pub(crate) data: Option<String>,
+    pub(crate) data: Option<serde_json::Value>,
     /// Queue group to which this endpoint is assigned to.
     pub(crate) queue_group: String,
 }
@@ -173,7 +173,7 @@ pub struct Stats {
     #[serde(with = "serde_error_string")]
     pub last_error: Option<error::Error>,
     /// Custom data added by [crate::service::Config::stats_handler]
-    pub data: Option<String>,
+    pub data: Option<serde_json::Value>,
     /// Queue group to which this endpoint is assigned to.
     pub queue_group: String,
 }

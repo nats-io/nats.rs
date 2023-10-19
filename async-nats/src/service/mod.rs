@@ -163,7 +163,7 @@ impl ServiceBuilder {
     /// Handler for custom service statistics.
     pub fn stats_handler<F>(mut self, handler: F) -> Self
     where
-        F: FnMut(String, endpoint::Stats) -> String + Send + Sync + 'static,
+        F: FnMut(String, endpoint::Stats) -> serde_json::Value + Send + Sync + 'static,
     {
         self.stats_handler = Some(StatsHandler(Box::new(handler)));
         self
@@ -265,7 +265,7 @@ pub trait ServiceExt {
     /// let mut service = client
     ///     .service_builder()
     ///     .description("some service")
-    ///     .stats_handler(|endpoint, stats| format!("customstats"))
+    ///     .stats_handler(|endpoint, stats| serde_json::json!({ "endpoint": endpoint }))
     ///     .start("products", "1.0.0")
     ///     .await?;
     ///
@@ -870,7 +870,7 @@ impl EndpointBuilder {
     }
 }
 
-pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> String + Send>);
+pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> serde_json::Value + Send>);
 
 impl std::fmt::Debug for StatsHandler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
