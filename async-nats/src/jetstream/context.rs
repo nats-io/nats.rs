@@ -1179,7 +1179,7 @@ impl futures::Stream for Streams<'_> {
 #[derive(Default, Clone, Debug)]
 pub struct Publish {
     payload: Bytes,
-    headers: Option<header::HeaderMap>,
+    headers: header::HeaderMap,
 }
 impl Publish {
     /// Creates a new custom Publish struct to be used with.
@@ -1194,14 +1194,12 @@ impl Publish {
     }
     /// Adds headers to the message.
     pub fn headers(mut self, headers: HeaderMap) -> Self {
-        self.headers = Some(headers);
+        self.headers = headers;
         self
     }
     /// A shorthand to add a single header.
     pub fn header<N: IntoHeaderName, V: IntoHeaderValue>(mut self, name: N, value: V) -> Self {
-        self.headers
-            .get_or_insert(header::HeaderMap::new())
-            .insert(name, value);
+        self.headers.insert(name, value);
         self
     }
     /// Sets the `Nats-Msg-Id` header, that is used by stream deduplicate window.
