@@ -30,7 +30,6 @@ use futures::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use time::serde::rfc3339;
 use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
@@ -58,6 +57,23 @@ static NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9\-_]+$").unwrap(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Endpoints {
     pub(crate) endpoints: HashMap<String, endpoint::Inner>,
+}
+
+/// Response for `PING` requests.
+#[derive(Serialize, Deserialize)]
+pub struct PingResponse {
+    /// Response type.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Service name.
+    pub name: String,
+    /// Service id.
+    pub id: String,
+    /// Service version.
+    pub version: String,
+    /// Additional metadata
+    #[serde(default, deserialize_with = "endpoint::null_meta_as_default")]
+    pub metadata: HashMap<String, String>,
 }
 
 /// Response for `STATS` requests.
@@ -94,13 +110,14 @@ pub struct Info {
     /// Service version.
     pub version: String,
     /// Additional metadata
+    #[serde(default, deserialize_with = "endpoint::null_meta_as_default")]
     pub metadata: HashMap<String, String>,
     /// Info about all service endpoints.
     pub endpoints: Vec<endpoint::Info>,
 }
 
 /// Configuration of the [Service].
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     /// Really the kind of the service. Shared by all the services that have the same name.
     /// This name can only have A-Z, a-z, 0-9, dash, underscore
@@ -110,6 +127,7 @@ pub struct Config {
     /// A SemVer valid service version.
     pub version: String,
     /// Custom handler for providing the `EndpointStats.data` value.
+    #[serde(skip)]
     pub stats_handler: Option<StatsHandler>,
     /// Additional service metadata
     pub metadata: Option<HashMap<String, String>>,
@@ -145,7 +163,7 @@ impl ServiceBuilder {
     /// Handler for custom service statistics.
     pub fn stats_handler<F>(mut self, handler: F) -> Self
     where
-        F: FnMut(String, endpoint::Stats) -> String + Send + Sync + 'static,
+        F: FnMut(String, endpoint::Stats) -> serde_json::Value + Send + Sync + 'static,
     {
         self.stats_handler = Some(StatsHandler(Box::new(handler)));
         self
@@ -247,7 +265,7 @@ pub trait ServiceExt {
     /// let mut service = client
     ///     .service_builder()
     ///     .description("some service")
-    ///     .stats_handler(|endpoint, stats| format!("customstats"))
+    ///     .stats_handler(|endpoint, stats| serde_json::json!({ "endpoint": endpoint }))
     ///     .start("products", "1.0.0")
     ///     .await?;
     ///
@@ -362,12 +380,13 @@ impl Service {
                 loop {
                     tokio::select! {
                         Some(ping) = pings.next() => {
-                            let pong = serde_json::to_vec(&json!({
-                                "type": "io.nats.micro.v1.ping_response",
-                                "name": info.name,
-                                "id": info.id,
-                                "version": info.version,
-                            }))?;
+                            let pong = serde_json::to_vec(&PingResponse{
+                                kind: "io.nats.micro.v1.ping_response".to_string(),
+                                name: info.name.clone(),
+                                id: info.id.clone(),
+                                version: info.version.clone(),
+                                metadata: info.metadata.clone(),
+                            })?;
                             client.publish(ping.reply.unwrap(), pong.into()).await?;
                         },
                         Some(info_request) = infos.next() => {
@@ -395,7 +414,7 @@ impl Service {
                                 let mut endpoint_stats_locked = endpoints_state.lock().unwrap();
                                 for (key, value) in &mut endpoint_stats_locked.endpoints {
                                     let data = stats_callback.0(key.to_string(), value.clone().into());
-                                    value.data = data;
+                                    value.data = Some(data);
                                 }
                             }
                             let stats = serde_json::to_vec(&Stats {
@@ -851,7 +870,7 @@ impl EndpointBuilder {
     }
 }
 
-pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> String + Send>);
+pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> serde_json::Value + Send>);
 
 impl std::fmt::Debug for StatsHandler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

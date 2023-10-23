@@ -109,29 +109,15 @@ mod service {
             .publish_with_reply("$SRV.INFO".into(), info_reply.into(), "".into())
             .await
             .unwrap();
-        let info = infos
+        let mut info = infos
             .next()
             .await
             .map(|message| serde_json::from_slice::<service::Info>(&message.payload).unwrap())
             .unwrap();
+        let endpoint_stats = info.endpoints.pop().unwrap();
         assert_eq!(metadata, info.metadata);
-        //TODO: test rest of fields
-
-        let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
-        client
-            .publish_with_reply("$SRV.STATS".into(), reply.into(), "".into())
-            .await
-            .unwrap();
-
-        let mut stats = responses
-            .next()
-            .await
-            .map(|message| serde_json::from_slice::<service::Stats>(&message.payload).unwrap())
-            .unwrap();
-
-        let endpoint_stats = stats.endpoints.pop().unwrap();
         assert_eq!(endpoint_stats.metadata, endpoint_metadata);
+        //TODO: test rest of fields
     }
 
     #[tokio::test]
@@ -531,7 +517,7 @@ mod service {
 
         let service = client
             .service_builder()
-            .stats_handler(|endpoint, _| format!("custom data for {endpoint}"))
+            .stats_handler(|endpoint, _| serde_json::json!({ "endpoint": endpoint }))
             .description("a cross service")
             .start("cross", "1.0.0")
             .await

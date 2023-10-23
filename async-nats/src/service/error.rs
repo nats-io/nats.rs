@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 impl std::error::Error for Error {}
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub status: String,
     pub code: usize,
