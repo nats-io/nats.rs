@@ -80,7 +80,7 @@ mod jetstream {
         let payload = b"Hello JetStream";
 
         let ack = context
-            .publish_with_headers("foo".into(), headers, payload.as_ref().into())
+            .publish_with_headers("foo", headers, payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -105,13 +105,10 @@ mod jetstream {
             .await
             .unwrap();
 
-        let ack = context
-            .publish("foo".into(), "payload".into())
-            .await
-            .unwrap();
+        let ack = context.publish("foo", "payload".into()).await.unwrap();
         assert!(ack.await.is_ok());
         let ack = context
-            .publish("not_stream".into(), "payload".into())
+            .publish("not_stream", "payload".into())
             .await
             .unwrap();
         assert!(ack.await.is_err());
@@ -137,7 +134,7 @@ mod jetstream {
         // Publish first message
         context
             .send_publish(
-                "foo".into(),
+                "foo",
                 Publish::build()
                     .message_id(id.clone())
                     .payload("data".into()),
@@ -148,7 +145,7 @@ mod jetstream {
             .unwrap();
         // Publish second message, a duplicate.
         context
-            .send_publish("foo".into(), Publish::build().message_id(id.clone()))
+            .send_publish("foo", Publish::build().message_id(id.clone()))
             .await
             .unwrap()
             .await
@@ -164,10 +161,7 @@ mod jetstream {
 
         // Publish message with different ID and expect error.
         let err = context
-            .send_publish(
-                "foo".into(),
-                Publish::build().expected_last_message_id("BAD_ID"),
-            )
+            .send_publish("foo", Publish::build().expected_last_message_id("BAD_ID"))
             .await
             .unwrap()
             .await
@@ -176,10 +170,7 @@ mod jetstream {
         assert_eq!(err, PublishErrorKind::WrongLastMessageId);
         // Publish a new message with expected ID.
         context
-            .send_publish(
-                "foo".into(),
-                Publish::build().expected_last_message_id(id.clone()),
-            )
+            .send_publish("foo", Publish::build().expected_last_message_id(id.clone()))
             .await
             .unwrap()
             .await
@@ -187,7 +178,7 @@ mod jetstream {
 
         // We should have now two messages. Check it.
         context
-            .send_publish("foo".into(), Publish::build().expected_last_sequence(2))
+            .send_publish("foo", Publish::build().expected_last_sequence(2))
             .await
             .unwrap()
             .await
@@ -195,7 +186,7 @@ mod jetstream {
         // 3 messages should be there, so this should error.
         assert_eq!(
             context
-                .send_publish("foo".into(), Publish::build().expected_last_sequence(2),)
+                .send_publish("foo", Publish::build().expected_last_sequence(2),)
                 .await
                 .unwrap()
                 .await
@@ -205,10 +196,7 @@ mod jetstream {
         );
         // 3 messages there, should be ok for this subject too.
         context
-            .send_publish(
-                "foo".into(),
-                Publish::build().expected_last_subject_sequence(3),
-            )
+            .send_publish("foo", Publish::build().expected_last_subject_sequence(3))
             .await
             .unwrap()
             .await
@@ -216,10 +204,7 @@ mod jetstream {
         // 4 messages there, should error.
         assert_eq!(
             context
-                .send_publish(
-                    "foo".into(),
-                    Publish::build().expected_last_subject_sequence(3),
-                )
+                .send_publish("foo", Publish::build().expected_last_subject_sequence(3),)
                 .await
                 .unwrap()
                 .await
@@ -230,20 +215,14 @@ mod jetstream {
 
         // Check if it works for the other subjects in the stream.
         context
-            .send_publish(
-                "bar".into(),
-                Publish::build().expected_last_subject_sequence(0),
-            )
+            .send_publish("bar", Publish::build().expected_last_subject_sequence(0))
             .await
             .unwrap()
             .await
             .unwrap();
         // Sequence is now 1, so this should fail.
         context
-            .send_publish(
-                "bar".into(),
-                Publish::build().expected_last_subject_sequence(0),
-            )
+            .send_publish("bar", Publish::build().expected_last_subject_sequence(0))
             .await
             .unwrap()
             .await
@@ -251,10 +230,7 @@ mod jetstream {
         // test header shorthand
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
-            .send_publish(
-                "foo".into(),
-                Publish::build().header(NATS_MESSAGE_ID, id.as_str()),
-            )
+            .send_publish("foo", Publish::build().header(NATS_MESSAGE_ID, id.as_str()))
             .await
             .unwrap()
             .await
@@ -262,7 +238,7 @@ mod jetstream {
         // above message should be ignored.
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
-            .send_publish("bar".into(), Publish::build().expected_stream("TEST"))
+            .send_publish("bar", Publish::build().expected_stream("TEST"))
             .await
             .unwrap()
             .await
@@ -288,7 +264,7 @@ mod jetstream {
 
         // Basic publish like NATS core.
         let ack = context
-            .publish("foo".into(), payload.as_ref().into())
+            .publish("foo", payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -303,7 +279,7 @@ mod jetstream {
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let response: Response<AccountInfo> = context.request("INFO".into(), &()).await.unwrap();
+        let response: Response<AccountInfo> = context.request("INFO", &()).await.unwrap();
 
         assert!(matches!(response, Response::Ok { .. }));
     }
@@ -315,7 +291,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         let response: Response<AccountInfo> = context
-            .request("STREAM.INFO.nonexisting".into(), &())
+            .request("STREAM.INFO.nonexisting", &())
             .await
             .unwrap();
 
@@ -331,8 +307,7 @@ mod jetstream {
         let client = async_nats::connect("nats://localhost:4222").await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let response: Response<AccountInfo> =
-            context.request("API.FONI".into(), &()).await.unwrap();
+        let response: Response<AccountInfo> = context.request("API.FONI", &()).await.unwrap();
 
         assert!(matches!(response, Response::Err { .. }));
     }
@@ -437,7 +412,7 @@ mod jetstream {
 
         for _ in 0..3 {
             context
-                .publish("events".into(), "data".into())
+                .publish("events", "data".into())
                 .await
                 .unwrap()
                 .await
@@ -468,7 +443,7 @@ mod jetstream {
 
         for _ in 0..3 {
             context
-                .publish("events.one".into(), "data".into())
+                .publish("events.one", "data".into())
                 .await
                 .unwrap()
                 .await
@@ -476,7 +451,7 @@ mod jetstream {
         }
         for _ in 0..4 {
             context
-                .publish("events.two".into(), "data".into())
+                .publish("events.two", "data".into())
                 .await
                 .unwrap()
                 .await
@@ -506,7 +481,7 @@ mod jetstream {
 
         for _ in 0..100 {
             context
-                .publish("events.two".into(), "data".into())
+                .publish("events.two", "data".into())
                 .await
                 .unwrap()
                 .await
@@ -593,7 +568,7 @@ mod jetstream {
         let stream = context.get_or_create_stream("events").await.unwrap();
         let payload = b"payload";
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -622,14 +597,14 @@ mod jetstream {
 
         let payload = b"payload";
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap()
             .await
             .unwrap();
 
         context
-            .publish("entries".into(), payload.as_ref().into())
+            .publish("entries", payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -663,20 +638,20 @@ mod jetstream {
 
         let payload = b"payload";
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
             .unwrap();
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap()
             .await
             .unwrap();
 
         context
-            .publish("entries".into(), payload.as_ref().into())
+            .publish("entries", payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -720,20 +695,20 @@ mod jetstream {
 
         let payload = b"payload";
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
             .unwrap();
 
         context
-            .publish("entries".into(), payload.as_ref().into())
+            .publish("entries", payload.as_ref().into())
             .await
             .unwrap();
 
@@ -779,32 +754,32 @@ mod jetstream {
 
         let payload = b"payload";
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
             .unwrap();
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
             .unwrap();
 
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
@@ -856,7 +831,7 @@ mod jetstream {
 
         let payload = b"payload";
         context
-            .publish("events".into(), "not this".into())
+            .publish("events", "not this".into())
             .await
             .unwrap()
             .await
@@ -864,7 +839,7 @@ mod jetstream {
         // .await
         // .unwrap();
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -873,7 +848,7 @@ mod jetstream {
         // .unwrap();
 
         context
-            .publish("entries".into(), payload.as_ref().into())
+            .publish("entries", payload.as_ref().into())
             .await
             .unwrap()
             .await
@@ -906,15 +881,15 @@ mod jetstream {
         let stream = context.get_or_create_stream("events").await.unwrap();
         let payload = b"payload";
         context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap();
         let publish_ack = context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap();
         context
-            .publish("events".into(), payload.as_ref().into())
+            .publish("events", payload.as_ref().into())
             .await
             .unwrap();
 
@@ -1171,10 +1146,7 @@ mod jetstream {
             .unwrap();
 
         for _ in 0..1000 {
-            context
-                .publish("events".into(), "dat".into())
-                .await
-                .unwrap();
+            context.publish("events", "dat".into()).await.unwrap();
         }
 
         let mut iter = consumer.sequence(50).unwrap().take(10);
@@ -1211,10 +1183,7 @@ mod jetstream {
         let consumer: PullConsumer = stream.get_consumer("push").await.unwrap();
 
         for _ in 0..100 {
-            context
-                .publish("events".into(), "dat".into())
-                .await
-                .unwrap();
+            context.publish("events", "dat".into()).await.unwrap();
         }
 
         let mut messages = consumer
@@ -1259,10 +1228,7 @@ mod jetstream {
         let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
 
         for _ in 0..1000 {
-            context
-                .publish("events".into(), "dat".into())
-                .await
-                .unwrap();
+            context.publish("events", "dat".into()).await.unwrap();
         }
 
         let mut messages = consumer.messages().await.unwrap().take(1000);
@@ -1304,10 +1270,7 @@ mod jetstream {
                     if i % 500 == 0 {
                         tokio::time::sleep(Duration::from_secs(6)).await
                     }
-                    context
-                        .publish("events".into(), "dat".into())
-                        .await
-                        .unwrap();
+                    context.publish("events", "dat".into()).await.unwrap();
                 }
             }
         });
@@ -1352,10 +1315,7 @@ mod jetstream {
                     if i % 500 == 0 {
                         tokio::time::sleep(Duration::from_secs(6)).await
                     }
-                    context
-                        .publish("events".into(), "dat".into())
-                        .await
-                        .unwrap();
+                    context.publish("events", "dat".into()).await.unwrap();
                 }
             }
         });
@@ -1410,7 +1370,7 @@ mod jetstream {
                     }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     context
-                        .publish(format!("events.{i}").into(), i.to_string().into())
+                        .publish(format!("events.{i}"), i.to_string().into())
                         .await
                         .ok();
                 }
@@ -1460,7 +1420,7 @@ mod jetstream {
 
         for _ in 0..1000 {
             context
-                .publish("events".into(), "dat".into())
+                .publish("events", "dat".into())
                 .await
                 .unwrap()
                 .await
@@ -1506,7 +1466,7 @@ mod jetstream {
 
         for i in 0..1000 {
             context
-                .publish("events".into(), format!("{i}").into())
+                .publish("events", format!("{i}").into())
                 .await
                 .unwrap()
                 .await
@@ -1566,10 +1526,7 @@ mod jetstream {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         for _ in 0..1000 {
-            context
-                .publish("events".into(), "dat".into())
-                .await
-                .unwrap();
+            context.publish("events", "dat".into()).await.unwrap();
         }
 
         let mut messages = consumer.messages().await.unwrap().take(1000);
@@ -1611,10 +1568,7 @@ mod jetstream {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         for _ in 0..1000 {
-            context
-                .publish("events".into(), "dat".into())
-                .await
-                .unwrap();
+            context.publish("events", "dat".into()).await.unwrap();
         }
 
         let mut seen = 0;
@@ -1682,7 +1636,7 @@ mod jetstream {
         tokio::task::spawn(async move {
             for i in 0..1000 {
                 context
-                    .publish("events".into(), format!("i: {i}").into())
+                    .publish("events", format!("i: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1729,7 +1683,7 @@ mod jetstream {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 let ack = context
-                    .publish("events".into(), format!("timeout test message: {i}").into())
+                    .publish("events", format!("timeout test message: {i}").into())
                     .await
                     .unwrap();
                 println!("ack from publish {i}: {ack:?}");
@@ -1779,7 +1733,7 @@ mod jetstream {
             for i in 0..10 {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 context
-                    .publish("events".into(), format!("heartbeat message: {i}").into())
+                    .publish("events", format!("heartbeat message: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1868,7 +1822,7 @@ mod jetstream {
             for i in 0..100 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
                 context
-                    .publish("events".into(), format!("heartbeat message: {i}").into())
+                    .publish("events", format!("heartbeat message: {i}").into())
                     .await
                     .unwrap();
             }
@@ -1919,7 +1873,7 @@ mod jetstream {
 
         for _ in 0..10 {
             context
-                .publish("events".into(), "dat".into())
+                .publish("events", "dat".into())
                 .await
                 .unwrap()
                 .await
@@ -1972,7 +1926,7 @@ mod jetstream {
             let mut interval = tokio::time::interval(Duration::from_millis(20));
             for i in 0..=num_messages {
                 context
-                    .publish("events".into(), i.to_string().into())
+                    .publish("events", i.to_string().into())
                     .await
                     .unwrap()
                     .await
@@ -2041,10 +1995,7 @@ mod jetstream {
             .unwrap();
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
-        context
-            .publish("events".into(), "dat".into())
-            .await
-            .unwrap();
+        context.publish("events", "dat".into()).await.unwrap();
 
         let mut messages = consumer
             .stream()
@@ -2100,7 +2051,7 @@ mod jetstream {
             // Publish something.
             debug!("publishing the message");
             context
-                .publish("events".into(), "data".into())
+                .publish("events", "data".into())
                 .await
                 .unwrap()
                 .await
@@ -2178,7 +2129,7 @@ mod jetstream {
         // Publish something.
         debug!("publishing the message");
         context
-            .publish("events".into(), "data".into())
+            .publish("events", "data".into())
             .await
             .unwrap()
             .await
@@ -2221,10 +2172,7 @@ mod jetstream {
             .unwrap();
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
 
-        context
-            .publish("events".into(), "dat".into())
-            .await
-            .unwrap();
+        context.publish("events", "dat".into()).await.unwrap();
 
         let mut messages = consumer.messages().await.unwrap();
 
@@ -2308,7 +2256,7 @@ mod jetstream {
 
         for _ in 0..10 {
             context
-                .publish("events".into(), "dat".into())
+                .publish("events", "dat".into())
                 .await
                 .unwrap()
                 .await
@@ -2399,7 +2347,7 @@ mod jetstream {
 
         for i in 0..1000 {
             jetstream
-                .publish(format!("reconnect.{i}").into(), i.to_string().into())
+                .publish(format!("reconnect.{i}"), i.to_string().into())
                 .await
                 .unwrap()
                 .await
@@ -2446,14 +2394,14 @@ mod jetstream {
 
         for i in 0..500 {
             jetstream
-                .publish("events".into(), format!("{i}").into())
+                .publish("events", format!("{i}").into())
                 .await
                 .unwrap();
         }
         drop(server);
         assert_eq!(
             jetstream
-                .publish("events".into(), "fail".into())
+                .publish("events", "fail".into())
                 .await
                 .unwrap()
                 .await
@@ -2506,7 +2454,7 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap().take(100).enumerate();
         for i in 0..100 {
             jetstream
-                .publish(format!("source.{i}").into(), format!("{i}").into())
+                .publish(format!("source.{i}"), format!("{i}").into())
                 .await
                 .unwrap();
         }
@@ -2540,19 +2488,19 @@ mod jetstream {
             .unwrap();
 
         jetstream
-            .publish("events.1".into(), "data".into())
+            .publish("events.1", "data".into())
             .await
             .unwrap()
             .await
             .unwrap();
         jetstream
-            .publish("events.1".into(), "data".into())
+            .publish("events.1", "data".into())
             .await
             .unwrap()
             .await
             .unwrap();
         jetstream
-            .publish("events.1".into(), "data".into())
+            .publish("events.1", "data".into())
             .await
             .unwrap()
             .await
@@ -2575,14 +2523,8 @@ mod jetstream {
             .await
             .unwrap();
 
-        jetstream
-            .publish("events".into(), "skipped".into())
-            .await
-            .unwrap();
-        jetstream
-            .publish("events".into(), "data".into())
-            .await
-            .unwrap();
+        jetstream.publish("events", "skipped".into()).await.unwrap();
+        jetstream.publish("events", "data".into()).await.unwrap();
 
         let mut mirror = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
@@ -2643,22 +2585,10 @@ mod jetstream {
             .await
             .unwrap();
 
-        jetstream
-            .publish("events".into(), "skipped".into())
-            .await
-            .unwrap();
-        jetstream
-            .publish("events".into(), "data".into())
-            .await
-            .unwrap();
-        jetstream
-            .publish("events2".into(), "data".into())
-            .await
-            .unwrap();
-        jetstream
-            .publish("events2".into(), "data".into())
-            .await
-            .unwrap();
+        jetstream.publish("events", "skipped".into()).await.unwrap();
+        jetstream.publish("events", "data".into()).await.unwrap();
+        jetstream.publish("events2", "data".into()).await.unwrap();
+        jetstream.publish("events2", "data".into()).await.unwrap();
 
         let mut source = jetstream
             .create_stream(async_nats::jetstream::stream::Config {
@@ -2806,7 +2736,7 @@ mod jetstream {
             for i in 0..1000 {
                 context
                     .publish(
-                        "events".into(),
+                        "events",
                         format!("Some bytes to sent with sequence number included: {i}").into(),
                     )
                     .await
@@ -2966,7 +2896,7 @@ mod jetstream {
 
         for i in 0..50 {
             context
-                .publish("filter".into(), format!("{i}").into())
+                .publish("filter", format!("{i}").into())
                 .await
                 .unwrap()
                 .await
@@ -3006,7 +2936,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client.clone());
         assert_eq!(
             context
-                .publish("test".into(), "jghf".into())
+                .publish("test", "jghf".into())
                 .await
                 .unwrap()
                 .await
@@ -3033,25 +2963,25 @@ mod jetstream {
             .unwrap();
 
         context
-            .publish("events".into(), "0".into())
+            .publish("events", "0".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("other".into(), "100".into())
+            .publish("other", "100".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("data".into(), "1".into())
+            .publish("data", "1".into())
             .await
             .unwrap()
             .await
             .unwrap();
         context
-            .publish("events".into(), "2".into())
+            .publish("events", "2".into())
             .await
             .unwrap()
             .await
@@ -3169,7 +3099,7 @@ mod jetstream {
             .unwrap();
 
         context
-            .publish("stream".into(), "data".into())
+            .publish("stream", "data".into())
             .await
             .unwrap()
             .await
@@ -3226,7 +3156,7 @@ mod jetstream {
             .unwrap();
 
         context
-            .publish("test".into(), "data".into())
+            .publish("test", "data".into())
             .await
             .unwrap()
             .await
@@ -3292,7 +3222,7 @@ mod jetstream {
 
         for _ in 0..10 {
             context
-                .publish("test".into(), "data".into())
+                .publish("test", "data".into())
                 .await
                 .unwrap()
                 .await
@@ -3343,7 +3273,7 @@ mod jetstream {
 
         debug!("start publishing");
         for _ in 0..5000 {
-            context.publish("test".into(), "data".into()).await.unwrap();
+            context.publish("test", "data".into()).await.unwrap();
         }
         debug!("finished publishing");
 

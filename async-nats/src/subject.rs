@@ -110,3 +110,25 @@ impl fmt::Display for Subject {
         write!(f, "{}", self.as_str())
     }
 }
+
+pub trait AsSubject {
+    fn as_subject(&self) -> Subject;
+}
+
+impl AsSubject for Subject {
+    fn as_subject(&self) -> Subject {
+        self.to_owned()
+    }
+}
+
+impl AsSubject for &'static str {
+    fn as_subject(&self) -> Subject {
+        Subject::from_static(self)
+    }
+}
+
+impl AsSubject for String {
+    fn as_subject(&self) -> Subject {
+        Subject::from(self.as_str())
+    }
+}

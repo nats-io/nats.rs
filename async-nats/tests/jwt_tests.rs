@@ -30,7 +30,7 @@ mod client {
         .unwrap();
 
         // publish something
-        nc.publish("hello".into(), "world".into())
+        nc.publish("hello", "world".into())
             .await
             .expect("published");
     }
@@ -49,7 +49,7 @@ mod client {
             .unwrap();
 
         // publish something
-        nc.publish("hello".into(), "world".into())
+        nc.publish("hello", "world".into())
             .await
             .expect("published");
     }
@@ -80,9 +80,9 @@ mod client {
         .await
         .unwrap();
 
-        let mut subscriber = client.subscribe("test".into()).await.unwrap();
+        let mut subscriber = client.subscribe("test").await.unwrap();
         while !servers.is_empty() {
-            client.publish("test".into(), "data".into()).await.unwrap();
+            client.publish("test", "data".into()).await.unwrap();
             client.flush().await.unwrap();
             assert!(subscriber.next().await.is_some());
 

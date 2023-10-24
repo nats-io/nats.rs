@@ -18,7 +18,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::subject::Subject;
+use crate::subject::AsSubject;
 use crate::{header, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -97,12 +97,9 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let ack = jetstream.publish("events".into(), "data".into()).await?;
+    /// let ack = jetstream.publish("events", "data".into()).await?;
     /// ack.await?;
-    /// jetstream
-    ///     .publish("events".into(), "data".into())
-    ///     .await?
-    ///     .await?;
+    /// jetstream.publish("events", "data".into()).await?.await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -116,16 +113,16 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let first_ack = jetstream.publish("events".into(), "data".into()).await?;
-    /// let second_ack = jetstream.publish("events".into(), "data".into()).await?;
+    /// let first_ack = jetstream.publish("events", "data".into()).await?;
+    /// let second_ack = jetstream.publish("events", "data".into()).await?;
     /// first_ack.await?;
     /// second_ack.await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(
+    pub async fn publish<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
         self.send_publish(subject, Publish::build().payload(payload))
@@ -148,14 +145,14 @@ impl Context {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.append("X-key", "Value");
     /// let ack = jetstream
-    ///     .publish_with_headers("events".into(), headers, "data".into())
+    ///     .publish_with_headers("events", headers, "data".into())
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_headers(
+    pub async fn publish_with_headers<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
@@ -178,18 +175,19 @@ impl Context {
     ///
     /// let ack = jetstream
     ///     .send_publish(
-    ///         "events".into(),
+    ///         "events",
     ///         Publish::build().payload("data".into()).message_id("uuid"),
     ///     )
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_publish(
+    pub async fn send_publish<S: AsSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
+        let subject = subject.as_subject();
         let (sender, receiver) = oneshot::channel();
 
         let respond = self.client.new_inbox().into();
@@ -218,7 +216,7 @@ impl Context {
 
     /// Query the server for account information
     pub async fn query_account(&self) -> Result<Account, AccountError> {
-        let response: Response<Account> = self.request("INFO".into(), b"").await?;
+        let response: Response<Account> = self.request("INFO", b"").await?;
 
         match response {
             Response::Err { error } => Err(AccountError::new(AccountErrorKind::JetStream(error))),
@@ -295,7 +293,7 @@ impl Context {
             }
         }
         let subject = format!("STREAM.CREATE.{}", config.name);
-        let response: Response<Info> = self.request(subject.into(), &config).await?;
+        let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
             Response::Err { error } => Err(error.into()),
@@ -329,7 +327,7 @@ impl Context {
 
         let subject = format!("STREAM.INFO.{stream}");
         let request: Response<Info> = self
-            .request(subject.into(), &())
+            .request(subject, &())
             .await
             .map_err(|err| GetStreamError::with_source(GetStreamErrorKind::Request, err))?;
         match request {
@@ -376,7 +374,7 @@ impl Context {
         let config: Config = stream_config.into();
         let subject = format!("STREAM.INFO.{}", config.name);
 
-        let request: Response<Info> = self.request(subject.into(), &()).await?;
+        let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } if error.code() == 404 => self.create_stream(&config).await,
             Response::Err { error } => Err(error.into()),
@@ -412,7 +410,7 @@ impl Context {
         }
         let subject = format!("STREAM.DELETE.{stream}");
         match self
-            .request(subject.into(), &json!({}))
+            .request(subject, &json!({}))
             .await
             .map_err(|err| DeleteStreamError::with_source(DeleteStreamErrorKind::Request, err))?
         {
@@ -453,7 +451,7 @@ impl Context {
     {
         let config = config.borrow();
         let subject = format!("STREAM.UPDATE.{}", config.name);
-        match self.request(subject.into(), config).await? {
+        match self.request(subject, config).await? {
             Response::Err { error } => Err(error.into()),
             Response::Ok(info) => Ok(info),
         }
@@ -763,7 +761,7 @@ impl Context {
     {
         let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
 
-        let info: super::consumer::Info = match self.request(subject.into(), &json!({})).await? {
+        let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
             Response::Ok(info) => info,
             Response::Err { error } => {
                 return Err(Box::new(std::io::Error::new(
@@ -795,15 +793,17 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let response: Response<Info> = jetstream.request("STREAM.INFO.events".into(), &()).await?;
+    /// let response: Response<Info> = jetstream.request("STREAM.INFO.events", &()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<T, V>(&self, subject: Subject, payload: &T) -> Result<V, RequestError>
+    pub async fn request<S, T, V>(&self, subject: S, payload: &T) -> Result<V, RequestError>
     where
+        S: AsSubject,
         T: ?Sized + Serialize,
         V: DeserializeOwned,
     {
+        let subject = subject.as_subject();
         let request = serde_json::to_vec(&payload)
             .map(Bytes::from)
             .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
@@ -812,10 +812,7 @@ impl Context {
 
         let message = self
             .client
-            .request(
-                format!("{}.{}", self.prefix, subject.as_ref()).into(),
-                request,
-            )
+            .request(format!("{}.{}", self.prefix, subject.as_ref()), request)
             .await;
         let message = message?;
         debug!(
@@ -1082,7 +1079,7 @@ impl futures::Stream for StreamNames<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.NAMES".into(),
+                                "STREAM.NAMES",
                                 &json!({
                                     "offset": offset,
                                 }),
@@ -1156,7 +1153,7 @@ impl futures::Stream for Streams<'_> {
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
-                                "STREAM.LIST".into(),
+                                "STREAM.LIST",
                                 &json!({
                                     "offset": offset,
                                 }),

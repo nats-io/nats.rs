@@ -192,7 +192,7 @@ impl ObjectStore {
             })?,
         );
 
-        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name)).into();
+        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name));
 
         self.stream
             .context
@@ -375,7 +375,7 @@ impl ObjectStore {
         // publish meta.
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, data.into())
+            .publish_with_headers(subject, headers, data.into())
             .await
             .map_err(|err| {
                 PutError::with_source(
@@ -625,7 +625,7 @@ impl ObjectStore {
         // publish meta.
         self.stream
             .context
-            .publish_with_headers(subject.into(), headers, data.into())
+            .publish_with_headers(subject, headers, data.into())
             .await
             .map_err(|err| {
                 UpdateMetadataError::with_source(
@@ -788,7 +788,7 @@ impl ObjectStore {
 
 async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), PublishMetadataError> {
     let encoded_object_name = encode_object_name(&info.name);
-    let subject = format!("$O.{}.M.{}", &store.name, &encoded_object_name).into();
+    let subject = format!("$O.{}.M.{}", &store.name, &encoded_object_name);
 
     let mut headers = HeaderMap::new();
     headers.insert(

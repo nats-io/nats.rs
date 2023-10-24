@@ -76,14 +76,14 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     pub async fn info(&mut self) -> Result<&consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
 
-        let info = self.context.request(subject.into(), &json!({})).await?;
+        let info = self.context.request(subject, &json!({})).await?;
         self.info = info;
         Ok(&self.info)
     }
 
     async fn fetch_info(&self) -> Result<consumer::Info, RequestError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
-        self.context.request(subject.into(), &json!({})).await
+        self.context.request(subject, &json!({})).await
     }
 
     /// Returns cached [Info] for the [Consumer].
