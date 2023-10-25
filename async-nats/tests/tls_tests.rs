@@ -141,7 +141,8 @@ mod client {
         let _server =
             nats_server::run_server_with_port("tests/configs/tls_first.conf", Some("9090"));
 
-        // For some reason tls-first makes server starup longer.
+        // Need to add some timeout here, as `client_url` does not work with tls_first aproach,
+        // and without it there is nothing that ensures that server is up and running.
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -175,13 +176,9 @@ mod client {
 
     #[tokio::test]
     async fn tls_auto() {
-        let _server =
-            nats_server::run_server_with_port("tests/configs/tls_first_auto.conf", Some("9898"));
+        let server = nats_server::run_server("tests/configs/tls_first_auto.conf");
 
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-        // For some reason tls-first makes server starup longer.
-        tokio::time::sleep(Duration::from_secs(2)).await;
 
         async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
@@ -190,7 +187,7 @@ mod client {
                 path.join("tests/configs/certs/client-key.pem"),
             )
             .require_tls(true)
-            .connect("tls://localhost:9898")
+            .connect(server.client_url())
             .await
             .unwrap();
 
@@ -203,7 +200,7 @@ mod client {
                 )
                 .require_tls(true)
                 .tls_first()
-                .connect("tls://localhost:9898")
+                .connect(server.client_url())
                 .await
                 .unwrap();
 
