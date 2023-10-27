@@ -1063,7 +1063,6 @@ pub struct Config {
     /// to [Compression::None], which is different from not overriding global config with anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compression: Option<Compression>,
-
     #[cfg(feature = "server_2_10")]
     /// Set limits on consumers that are created on this stream.
     #[serde(default, deserialize_with = "default_consumer_limits_as_none")]

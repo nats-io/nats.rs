@@ -38,8 +38,8 @@ use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
     context::{PublishError, PublishErrorKind},
     stream::{
-        ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
-        Republish, Source, StorageType, Stream,
+        Compression, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind,
+        RawMessage, Republish, Source, StorageType, Stream,
     },
 };
 
@@ -120,6 +120,9 @@ pub struct Config {
     pub sources: Option<Vec<Source>>,
     /// Allow mirrors using direct API.
     pub mirror_direct: bool,
+    /// Compression
+    #[cfg(feature = "server_2_10")]
+    pub compression: Option<Compression>,
 }
 
 /// Describes what kind of operation and entry represents

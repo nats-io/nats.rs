@@ -644,6 +644,8 @@ impl Context {
                 num_replicas,
                 discard: stream::DiscardPolicy::New,
                 mirror_direct: config.mirror_direct,
+                #[cfg(feature = "server_2_10")]
+                compression: config.compression,
                 ..Default::default()
             })
             .await
