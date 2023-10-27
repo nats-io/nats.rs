@@ -845,6 +845,7 @@ impl EndpointBuilder {
         if let Some(prefix) = self.prefix {
             subject = format!("{}.{}", prefix, subject);
         }
+        let endpoint_name = format!("{}-{}", subject, self.queue_group);
         let name = self.name.clone().unwrap_or_else(|| subject.clone());
         let requests = self
             .client
@@ -857,7 +858,7 @@ impl EndpointBuilder {
         let mut stats = self.stats.lock().unwrap();
         stats
             .endpoints
-            .entry(subject.clone())
+            .entry(endpoint_name.clone())
             .or_insert(endpoint::Inner {
                 name,
                 subject: subject.clone(),
@@ -870,7 +871,7 @@ impl EndpointBuilder {
             requests,
             stats: self.stats.clone(),
             client: self.client.clone(),
-            endpoint: subject.clone(),
+            endpoint: endpoint_name,
             shutdown: Some(shutdown_rx),
             shutdown_future: None,
         })
