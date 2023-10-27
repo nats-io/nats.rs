@@ -665,15 +665,15 @@ impl Group {
     /// # }
     /// ```
     pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
-        EndpointBuilder::new(
+        let mut endpoint = EndpointBuilder::new(
             self.client.clone(),
             self.stats.clone(),
             self.shutdown_tx.clone(),
             self.subjects.clone(),
             self.queue_group.clone(),
-        )
-        .add(format!("{}.{}", self.prefix, subject.to_string()))
-        .await
+        );
+        endpoint.prefix = Some(self.prefix.clone());
+        endpoint.add(subject.to_string()).await
     }
 
     /// Builder for customized [Endpoint] creation under current [Group]
@@ -693,13 +693,15 @@ impl Group {
     /// # }
     /// ```
     pub fn endpoint_builder(&self) -> EndpointBuilder {
-        EndpointBuilder::new(
+        let mut endpoint = EndpointBuilder::new(
             self.client.clone(),
             self.stats.clone(),
             self.shutdown_tx.clone(),
             self.subjects.clone(),
             self.queue_group.clone(),
-        )
+        );
+        endpoint.prefix = Some(self.prefix.clone());
+        endpoint
     }
 }
 
@@ -796,6 +798,7 @@ pub struct EndpointBuilder {
     metadata: Option<HashMap<String, String>>,
     subjects: Arc<Mutex<Vec<String>>>,
     queue_group: String,
+    prefix: Option<String>,
 }
 
 impl EndpointBuilder {
@@ -814,6 +817,7 @@ impl EndpointBuilder {
             name: None,
             metadata: None,
             queue_group,
+            prefix: None,
         }
     }
 
@@ -837,7 +841,10 @@ impl EndpointBuilder {
 
     /// Finalizes the builder and adds the [Endpoint].
     pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, Error> {
-        let subject = subject.to_string();
+        let mut subject = subject.to_string();
+        if let Some(prefix) = self.prefix {
+            subject = format!("{}.{}", prefix, subject);
+        }
         let name = self.name.clone().unwrap_or_else(|| subject.clone());
         let requests = self
             .client
