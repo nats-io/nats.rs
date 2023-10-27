@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// #[cfg(feature = "compatibility_tests")]
+#[cfg(feature = "compatibility_tests")]
 mod compatibility {
     use futures::{pin_mut, stream::Peekable, StreamExt};
 
@@ -421,7 +421,7 @@ mod compatibility {
     #[tokio::test]
     async fn service_core() {
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
-        tracing::info!("staring client for object store tests at {}", url);
+        tracing::info!("staring client for service tests at {}", url);
         let client = async_nats::connect(url).await.unwrap();
 
         let mut tests = client
@@ -460,7 +460,10 @@ mod compatibility {
         );
         let config: TestRequest<ServiceConfig> =
             serde_json::from_slice(&test_request.payload).expect("failed to parse service config");
-        let config = config.config;
+        let mut config = config.config;
+        config.service.stats_handler = Some(service::StatsHandler(Box::new(
+            |_, stats| serde_json::json!({ "endpoint": stats.name }),
+        )));
 
         let service = client
             .add_service(config.service)
@@ -507,8 +510,8 @@ mod compatibility {
                         if endpoint_name.as_str() == "faulty" {
                             request
                                 .respond(Err(service::error::Error {
-                                    status: "faulty".into(),
-                                    code: 400,
+                                    status: "handler error".into(),
+                                    code: 500,
                                 }))
                                 .await
                                 .expect("failed to respond");
@@ -527,7 +530,14 @@ mod compatibility {
             .publish(test_request.reply.unwrap(), "".into())
             .await
             .unwrap();
-        tests.next().await.expect("failed to get finalizer");
+
+        let cleanup = tests.next().await.expect("failed to get cleanup");
+        service.stop().await.expect("failed to stop service");
+        client
+            .publish(cleanup.reply.unwrap(), "".into())
+            .await
+            .expect("failed to publish cleanup ack");
+        client.flush().await.expect("failed to flush");
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
