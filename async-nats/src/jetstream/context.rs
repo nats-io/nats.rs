@@ -645,7 +645,11 @@ impl Context {
                 discard: stream::DiscardPolicy::New,
                 mirror_direct: config.mirror_direct,
                 #[cfg(feature = "server_2_10")]
-                compression: config.compression,
+                compression: if config.compression {
+                    Some(stream::Compression::S2)
+                } else {
+                    None
+                },
                 ..Default::default()
             })
             .await
