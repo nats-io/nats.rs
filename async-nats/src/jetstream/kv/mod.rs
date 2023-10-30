@@ -38,8 +38,8 @@ use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
     context::{PublishError, PublishErrorKind},
     stream::{
-        Compression, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind,
-        RawMessage, Republish, Source, StorageType, Stream,
+        ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
+        Republish, Source, StorageType, Stream,
     },
 };
 
@@ -122,7 +122,7 @@ pub struct Config {
     pub mirror_direct: bool,
     /// Compression
     #[cfg(feature = "server_2_10")]
-    pub compression: Option<Compression>,
+    pub compression: bool,
 }
 
 /// Describes what kind of operation and entry represents
