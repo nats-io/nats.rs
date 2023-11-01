@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::connection::State;
-use crate::subject::AsSubject;
+use crate::subject::ToSubject;
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
@@ -148,12 +148,12 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish<S: AsSubject>(
+    pub async fn publish<S: ToSubject>(
         &self,
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
 
         self.sender
             .send(Command::Publish {
@@ -185,13 +185,13 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_headers<S: AsSubject>(
+    pub async fn publish_with_headers<S: ToSubject>(
         &self,
         subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
 
         self.sender
             .send(Command::Publish {
@@ -220,14 +220,14 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_reply<S: AsSubject, R: AsSubject>(
+    pub async fn publish_with_reply<S: ToSubject, R: ToSubject>(
         &self,
         subject: S,
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.as_subject();
-        let reply = reply.as_subject();
+        let subject = subject.to_subject();
+        let reply = reply.to_subject();
 
         self.sender
             .send(Command::Publish {
@@ -258,15 +258,15 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_reply_and_headers<S: AsSubject, R: AsSubject>(
+    pub async fn publish_with_reply_and_headers<S: ToSubject, R: ToSubject>(
         &self,
         subject: S,
         reply: R,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.as_subject();
-        let reply = reply.as_subject();
+        let subject = subject.to_subject();
+        let reply = reply.to_subject();
 
         self.sender
             .send(Command::Publish {
@@ -290,12 +290,12 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request<S: AsSubject>(
+    pub async fn request<S: ToSubject>(
         &self,
         subject: S,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
 
         trace!(
             "request sent to subject: {} ({})",
@@ -321,13 +321,13 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request_with_headers<S: AsSubject>(
+    pub async fn request_with_headers<S: ToSubject>(
         &self,
         subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
 
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
@@ -346,12 +346,12 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_request<S: AsSubject>(
+    pub async fn send_request<S: ToSubject>(
         &self,
         subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
 
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
@@ -463,8 +463,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn subscribe<S: AsSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let subject = subject.as_subject();
+    pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
+        let subject = subject.to_subject();
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -496,12 +496,12 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn queue_subscribe<S: AsSubject>(
+    pub async fn queue_subscribe<S: ToSubject>(
         &self,
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);

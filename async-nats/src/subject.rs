@@ -111,24 +111,24 @@ impl fmt::Display for Subject {
     }
 }
 
-pub trait AsSubject {
-    fn as_subject(&self) -> Subject;
+pub trait ToSubject {
+    fn to_subject(&self) -> Subject;
 }
 
-impl AsSubject for Subject {
-    fn as_subject(&self) -> Subject {
+impl ToSubject for Subject {
+    fn to_subject(&self) -> Subject {
         self.to_owned()
     }
 }
 
-impl AsSubject for &'static str {
-    fn as_subject(&self) -> Subject {
+impl ToSubject for &'static str {
+    fn to_subject(&self) -> Subject {
         Subject::from_static(self)
     }
 }
 
-impl AsSubject for String {
-    fn as_subject(&self) -> Subject {
+impl ToSubject for String {
+    fn to_subject(&self) -> Subject {
         Subject::from(self.as_str())
     }
 }

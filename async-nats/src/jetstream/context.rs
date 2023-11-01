@@ -18,7 +18,7 @@ use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
-use crate::subject::AsSubject;
+use crate::subject::ToSubject;
 use crate::{header, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -120,7 +120,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish<S: AsSubject>(
+    pub async fn publish<S: ToSubject>(
         &self,
         subject: S,
         payload: Bytes,
@@ -150,7 +150,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_headers<S: AsSubject>(
+    pub async fn publish_with_headers<S: ToSubject>(
         &self,
         subject: S,
         headers: crate::header::HeaderMap,
@@ -182,12 +182,12 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_publish<S: AsSubject>(
+    pub async fn send_publish<S: ToSubject>(
         &self,
         subject: S,
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
         let (sender, receiver) = oneshot::channel();
 
         let respond = self.client.new_inbox().into();
@@ -805,11 +805,11 @@ impl Context {
     /// ```
     pub async fn request<S, T, V>(&self, subject: S, payload: &T) -> Result<V, RequestError>
     where
-        S: AsSubject,
+        S: ToSubject,
         T: ?Sized + Serialize,
         V: DeserializeOwned,
     {
-        let subject = subject.as_subject();
+        let subject = subject.to_subject();
         let request = serde_json::to_vec(&payload)
             .map(Bytes::from)
             .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
