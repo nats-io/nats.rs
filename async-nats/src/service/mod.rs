@@ -784,7 +784,10 @@ impl Request {
         let stats = stats.endpoints.get_mut(self.endpoint.as_str()).unwrap();
         stats.requests += 1;
         stats.processing_time += elapsed;
-        stats.average_processing_time = stats.processing_time.checked_div(2).unwrap();
+        stats.average_processing_time = {
+            let avg_nanos = (stats.processing_time.as_nanos() / stats.requests as u128) as u64;
+            Duration::from_nanos(avg_nanos)
+        };
         result
     }
 }
