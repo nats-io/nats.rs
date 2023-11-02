@@ -47,11 +47,11 @@
 //!     let client = async_nats::connect("demo.nats.io").await?;
 //!
 //!     // Subscribe to the "messages" subject
-//!     let mut subscriber = client.subscribe("messages".into()).await?;
+//!     let mut subscriber = client.subscribe("messages").await?;
 //!
 //!     // Publish messages to the "messages" subject
 //!     for _ in 0..10 {
-//!         client.publish("messages".into(), "data".into()).await?;
+//!         client.publish("messages", "data".into()).await?;
 //!     }
 //!
 //!     // Receive and process messages
@@ -77,12 +77,12 @@
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! // Prepare the subject and data
-//! let subject = String::from("foo");
+//! let subject = "foo";
 //! let data = Bytes::from("bar");
 //!
 //! // Publish messages to the NATS server
 //! for _ in 0..10 {
-//!     client.publish(subject.clone().into(), data.clone()).await?;
+//!     client.publish(subject, data.clone()).await?;
 //! }
 //! #    Ok(())
 //! # }
@@ -103,7 +103,7 @@
 //! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! // Subscribe to the "foo" subject
-//! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
+//! let mut subscriber = client.subscribe("foo").await.unwrap();
 //!
 //! // Receive and process messages
 //! while let Some(message) = subscriber.next().await {
@@ -773,7 +773,7 @@ impl ConnectionHandler {
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc =
 ///     async_nats::connect_with_options("demo.nats.io", async_nats::ConnectOptions::new()).await?;
-/// nc.publish("test".into(), "data".into()).await?;
+/// nc.publish("test", "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -794,6 +794,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             client_key: options.client_key,
             client_cert: options.client_cert,
             tls_client_config: options.tls_client_config,
+            tls_first: options.tls_first,
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
@@ -887,7 +888,7 @@ impl fmt::Display for Event {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// nc.publish("test".into(), "data".into()).await?;
+/// nc.publish("test", "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -995,7 +996,7 @@ impl From<io::Error> for ConnectError {
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
 /// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// # nc.publish("test".into(), "data".into()).await?;
+/// # nc.publish("test", "data".into()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -1027,7 +1028,7 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut subscriber = client.subscribe("foo".into()).await?;
+    /// let mut subscriber = client.subscribe("foo").await?;
     ///
     /// subscriber.unsubscribe().await?;
     /// # Ok(())
@@ -1055,11 +1056,11 @@ impl Subscriber {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     ///
-    /// let mut subscriber = client.subscribe("test".into()).await?;
+    /// let mut subscriber = client.subscribe("test").await?;
     /// subscriber.unsubscribe_after(3).await?;
     ///
     /// for _ in 0..3 {
-    ///     client.publish("test".into(), "data".into()).await?;
+    ///     client.publish("test", "data".into()).await?;
     /// }
     ///
     /// while let Some(message) = subscriber.next().await {

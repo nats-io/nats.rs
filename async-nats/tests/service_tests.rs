@@ -17,6 +17,7 @@ mod service {
 
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures::StreamExt;
+    use jsonschema::JSONSchema;
     use tracing::debug;
 
     #[tokio::test]
@@ -104,34 +105,20 @@ mod service {
             .unwrap();
 
         let info_reply = client.new_inbox();
-        let mut infos = client.subscribe(info_reply.clone().into()).await.unwrap();
+        let mut infos = client.subscribe(info_reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("$SRV.INFO".into(), info_reply.into(), "".into())
+            .publish_with_reply("$SRV.INFO", info_reply, "".into())
             .await
             .unwrap();
-        let info = infos
+        let mut info = infos
             .next()
             .await
             .map(|message| serde_json::from_slice::<service::Info>(&message.payload).unwrap())
             .unwrap();
+        let endpoint_stats = info.endpoints.pop().unwrap();
         assert_eq!(metadata, info.metadata);
-        //TODO: test rest of fields
-
-        let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
-        client
-            .publish_with_reply("$SRV.STATS".into(), reply.into(), "".into())
-            .await
-            .unwrap();
-
-        let mut stats = responses
-            .next()
-            .await
-            .map(|message| serde_json::from_slice::<service::Stats>(&message.payload).unwrap())
-            .unwrap();
-
-        let endpoint_stats = stats.endpoints.pop().unwrap();
         assert_eq!(endpoint_stats.metadata, endpoint_metadata);
+        //TODO: test rest of fields
     }
 
     #[tokio::test]
@@ -163,9 +150,9 @@ mod service {
             .unwrap();
 
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
+        let mut responses = client.subscribe(reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("$SRV.PING".into(), reply.into(), "".into())
+            .publish_with_reply("$SRV.PING", reply, "".into())
             .await
             .unwrap();
         responses.next().await.unwrap();
@@ -191,9 +178,9 @@ mod service {
 
         let mut products = service.endpoint("products").await.unwrap();
         let reply = client.new_inbox();
-        let mut responses = client.subscribe(reply.clone().into()).await.unwrap();
+        let mut responses = client.subscribe(reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         let request = products.next().await.unwrap();
@@ -203,7 +190,7 @@ mod service {
         let v2 = service.group("v2");
         let mut v2product = v2.endpoint("products").await.unwrap();
         client
-            .publish_with_reply("v2.products".into(), reply.into(), "data".into())
+            .publish_with_reply("v2.products", reply, "data".into())
             .await
             .unwrap();
         let request = v2product.next().await.unwrap();
@@ -231,21 +218,21 @@ mod service {
 
         let mut endpoint = service.endpoint("products").await.unwrap().take(3);
         let reply = client.new_inbox();
-        let mut response = client.subscribe(reply.clone().into()).await.unwrap();
+        let mut response = client.subscribe(reply.to_owned()).await.unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client
-            .publish_with_reply("products".into(), reply.clone().into(), "data".into())
+            .publish_with_reply("products", reply.to_owned(), "data".into())
             .await
             .unwrap();
         client.flush().await.unwrap();
@@ -268,7 +255,7 @@ mod service {
         }
 
         let info = client
-            .request("$SRV.INFO.serviceA".into(), "".into())
+            .request("$SRV.INFO.serviceA", "".into())
             .await
             .map(|message| serde_json::from_slice::<Info>(&message.payload))
             .unwrap()
@@ -277,7 +264,7 @@ mod service {
         assert_eq!(info.name, "serviceA");
 
         let stats = client
-            .request("$SRV.STATS".into(), "".into())
+            .request("$SRV.STATS", "".into())
             .await
             .map(|message| serde_json::from_slice::<Stats>(&message.payload))
             .unwrap()
@@ -329,10 +316,7 @@ mod service {
         );
 
         // service should not respond anymore, as its stopped.
-        client
-            .request("$SRV.PING".into(), "".into())
-            .await
-            .unwrap_err();
+        client.request("$SRV.PING", "".into()).await.unwrap_err();
     }
 
     #[tokio::test]
@@ -356,7 +340,7 @@ mod service {
 
         let info: service::Stats = serde_json::from_slice(
             &client
-                .request("$SRV.STATS".into(), "".into())
+                .request("$SRV.STATS", "".into())
                 .await
                 .unwrap()
                 .payload,
@@ -381,12 +365,9 @@ mod service {
         // Check if we get response from each service instance, as each have different
         // queue groups.
         let reply_subject = client.new_inbox();
-        let responses = client
-            .subscribe(reply_subject.clone().into())
-            .await
-            .unwrap();
+        let responses = client.subscribe(reply_subject.to_owned()).await.unwrap();
         client
-            .publish_with_reply("data".into(), reply_subject.into(), "request".into())
+            .publish_with_reply("data", reply_subject, "request".into())
             .await
             .unwrap();
 
@@ -428,16 +409,9 @@ mod service {
 
         // Check if we get reply from both group endpoints.
         let reply_subject = client.new_inbox();
-        let responses = client
-            .subscribe(reply_subject.clone().into())
-            .await
-            .unwrap();
+        let responses = client.subscribe(reply_subject.to_owned()).await.unwrap();
         client
-            .publish_with_reply(
-                "group.grouped".into(),
-                reply_subject.into(),
-                "request".into(),
-            )
+            .publish_with_reply("group.grouped", reply_subject, "request".into())
             .await
             .unwrap();
         assert_eq!(responses.take(2).count().await, 2);
@@ -471,12 +445,9 @@ mod service {
         });
         // Check if we get reply from both group endpoints.
         let reply_subject = client.new_inbox();
-        let responses = client
-            .subscribe(reply_subject.clone().into())
-            .await
-            .unwrap();
+        let responses = client.subscribe(reply_subject.to_owned()).await.unwrap();
         client
-            .publish_with_reply("endpoint".into(), reply_subject.into(), "request".into())
+            .publish_with_reply("endpoint", reply_subject, "request".into())
             .await
             .unwrap();
         assert_eq!(responses.take(2).count().await, 2);
@@ -511,7 +482,7 @@ mod service {
 
         let info: service::Info = serde_json::from_slice(
             &client
-                .request("$SRV.INFO".into(), "".into())
+                .request("$SRV.INFO", "".into())
                 .await
                 .unwrap()
                 .payload,
@@ -519,6 +490,66 @@ mod service {
         .unwrap();
 
         assert_eq!(&endpoint_info, info.endpoints.first().unwrap());
+    }
+
+    #[tokio::test]
+    async fn schemas() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // test default service
+        let service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+        let _endpoint = service.endpoint("products").await.unwrap();
+        let group = service.group("v1");
+        group.endpoint("productsv2").await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // test default service
+        let service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+        let _endpoint = service.endpoint("products").await.unwrap();
+        let group = service.group("v1");
+        group.endpoint("productsv2").await.unwrap();
+        validate(&client, "ping").await;
+        validate(&client, "stats").await;
+        validate(&client, "info").await;
+
+        async fn validate(client: &async_nats::Client, endpoint: &str) {
+            let data: serde_json::Value = serde_json::from_slice(
+                &client
+                    .request(format!("$SRV.{}", endpoint.to_uppercase()), "".into())
+                    .await
+                    .unwrap()
+                    .payload,
+            )
+            .unwrap();
+            let schema = reqwest::get(schema_url(endpoint))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            match JSONSchema::compile(&schema).unwrap().validate(&data) {
+                Ok(_) => (),
+                Err(errs) => {
+                    for err in errs {
+                        panic!("schema {} validation error: {}", endpoint, err)
+                    }
+                }
+            };
+        }
+
+        fn schema_url(url: &str) -> String {
+            format!("https://raw.githubusercontent.com/nats-io/jsm.go/main/schemas/micro/v1/{}_response.json",  url)
+        }
     }
 
     #[tokio::test]
@@ -531,7 +562,7 @@ mod service {
 
         let service = client
             .service_builder()
-            .stats_handler(|endpoint, _| format!("custom data for {endpoint}"))
+            .stats_handler(|endpoint, _| serde_json::json!({ "endpoint": endpoint }))
             .description("a cross service")
             .start("cross", "1.0.0")
             .await

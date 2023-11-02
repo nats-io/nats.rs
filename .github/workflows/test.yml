@@ -42,16 +42,8 @@ jobs:
         uses: actions/setup-go@v4 # v4 uses caching out of the box
         with:
           go-version: '1.20'
-      - name: Cache nats-server on ${{ matrix.os }}
-        id:   cache-nats-server
-        uses: actions/cache@v3
-        with:
-          path: ${{ matrix.go-bin }}
-          key:  ${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}-nats-server
       - name: Install nats-server
-        if:   steps.cache-nats-server.outputs.cache-hit != 'true'
         run:  go install github.com/nats-io/nats-server/v2@main
-
       - name: Install stable Rust on ${{ matrix.os }}
         id:   install-rust
         uses: dtolnay/rust-toolchain@stable
@@ -111,7 +103,7 @@ jobs:
 
       - name: Run linter
         run: cargo clippy --benches --tests --examples --all-features -- --deny clippy::all
-  
+
   check_docs:
     name: check docs (ubuntu-latest / stable)
     runs-on: ubuntu-latest

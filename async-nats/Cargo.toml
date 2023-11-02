@@ -36,7 +36,7 @@ tracing = "0.1"
 thiserror = "1.0"
 base64 = "0.21"
 tokio-retry = "0.3"
-ring = "0.16"
+ring = "0.17"
 rand = "0.8"
 webpki = { package = "rustls-webpki", version = "0.101.2", features = ["alloc", "std"] }
 
@@ -52,6 +52,7 @@ futures = { version = "0.3.28", default-features = false, features = ["std", "as
 tracing-subscriber = "0.3"
 async-nats = {path = ".", features = ["experimental"]}
 reqwest = "0.11.18"
+jsonschema = "0.17.1"
 
 
 [features]

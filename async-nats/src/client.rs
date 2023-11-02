@@ -12,11 +12,10 @@
 // limitations under the License.
 
 use crate::connection::State;
+use crate::subject::ToSubject;
 use crate::ServerInfo;
 
-use super::{
-    header::HeaderMap, status::StatusCode, subject::Subject, Command, Message, Subscriber,
-};
+use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
@@ -145,13 +144,17 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// client
-    ///     .publish("events.data".into(), "payload".into())
-    ///     .await?;
+    /// client.publish("events.data", "payload".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish(&self, subject: Subject, payload: Bytes) -> Result<(), PublishError> {
+    pub async fn publish<S: ToSubject>(
+        &self,
+        subject: S,
+        payload: Bytes,
+    ) -> Result<(), PublishError> {
+        let subject = subject.to_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -177,17 +180,19 @@ impl Client {
     ///     async_nats::HeaderValue::from_str("Value").unwrap(),
     /// );
     /// client
-    ///     .publish_with_headers("events.data".into(), headers, "payload".into())
+    ///     .publish_with_headers("events.data", headers, "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_headers(
+    pub async fn publish_with_headers<S: ToSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let subject = subject.to_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -210,21 +215,20 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// client
-    ///     .publish_with_reply(
-    ///         "events.data".into(),
-    ///         "reply_subject".into(),
-    ///         "payload".into(),
-    ///     )
+    ///     .publish_with_reply("events.data", "reply_subject", "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_reply(
+    pub async fn publish_with_reply<S: ToSubject, R: ToSubject>(
         &self,
-        subject: Subject,
-        reply: Subject,
+        subject: S,
+        reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let subject = subject.to_subject();
+        let reply = reply.to_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -249,23 +253,21 @@ impl Client {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut headers = async_nats::HeaderMap::new();
     /// client
-    ///     .publish_with_reply_and_headers(
-    ///         "events.data".into(),
-    ///         "reply_subject".into(),
-    ///         headers,
-    ///         "payload".into(),
-    ///     )
+    ///     .publish_with_reply_and_headers("events.data", "reply_subject", headers, "payload".into())
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn publish_with_reply_and_headers(
+    pub async fn publish_with_reply_and_headers<S: ToSubject, R: ToSubject>(
         &self,
-        subject: Subject,
-        reply: Subject,
+        subject: S,
+        reply: R,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let subject = subject.to_subject();
+        let reply = reply.to_subject();
+
         self.sender
             .send(Command::Publish {
                 subject,
@@ -284,11 +286,17 @@ impl Client {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let response = client.request("service".into(), "data".into()).await?;
+    /// let response = client.request("service", "data".into()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request(&self, subject: Subject, payload: Bytes) -> Result<Message, RequestError> {
+    pub async fn request<S: ToSubject>(
+        &self,
+        subject: S,
+        payload: Bytes,
+    ) -> Result<Message, RequestError> {
+        let subject = subject.to_subject();
+
         trace!(
             "request sent to subject: {} ({})",
             subject.as_ref(),
@@ -308,17 +316,19 @@ impl Client {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("Key", "Value");
     /// let response = client
-    ///     .request_with_headers("service".into(), headers, "data".into())
+    ///     .request_with_headers("service", headers, "data".into())
     ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn request_with_headers(
+    pub async fn request_with_headers<S: ToSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
+        let subject = subject.to_subject();
+
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
@@ -332,28 +342,27 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let request = async_nats::Request::new().payload("data".into());
-    /// let response = client.send_request("service".into(), request).await?;
+    /// let response = client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_request(
+    pub async fn send_request<S: ToSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
+        let subject = subject.to_subject();
+
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
-            let mut subscriber = self.subscribe(inbox.clone().into()).await?;
+            let mut subscriber = self.subscribe(inbox.clone()).await?;
             let payload: Bytes = request.payload.unwrap_or_default();
             match request.headers {
                 Some(headers) => {
-                    self.publish_with_reply_and_headers(subject, inbox.into(), headers, payload)
+                    self.publish_with_reply_and_headers(subject, inbox, headers, payload)
                         .await?
                 }
-                None => {
-                    self.publish_with_reply(subject, inbox.into(), payload)
-                        .await?
-                }
+                None => self.publish_with_reply(subject, inbox, payload).await?,
             }
             let request = match timeout {
                 Some(timeout) => {
@@ -430,7 +439,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// # let mut nc = async_nats::connect("demo.nats.io").await?;
     /// let reply = nc.new_inbox();
-    /// let rsub = nc.subscribe(reply.into()).await?;
+    /// let rsub = nc.subscribe(reply).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -447,14 +456,15 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut subscription = client.subscribe("events.>".into()).await?;
+    /// let mut subscription = client.subscribe("events.>").await?;
     /// while let Some(message) = subscription.next().await {
     ///     println!("received message: {:?}", message);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn subscribe(&self, subject: Subject) -> Result<Subscriber, SubscribeError> {
+    pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
+        let subject = subject.to_subject();
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -479,20 +489,20 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
-    /// let mut subscription = client
-    ///     .queue_subscribe("events.>".into(), "queue".into())
-    ///     .await?;
+    /// let mut subscription = client.queue_subscribe("events.>", "queue".into()).await?;
     /// while let Some(message) = subscription.next().await {
     ///     println!("received message: {:?}", message);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn queue_subscribe(
+    pub async fn queue_subscribe<S: ToSubject>(
         &self,
-        subject: Subject,
+        subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
+        let subject = subject.to_subject();
+
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -570,7 +580,7 @@ impl Request {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let request = async_nats::Request::new().payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -595,7 +605,7 @@ impl Request {
     /// let request = async_nats::Request::new()
     ///     .headers(headers)
     ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -616,7 +626,7 @@ impl Request {
     /// let request = async_nats::Request::new()
     ///     .timeout(Some(std::time::Duration::from_secs(15)))
     ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -636,7 +646,7 @@ impl Request {
     /// let request = async_nats::Request::new()
     ///     .inbox("custom_inbox".into())
     ///     .payload("data".into());
-    /// client.send_request("service".into(), request).await?;
+    /// client.send_request("service", request).await?;
     /// # Ok(())
     /// # }
     /// ```

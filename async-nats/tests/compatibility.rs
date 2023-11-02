@@ -16,11 +16,14 @@ mod compatibility {
     use futures::{pin_mut, stream::Peekable, StreamExt};
 
     use core::panic;
-    use std::{collections::HashMap, pin::Pin};
+    use std::{collections::HashMap, pin::Pin, str::from_utf8};
 
-    use async_nats::jetstream::{
-        self,
-        object_store::{self, ObjectMetadata, UpdateMetadata},
+    use async_nats::{
+        jetstream::{
+            self,
+            object_store::{self, ObjectMetadata, UpdateMetadata},
+        },
+        service::{self, ServiceExt},
     };
     use ring::digest::{self, SHA256};
     use serde::{Deserialize, Serialize};
@@ -36,18 +39,18 @@ mod compatibility {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .init();
-        let url = std::env::var("NATS_URL").unwrap_or_else(|_| "demo.nats.io".to_string());
+        let url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
         tracing::info!("staring client for object store tests at {}", url);
         let client = async_nats::connect(url).await.unwrap();
 
         let tests = client
-            .subscribe("tests.object-store.>".into())
+            .subscribe("tests.object-store.>")
             .await
             .unwrap()
             .peekable();
         pin_mut!(tests);
 
-        let mut done = client.subscribe("tests.done".into()).await.unwrap();
+        let mut done = client.subscribe("tests.done").await.unwrap();
 
         loop {
             tokio::select! {
@@ -413,6 +416,128 @@ mod compatibility {
                 println!("test update-metadata PASS");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn service_core() {
+        let url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
+        tracing::info!("staring client for service tests at {}", url);
+        let client = async_nats::connect(url).await.unwrap();
+
+        let mut tests = client
+            .subscribe("tests.service.core.>")
+            .await
+            .unwrap()
+            .peekable();
+
+        #[derive(Serialize, Deserialize)]
+        struct ServiceConfig {
+            #[serde(flatten)]
+            service: service::Config,
+            groups: Vec<GroupConfig>,
+            endpoints: Vec<EndpointConfig>,
+        }
+
+        #[derive(Serialize, Deserialize)]
+        struct GroupConfig {
+            name: String,
+            queue_group: Option<String>,
+        }
+
+        #[derive(Serialize, Deserialize)]
+        struct EndpointConfig {
+            name: String,
+            subject: String,
+            metadata: Option<HashMap<String, String>>,
+            queue_group: Option<String>,
+            group: Option<String>,
+        }
+
+        let test_request = tests.next().await.unwrap();
+        println!(
+            "received first request: {}",
+            from_utf8(&test_request.payload).unwrap()
+        );
+        let config: TestRequest<ServiceConfig> =
+            serde_json::from_slice(&test_request.payload).expect("failed to parse service config");
+        let mut config = config.config;
+        config.service.stats_handler = Some(service::StatsHandler(Box::new(
+            |_, stats| serde_json::json!({ "endpoint": stats.name }),
+        )));
+
+        let service = client
+            .add_service(config.service)
+            .await
+            .expect("failed to add service");
+
+        let mut group_handlers = HashMap::new();
+        for group in config.groups {
+            match group.queue_group {
+                Some(queue_group) => group_handlers.insert(
+                    group.name.clone(),
+                    service.group_with_queue_group(group.name.clone(), queue_group),
+                ),
+                None => group_handlers.insert(group.name.clone(), service.group(group.name)),
+            };
+        }
+
+        for endpoint_config in config.endpoints {
+            let mut endpoint = {
+                if let Some(ref group) = endpoint_config.group {
+                    group_handlers
+                        .get(group)
+                        .expect("unknown group")
+                        .endpoint_builder()
+                } else {
+                    service.endpoint_builder()
+                }
+            };
+            endpoint = endpoint.name(endpoint_config.name.clone());
+            if let Some(ref queue_group) = endpoint_config.queue_group {
+                endpoint = endpoint.queue_group(queue_group);
+            }
+            if let Some(ref metadata) = endpoint_config.metadata {
+                endpoint = endpoint.metadata(metadata.to_owned());
+            }
+            let mut endpoint = endpoint
+                .add(endpoint_config.subject)
+                .await
+                .expect("failed to add endpoint");
+            tokio::task::spawn({
+                let endpoint_name = endpoint_config.name.clone();
+                async move {
+                    while let Some(request) = endpoint.next().await {
+                        if endpoint_name.as_str() == "faulty" {
+                            request
+                                .respond(Err(service::error::Error {
+                                    status: "handler error".into(),
+                                    code: 500,
+                                }))
+                                .await
+                                .expect("failed to respond");
+                        } else {
+                            let response = request.message.payload.clone();
+                            request
+                                .respond(Ok(response))
+                                .await
+                                .expect("failed to echo respond");
+                        }
+                    }
+                }
+            });
+        }
+        client
+            .publish(test_request.reply.unwrap(), "".into())
+            .await
+            .unwrap();
+
+        let cleanup = tests.next().await.expect("failed to get cleanup");
+        service.stop().await.expect("failed to stop service");
+        client
+            .publish(cleanup.reply.unwrap(), "".into())
+            .await
+            .expect("failed to publish cleanup ack");
+        client.flush().await.expect("failed to flush");
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]

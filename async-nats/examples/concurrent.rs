@@ -26,12 +26,12 @@ async fn main() -> Result<(), async_nats::Error> {
     // `Subscriber` implements Rust iterator, so we can leverage
     // combinators like `take()` to limit the messages intended
     // to be consumed for this interaction.
-    let subscription = client.subscribe("greet.*".into()).await?.take(50);
+    let subscription = client.subscribe("greet.*").await?.take(50);
 
     // Publish set of messages, each with order identifier.
     for i in 0..50 {
         client
-            .publish("greet.joe".into(), format!("hello {i}").into())
+            .publish("greet.joe", format!("hello {i}").into())
             .await?;
     }
 
