@@ -106,7 +106,7 @@ pub struct Info {
     /// Service id.
     pub id: String,
     /// Service description.
-    pub description: Option<String>,
+    pub description: String,
     /// Service version.
     pub version: String,
     /// Additional metadata
@@ -354,7 +354,7 @@ impl Service {
             kind: "io.nats.micro.v1.info_response".to_string(),
             name: config.name.clone(),
             id: id.clone(),
-            description: config.description.clone(),
+            description: config.description.clone().unwrap_or_default(),
             version: config.version.clone(),
             metadata: config.metadata.clone().unwrap_or_default(),
             endpoints: Vec::new(),
