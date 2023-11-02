@@ -129,7 +129,9 @@ pub mod account;
 pub mod consumer;
 pub mod context;
 mod errors;
+#[cfg(feature = "kv")]
 pub mod kv;
+#[cfg(feature = "object_store")]
 pub mod message;
 pub mod object_store;
 pub mod publish;

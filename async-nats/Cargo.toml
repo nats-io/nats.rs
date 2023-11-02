@@ -56,9 +56,12 @@ jsonschema = "0.17.1"
 
 
 [features]
-default = ["server_2_10"]
+default = ["server_2_10", "jetstream", "kv", "object_store", "service"]
 service = []
-experimental = ["service"]
+jetstream = []
+kv = ["jetstream"]
+object_store = ["jetstream"]
+experimental = []
 "server_2_10" = []
 slow_tests = []
 compatibility_tests = []

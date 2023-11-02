@@ -179,6 +179,7 @@ pub use options::{AuthError, ConnectOptions};
 
 pub mod error;
 pub mod header;
+#[cfg(feature = "jetstream")]
 pub mod jetstream;
 pub mod message;
 #[cfg(feature = "service")]
