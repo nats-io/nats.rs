@@ -846,7 +846,11 @@ impl EndpointBuilder {
             subject = format!("{}.{}", prefix, subject);
         }
         let endpoint_name = self.name.clone().unwrap_or_else(|| subject.clone());
-        let name = self.name.clone().unwrap_or_else(|| subject.clone());
+        println!("endpoint name: {}", endpoint_name);
+        let name = self
+            .name
+            .clone()
+            .unwrap_or_else(|| subject.clone().replace('.', "-"));
         let requests = self
             .client
             .queue_subscribe(subject.to_owned(), self.queue_group.to_string())
