@@ -17,6 +17,7 @@ mod service {
 
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures::StreamExt;
+    use jsonschema::JSONSchema;
     use tracing::debug;
 
     #[tokio::test]
@@ -489,6 +490,66 @@ mod service {
         .unwrap();
 
         assert_eq!(&endpoint_info, info.endpoints.first().unwrap());
+    }
+
+    #[tokio::test]
+    async fn schemas() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // test default service
+        let service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+        let _endpoint = service.endpoint("products").await.unwrap();
+        let group = service.group("v1");
+        group.endpoint("productsv2").await.unwrap();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // test default service
+        let service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+        let _endpoint = service.endpoint("products").await.unwrap();
+        let group = service.group("v1");
+        group.endpoint("productsv2").await.unwrap();
+        validate(&client, "ping").await;
+        validate(&client, "stats").await;
+        validate(&client, "info").await;
+
+        async fn validate(client: &async_nats::Client, endpoint: &str) {
+            let data: serde_json::Value = serde_json::from_slice(
+                &client
+                    .request(format!("$SRV.{}", endpoint.to_uppercase()), "".into())
+                    .await
+                    .unwrap()
+                    .payload,
+            )
+            .unwrap();
+            let schema = reqwest::get(schema_url(endpoint))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            match JSONSchema::compile(&schema).unwrap().validate(&data) {
+                Ok(_) => (),
+                Err(errs) => {
+                    for err in errs {
+                        panic!("schema {} validation error: {}", endpoint, err)
+                    }
+                }
+            };
+        }
+
+        fn schema_url(url: &str) -> String {
+            format!("https://raw.githubusercontent.com/nats-io/jsm.go/main/schemas/micro/v1/{}_response.json",  url)
+        }
     }
 
     #[tokio::test]

@@ -52,6 +52,7 @@ futures = { version = "0.3.28", default-features = false, features = ["std", "as
 tracing-subscriber = "0.3"
 async-nats = {path = ".", features = ["experimental"]}
 reqwest = "0.11.18"
+jsonschema = "0.17.1"
 
 
 [features]
