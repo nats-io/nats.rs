@@ -64,6 +64,8 @@ This client will be deprecated soon, when `async-nats` reaches version 1.0, with
 
 Please refer each crate docs for API reference and examples.
 
+**Additionally Check out [NATS by example](https://natsbyexample.com) - An evolving collection of runnable, cross-client reference examples for NATS.**
+
 ## Feedback
 
 We encourage all folks in the NATS and Rust ecosystems to help us
