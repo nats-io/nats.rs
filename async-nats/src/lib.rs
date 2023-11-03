@@ -112,6 +112,76 @@
 //! #     Ok(())
 //! # }
 //! ```
+//!
+//! ### JetStream
+//!
+//! To access JetStream API, create a JetStream [jetstream::Context].
+//!
+//! ```no_run
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
+//! let client = async_nats::connect("demo.nats.io").await?;
+//! // Create a JetStream context.
+//! let jetstream = async_nats::jetstream::new(client);
+//!
+//! // Publish JetStream messages, manage streams, consumers, etc.
+//! jetstream.publish("foo", "bar".into()).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### Key-value Store
+//!
+//! Key-value [Store][jetstream::kv::Store] is accessed through [jetstream::Context].
+//!
+//! ```no_run
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
+//! let client = async_nats::connect("demo.nats.io").await?;
+//! // Create a JetStream context.
+//! let jetstream = async_nats::jetstream::new(client);
+//! // Access an existing key-value.
+//! let kv = jetstream.get_key_value("store").await?;
+//! # Ok(())
+//! # }
+//! ```
+//! ### Object Store store
+//!
+//! Object [Store][jetstream::object_store::ObjectStore] is accessed through [jetstream::Context].
+//!
+//! ```no_run
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), async_nats::Error> {
+//! // Connect to the NATS server
+//! let client = async_nats::connect("demo.nats.io").await?;
+//! // Create a JetStream context.
+//! let jetstream = async_nats::jetstream::new(client);
+//! // Access an existing key-value.
+//! let kv = jetstream.get_object_store("store").await?;
+//! # Ok(())
+//! # }
+//! ```
+//! ### Service API
+//!
+//! [Service API][service::Service] is accessible through [Client] after importing its trait.
+//!
+//! ```no_run
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), async_nats::Error> {
+//! use async_nats::service::ServiceExt;
+//! // Connect to the NATS server
+//! let client = async_nats::connect("demo.nats.io").await?;
+//! let mut service = client
+//!     .service_builder()
+//!     .description("some service")
+//!     .stats_handler(|endpoint, stats| serde_json::json!({ "endpoint": endpoint }))
+//!     .start("products", "1.0.0")
+//!     .await?;
+//! # Ok(())
+//! # }
+//! ```
 
 #![deny(unreachable_pub)]
 #![deny(rustdoc::broken_intra_doc_links)]
