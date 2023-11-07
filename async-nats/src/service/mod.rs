@@ -849,7 +849,6 @@ impl EndpointBuilder {
             subject = format!("{}.{}", prefix, subject);
         }
         let endpoint_name = self.name.clone().unwrap_or_else(|| subject.clone());
-        println!("endpoint name: {}", endpoint_name);
         let name = self
             .name
             .clone()
