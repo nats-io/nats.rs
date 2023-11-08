@@ -1,3 +1,13 @@
+# 0.24.1
+## Overview
+
+This is a patch release for all pending changes and backports for legacy sync nats client, especially for TLS security fix.
+
+## What's Changed
+* Fix sync TLS authentication for EC keys by @sp-angel  https://github.com/nats-io/nats.rs/pull/1128
+* Update TLS dependencies for legacy client and fix vulnerability by @n1ghtmare in https://github.com/nats-io/nats.rs/pull/982
+* Update nkeys to v0.3.0 by @vados-cosmonic in https://github.com/nats-io/nats.rs/pull/995
+
 # 0.24.0
 ## Added
 * Add timeout to JetStream requests by @j13tw in https://github.com/nats-io/nats.rs/pull/771
@@ -91,7 +101,7 @@ Dropping NATS connection was not affected.
 # 0.18.0
 ## Overview
 This release focuses mainly around fixes of large changes introduces in 0.17.0, but also improves adds slow consumers support
-and improves header map interface. 
+and improves header map interface.
 
 ## Breaking Change
 * Add a public convenience interface to header maps by @caspervonb in https://github.com/nats-io/nats.rs/pull/310

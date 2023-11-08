@@ -1,6 +1,6 @@
 [package]
 name = "nats"
-version = "0.24.0"
+version = "0.24.1"
 description = "A Rust NATS client"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
@@ -41,7 +41,7 @@ itoa = "1.0.1"
 json = "0.12.4"
 lazy_static = "1.4.0"
 log = "0.4.14"
-nkeys = "0.3.0"
+nkeys = "0.3.2"
 nuid = "0.3.1"
 once_cell = "1.8.0"
 parking_lot = "0.12.0"

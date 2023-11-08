@@ -1,3 +1,65 @@
+# 0.33.0
+## Overview
+
+This release introduces last planned breaking changes and stabilizes the async API.
+
+### Subject in publish methods
+The biggest change is how subjects are handled. Until now, publish was of type `String`:
+```rust
+client.publish("subject".to_string(), "data".into()).await?;
+```
+This was easy to understand and reason about, but had two downsides:
+1. It was always allocating
+2. It was cumbersome for codebases working with `&'static str`
+
+The signature has been change into:
+```rust
+// Signature
+async fn publish(subject: impl ToSubject, payload: Bytes)
+// Usage
+client.publish("subject", "data".into()).await?;
+```
+This is not only more concise, but also allows avoiding allocations when subject is `static`,
+or when it is `Subject` type that can be cheaply cloned leveraging memory optimized `bytes::Bytes` mechanism under the hood.
+
+### Service API improvements
+Beyond that, there were a lot of improvements to Service API to address cross-language compatibility issues.
+All structures are now tested against common cross-language json schemas.
+Thanks @jadamcrain for all the feedback, issues nad PRs related to Service API!
+
+### Docs improvements
+Despite every method having documentation with examples, we were aware that sometimes its hard to navigate the docs to find what someone is looking for.
+This was addressed by adding module-level docs.
+
+## Added
+* Add subject type by @caspervonb in https://github.com/nats-io/nats.rs/pull/952 & @Jarema in  https://github.com/nats-io/nats.rs/pull/1147
+* Add custom serialized for last_error, update schemas by @piotrpio in https://github.com/nats-io/nats.rs/pull/1140
+* Add JetStream, kv, object store and service to top level docs examples by @Jarema in https://github.com/nats-io/nats.rs/pull/1154
+* Add compression option to kv by @Jarema in https://github.com/nats-io/nats.rs/pull/1143
+* Add TLS first support by @Jarema in https://github.com/nats-io/nats.rs/pull/1136
+
+## Changed
+* Use muxed inbox to handle jetstream publishes by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1130
+* Make object store structures more resilient by @Jarema in https://github.com/nats-io/nats.rs/pull/1127
+
+## Fixed
+* Fix service Info to include endpoints info by @Jarema in https://github.com/nats-io/nats.rs/pull/1119
+* Fix service defaults by @Jarema in https://github.com/nats-io/nats.rs/pull/1150
+* Fix calculating average processing time as total time / # requests by @jadamcrain in https://github.com/nats-io/nats.rs/pull/1152
+
+## Misc
+* Bump ring crate to v0.17 by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1129
+* Cleanup flush logic by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1120
+* Improve CI/CD by @nepalez in https://github.com/nats-io/nats.rs/pull/1122
+* Increase default channel capacity values by @Jarema in https://github.com/nats-io/nats.rs/pull/1133
+* Remove println by @jadamcrain in https://github.com/nats-io/nats.rs/pull/1155
+
+## New Contributors
+* @jadamcrain made their first contribution in https://github.com/nats-io/nats.rs/pull/1152
+* @sp-angel made their first contribution in https://github.com/nats-io/nats.rs/pull/1128
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.32.0...async-nats/v0.33.0
+
 # 0.32.1
 ## Overview
 This is a patch release for the new 0.32 muxer, as it could subscribe to more messages than necessary, properly dispatching
@@ -97,7 +159,7 @@ This release fixes it by starting the idle heartbeat timer only after Stream fut
 # 0.30.0
 ## Overview
 This is a big release that introduces almost all breaking changes and API refinements before 1.0.0.
-The last two pending breaking items are: 
+The last two pending breaking items are:
 * Improved builders based on https://github.com/nats-io/nats.rs/discussions/828
 * Introduce a `Subject` type (still discussed)
 
@@ -236,10 +298,10 @@ To use the new features before the server 2.10.0 release, enable `server_2_10` f
 ## Breaking Changes
 ### To enable NAK with backoff, `AckKind::NAK` enum variant was changed
 
-What was before: 
+What was before:
 ```rust
 AckKind::Nak
-``` 
+```
 
 now is:
 ```rust
@@ -718,7 +780,7 @@ Warning: JetStream support is experimental and may change
 # 0.13.0
 ## Added
 * Add Auth - username/password & token by @Jarema in https://github.com/nats-io/nats.rs/pull/408
-* Support sending and receiving messages with headers by @caspervonb in https://github.com/nats-io/nats.rs/pull/402 
+* Support sending and receiving messages with headers by @caspervonb in https://github.com/nats-io/nats.rs/pull/402
 * Add async server errors callbacks by @Jarema in https://github.com/nats-io/nats.rs/pull/397
 * Discover additional servers via INFO by @caspervonb in https://github.com/nats-io/nats.rs/pull/403
 * Resolve socket addresses during connect by @caspervonb in https://github.com/nats-io/nats.rs/pull/403
@@ -745,7 +807,7 @@ Warning: JetStream support is experimental and may change
 * Use local server for documentation tests by @caspervonb in https://github.com/nats-io/nats.rs/pull/377
 * Improve workflow caching by @caspervonb in https://github.com/nats-io/nats.rs/pull/381
 * Fix typo in README.md by @mgrachev in https://github.com/nats-io/nats.rs/pull/384
-* Internal Architecture overhaul by @caspervonb and @Jarema 
+* Internal Architecture overhaul by @caspervonb and @Jarema
 
 # 0.11.0
 Initial release of async NATS client rewrite.
