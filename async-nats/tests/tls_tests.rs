@@ -35,8 +35,8 @@ mod client {
         async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
             .add_client_certificate(
-                path.join("tests/configs/certs/client-cert.pem"),
-                path.join("tests/configs/certs/client-key.pem"),
+                path.join("tests/configs/certs/clientonly.crt"),
+                path.join("tests/configs/certs/clientonly.key"),
             )
             .require_tls(true)
             .connect(server.client_url())
@@ -151,8 +151,8 @@ mod client {
             async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
                 .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
                 .add_client_certificate(
-                    path.join("tests/configs/certs/client-cert.pem"),
-                    path.join("tests/configs/certs/client-key.pem"),
+                    path.join("tests/configs/certs/clientonly.crt"),
+                    path.join("tests/configs/certs/clientonly.key"),
                 )
                 .require_tls(true)
                 .tls_first()
@@ -183,8 +183,8 @@ mod client {
         async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
             .add_client_certificate(
-                path.join("tests/configs/certs/client-cert.pem"),
-                path.join("tests/configs/certs/client-key.pem"),
+                path.join("tests/configs/certs/clientonly.crt"),
+                path.join("tests/configs/certs/clientonly.key"),
             )
             .require_tls(true)
             .connect(server.client_url())
@@ -195,8 +195,8 @@ mod client {
             async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
                 .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
                 .add_client_certificate(
-                    path.join("tests/configs/certs/client-cert.pem"),
-                    path.join("tests/configs/certs/client-key.pem"),
+                    path.join("tests/configs/certs/clientonly.crt"),
+                    path.join("tests/configs/certs/clientonly.key"),
                 )
                 .require_tls(true)
                 .tls_first()
