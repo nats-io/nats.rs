@@ -54,6 +54,9 @@ async-nats = {path = ".", features = ["experimental"]}
 reqwest = "0.11.18"
 jsonschema = "0.17.1"
 
+# for -Z minimal-versions
+num = "0.4.1"
+
 
 [features]
 default = ["server_2_10"]
