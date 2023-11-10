@@ -531,7 +531,6 @@ impl<'a> Consumer<OrderedConfig> {
     /// let mut messages = consumer.messages().await?.take(100);
     /// while let Some(Ok(message)) = messages.next().await {
     ///     println!("got message {:?}", message);
-    ///     message.ack().await?;
     /// }
     /// Ok(())
     /// # }
