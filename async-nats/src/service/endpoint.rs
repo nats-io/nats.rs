@@ -43,8 +43,13 @@ impl Stream for Endpoint {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         trace!("polling for next request");
-        match self.shutdown_future.as_mut() {
-            Some(shutdown) => match shutdown.as_mut().poll(cx) {
+        if let Some(mut receiver) = self.shutdown.take() {
+            // Need to initialize `shutdown_future` on first poll
+            self.shutdown_future = Some(Box::pin(async move { receiver.recv().await }));
+        }
+
+        if let Some(shutdown) = self.shutdown_future.as_mut() {
+            match shutdown.as_mut().poll(cx) {
                 Poll::Ready(_result) => {
                     debug!("got stop broadcast");
                     self.requests
@@ -54,16 +59,16 @@ impl Stream for Endpoint {
                             max: None,
                         })
                         .ok();
+
+                    // Clear future, can't be resumed after completion
+                    self.shutdown_future = None;
                 }
                 Poll::Pending => {
                     trace!("stop broadcast still pending");
                 }
-            },
-            None => {
-                let mut receiver = self.shutdown.take().unwrap();
-                self.shutdown_future = Some(Box::pin(async move { receiver.recv().await }));
             }
         }
+
         trace!("checking for new messages");
         match self.requests.poll_next_unpin(cx) {
             Poll::Ready(message) => {
