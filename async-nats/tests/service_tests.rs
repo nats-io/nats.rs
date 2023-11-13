@@ -553,6 +553,24 @@ mod service {
     }
 
     #[tokio::test]
+    async fn stop() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+
+        let mut endpoint = service.endpoint("products").await.unwrap();
+
+        service.stop().await.unwrap();
+        client.publish("products", "data".into()).await.unwrap();
+        assert!(endpoint.next().await.is_none());
+    }
+
+    #[tokio::test]
     #[cfg(not(target_os = "windows"))]
     async fn cross_clients_tests() {
         use std::process::Command;
