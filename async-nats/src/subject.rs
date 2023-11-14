@@ -66,6 +66,25 @@ impl Subject {
     pub fn as_str(&self) -> &str {
         self
     }
+
+    /// Turns the `Subject` into a `String`, consuming it.
+    ///
+    /// Note that this function is not implemented as `From<Subject> for String` as the conversion
+    /// from the underlying type could involve an allocation. If the `Subject` is owned data, it
+    /// will not allocate, but if it was constructed from borrowed data, it will.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_nats::Subject;
+    ///
+    /// let s = Subject::from("foo");
+    /// let sub = s.into_string();
+    /// ```
+    pub fn into_string(self) -> String {
+        // SAFETY: We have guaranteed that the bytes in the `Subject` struct are valid UTF-8.
+        unsafe { String::from_utf8_unchecked(self.bytes.into()) }
+    }
 }
 
 impl<'a> From<&'a str> for Subject {
