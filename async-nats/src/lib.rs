@@ -903,7 +903,10 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     task::spawn(async move {
         while let Some(event) = events_rx.recv().await {
-            options.event_callback.call(event).await
+            tracing::info!("event: {}", event);
+            if let Some(event_callback) = &options.event_callback {
+                event_callback.call(event).await;
+            }
         }
     });
 

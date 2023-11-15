@@ -59,7 +59,7 @@ pub struct ConnectOptions {
     pub(crate) ping_interval: Duration,
     pub(crate) subscription_capacity: usize,
     pub(crate) sender_capacity: usize,
-    pub(crate) event_callback: CallbackArg1<Event, ()>,
+    pub(crate) event_callback: Option<CallbackArg1<Event, ()>>,
     pub(crate) inbox_prefix: String,
     pub(crate) request_timeout: Option<Duration>,
     pub(crate) retry_on_initial_connect: bool,
@@ -112,11 +112,7 @@ impl Default for ConnectOptions {
             ping_interval: Duration::from_secs(60),
             sender_capacity: 2048,
             subscription_capacity: 1024 * 64,
-            event_callback: CallbackArg1::<Event, ()>(Box::new(move |event| {
-                Box::pin(async move {
-                    tracing::info!("event: {}", event);
-                })
-            })),
+            event_callback: None,
             inbox_prefix: "_INBOX".to_string(),
             request_timeout: Some(Duration::from_secs(10)),
             retry_on_initial_connect: false,
@@ -737,7 +733,9 @@ impl ConnectOptions {
         F: Fn(Event) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.event_callback = CallbackArg1::<Event, ()>(Box::new(move |event| Box::pin(cb(event))));
+        self.event_callback = Some(CallbackArg1::<Event, ()>(Box::new(move |event| {
+            Box::pin(cb(event))
+        })));
         self
     }
 
