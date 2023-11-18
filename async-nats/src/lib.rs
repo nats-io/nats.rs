@@ -209,7 +209,7 @@ use std::slice;
 use std::str::{self, FromStr};
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
+use tokio::time::{interval, Duration, Interval, MissedTickBehavior, interval_at, Instant};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -593,7 +593,7 @@ impl ConnectionHandler {
     }
 
     fn handle_server_op(&mut self, server_op: ServerOp) {
-        self.ping_interval.reset();
+        self.ping_interval = interval_at(Instant::now(), self.ping_interval.period());
 
         match server_op {
             ServerOp::Ping => {
@@ -693,7 +693,9 @@ impl ConnectionHandler {
     }
 
     fn handle_command(&mut self, command: Command) {
-        self.ping_interval.reset();
+        self.ping_interval = interval_at(Instant::now(), self.ping_interval.period());
+
+
 
         match command {
             Command::Unsubscribe { sid, max } => {
