@@ -38,6 +38,7 @@ tryhard = "0.5"
 ring = "0.17"
 rand = "0.8"
 webpki = { package = "rustls-webpki", version = "0.102" }
+portable-atomic = "1"
 
 [dev-dependencies]
 criterion =  { version = "0.5", features = ["async_tokio"]}

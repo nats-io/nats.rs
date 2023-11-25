@@ -343,17 +343,9 @@ impl Options {
     /// ```no_run
     /// # fn main() -> std::io::Result<()> {
     /// let mut root_store = nats::rustls::RootCertStore::empty();
-    ///
-    /// root_store.add_parsable_certificates(
-    ///     rustls_native_certs::load_native_certs()?
-    ///         .into_iter()
-    ///         .map(|cert| cert.0)
-    ///         .collect::<Vec<Vec<u8>>>()
-    ///         .as_ref(),
-    /// );
+    /// root_store.add_parsable_certificates(rustls_native_certs::load_native_certs()?);
     ///
     /// let tls_client_config = nats::rustls::ClientConfig::builder()
-    ///     .with_safe_defaults()
     ///     .with_root_certificates(root_store)
     ///     .with_no_client_auth();
     ///

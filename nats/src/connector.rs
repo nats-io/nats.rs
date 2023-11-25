@@ -51,18 +51,14 @@ fn configure_tls(options: &Arc<Options>) -> Result<ClientConfig, Error> {
 
     // load native system certs only if user did not specify them
     if options.tls_client_config.is_some() || options.certificates.is_empty() {
-        let native_certs = rustls_native_certs::load_native_certs()
-            .map_err(|err| {
-                io::Error::new(
-                    ErrorKind::Other,
-                    format!("could not load platform certs: {err}"),
-                )
-            })?
-            .into_iter()
-            .map(|cert| cert.0)
-            .collect::<Vec<Vec<u8>>>();
+        let native_certs = rustls_native_certs::load_native_certs().map_err(|err| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("could not load platform certs: {err}"),
+            )
+        })?;
 
-        root_store.add_parsable_certificates(&native_certs);
+        root_store.add_parsable_certificates(native_certs);
     }
 
     if let Some(config) = &options.tls_client_config {
@@ -71,28 +67,21 @@ fn configure_tls(options: &Arc<Options>) -> Result<ClientConfig, Error> {
         // Include user-provided certificates
         for path in &options.certificates {
             let mut pem = BufReader::new(std::fs::File::open(path)?);
-            let certs = rustls_pemfile::certs(&mut pem)?;
-            let trust_anchors = certs.iter().map(|cert| {
-                let trust_anchor = webpki::TrustAnchor::try_from_cert_der(&cert[..])
-                    .map_err(|err| {
-                        io::Error::new(
-                            ErrorKind::InvalidInput,
-                            format!("could not load certs: {err}"),
-                        )
-                    })
-                    .unwrap();
-                rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
-                    trust_anchor.subject,
-                    trust_anchor.spki,
-                    trust_anchor.name_constraints,
-                )
-            });
-            root_store.add_server_trust_anchors(trust_anchors);
+            let certs = rustls_pemfile::certs(&mut pem).collect::<io::Result<Vec<_>>>()?;
+            let trust_anchors = certs
+                .into_iter()
+                .map(|cert| webpki::anchor_from_trusted_cert(&cert).map(|ta| ta.to_owned()))
+                .collect::<Result<Vec<_>, webpki::Error>>()
+                .map_err(|err| {
+                    io::Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("could not load certs: {err}"),
+                    )
+                })?;
+            root_store.extend(trust_anchors);
         }
 
-        let builder = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_store);
+        let builder = rustls::ClientConfig::builder().with_root_certificates(root_store);
 
         if let Some(cert) = &options.client_cert {
             if let Some(key) = &options.client_key {
@@ -278,8 +267,8 @@ impl Connector {
             inject_io_failure()?;
 
             // Connect using TLS.
-            let server_name =
-                rustls::client::ServerName::try_from(server.host()).map_err(|_| {
+            let server_name = webpki::types::ServerName::try_from(server.host().to_string())
+                .map_err(|_| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "cannot determine hostname for TLS connection",

@@ -24,17 +24,15 @@ use crate::{
 
 use bytes::Bytes;
 use futures::{future::BoxFuture, FutureExt};
+use portable_atomic::AtomicU64;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
+use std::task::{self, Poll};
 use std::{
     io::{self, ErrorKind},
     pin::Pin,
     sync::Arc,
-};
-use std::{
-    sync::atomic::AtomicU64,
-    task::{self, Poll},
 };
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
