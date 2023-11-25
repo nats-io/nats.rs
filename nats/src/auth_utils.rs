@@ -18,7 +18,7 @@ use std::path::Path;
 use nkeys::KeyPair;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use rustls::{Certificate, PrivateKey};
+use webpki::types::{CertificateDer, PrivateKeyDer};
 
 use crate::SecureString;
 
@@ -100,36 +100,18 @@ fn parse_decorated_nkey(contents: &str) -> Option<SecureString> {
 /// If the pem file is found, but does not contain any certificates, it will return
 /// empty set of Certificates, not error.
 /// Can be used to parse only client certificates from .pem file containing both client key and certs.
-pub(crate) fn load_certs(path: &Path) -> io::Result<Vec<Certificate>> {
+pub(crate) fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
     let file = std::fs::File::open(path)?;
     let mut reader = BufReader::new(file);
-    let certs = rustls_pemfile::certs(&mut reader)?
-        .iter()
-        .map(|v| Certificate(v.clone()))
-        .collect();
-    Ok(certs)
+    rustls_pemfile::certs(&mut reader).collect::<io::Result<Vec<_>>>()
 }
 
 /// Loads client key from a `.pem` file.
 /// Can be used to parse only client key from .pem file containing both client key and certs.
-pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKey> {
+pub(crate) fn load_key(path: &Path) -> io::Result<PrivateKeyDer<'static>> {
     let file = std::fs::File::open(path)?;
     let mut reader = BufReader::new(file);
 
-    loop {
-        let cert = rustls_pemfile::read_one(&mut reader)?;
-        match cert {
-            Some(rustls_pemfile::Item::RSAKey(key))
-            | Some(rustls_pemfile::Item::PKCS8Key(key))
-            | Some(rustls_pemfile::Item::ECKey(key)) => return Ok(PrivateKey(key)),
-            // if public key is found, don't error, just skip it and hope to find client key next.
-            Some(rustls_pemfile::Item::X509Certificate(_)) | Some(_) => {}
-            None => break,
-        }
-    }
-
-    Err(io::Error::new(
-        ErrorKind::NotFound,
-        "could not find client key in the path",
-    ))
+    rustls_pemfile::private_key(&mut reader)?
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "could not find client key in the path"))
 }
