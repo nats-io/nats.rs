@@ -18,7 +18,7 @@
 // is coming from the derive, it didn't work to set it on the struct.
 #![allow(clippy::mutable_key_type)]
 
-//! NATS [Message][crate::Message] headers, modeled loosely after the [http::header] crate.
+//! NATS [Message][crate::Message] headers, modeled loosely after the `http::header` crate.
 
 use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
 
@@ -26,7 +26,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 /// A struct for handling NATS headers.
-/// Has a similar API to [http::header], but properly serializes and deserializes
+/// Has a similar API to `http::header`, but properly serializes and deserializes
 /// according to NATS requirements.
 ///
 /// # Examples
