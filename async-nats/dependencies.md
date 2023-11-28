@@ -7,7 +7,6 @@ This file lists the dependencies used in this repository.
 | base64 0.21.4             | Apache-2.0 OR MIT        |
 | bytes 1.5.0               | MIT                      |
 | futures 0.3.28            | Apache-2.0 OR MIT        |
-| http 0.2.9                | Apache-2.0 OR MIT        |
 | memchr 2.6.3              | MIT OR Unlicense         |
 | nkeys 0.3.2               | Apache-2.0               |
 | nuid 0.5.0                | Apache-2.0               |
