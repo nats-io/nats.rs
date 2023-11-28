@@ -539,8 +539,8 @@ mod service {
 
             match JSONSchema::compile(&schema).unwrap().validate(&data) {
                 Ok(_) => (),
-                Err(errs) => {
-                    for err in errs {
+                Err(mut errs) => {
+                    if let Some(err) = errs.next() {
                         panic!("schema {} validation error: {}", endpoint, err)
                     }
                 }
