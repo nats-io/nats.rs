@@ -15,10 +15,11 @@
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
+use std::fmt::Formatter;
 use std::{
     fmt::{self, Debug, Display},
     future::IntoFuture,
-    io::{self, ErrorKind},
+    io::ErrorKind,
     pin::Pin,
     str::FromStr,
     task::Poll,
@@ -1300,31 +1301,64 @@ fn is_continuation(c: char) -> bool {
 }
 const HEADER_LINE: &str = "NATS/1.0";
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ParseHeadersErrorKind {
+    HeaderInfoMissing,
+    InvalidHeader,
+    InvalidVersionLine,
+    InvalidStatusCode,
+    MalformedHeader,
+}
+
+impl Display for ParseHeadersErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidHeader => write!(f, "invalid header"),
+            Self::InvalidStatusCode => write!(f, "invalid status code"),
+            Self::InvalidVersionLine => write!(f, "version line does not start with NATS/1.0"),
+            Self::HeaderInfoMissing => write!(f, "expected header information not found"),
+            Self::MalformedHeader => write!(f, "malformed header line"),
+        }
+    }
+}
+
+pub type ParseHeadersError = Error<ParseHeadersErrorKind>;
+
+impl From<ParseHeaderNameError> for ParseHeadersError {
+    fn from(e: ParseHeaderNameError) -> Self {
+        e.with_kind(ParseHeadersErrorKind::MalformedHeader)
+    }
+}
+
+impl From<ParseHeaderValueError> for ParseHeadersError {
+    fn from(e: ParseHeaderValueError) -> Self {
+        e.with_kind(ParseHeadersErrorKind::MalformedHeader)
+    }
+}
+
+impl From<InvalidStatusCode> for ParseHeadersError {
+    fn from(e: InvalidStatusCode) -> Self {
+        e.with_kind(ParseHeadersErrorKind::InvalidStatusCode)
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn parse_headers(
     buf: &[u8],
-) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), crate::Error> {
+) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), ParseHeadersError> {
     let mut headers = HeaderMap::new();
     let mut maybe_status: Option<StatusCode> = None;
     let mut maybe_description: Option<String> = None;
     let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
         line.lines().peekable()
     } else {
-        return Err(Box::new(std::io::Error::new(
-            ErrorKind::Other,
-            "invalid header",
-        )));
+        return Err(ParseHeadersErrorKind::InvalidHeader.into());
     };
 
     if let Some(line) = lines.next() {
         let line = line
             .strip_prefix(HEADER_LINE)
-            .ok_or_else(|| {
-                Box::new(std::io::Error::new(
-                    ErrorKind::Other,
-                    "version line does not start with NATS/1.0",
-                ))
-            })?
+            .ok_or_else(|| ParseHeadersError::new(ParseHeadersErrorKind::InvalidHeader))?
             .trim();
 
         match line.split_once(' ') {
@@ -1344,10 +1378,7 @@ fn parse_headers(
             }
         }
     } else {
-        return Err(Box::new(std::io::Error::new(
-            ErrorKind::Other,
-            "expected header information not found",
-        )));
+        return Err(ParseHeadersErrorKind::HeaderInfoMissing.into());
     };
 
     while let Some(line) = lines.next() {
@@ -1362,16 +1393,9 @@ fn parse_headers(
                 s.push_str(v.trim());
             }
 
-            headers.insert(
-                HeaderName::from_str(k)?,
-                HeaderValue::from_str(&s)
-                    .map_err(|err| Box::new(io::Error::new(ErrorKind::Other, err)))?,
-            );
+            headers.insert(HeaderName::from_str(k)?, HeaderValue::from_str(&s)?);
         } else {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "malformed header line",
-            )));
+            return Err(ParseHeadersErrorKind::MalformedHeader.into());
         }
     }
 
@@ -1517,6 +1541,9 @@ pub struct External {
     pub delivery_prefix: Option<String>,
 }
 
+use crate::error::WithKind;
+use crate::header::{ParseHeaderNameError, ParseHeaderValueError};
+use crate::status::InvalidStatusCode;
 use std::marker::PhantomData;
 
 #[derive(Debug, Default)]

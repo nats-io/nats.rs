@@ -22,6 +22,7 @@
 
 use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
 
+use crate::error::Error;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
@@ -312,7 +313,7 @@ impl FromStr for HeaderValue {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.contains(['\r', '\n']) {
-            return Err(ParseHeaderValueError);
+            return Err(s.into());
         }
 
         Ok(HeaderValue {
@@ -339,19 +340,26 @@ impl HeaderValue {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ParseHeaderValueError;
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParseHeaderValueErrorKind(String);
 
-impl fmt::Display for ParseHeaderValueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseHeaderValueErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            r#"invalid character found in header value (value cannot contain '\r' or '\n')"#
+            r#"invalid character found in header value (value cannot contain '\r' or '\n'): {:?}"#,
+            self.0
         )
     }
 }
 
-impl std::error::Error for ParseHeaderValueError {}
+pub type ParseHeaderValueError = Error<ParseHeaderValueErrorKind>;
+
+impl From<&str> for ParseHeaderValueError {
+    fn from(value: &str) -> Self {
+        Self::new(ParseHeaderValueErrorKind(value.into()))
+    }
+}
 
 pub trait IntoHeaderName {
     fn into_header_name(self) -> HeaderName;
@@ -568,7 +576,9 @@ impl FromStr for HeaderName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
-            return Err(ParseHeaderNameError);
+            return Err(ParseHeaderNameError::new(ParseHeaderNameErrorKind(
+                s.into(),
+            )));
         }
 
         match StandardHeader::from_bytes(s.as_ref()) {
@@ -600,16 +610,22 @@ impl AsRef<str> for HeaderName {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ParseHeaderNameError;
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParseHeaderNameErrorKind(String);
 
-impl std::fmt::Display for ParseHeaderNameError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "invalid header name (name cannot contain non-ascii alphanumeric characters other than '-')")
+impl fmt::Display for ParseHeaderNameErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid header name (name cannot contain non-ascii alphanumeric characters other than '-'): {:?}", self.0)
     }
 }
 
-impl std::error::Error for ParseHeaderNameError {}
+pub type ParseHeaderNameError = Error<ParseHeaderNameErrorKind>;
+
+impl From<&str> for ParseHeaderNameError {
+    fn from(value: &str) -> Self {
+        Self::new(ParseHeaderNameErrorKind(value.into()))
+    }
+}
 
 #[cfg(test)]
 mod tests {
