@@ -1664,18 +1664,18 @@ struct ConsumerInfoPage {
 
 type ConsumerNamesErrorKind = StreamsErrorKind;
 type ConsumerNamesError = StreamsError;
-type PageRequest<'a> = BoxFuture<'a, Result<ConsumerPage, RequestError>>;
+type PageRequest = BoxFuture<'static, Result<ConsumerPage, RequestError>>;
 
-pub struct ConsumerNames<'a> {
+pub struct ConsumerNames {
     context: Context,
     stream: String,
     offset: usize,
-    page_request: Option<PageRequest<'a>>,
+    page_request: Option<PageRequest>,
     consumers: Vec<String>,
     done: bool,
 }
 
-impl futures::Stream for ConsumerNames<'_> {
+impl futures::Stream for ConsumerNames {
     type Item = Result<String, ConsumerNamesError>;
 
     fn poll_next(
@@ -1742,18 +1742,18 @@ impl futures::Stream for ConsumerNames<'_> {
 
 pub type ConsumersErrorKind = StreamsErrorKind;
 pub type ConsumersError = StreamsError;
-type PageInfoRequest<'a> = BoxFuture<'a, Result<ConsumerInfoPage, RequestError>>;
+type PageInfoRequest = BoxFuture<'static, Result<ConsumerInfoPage, RequestError>>;
 
-pub struct Consumers<'a> {
+pub struct Consumers {
     context: Context,
     stream: String,
     offset: usize,
-    page_request: Option<PageInfoRequest<'a>>,
+    page_request: Option<PageInfoRequest>,
     consumers: Vec<super::consumer::Info>,
     done: bool,
 }
 
-impl futures::Stream for Consumers<'_> {
+impl futures::Stream for Consumers {
     type Item = Result<super::consumer::Info, ConsumersError>;
 
     fn poll_next(

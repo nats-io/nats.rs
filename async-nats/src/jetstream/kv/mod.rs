@@ -427,7 +427,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, WatchError> {
+    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch, WatchError> {
         self.watch_with_deliver_policy(key, DeliverPolicy::New)
             .await
     }
@@ -457,7 +457,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch<'_>, WatchError> {
+    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch, WatchError> {
         self.watch_with_deliver_policy(key, DeliverPolicy::LastPerSubject)
             .await
     }
@@ -466,7 +466,7 @@ impl Store {
         &self,
         key: T,
         deliver_policy: DeliverPolicy,
-    ) -> Result<Watch<'_>, WatchError> {
+    ) -> Result<Watch, WatchError> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         debug!("initial consumer creation");
@@ -527,7 +527,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_all(&self) -> Result<Watch<'_>, WatchError> {
+    pub async fn watch_all(&self) -> Result<Watch, WatchError> {
         self.watch(ALL_KEYS).await
     }
 
@@ -750,7 +750,7 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History<'_>, HistoryError> {
+    pub async fn history<T: AsRef<str>>(&self, key: T) -> Result<History, HistoryError> {
         if !is_valid_key(key.as_ref()) {
             return Err(HistoryError::new(HistoryErrorKind::InvalidKey));
         }
@@ -851,13 +851,13 @@ impl Store {
 }
 
 /// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
-pub struct Watch<'a> {
-    subscription: super::consumer::push::Ordered<'a>,
+pub struct Watch {
+    subscription: super::consumer::push::Ordered,
     prefix: String,
     bucket: String,
 }
 
-impl<'a> futures::Stream for Watch<'a> {
+impl futures::Stream for Watch {
     type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
@@ -905,14 +905,14 @@ impl<'a> futures::Stream for Watch<'a> {
 }
 
 /// A structure representing the history of a key-value bucket, yielding past values.
-pub struct History<'a> {
-    subscription: super::consumer::push::Ordered<'a>,
+pub struct History {
+    subscription: super::consumer::push::Ordered,
     done: bool,
     prefix: String,
     bucket: String,
 }
 
-impl<'a> futures::Stream for History<'a> {
+impl futures::Stream for History {
     type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
@@ -965,11 +965,11 @@ impl<'a> futures::Stream for History<'a> {
     }
 }
 
-pub struct Keys<'a> {
-    inner: History<'a>,
+pub struct Keys {
+    inner: History,
 }
 
-impl<'a> futures::Stream for Keys<'a> {
+impl futures::Stream for Keys {
     type Item = Result<String, WatcherError>;
 
     fn poll_next(

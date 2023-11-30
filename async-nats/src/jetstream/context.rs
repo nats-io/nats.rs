@@ -1034,17 +1034,17 @@ struct StreamInfoPage {
     streams: Option<Vec<super::stream::Info>>,
 }
 
-type PageRequest<'a> = BoxFuture<'a, Result<StreamPage, RequestError>>;
+type PageRequest = BoxFuture<'static, Result<StreamPage, RequestError>>;
 
-pub struct StreamNames<'a> {
+pub struct StreamNames {
     context: Context,
     offset: usize,
-    page_request: Option<PageRequest<'a>>,
+    page_request: Option<PageRequest>,
     streams: Vec<String>,
     done: bool,
 }
 
-impl futures::Stream for StreamNames<'_> {
+impl futures::Stream for StreamNames {
     type Item = Result<String, StreamsError>;
 
     fn poll_next(
@@ -1105,20 +1105,20 @@ impl futures::Stream for StreamNames<'_> {
     }
 }
 
-type PageInfoRequest<'a> = BoxFuture<'a, Result<StreamInfoPage, RequestError>>;
+type PageInfoRequest = BoxFuture<'static, Result<StreamInfoPage, RequestError>>;
 
 pub type StreamsErrorKind = RequestErrorKind;
 pub type StreamsError = RequestError;
 
-pub struct Streams<'a> {
+pub struct Streams {
     context: Context,
     offset: usize,
-    page_request: Option<PageInfoRequest<'a>>,
+    page_request: Option<PageInfoRequest>,
     streams: Vec<super::stream::Info>,
     done: bool,
 }
 
-impl futures::Stream for Streams<'_> {
+impl futures::Stream for Streams {
     type Item = Result<super::stream::Info, StreamsError>;
 
     fn poll_next(
