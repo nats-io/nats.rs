@@ -420,15 +420,15 @@ impl futures::Stream for Batch {
     }
 }
 
-pub struct Sequence<'a> {
+pub struct Sequence {
     context: Context,
     subject: String,
     request: Bytes,
     pending_messages: usize,
-    next: Option<BoxFuture<'a, Result<Batch, MessagesError>>>,
+    next: Option<BoxFuture<'static, Result<Batch, MessagesError>>>,
 }
 
-impl<'a> futures::Stream for Sequence<'a> {
+impl futures::Stream for Sequence {
     type Item = Result<Batch, MessagesError>;
 
     fn poll_next(
@@ -490,7 +490,7 @@ impl<'a> futures::Stream for Sequence<'a> {
     }
 }
 
-impl<'a> Consumer<OrderedConfig> {
+impl Consumer<OrderedConfig> {
     /// Returns a stream of messages for Ordered Pull Consumer.
     ///
     /// Ordered consumers uses single replica ephemeral consumer, no matter the replication factor of the
@@ -535,7 +535,7 @@ impl<'a> Consumer<OrderedConfig> {
     /// Ok(())
     /// # }
     /// ```
-    pub async fn messages(self) -> Result<Ordered<'a>, StreamError> {
+    pub async fn messages(self) -> Result<Ordered, StreamError> {
         let config = Consumer {
             config: self.config.clone().into(),
             context: self.context.clone(),
@@ -719,18 +719,18 @@ impl IntoConsumerConfig for OrderedConfig {
     }
 }
 
-pub struct Ordered<'a> {
+pub struct Ordered {
     context: Context,
     stream_name: String,
     consumer: OrderedConfig,
     consumer_name: String,
     stream: Option<Stream>,
-    create_stream: Option<BoxFuture<'a, Result<Stream, ConsumerRecreateError>>>,
+    create_stream: Option<BoxFuture<'static, Result<Stream, ConsumerRecreateError>>>,
     consumer_sequence: u64,
     stream_sequence: u64,
 }
 
-impl<'a> futures::Stream for Ordered<'a> {
+impl futures::Stream for Ordered {
     type Item = Result<jetstream::Message, OrderedError>;
 
     fn poll_next(
