@@ -109,7 +109,11 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get<'bucket, 'future, T>(
+    pub async fn get<T: AsRef<str> + Send>(&self, object_name: T) -> Result<Object, GetError> {
+        self.get_impl(object_name).await
+    }
+
+    fn get_impl<'bucket, 'future, T>(
         &'bucket self,
         object_name: T,
     ) -> BoxFuture<'future, Result<Object, GetError>>
@@ -125,7 +129,7 @@ impl ObjectStore {
                         let link_name = link_name.clone();
                         debug!("getting object via link");
                         if link.bucket == self.name {
-                            return self.get(link_name).await;
+                            return self.get_impl(link_name).await;
                         } else {
                             let bucket = self
                                 .stream
@@ -135,7 +139,7 @@ impl ObjectStore {
                                 .map_err(|err| {
                                 GetError::with_source(GetErrorKind::Other, err)
                             })?;
-                            let object = bucket.get(&link_name).await?;
+                            let object = bucket.get_impl(&link_name).await?;
                             return Ok(object);
                         }
                     } else {
