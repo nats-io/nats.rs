@@ -471,7 +471,7 @@ impl IntoConsumerConfig for OrderedConfig {
 }
 
 impl Consumer<OrderedConfig> {
-    pub async fn messages<'a>(self) -> Result<Ordered<'a>, StreamError> {
+    pub async fn messages<'a>(self) -> Result<Ordered, StreamError> {
         let subscriber = self
             .context
             .client
@@ -540,11 +540,11 @@ impl Consumer<OrderedConfig> {
     }
 }
 
-pub struct Ordered<'a> {
+pub struct Ordered {
     context: Context,
     consumer: Consumer<OrderedConfig>,
     subscriber: Option<Subscriber>,
-    subscriber_future: Option<BoxFuture<'a, Result<Subscriber, ConsumerRecreateError>>>,
+    subscriber_future: Option<BoxFuture<'static, Result<Subscriber, ConsumerRecreateError>>>,
     stream_sequence: Arc<AtomicU64>,
     consumer_sequence: Arc<AtomicU64>,
     shutdown: tokio::sync::oneshot::Receiver<ConsumerRecreateError>,
@@ -552,14 +552,14 @@ pub struct Ordered<'a> {
     heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
-impl<'a> Drop for Ordered<'a> {
+impl Drop for Ordered {
     fn drop(&mut self) {
         // Stop trying to recreate the consumer
         self.handle.abort()
     }
 }
 
-impl<'a> futures::Stream for Ordered<'a> {
+impl futures::Stream for Ordered {
     type Item = Result<Message, OrderedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {

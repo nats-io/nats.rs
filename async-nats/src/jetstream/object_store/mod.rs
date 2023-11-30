@@ -109,10 +109,10 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get<'bucket, 'object, 'future, T>(
+    pub fn get<'bucket, 'future, T>(
         &'bucket self,
         object_name: T,
-    ) -> BoxFuture<'future, Result<Object<'object>, GetError>>
+    ) -> BoxFuture<'future, Result<Object, GetError>>
     where
         T: AsRef<str> + Send + 'future,
         'bucket: 'future,
@@ -424,13 +424,13 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch(&self) -> Result<Watch<'_>, WatchError> {
+    pub async fn watch(&self) -> Result<Watch, WatchError> {
         self.watch_with_deliver_policy(DeliverPolicy::New).await
     }
 
     /// Creates a [Watch] stream over changes in the [ObjectStore] which yields values whenever
     /// there are changes for that key with as well as last value.
-    pub async fn watch_with_history(&self) -> Result<Watch<'_>, WatchError> {
+    pub async fn watch_with_history(&self) -> Result<Watch, WatchError> {
         self.watch_with_deliver_policy(DeliverPolicy::LastPerSubject)
             .await
     }
@@ -438,7 +438,7 @@ impl ObjectStore {
     async fn watch_with_deliver_policy(
         &self,
         deliver_policy: DeliverPolicy,
-    ) -> Result<Watch<'_>, WatchError> {
+    ) -> Result<Watch, WatchError> {
         let subject = format!("$O.{}.M.>", self.name);
         let ordered = self
             .stream
@@ -474,7 +474,7 @@ impl ObjectStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn list(&self) -> Result<List<'_>, ListError> {
+    pub async fn list(&self) -> Result<List, ListError> {
         trace!("starting Object List");
         let subject = format!("$O.{}.M.>", self.name);
         let ordered = self
@@ -828,11 +828,11 @@ async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), Publ
     Ok(())
 }
 
-pub struct Watch<'a> {
-    subscription: crate::jetstream::consumer::push::Ordered<'a>,
+pub struct Watch {
+    subscription: crate::jetstream::consumer::push::Ordered,
 }
 
-impl Stream for Watch<'_> {
+impl Stream for Watch {
     type Item = Result<ObjectInfo, WatcherError>;
 
     fn poll_next(
@@ -858,12 +858,12 @@ impl Stream for Watch<'_> {
     }
 }
 
-pub struct List<'a> {
-    subscription: Option<crate::jetstream::consumer::push::Ordered<'a>>,
+pub struct List {
+    subscription: Option<crate::jetstream::consumer::push::Ordered>,
     done: bool,
 }
 
-impl Stream for List<'_> {
+impl Stream for List {
     type Item = Result<ObjectInfo, ListerError>;
 
     fn poll_next(
@@ -913,17 +913,17 @@ impl Stream for List<'_> {
 }
 
 /// Represents an object stored in a bucket.
-pub struct Object<'a> {
+pub struct Object {
     pub info: ObjectInfo,
     remaining_bytes: VecDeque<u8>,
     has_pending_messages: bool,
     digest: Option<ring::digest::Context>,
-    subscription: Option<crate::jetstream::consumer::push::Ordered<'a>>,
-    subscription_future: Option<BoxFuture<'a, Result<Ordered<'a>, StreamError>>>,
+    subscription: Option<crate::jetstream::consumer::push::Ordered>,
+    subscription_future: Option<BoxFuture<'static, Result<Ordered, StreamError>>>,
     stream: crate::jetstream::stream::Stream,
 }
 
-impl<'a> Object<'a> {
+impl Object {
     pub(crate) fn new(info: ObjectInfo, stream: stream::Stream) -> Self {
         Object {
             subscription: None,
@@ -942,7 +942,7 @@ impl<'a> Object<'a> {
     }
 }
 
-impl tokio::io::AsyncRead for Object<'_> {
+impl tokio::io::AsyncRead for Object {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -1137,7 +1137,7 @@ pub trait AsObjectInfo {
     fn as_info(&self) -> &ObjectInfo;
 }
 
-impl AsObjectInfo for &Object<'_> {
+impl AsObjectInfo for &Object {
     fn as_info(&self) -> &ObjectInfo {
         &self.info
     }
