@@ -397,7 +397,7 @@ macro_rules! standard_headers {
         )+
     ) => {
         #[allow(clippy::enum_variant_names)]
-        #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
         enum StandardHeader {
             $(
                 $variant,
@@ -481,7 +481,7 @@ standard_headers! {
     (NatsExpectedStream, NATS_EXPECTED_STREAM, b"Nats-Expected-Stream");
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 struct CustomHeader {
     bytes: Bytes,
 }
@@ -518,7 +518,7 @@ impl<'a> From<&'a str> for CustomHeader {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 enum HeaderRepr {
     Standard(StandardHeader),
     Custom(CustomHeader),
@@ -533,7 +533,7 @@ enum HeaderRepr {
 ///
 /// `HeaderName` represents standard header names using an `enum`, as such they
 /// will not require an allocation for storage.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct HeaderName {
     inner: HeaderRepr,
 }
@@ -597,6 +597,26 @@ impl AsRef<[u8]> for HeaderName {
 impl AsRef<str> for HeaderName {
     fn as_ref(&self) -> &str {
         self.as_str()
+    }
+}
+
+impl Serialize for HeaderName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for HeaderName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -759,5 +779,19 @@ mod tests {
         let b = HeaderName::from_static("NATS-Stream");
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn header_name_serde() {
+        let raw = "Nats-Stream";
+        let raw_json = "\"Nats-Stream\"";
+        let header = HeaderName::from_static(raw);
+
+        // ser/de of HeaderName should be the same as raw string
+        assert_eq!(serde_json::to_string(&header).unwrap(), raw_json);
+        assert_eq!(
+            serde_json::from_str::<HeaderName>(raw_json).unwrap(),
+            header
+        );
     }
 }
