@@ -385,13 +385,21 @@ impl futures::Stream for Batch {
             Poll::Ready(maybe_message) => match maybe_message {
                 Some(message) => match message.status.unwrap_or(StatusCode::OK) {
                     StatusCode::TIMEOUT => {
-                        debug!("received timeout. Iterator done.");
+                        debug!("received timeout. Iterator done");
                         self.terminated = true;
                         Poll::Ready(None)
                     }
                     StatusCode::IDLE_HEARTBEAT => {
                         debug!("received heartbeat");
                         Poll::Pending
+                    }
+                    // If this is fetch variant, terminate on no more messages.
+                    // We do not need to check if this is a fetch, not batch,
+                    // as only fetch will send back `NO_MESSAGES` status.
+                    StatusCode::NOT_FOUND => {
+                        debug!("received `NO_MESSAGES`. Iterator done");
+                        self.terminated = true;
+                        Poll::Ready(None)
                     }
                     StatusCode::OK => {
                         debug!("received message");
