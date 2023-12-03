@@ -40,7 +40,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::ErrorKind;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tokio_rustls::rustls;
@@ -306,19 +305,14 @@ impl Connector {
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
             );
-            let tls_connector = tokio_rustls::TlsConnector::try_from(tls_config)
-                .map_err(|err| {
-                    io::Error::new(
-                        ErrorKind::Other,
-                        format!("failed to create TLS connector from TLS config: {err}"),
-                    )
-                })
+            let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
+
+            let domain = webpki::types::ServerName::try_from(tls_host)
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
-            let domain = rustls::ServerName::try_from(tls_host)
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
-
-            let tls_stream = tls_connector.connect(domain, connection.stream).await?;
+            let tls_stream = tls_connector
+                .connect(domain.to_owned(), connection.stream)
+                .await?;
 
             Ok::<Connection, ConnectError>(Connection::new(Box::new(tls_stream), 0))
         };

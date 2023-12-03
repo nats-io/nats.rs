@@ -95,17 +95,9 @@ mod client {
     async fn custom_tls_client() {
         let mut root_store = async_nats::rustls::RootCertStore::empty();
 
-        root_store.add_parsable_certificates(
-            rustls_native_certs::load_native_certs()
-                .unwrap()
-                .into_iter()
-                .map(|cert| cert.0)
-                .collect::<Vec<Vec<u8>>>()
-                .as_ref(),
-        );
+        root_store.add_parsable_certificates(rustls_native_certs::load_native_certs().unwrap());
 
         let tls_client = async_nats::rustls::ClientConfig::builder()
-            .with_safe_defaults()
             .with_root_certificates(root_store)
             .with_no_client_auth();
 
