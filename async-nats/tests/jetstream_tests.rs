@@ -1052,6 +1052,55 @@ mod jetstream {
         let consumer = stream.get_consumer("pull").await.unwrap();
         consumer.fetch().max_messages(10).messages().await.unwrap();
     }
+
+    #[tokio::test]
+    async fn fetch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(&server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(jetstream::stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..20 {
+            context.publish("events", "data".into()).await.unwrap();
+        }
+
+        let consumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let messages = consumer
+            .fetch()
+            .max_messages(15)
+            .messages()
+            .await
+            .unwrap()
+            .count()
+            .await;
+        assert_eq!(messages, 15);
+
+        let messages = consumer
+            .fetch()
+            .max_messages(15)
+            .messages()
+            .await
+            .unwrap()
+            .count()
+            .await;
+        assert_eq!(messages, 5);
+    }
+
     #[tokio::test]
     async fn get_consumer_from_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
