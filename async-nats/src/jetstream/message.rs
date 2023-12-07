@@ -18,7 +18,7 @@ use crate::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
-use std::time::Duration;
+use std::{mem, time::Duration};
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug)]
@@ -45,8 +45,8 @@ impl Message {
     /// Splits [Message] into [Acker] and [crate::Message].
     /// This can help reduce memory footprint if [Message] can be dropped before acking,
     /// for example when it's transformed into another structure and acked later
-    pub fn split(self) -> (crate::Message, Acker) {
-        let reply = self.message.reply.clone();
+    pub fn split(mut self) -> (crate::Message, Acker) {
+        let reply = mem::take(&mut self.message.reply);
         (
             self.message,
             Acker {
