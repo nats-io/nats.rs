@@ -41,7 +41,7 @@ jobs:
       - name: Run benchmarks
         env:
           RUST_LOG: trace
-        run: cargo bench
+        run: cargo bench nats
       - name: Archive benchmarks
         uses: actions/upload-artifact@v3
         with:
