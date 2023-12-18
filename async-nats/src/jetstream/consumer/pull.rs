@@ -564,6 +564,7 @@ impl Consumer<OrderedConfig> {
         Ok(Ordered {
             consumer_sequence: 0,
             stream_sequence: 0,
+            missed_heartbeats: false,
             create_stream: None,
             context: self.context.clone(),
             consumer_name: self
@@ -736,6 +737,7 @@ pub struct Ordered {
     create_stream: Option<BoxFuture<'static, Result<Stream, ConsumerRecreateError>>>,
     consumer_sequence: u64,
     stream_sequence: u64,
+    missed_heartbeats: bool,
 }
 
 impl futures::Stream for Ordered {
@@ -750,31 +752,52 @@ impl futures::Stream for Ordered {
         if let Some(stream) = self.stream.as_mut() {
             match stream.poll_next_unpin(cx) {
                 Poll::Ready(message) => match message {
-                    Some(message) => {
-                        // Do we bail out on all errors?
-                        // Or we want to handle some? (like consumer deleted?)
-                        let message = message?;
-                        let info = message.info().map_err(|err| {
-                            OrderedError::with_source(OrderedErrorKind::Other, err)
-                        })?;
-                        trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
+                    Some(message) => match message {
+                        Ok(message) => {
+                            self.missed_heartbeats = false;
+                            let info = message.info().map_err(|err| {
+                                OrderedError::with_source(OrderedErrorKind::Other, err)
+                            })?;
+                            trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
                                            self.consumer_sequence,
                                            self.stream_sequence,
                                            info.consumer_sequence,
                                            info.stream_sequence);
-                        if info.consumer_sequence != self.consumer_sequence + 1 {
-                            debug!(
-                                "ordered consumer mismatch. current {}, info: {}",
-                                self.consumer_sequence, info.consumer_sequence
-                            );
-                            recreate = true;
-                            self.consumer_sequence = 0;
-                        } else {
-                            self.stream_sequence = info.stream_sequence;
-                            self.consumer_sequence = info.consumer_sequence;
-                            return Poll::Ready(Some(Ok(message)));
+                            if info.consumer_sequence != self.consumer_sequence + 1 {
+                                debug!(
+                                    "ordered consumer mismatch. current {}, info: {}",
+                                    self.consumer_sequence, info.consumer_sequence
+                                );
+                                recreate = true;
+                                self.consumer_sequence = 0;
+                            } else {
+                                self.stream_sequence = info.stream_sequence;
+                                self.consumer_sequence = info.consumer_sequence;
+                                return Poll::Ready(Some(Ok(message)));
+                            }
                         }
-                    }
+                        Err(err) => match err.kind() {
+                            MessagesErrorKind::MissingHeartbeat => {
+                                // If we have missed heartbeats set, it means this is a second
+                                // missed heartbeat, so we need to recreate consumer.
+                                if self.missed_heartbeats {
+                                    self.consumer_sequence = 0;
+                                    recreate = true;
+                                } else {
+                                    self.missed_heartbeats = true;
+                                }
+                            }
+                            MessagesErrorKind::ConsumerDeleted => {
+                                recreate = true;
+                                self.consumer_sequence = 0;
+                            }
+                            MessagesErrorKind::Pull
+                            | MessagesErrorKind::PushBasedConsumer
+                            | MessagesErrorKind::Other => {
+                                return Poll::Ready(Some(Err(err.into())));
+                            }
+                        },
+                    },
                     None => return Poll::Ready(None),
                 },
                 Poll::Pending => (),
