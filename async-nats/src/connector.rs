@@ -125,6 +125,7 @@ impl Connector {
     }
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
+        tracing::debug!("connecting");
         let mut error = None;
 
         let mut servers = self.servers.clone();
@@ -277,6 +278,7 @@ impl Connector {
                                 }
                             },
                             Some(_) => {
+                                tracing::debug!("connected to {}", server_info.port);
                                 self.attempts = 0;
                                 self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();

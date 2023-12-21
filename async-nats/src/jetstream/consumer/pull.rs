@@ -14,7 +14,7 @@
 use bytes::Bytes;
 use futures::{
     future::{BoxFuture, Either},
-    FutureExt, StreamExt, TryFutureExt,
+    FutureExt, StreamExt,
 };
 
 #[cfg(feature = "server_2_10")]
@@ -808,13 +808,23 @@ impl futures::Stream for Ordered {
             self.stream = None;
             self.create_stream = Some(Box::pin({
                 let context = self.context.clone();
-                let config = self.consumer.clone().into();
+                let config = self.consumer.clone();
                 let stream_name = self.stream_name.clone();
                 let consumer_name = self.consumer_name.clone();
-                let sequence = self.consumer_sequence;
+                let sequence = self.stream_sequence;
                 async move {
-                    recreate_consumer_stream(context, config, stream_name, consumer_name, sequence)
-                        .await
+                    let strategy =
+                        tokio_retry::strategy::ExponentialBackoff::from_millis(500).take(5);
+                    tokio_retry::Retry::spawn(strategy, || {
+                        recreate_consumer_stream(
+                            &context,
+                            &config,
+                            &stream_name,
+                            &consumer_name,
+                            sequence,
+                        )
+                    })
+                    .await
                 }
             }))
         }
@@ -913,7 +923,8 @@ impl Stream {
                                     continue;
                                 }
                             debug!("detected !Connected -> Connected state change");
-                            match consumer.fetch_info().await {
+                            let strategy = tokio_retry::strategy::ExponentialBackoff::from_millis(500).take(5);
+                            match tokio_retry::Retry::spawn(strategy , || consumer.fetch_info()).await {
                                 Ok(info) => {
                                     if info.num_waiting == 0 {
                                         pending_reset = true;
@@ -2224,25 +2235,39 @@ impl std::fmt::Display for ConsumerRecreateErrorKind {
 pub type ConsumerRecreateError = Error<ConsumerRecreateErrorKind>;
 
 async fn recreate_consumer_stream(
-    context: Context,
-    config: Config,
-    stream_name: String,
-    consumer_name: String,
+    context: &Context,
+    config: &OrderedConfig,
+    stream_name: &String,
+    consumer_name: &String,
     sequence: u64,
 ) -> Result<Stream, ConsumerRecreateError> {
-    // TODO(jarema): retry whole operation few times?
-    let stream = context
-        .get_stream(stream_name.clone())
-        .await
-        .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
-        })?;
-    stream
-        .delete_consumer(&consumer_name)
-        .await
-        .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
-        })?;
+    let span = tracing::span!(
+        tracing::Level::DEBUG,
+        "recreate_ordered_consumer",
+        stream_name = stream_name.as_str(),
+        consumer_name = consumer_name.as_str(),
+        sequence = sequence
+    );
+    let _span_handle = span.enter();
+    debug!("recreating consumer");
+    let config = config.to_owned();
+    trace!("get stream");
+    let stream = tokio::time::timeout(
+        Duration::from_secs(5),
+        context.get_stream(stream_name.clone()),
+    )
+    .await
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err))?;
+    trace!("delete old consumer before creating new one");
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        stream.delete_consumer(&consumer_name),
+    )
+    .await
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))
+    .ok();
 
     let deliver_policy = {
         if sequence == 0 {
@@ -2253,17 +2278,41 @@ async fn recreate_consumer_stream(
             }
         }
     };
-    tokio::time::timeout(
+    trace!("create the new ordered consumer for sequence {}", sequence);
+    let consumer = tokio::time::timeout(
         Duration::from_secs(5),
-        stream.create_consumer(jetstream::consumer::pull::Config {
+        stream.create_consumer(jetstream::consumer::pull::OrderedConfig {
             deliver_policy,
-            ..config
+            ..config.clone()
         }),
     )
     .await
-    .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?
-    .messages()
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
+
+    let config = Consumer {
+        config: config.clone().into(),
+        context: context.clone(),
+        info: consumer.info,
+    };
+
+    trace!("create iterator");
+    let stream = tokio::time::timeout(
+        Duration::from_secs(5),
+        Stream::stream(
+            BatchConfig {
+                batch: 500,
+                expires: Some(Duration::from_secs(30)),
+                no_wait: false,
+                max_bytes: 0,
+                idle_heartbeat: Duration::from_secs(15),
+            },
+            &config,
+        ),
+    )
     .await
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
+    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err));
+    trace!("recreated consumer");
+    stream
 }
