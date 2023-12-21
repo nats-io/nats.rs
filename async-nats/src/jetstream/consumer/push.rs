@@ -845,12 +845,13 @@ async fn recreate_ephemeral_consumer(
     stream_name: String,
     sequence: u64,
 ) -> Result<(), ConsumerRecreateError> {
-    let stream = context
-        .get_stream(stream_name.clone())
-        .await
-        .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
-        })?;
+    let strategy = ExponentialBackoff::from_millis(500).take(5);
+    let stream =
+        tokio_retry::Retry::spawn(strategy.clone(), || context.get_stream(stream_name.clone()))
+            .await
+            .map_err(|err| {
+                ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
+            })?;
 
     let deliver_policy = {
         if sequence == 0 {
@@ -861,13 +862,16 @@ async fn recreate_ephemeral_consumer(
             }
         }
     };
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        stream.create_consumer(jetstream::consumer::push::OrderedConfig {
-            deliver_policy,
-            ..config
-        }),
-    )
+    tokio_retry::Retry::spawn(strategy, || {
+        let config = config.clone();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            stream.create_consumer(jetstream::consumer::push::OrderedConfig {
+                deliver_policy,
+                ..config
+            }),
+        )
+    })
     .await
     .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
