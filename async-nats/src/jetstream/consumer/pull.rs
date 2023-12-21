@@ -2237,33 +2237,34 @@ pub type ConsumerRecreateError = Error<ConsumerRecreateErrorKind>;
 async fn recreate_consumer_stream(
     context: &Context,
     config: &OrderedConfig,
-    stream_name: &String,
-    consumer_name: &String,
+    stream_name: &str,
+    consumer_name: &str,
     sequence: u64,
 ) -> Result<Stream, ConsumerRecreateError> {
     let span = tracing::span!(
         tracing::Level::DEBUG,
         "recreate_ordered_consumer",
-        stream_name = stream_name.as_str(),
-        consumer_name = consumer_name.as_str(),
+        stream_name = stream_name,
+        consumer_name = consumer_name,
         sequence = sequence
     );
     let _span_handle = span.enter();
     debug!("recreating consumer");
     let config = config.to_owned();
     trace!("get stream");
-    let stream = tokio::time::timeout(
-        Duration::from_secs(5),
-        context.get_stream(stream_name.clone()),
-    )
-    .await
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err))?;
+    let stream = tokio::time::timeout(Duration::from_secs(5), context.get_stream(stream_name))
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err)
+        })?
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
+        })?;
     trace!("delete old consumer before creating new one");
 
     tokio::time::timeout(
         Duration::from_secs(5),
-        stream.delete_consumer(&consumer_name),
+        stream.delete_consumer(consumer_name),
     )
     .await
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))
