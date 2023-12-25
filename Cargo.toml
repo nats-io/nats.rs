@@ -1,7 +1,17 @@
 [workspace]
 
+resolver = "2"
+
 members = [
   "nats",
   "async-nats",
   "nats-server"
 ]
+
+[profile.release]
+debug = true
+split-debuginfo = "unpacked"
+
+[profile.dev]
+panic = 'abort'
+split-debuginfo = "unpacked"
