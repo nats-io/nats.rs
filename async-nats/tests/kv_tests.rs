@@ -212,7 +212,6 @@ mod kv {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
-            // .connect(server.client_url())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -234,7 +233,7 @@ mod kv {
         kv.put("key", payload.clone()).await.unwrap();
         let value = kv.get("key").await.unwrap();
         assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
-        kv.delete("key").await.unwrap();
+        kv.delete("key", None).await.unwrap();
         let ss = kv.get("kv").await.unwrap();
         assert!(ss.is_none());
 
@@ -252,7 +251,6 @@ mod kv {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
-            // .connect(server.client_url())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -283,7 +281,7 @@ mod kv {
 
         let history = kv.history("dz").await.unwrap().count().await;
         assert_eq!(history, 6);
-        kv.purge("dz").await.unwrap();
+        kv.purge("dz", None).await.unwrap();
         let history = kv.history("dz").await.unwrap().count().await;
         assert_eq!(history, 1);
     }
@@ -614,7 +612,7 @@ mod kv {
         assert_eq!(vec!["bar", "foo"], keys);
 
         // Delete a key and make sure it doesn't show up in the keys list
-        kv.delete("bar").await.unwrap();
+        kv.delete("bar", None).await.unwrap();
         let keys = kv
             .keys()
             .await
@@ -628,7 +626,7 @@ mod kv {
         for i in 0..10 {
             kv.put("bar", i.to_string().into()).await.unwrap();
         }
-        kv.purge("foo").await.unwrap();
+        kv.purge("foo", None).await.unwrap();
         let keys = kv
             .keys()
             .await
@@ -758,7 +756,7 @@ mod kv {
         let name = test.get("name").await.unwrap();
         assert_eq!(from_utf8(&name.unwrap()).unwrap(), "ivan");
 
-        test.purge("name").await.unwrap();
+        test.purge("name", None).await.unwrap();
         let name = test.get("name").await.unwrap();
         assert!(name.is_none());
 

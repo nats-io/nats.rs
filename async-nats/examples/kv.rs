@@ -138,7 +138,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Unsurprisingly, we get the new updated value as a message.
     // Since it's KV interface, we should be able to delete a key as well.
     // Does this result in a new message?
-    kv.delete("sue.color").await?;
+    kv.delete("sue.color", None).await?;
     let message = messages.next().await.unwrap()?;
     let metadata = message.info()?;
     println!(
