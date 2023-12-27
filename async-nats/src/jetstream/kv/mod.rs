@@ -648,7 +648,11 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete<T: AsRef<str>>(&self, key: T, revison: Option<u64>) -> Result<(), DeleteError> {
+    pub async fn delete<T: AsRef<str>>(
+        &self,
+        key: T,
+        revison: Option<u64>,
+    ) -> Result<(), DeleteError> {
         if !is_valid_key(key.as_ref()) {
             return Err(DeleteError::new(DeleteErrorKind::InvalidKey));
         }
@@ -707,7 +711,11 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge<T: AsRef<str>>(&self, key: T, revison: Option<u64>) -> Result<(), PurgeError> {
+    pub async fn purge<T: AsRef<str>>(
+        &self,
+        key: T,
+        revison: Option<u64>,
+    ) -> Result<(), PurgeError> {
         if !is_valid_key(key.as_ref()) {
             return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
         }
