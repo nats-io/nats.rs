@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! Manage operations on a [Stream], create/delete/update [Consumer][crate::jetstream::consumer::Consumer].
+//! Manage operations on a [Stream], create/delete/update [Consumer].
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
@@ -680,7 +680,7 @@ impl Stream {
     }
 
     /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
-    /// returns the info from the server about created [Consumer][Consumer]
+    /// returns the info from the server about created [Consumer]
     ///
     /// # Examples
     ///
