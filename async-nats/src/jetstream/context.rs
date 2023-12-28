@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! Manage operations on [Context], create/delete/update [Stream][crate::jetstream::stream::Stream]
+//! Manage operations on [Context], create/delete/update [Stream]
 
 use crate::error::Error;
 use crate::header::{IntoHeaderName, IntoHeaderValue};
@@ -225,7 +225,7 @@ impl Context {
     }
 
     /// Create a JetStream [Stream] with given config and return a handle to it.
-    /// That handle can be used to manage and use [Consumer][crate::jetstream::consumer::Consumer].
+    /// That handle can be used to manage and use [Consumer].
     ///
     /// # Examples
     ///
@@ -305,7 +305,7 @@ impl Context {
     }
 
     /// Checks for [Stream] existence on the server and returns handle to it.
-    /// That handle can be used to manage and use [Consumer][crate::jetstream::consumer::Consumer].
+    /// That handle can be used to manage and use [Consumer].
     ///
     /// # Examples
     ///
@@ -787,7 +787,7 @@ impl Context {
     /// Send a request to the jetstream JSON API.
     ///
     /// This is a low level API used mostly internally, that should be used only in
-    /// specific cases when this crate API on [Consumer][crate::jetstream::consumer::Consumer] or [Stream] does not provide needed functionality.
+    /// specific cases when this crate API on [Consumer] or [Stream] does not provide needed functionality.
     ///
     /// # Examples
     ///
