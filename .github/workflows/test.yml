@@ -121,7 +121,7 @@ jobs:
           save-if: false # we only build docs, so we don't have the full build to be cached.
 
       - name: Check lint
-        run: cargo doc --no-deps
+        run: cargo doc --no-deps --all-features
 
   check_licenses:
     name: check licenses (ubuntu-latest / stable)

@@ -1,7 +1,10 @@
 [workspace]
 
+resolver = "2"
+
 members = [
   "nats",
   "async-nats",
   "nats-server"
 ]
+

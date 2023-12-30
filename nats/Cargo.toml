@@ -23,14 +23,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 [badges]
 maintenance = { status = "actively-developed" }
 
-[profile.release]
-debug = true
-split-debuginfo = "unpacked"
-
-[profile.dev]
-panic = 'abort'
-split-debuginfo = "unpacked"
-
 [dependencies]
 base64 = "0.13.0"
 base64-url = "1.4.10"
