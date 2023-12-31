@@ -824,6 +824,32 @@ impl ConnectOptions {
         self
     }
 
+    /// Specifies the number of consecutive reconnect attempts the client will
+    /// make before giving up. This is useful for preventing zombie services
+    /// from endlessly reaching the servers, but it can also be a footgun and
+    /// surprise for users who do not expect that the client can give up
+    /// entirely.
+    ///
+    /// Pass `None` or `0` for no limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// async_nats::ConnectOptions::new()
+    ///     .max_reconnects(None)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn max_reconnects<T: Into<Option<usize>>>(mut self, max_reconnects: T) -> ConnectOptions {
+        let val: Option<usize> = max_reconnects.into();
+        self.max_reconnects = if val == Some(0) { None } else { val };
+        self
+    }
+
     pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
         self.ignore_discovered_servers = true;
         self
