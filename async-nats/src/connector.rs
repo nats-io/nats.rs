@@ -20,6 +20,7 @@ use crate::AuthError;
 use crate::ClientError;
 use crate::ClientOp;
 use crate::ConnectError;
+use crate::ConnectErrorKind;
 use crate::ConnectInfo;
 use crate::Event;
 use crate::Protocol;
@@ -60,6 +61,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
+    pub(crate) max_reconnects: Option<usize>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -100,16 +102,24 @@ impl Connector {
         })
     }
 
-    pub(crate) async fn connect(&mut self) -> (ServerInfo, Connection) {
+    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         loop {
             match self.try_connect().await {
-                Ok(inner) => return inner,
-                Err(error) => {
-                    self.events_tx
-                        .send(Event::ClientError(ClientError::Other(error.to_string())))
-                        .await
-                        .ok();
-                }
+                Ok(inner) => return Ok(inner),
+                Err(error) => match error.kind() {
+                    ConnectErrorKind::MaxReconnects => {
+                        return Err(ConnectError::with_source(
+                            crate::ConnectErrorKind::MaxReconnects,
+                            error,
+                        ))
+                    }
+                    other => {
+                        self.events_tx
+                            .send(Event::ClientError(ClientError::Other(other.to_string())))
+                            .await
+                            .ok();
+                    }
+                },
             }
         }
     }
@@ -126,6 +136,15 @@ impl Connector {
 
         for (server_addr, _) in servers {
             self.attempts += 1;
+            if let Some(max_reconnects) = self.options.max_reconnects {
+                if self.attempts > max_reconnects {
+                    self.events_tx
+                        .send(Event::ClientError(ClientError::MaxReconnects))
+                        .await
+                        .ok();
+                    return Err(ConnectError::new(crate::ConnectErrorKind::MaxReconnects));
+                }
+            }
 
             let duration = (self.options.reconnect_delay_callback)(self.attempts);
 
