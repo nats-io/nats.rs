@@ -819,11 +819,19 @@ impl ConnectOptions {
         self
     }
 
+    /// By default, [`ConnectOptions::connect`] will return an error if
+    /// the connection to the server cannot be established.
+    ///
+    /// Setting `retry_on_initial_connect` makes the client
+    /// establish the connection in the background.
     pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
         self
     }
 
+    /// By default, a server may advertise other servers in the cluster known to it.
+    /// By setting this option, the client will ignore the advertised servers.
+    /// This may be useful if the client may not be able to reach them.
     pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
         self.ignore_discovered_servers = true;
         self
