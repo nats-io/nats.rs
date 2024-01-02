@@ -147,11 +147,6 @@ impl ConnectOptions {
         ConnectOptions::default()
     }
 
-    pub fn max_reconnects(mut self, max_reconnects: usize) -> ConnectOptions {
-        self.max_reconnects = Some(max_reconnects);
-        self
-    }
-
     /// Connect to the NATS Server leveraging all passed options.
     ///
     /// # Examples
