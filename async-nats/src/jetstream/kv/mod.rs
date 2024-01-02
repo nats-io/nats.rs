@@ -644,11 +644,38 @@ impl Store {
     ///     })
     ///     .await?;
     /// kv.put("key", "value".into()).await?;
-    /// kv.delete("key", None).await?;
+    /// kv.delete("key").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete<T: AsRef<str>>(
+    pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), DeleteError> {
+        self.delete_expect_revision(key, None).await
+    }
+
+    /// Deletes a given key if the revision matches. This is a non-destructive operation, which
+    /// sets a `DELETE` marker.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let revision = kv.put("key", "value".into()).await?;
+    /// kv.delete_expect_revision("key", Some(revision)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_expect_revision<T: AsRef<str>>(
         &self,
         key: T,
         revison: Option<u64>,
@@ -707,11 +734,39 @@ impl Store {
     ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// kv.put("key", "another".into()).await?;
-    /// kv.purge("key", None).await?;
+    /// kv.purge("key").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge<T: AsRef<str>>(
+    pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), PurgeError> {
+        self.purge_expected_revision(key, None).await
+    }
+
+    /// Purges all the revisions of a entry destructively if the resision matches, leaving behind a single
+    /// purge entry in-place.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// kv.put("key", "value".into()).await?;
+    /// let revision = kv.put("key", "another".into()).await?;
+    /// kv.purge_expected_revision("key", Some(revision)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn purge_expected_revision<T: AsRef<str>>(
         &self,
         key: T,
         revison: Option<u64>,
