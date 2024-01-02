@@ -101,7 +101,7 @@ impl Default for ConnectOptions {
             no_echo: false,
             retry_on_failed_connect: false,
             reconnect_buffer_size: 8 * 1024 * 1024,
-            max_reconnects: Some(60),
+            max_reconnects: None,
             connection_timeout: Duration::from_secs(5),
             tls_required: false,
             tls_first: false,
@@ -145,6 +145,11 @@ impl ConnectOptions {
     /// ```
     pub fn new() -> ConnectOptions {
         ConnectOptions::default()
+    }
+
+    pub fn max_reconnects(mut self, max_reconnects: usize) -> ConnectOptions {
+        self.max_reconnects = Some(max_reconnects);
+        self
     }
 
     /// Connect to the NATS Server leveraging all passed options.
@@ -819,6 +824,11 @@ impl ConnectOptions {
         self
     }
 
+    /// By default, [`ConnectOptions::connect`] will return an error if
+    /// the connection to the server cannot be established.
+    ///
+    /// Setting `retry_on_initial_connect` makes the client
+    /// establish the connection in the background.
     pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
         self
@@ -833,7 +843,6 @@ impl ConnectOptions {
     /// Pass `None` or `0` for no limit.
     ///
     /// # Examples
-    ///
     /// ```
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {

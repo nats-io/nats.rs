@@ -584,7 +584,9 @@ impl ConnectionHandler {
                 ExitReason::Disconnected(err) => {
                     debug!(?err, "disconnected");
 
-                    self.handle_disconnect().await;
+                    if self.handle_disconnect().await.is_err() {
+                        break;
+                    };
                     debug!("reconnected");
                 }
                 ExitReason::Closed => break,
@@ -796,16 +798,16 @@ impl ConnectionHandler {
         }
     }
 
-    async fn handle_disconnect(&mut self) {
+    async fn handle_disconnect(&mut self) -> Result<(), ConnectError> {
         self.pending_pings = 0;
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
 
-        self.handle_reconnect().await;
+        self.handle_reconnect().await
     }
 
-    async fn handle_reconnect(&mut self) {
-        let (info, connection) = self.connector.connect().await;
+    async fn handle_reconnect(&mut self) -> Result<(), ConnectError> {
+        let (info, connection) = self.connector.connect().await?;
         self.connection = connection;
         let _ = self.info_sender.send(info);
 
@@ -829,6 +831,7 @@ impl ConnectionHandler {
         }
 
         self.connector.events_tx.try_send(Event::Connected).ok();
+        Ok(())
     }
 }
 
@@ -874,6 +877,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             read_buffer_capacity: options.read_buffer_capacity,
             reconnect_delay_callback: options.reconnect_delay_callback,
             auth_callback: options.auth_callback,
+            max_reconnects: options.max_reconnects,
         },
         events_tx,
         state_tx,
@@ -912,7 +916,13 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     task::spawn(async move {
         if connection.is_none() && options.retry_on_initial_connect {
-            let (info, connection_ok) = connector.connect().await;
+            let (info, connection_ok) = match connector.connect().await {
+                Ok((info, connection)) => (info, connection),
+                Err(err) => {
+                    error!("connection closed: {}", err);
+                    return;
+                }
+            };
             info_sender.send(info).ok();
             connection = Some(connection_ok);
         }
@@ -1034,6 +1044,8 @@ pub enum ConnectErrorKind {
     Tls,
     /// Other IO error.
     Io,
+    /// Reached the maximum number of reconnects.
+    MaxReconnects,
 }
 
 impl Display for ConnectErrorKind {
@@ -1046,6 +1058,7 @@ impl Display for ConnectErrorKind {
             Self::TimedOut => write!(f, "timed out"),
             Self::Tls => write!(f, "TLS error"),
             Self::Io => write!(f, "IO error"),
+            Self::MaxReconnects => write!(f, "reached maximum number of reconnects"),
         }
     }
 }
@@ -1224,11 +1237,13 @@ pub enum ServerError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientError {
     Other(String),
+    MaxReconnects,
 }
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Other(error) => write!(f, "nats: {error}"),
+            Self::MaxReconnects => write!(f, "nats: max reconnects reached"),
         }
     }
 }
