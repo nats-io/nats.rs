@@ -837,4 +837,33 @@ mod client {
         .await
         .unwrap();
     }
+
+    #[tokio::test]
+    async fn max_reconnects() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let _client = ConnectOptions::new()
+            .max_reconnects(5)
+            .retry_on_initial_connect()
+            .event_callback(move |event| {
+                let tx = tx.clone();
+                async move {
+                    println!("event: {event}");
+                    tx.send(event).unwrap();
+                }
+            })
+            .connect("localhost:7777")
+            .await
+            .unwrap();
+
+        for _ in 0..5 {
+            match rx.recv().await.unwrap() {
+                Event::ClientError(async_nats::ClientError::Other(_)) => (),
+                other => panic!("unexpected event: {:?}", other),
+            };
+        }
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            Event::ClientError(async_nats::ClientError::MaxReconnects)
+        );
+    }
 }
