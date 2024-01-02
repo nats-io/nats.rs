@@ -373,12 +373,12 @@ mod kv {
 
         let wrong_revision = 3;
         let failed = kv
-            .purge_expected_revision("dz", Some(wrong_revision))
+            .purge_expect_revision("dz", Some(wrong_revision))
             .await
             .is_err();
         assert!(failed);
 
-        kv.purge_expected_revision("dz", Some(revision))
+        kv.purge_expect_revision("dz", Some(revision))
             .await
             .unwrap();
         let history = kv.history("dz").await.unwrap().count().await;

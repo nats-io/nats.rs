@@ -739,7 +739,7 @@ impl Store {
     /// # }
     /// ```
     pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), PurgeError> {
-        self.purge_expected_revision(key, None).await
+        self.purge_expect_revision(key, None).await
     }
 
     /// Purges all the revisions of a entry destructively if the resision matches, leaving behind a single
@@ -762,11 +762,11 @@ impl Store {
     ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// let revision = kv.put("key", "another".into()).await?;
-    /// kv.purge_expected_revision("key", Some(revision)).await?;
+    /// kv.purge_expect_revision("key", Some(revision)).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn purge_expected_revision<T: AsRef<str>>(
+    pub async fn purge_expect_revision<T: AsRef<str>>(
         &self,
         key: T,
         revison: Option<u64>,
