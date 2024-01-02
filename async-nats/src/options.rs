@@ -147,11 +147,6 @@ impl ConnectOptions {
         ConnectOptions::default()
     }
 
-    pub fn max_reconnects(mut self, max_reconnects: usize) -> ConnectOptions {
-        self.max_reconnects = Some(max_reconnects);
-        self
-    }
-
     /// Connect to the NATS Server leveraging all passed options.
     ///
     /// # Examples
@@ -855,6 +850,9 @@ impl ConnectOptions {
         self
     }
 
+    /// By default, a server may advertise other servers in the cluster known to it.
+    /// By setting this option, the client will ignore the advertised servers.
+    /// This may be useful if the client may not be able to reach them.
     pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
         self.ignore_discovered_servers = true;
         self
