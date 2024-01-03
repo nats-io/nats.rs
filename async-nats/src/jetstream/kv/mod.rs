@@ -649,6 +649,37 @@ impl Store {
     /// # }
     /// ```
     pub async fn delete<T: AsRef<str>>(&self, key: T) -> Result<(), DeleteError> {
+        self.delete_expect_revision(key, None).await
+    }
+
+    /// Deletes a given key if the revision matches. This is a non-destructive operation, which
+    /// sets a `DELETE` marker.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let revision = kv.put("key", "value".into()).await?;
+    /// kv.delete_expect_revision("key", Some(revision)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_expect_revision<T: AsRef<str>>(
+        &self,
+        key: T,
+        revison: Option<u64>,
+    ) -> Result<(), DeleteError> {
         if !is_valid_key(key.as_ref()) {
             return Err(DeleteError::new(DeleteErrorKind::InvalidKey));
         }
@@ -668,6 +699,13 @@ impl Store {
                 .parse::<HeaderValue>()
                 .map_err(|err| DeleteError::with_source(DeleteErrorKind::Other, err))?,
         );
+
+        if let Some(revision) = revison {
+            headers.insert(
+                header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+                HeaderValue::from(revision),
+            );
+        }
 
         self.stream
             .context
@@ -701,6 +739,38 @@ impl Store {
     /// # }
     /// ```
     pub async fn purge<T: AsRef<str>>(&self, key: T) -> Result<(), PurgeError> {
+        self.purge_expect_revision(key, None).await
+    }
+
+    /// Purges all the revisions of a entry destructively if the revision matches, leaving behind a single
+    /// purge entry in-place.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// kv.put("key", "value".into()).await?;
+    /// let revision = kv.put("key", "another".into()).await?;
+    /// kv.purge_expect_revision("key", Some(revision)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn purge_expect_revision<T: AsRef<str>>(
+        &self,
+        key: T,
+        revison: Option<u64>,
+    ) -> Result<(), PurgeError> {
         if !is_valid_key(key.as_ref()) {
             return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
         }
@@ -716,6 +786,13 @@ impl Store {
         let mut headers = crate::HeaderMap::default();
         headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
         headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
+
+        if let Some(revision) = revison {
+            headers.insert(
+                header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+                HeaderValue::from(revision),
+            );
+        }
 
         self.stream
             .context

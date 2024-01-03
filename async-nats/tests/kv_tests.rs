@@ -212,7 +212,6 @@ mod kv {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
-            // .connect(server.client_url())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -248,11 +247,59 @@ mod kv {
     }
 
     #[tokio::test]
+    async fn delete_expect_revision() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "delete".into(),
+                description: "test_description".into(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let payload: Bytes = "data".into();
+        let revision = kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+
+        let wrong_revision = 3;
+        let failed = kv
+            .delete_expect_revision("key", Some(wrong_revision))
+            .await
+            .is_err();
+        assert!(failed);
+
+        kv.delete_expect_revision("key", Some(revision))
+            .await
+            .unwrap();
+        let ss = kv.get("kv").await.unwrap();
+        assert!(ss.is_none());
+
+        let mut entries = kv.history("key").await.unwrap();
+
+        let first_op = entries.next().await;
+        assert_eq!(first_op.unwrap().unwrap().operation, Operation::Put);
+
+        let first_op = entries.next().await;
+        assert_eq!(first_op.unwrap().unwrap().operation, Operation::Delete);
+    }
+
+    #[tokio::test]
     async fn purge() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
-            // .connect(server.client_url())
             .connect(server.client_url())
             .await
             .unwrap();
@@ -284,6 +331,56 @@ mod kv {
         let history = kv.history("dz").await.unwrap().count().await;
         assert_eq!(history, 6);
         kv.purge("dz").await.unwrap();
+        let history = kv.history("dz").await.unwrap().count().await;
+        assert_eq!(history, 1);
+    }
+
+    #[tokio::test]
+    async fn purge_expect_revision() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "purge".into(),
+                description: "test_description".into(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        kv.put("dz", "0".into()).await.unwrap();
+        kv.put("dz", "1".into()).await.unwrap();
+        kv.put("dz", "2".into()).await.unwrap();
+        kv.put("dz", "3".into()).await.unwrap();
+        kv.put("dz", "4".into()).await.unwrap();
+        let revision = kv.put("dz", "5".into()).await.unwrap();
+
+        kv.put("baz", "0".into()).await.unwrap();
+        kv.put("baz", "1".into()).await.unwrap();
+        kv.put("baz", "2".into()).await.unwrap();
+
+        let history = kv.history("dz").await.unwrap().count().await;
+        assert_eq!(history, 6);
+
+        let wrong_revision = 3;
+        let failed = kv
+            .purge_expect_revision("dz", Some(wrong_revision))
+            .await
+            .is_err();
+        assert!(failed);
+
+        kv.purge_expect_revision("dz", Some(revision))
+            .await
+            .unwrap();
         let history = kv.history("dz").await.unwrap().count().await;
         assert_eq!(history, 1);
     }
