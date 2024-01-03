@@ -742,7 +742,7 @@ impl Store {
         self.purge_expect_revision(key, None).await
     }
 
-    /// Purges all the revisions of a entry destructively if the resision matches, leaving behind a single
+    /// Purges all the revisions of a entry destructively if the revision matches, leaving behind a single
     /// purge entry in-place.
     ///
     /// # Examples
