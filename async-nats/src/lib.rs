@@ -202,7 +202,7 @@ use std::fmt::Display;
 use std::future::Future;
 use std::iter;
 use std::mem;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::option;
 use std::pin::Pin;
 use std::slice;
@@ -1427,8 +1427,8 @@ impl ServerAddr {
     }
 
     /// Return the sockets from resolving the server address.
-    pub fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr>> {
-        (self.host(), self.port()).to_socket_addrs()
+    pub async fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr> + '_> {
+        tokio::net::lookup_host((self.host(), self.port())).await
     }
 }
 

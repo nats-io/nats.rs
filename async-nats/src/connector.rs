@@ -152,6 +152,7 @@ impl Connector {
 
             let socket_addrs = server_addr
                 .socket_addrs()
+                .await
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
             for socket_addr in socket_addrs {
                 match self
