@@ -7,9 +7,16 @@ use async_nats::jetstream::{
 };
 use futures::StreamExt;
 use tokio::time::Instant;
+use async_nats::jetstream::stream::DiscardPolicy;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
+
+    // Prepare the stream:
+    // nats bench benchsubject --js --purge --pub 1 --msgs 10000000 --maxbytes 10000000000
+    // nats bench benchsubject --js --sub 1 --msgs 10000000 --maxbytes 10000000000
+    let msgs = 10_000_000;
+
     // Use the NATS_URL env variable if defined, otherwise fallback to the default.
     let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
@@ -19,7 +26,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Access the JetStream Context for managing streams and consumers as well as for publishing and subscription convenience methods.
     let jetstream = jetstream::new(client);
 
-    let stream_name = String::from("EVENTS");
+    let stream_name = String::from("benchstream");
 
     // Create a stream and a consumer.
     // We can chain the methods.
@@ -27,7 +34,13 @@ async fn main() -> Result<(), async_nats::Error> {
     let consumer: OrderedPullConsumer = jetstream
         .create_stream(jetstream::stream::Config {
             name: stream_name.clone(),
-            subjects: vec!["events".into()],
+            subjects: vec!["benchsubject".into()],
+            max_bytes: 10000000000,
+            max_messages: -1,
+            max_messages_per_subject: -1,
+            max_consumers: -1,
+            num_replicas: 1,
+            discard: DiscardPolicy::New,
             ..Default::default()
         })
         .await?
@@ -36,33 +49,12 @@ async fn main() -> Result<(), async_nats::Error> {
             ..Default::default()
         })
         .await?;
-    let stream = jetstream.get_stream(stream_name).await?;
-    if stream.cached_info().state.messages >= 50_000_000 {
-        println!("stream already has 50M messages");
-    } else {
-        println!("publishing messages");
-        // Publish a few messages for the example.
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
-        for _ in 0..50_000_000 {
-            let ack = jetstream
-                .publish(format!("events"), "foo".into())
-                // The first `await` sends the publish
-                .await?;
-            tx.send(ack).await.unwrap();
-        }
-        tokio::spawn(async move {
-            while let Some(ack) = rx.recv().await {
-                ack.await.unwrap();
-            }
-        });
-    }
 
     println!("pulling messages");
     let now = Instant::now();
     // Attach to the messages iterator for the Consumer.
     // The iterator does its best to optimize retrieval of messages from the server.
-    let mut messages = consumer.messages().await?.take(50_000_000);
+    let mut messages = consumer.messages().await?.take(msgs as usize);
 
     // Iterate over messages.
     while let Some(message) = messages.next().await {
@@ -72,8 +64,8 @@ async fn main() -> Result<(), async_nats::Error> {
         // let i = i + 1;
         // assert_eq!(i as u64, sequence);
     }
-    println!("pulled 50M messages in {:?}", now.elapsed());
-    let msgs_per_sec = 50_000_000.0 / now.elapsed().as_secs_f64();
+    println!("pulled {:?} messages in {:?}", msgs, now.elapsed());
+    let msgs_per_sec = msgs as f64 / now.elapsed().as_secs_f64();
     println!("msgs/sec: {}", msgs_per_sec);
     Ok(())
 }
