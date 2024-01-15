@@ -551,7 +551,7 @@ impl Consumer<OrderedConfig> {
         };
         let stream = Stream::stream(
             BatchConfig {
-                batch: 500,
+                batch: 2000,
                 expires: Some(Duration::from_secs(30)),
                 no_wait: false,
                 max_bytes: 0,

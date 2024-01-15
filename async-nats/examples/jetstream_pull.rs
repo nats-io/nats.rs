@@ -1,7 +1,12 @@
 use std::{env, str::from_utf8};
 
-use async_nats::jetstream::{self, consumer::PullConsumer};
+use async_nats::jetstream::{
+    self,
+    consumer::{OrderedPullConsumer, OrderedPushConsumer, PullConsumer},
+    context::PublishAckFuture,
+};
 use futures::StreamExt;
+use tokio::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
@@ -19,48 +24,56 @@ async fn main() -> Result<(), async_nats::Error> {
     // Create a stream and a consumer.
     // We can chain the methods.
     // First we create a stream and bind to it.
-    let consumer: PullConsumer = jetstream
+    let consumer: OrderedPullConsumer = jetstream
         .create_stream(jetstream::stream::Config {
-            name: stream_name,
-            subjects: vec!["events.>".into()],
+            name: stream_name.clone(),
+            subjects: vec!["events".into()],
             ..Default::default()
         })
         .await?
         // Then, on that `Stream` use method to create Consumer and bind to it too.
-        .create_consumer(jetstream::consumer::pull::Config {
-            durable_name: Some("consumer".into()),
+        .create_consumer(jetstream::consumer::pull::OrderedConfig {
             ..Default::default()
         })
         .await?;
+    let stream = jetstream.get_stream(stream_name).await?;
+    if stream.cached_info().state.messages >= 50_000_000 {
+        println!("stream already has 50M messages");
+    } else {
+        println!("publishing messages");
+        // Publish a few messages for the example.
 
-    // Publish a few messages for the example.
-    for i in 0..10 {
-        jetstream
-            .publish(format!("events.{i}"), "data".into())
-            // The first `await` sends the publish
-            .await?
-            // The second `await` awaits a publish acknowledgement.
-            // This can be skipped (for the cost of processing guarantee)
-            // or deferred to not block another `publish`
-            .await?;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
+        for _ in 0..50_000_000 {
+            let ack = jetstream
+                .publish(format!("events"), "foo".into())
+                // The first `await` sends the publish
+                .await?;
+            tx.send(ack).await.unwrap();
+        }
+        tokio::spawn(async move {
+            while let Some(ack) = rx.recv().await {
+                ack.await.unwrap();
+            }
+        });
     }
 
+    println!("pulling messages");
+    let now = Instant::now();
     // Attach to the messages iterator for the Consumer.
     // The iterator does its best to optimize retrieval of messages from the server.
-    let mut messages = consumer.messages().await?.take(10);
+    let mut messages = consumer.messages().await?.take(50_000_000);
 
     // Iterate over messages.
     while let Some(message) = messages.next().await {
-        let message = message?;
-        println!(
-            "got message on subject {} with payload {:?}",
-            message.subject,
-            from_utf8(&message.payload)?
-        );
-
-        // acknowledge the message
-        message.ack().await?;
+        message.unwrap();
+        // let message = message.unwrap();
+        // let sequence = message.info().unwrap().stream_sequence;
+        // let i = i + 1;
+        // assert_eq!(i as u64, sequence);
     }
-
+    println!("pulled 50M messages in {:?}", now.elapsed());
+    let msgs_per_sec = 50_000_000.0 / now.elapsed().as_secs_f64();
+    println!("msgs/sec: {}", msgs_per_sec);
     Ok(())
 }
