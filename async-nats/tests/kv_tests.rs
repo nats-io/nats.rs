@@ -670,6 +670,52 @@ mod kv {
             }
         }
     }
+
+    #[tokio::test]
+    async fn watch_from_revision() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "bucket".into(),
+                description: "test_description".into(),
+                history: 15,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        kv.put("foo", "bar".into()).await.unwrap();
+        kv.put("foo", "baz".into()).await.unwrap();
+        kv.put("bar", "foo".into()).await.unwrap();
+        kv.put("bar", "bar".into()).await.unwrap();
+        kv.put("baz", "foo".into()).await.unwrap();
+
+        let mut watch = kv.watch_from_revision("foo", 2).await.unwrap().take(1);
+        let key = watch.next().await.unwrap().unwrap();
+        assert_eq!(key.key, "foo");
+        assert_eq!(key.value, "baz".as_bytes());
+        assert_eq!(key.revision, 2);
+
+        let mut watch = kv.watch_all_from_revision(3).await.unwrap().take(3);
+        let key = watch.next().await.unwrap().unwrap();
+        assert_eq!(key.key, "bar");
+        assert_eq!(key.value, "foo".as_bytes());
+        assert_eq!(key.revision, 3);
+        let key = watch.next().await.unwrap().unwrap();
+        assert_eq!(key.key, "bar");
+        assert_eq!(key.value, "bar".as_bytes());
+        let key = watch.next().await.unwrap().unwrap();
+        assert_eq!(key.key, "baz");
+        assert_eq!(key.value, "foo".as_bytes());
+    }
+
     #[tokio::test]
     async fn keys() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
