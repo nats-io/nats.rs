@@ -432,6 +432,46 @@ impl Store {
             .await
     }
 
+    /// Creates a [futures::Stream] over [Entries][Entry] a given key in the bucket, starting from
+    /// provided revision. This is useful to resume watching over big KV buckets without a need to
+    /// replay all the history.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let mut entries = kv.watch_from_revision("kv", 5).await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn watch_from_revision<T: AsRef<str>>(
+        &self,
+        key: T,
+        revision: u64,
+    ) -> Result<Watch, WatchError> {
+        self.watch_with_deliver_policy(
+            key,
+            DeliverPolicy::ByStartSequence {
+                start_sequence: revision,
+            },
+        )
+        .await
+    }
+
     /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
     /// values whenever there are changes for that key with as well as last value.
     ///
@@ -529,6 +569,36 @@ impl Store {
     /// ```
     pub async fn watch_all(&self) -> Result<Watch, WatchError> {
         self.watch(ALL_KEYS).await
+    }
+
+    /// Creates a [futures::Stream] over [Entries][Entry] for all keys starting
+    /// from a provider revision. This can be useful when resuming watching over a big bucket
+    /// without the need to replay all the history.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let mut entries = kv.watch_all_from_revision(40).await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn watch_all_from_revision(&self, revision: u64) -> Result<Watch, WatchError> {
+        self.watch_from_revision(ALL_KEYS, revision).await
     }
 
     /// Retrieves the [Entry] for a given key from a bucket.
