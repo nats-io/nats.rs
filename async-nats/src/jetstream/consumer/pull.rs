@@ -813,9 +813,7 @@ impl futures::Stream for Ordered {
                 let consumer_name = self.consumer_name.clone();
                 let sequence = self.stream_sequence;
                 async move {
-                    let strategy =
-                        tokio_retry::strategy::ExponentialBackoff::from_millis(500).take(5);
-                    tokio_retry::Retry::spawn(strategy, || {
+                    tryhard::retry_fn(|| {
                         recreate_consumer_stream(
                             &context,
                             &config,
@@ -824,6 +822,8 @@ impl futures::Stream for Ordered {
                             sequence,
                         )
                     })
+                    .retries(5)
+                    .exponential_backoff(Duration::from_millis(500))
                     .await
                 }
             }))
@@ -923,8 +923,8 @@ impl Stream {
                                     continue;
                                 }
                             debug!("detected !Connected -> Connected state change");
-                            let strategy = tokio_retry::strategy::ExponentialBackoff::from_millis(500).take(5);
-                            match tokio_retry::Retry::spawn(strategy , || consumer.fetch_info()).await {
+
+                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(5).exponential_backoff(Duration::from_millis(500)).await {
                                 Ok(info) => {
                                     if info.num_waiting == 0 {
                                         pending_reset = true;

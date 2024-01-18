@@ -38,7 +38,6 @@ use std::{
 };
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tracing::{debug, trace};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
@@ -506,8 +505,7 @@ impl Consumer<OrderedConfig> {
                         "idle heartbeats expired. recreating consumer s: {},  {:?}",
                         stream_name, config
                     );
-                    let retry_strategy = ExponentialBackoff::from_millis(500).take(5);
-                    let consumer = Retry::spawn(retry_strategy, || {
+                    let consumer = tryhard::retry_fn(|| {
                         recreate_ephemeral_consumer(
                             context.clone(),
                             config.clone(),
@@ -515,6 +513,8 @@ impl Consumer<OrderedConfig> {
                             last_sequence.load(Ordering::Relaxed),
                         )
                     })
+                    .retries(5)
+                    .exponential_backoff(Duration::from_millis(500))
                     .await;
                     if let Err(err) = consumer {
                         shutdown_tx.send(err).unwrap();
@@ -845,13 +845,15 @@ async fn recreate_ephemeral_consumer(
     stream_name: String,
     sequence: u64,
 ) -> Result<(), ConsumerRecreateError> {
-    let strategy = ExponentialBackoff::from_millis(500).take(5);
-    let stream =
-        tokio_retry::Retry::spawn(strategy.clone(), || context.get_stream(stream_name.clone()))
-            .await
-            .map_err(|err| {
-                ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
-            })?;
+    let strategy =
+        tryhard::RetryFutureConfig::new(5).exponential_backoff(Duration::from_millis(500));
+
+    let stream = tryhard::retry_fn(|| context.get_stream(stream_name.clone()))
+        .with_config(strategy)
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
+        })?;
 
     let deliver_policy = {
         if sequence == 0 {
@@ -862,7 +864,8 @@ async fn recreate_ephemeral_consumer(
             }
         }
     };
-    tokio_retry::Retry::spawn(strategy, || {
+
+    tryhard::retry_fn(|| {
         let config = config.clone();
         tokio::time::timeout(
             Duration::from_secs(5),
@@ -872,8 +875,10 @@ async fn recreate_ephemeral_consumer(
             }),
         )
     })
+    .with_config(strategy)
     .await
     .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
+
     Ok(())
 }
