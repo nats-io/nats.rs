@@ -45,7 +45,6 @@ mod jetstream {
     use async_nats::ConnectOptions;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
-    use tokio_retry::Retry;
     use tracing::debug;
 
     #[tokio::test]
@@ -338,8 +337,7 @@ mod jetstream {
         let client = async_nats::connect(cluster.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
 
-        let retry_strategy = tokio_retry::strategy::FibonacciBackoff::from_millis(500).take(5);
-        let mut stream = Retry::spawn(retry_strategy, || {
+        let mut stream = tryhard::retry_fn(|| {
             context.create_stream(stream::Config {
                 name: "events2".to_string(),
                 num_replicas: 3,
@@ -348,6 +346,8 @@ mod jetstream {
                 ..Default::default()
             })
         })
+        .retries(5)
+        .exponential_backoff(Duration::from_millis(500))
         .await
         .unwrap();
 
@@ -2371,8 +2371,7 @@ mod jetstream {
         let jetstream = async_nats::jetstream::new(client.clone());
         // cluster takes some time to spin up.
         // we can have a retry mechanism added later.
-        let retry_strategy = tokio_retry::strategy::FibonacciBackoff::from_millis(500).take(5);
-        let stream = Retry::spawn(retry_strategy, || {
+        let stream = tryhard::retry_fn(|| {
             jetstream.create_stream(async_nats::jetstream::stream::Config {
                 name: "reconnect".into(),
                 subjects: vec!["reconnect.>".into()],
@@ -2380,6 +2379,8 @@ mod jetstream {
                 ..Default::default()
             })
         })
+        .retries(5)
+        .exponential_backoff(Duration::from_secs(1))
         .await
         .unwrap();
 
