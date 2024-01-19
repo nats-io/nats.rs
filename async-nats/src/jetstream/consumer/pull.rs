@@ -2267,7 +2267,6 @@ async fn recreate_consumer_stream(
         stream.delete_consumer(consumer_name),
     )
     .await
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))
     .ok();
 
     let deliver_policy = {
