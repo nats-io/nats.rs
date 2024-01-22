@@ -28,7 +28,7 @@ There are two clients available in two separate crates:
 [![Documentation](https://docs.rs/async-nats/badge.svg)](https://docs.rs/async-nats/)
 [![Build Status](https://github.com/nats-io/nats.rs/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/nats-io/nats.rs/actions)
 
-New async Tokio-based NATS client.
+Async Tokio-based NATS client.
 
 Supports:
 
@@ -39,9 +39,8 @@ Supports:
 * Object Store
 * Service API
 
-Any feedback related to this client is welcomed.
-
-> **Note:** async client is still <1.0.0 version and will introduce breaking changes.
+The API is stable, however it remains on 0.x.x versioning, as async ecosystem is still introducing a lot of ergonomic improvements. Some of our dependencies are also considered
+stable, yet versioned <1.0.0, like `rustls`, which might introduce breaking changes that can affect our users in some way.
 
 ### nats
 
@@ -58,7 +57,8 @@ Legacy *synchronous* client that supports:
 * Key Value Store
 * Object Store
 
-This client will be deprecated soon, when `async-nats` reaches version 1.0, with a sync wrapper around it.
+This client does not get updates, unless those are security fixes.
+Please use the new `async-nats` crate.
 
 ### Documentation
 
