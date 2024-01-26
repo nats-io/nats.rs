@@ -487,7 +487,10 @@ impl ConnectionHandler {
             ///   [`Self::receiver`] was closed, so there's nothing
             ///   more for us to do than to exit the client.
             fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                if self.handler.ping_interval.poll_tick(cx).is_ready() {
+                // We need to be sure the waker is registered, therefore we need to poll until we
+                // get a `Poll::Pending`. With a sane interval delay, this means that the loop
+                // breaks at the second iteration.
+                while self.handler.ping_interval.poll_tick(cx).is_ready() {
                     if let Poll::Ready(exit) = self.ping() {
                         return Poll::Ready(exit);
                     }
