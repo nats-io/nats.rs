@@ -705,57 +705,9 @@ impl Stream {
         &self,
         config: C,
     ) -> Result<Consumer<C>, ConsumerError> {
-        let config = config.into_consumer_config();
-
-        let subject = {
-            if self.context.client.is_server_compatible(2, 9, 0) {
-                let filter = if config.filter_subject.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(".{}", config.filter_subject)
-                };
-                config
-                    .name
-                    .as_ref()
-                    .or(config.durable_name.as_ref())
-                    .map(|name| {
-                        format!(
-                            "CONSUMER.CREATE.{}.{}{}",
-                            self.info.config.name, name, filter
-                        )
-                    })
-                    .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", self.info.config.name))
-            } else if config.name.is_some() {
-                return Err(ConsumerError::with_source(
-                    ConsumerErrorKind::Other,
-                    "can't use consumer name with server < 2.9.0",
-                ));
-            } else if let Some(ref durable_name) = config.durable_name {
-                format!(
-                    "CONSUMER.DURABLE.CREATE.{}.{}",
-                    self.info.config.name, durable_name
-                )
-            } else {
-                format!("CONSUMER.CREATE.{}", self.info.config.name)
-            }
-        };
-
-        match self
-            .context
-            .request(
-                subject,
-                &json!({"stream_name": self.info.config.name.clone(), "config": config}),
-            )
-            .await?
-        {
-            Response::Err { error } => Err(ConsumerError::new(ConsumerErrorKind::JetStream(error))),
-            Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
-                FromConsumer::try_from_consumer_config(info.clone().config)
-                    .map_err(|err| ConsumerError::with_source(ConsumerErrorKind::Other, err))?,
-                info,
-                self.context.clone(),
-            )),
-        }
+        self.context
+            .create_consumer_on_stream(config, self.info.config.name.clone())
+            .await
     }
 
     /// Retrieve [Info] about [Consumer] from the server.

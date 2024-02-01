@@ -1160,6 +1160,33 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn create_consumer_on_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_or_create_stream("stream").await.unwrap();
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        context
+            .create_consumer_on_stream(
+                consumer::push::Config {
+                    durable_name: Some("push".into()),
+                    deliver_subject: "subject".into(),
+                    ..Default::default()
+                },
+                "stream",
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn get_or_create_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
