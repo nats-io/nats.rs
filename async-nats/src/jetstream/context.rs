@@ -41,7 +41,9 @@ use super::consumer::{Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
-use super::stream::{self, Config, DeleteStatus, DiscardPolicy, External, Info, Stream};
+use super::stream::{
+    self, Config, ConsumerError, DeleteStatus, DiscardPolicy, External, Info, Stream,
+};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -782,6 +784,61 @@ impl Context {
             info,
             self.clone(),
         ))
+    }
+
+    /// Delete a [crate::jetstream::consumer::Consumer] straight from [Context], without binding to a [Stream] first.
+    ///
+    /// It has one less interaction with the server when binding to only one
+    /// [crate::jetstream::consumer::Consumer].
+    ///
+    /// # Examples:
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .delete_consumer_from_stream("consumer", "stream")
+    ///     .await?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// Delete a [Consumer] from the server.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .delete_consumer("pull")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_consumer_from_stream<C: AsRef<str>, S: AsRef<str>>(
+        &self,
+        consumer: C,
+        stream: S,
+    ) -> Result<DeleteStatus, ConsumerError> {
+        let subject = format!("CONSUMER.DELETE.{}.{}", stream.as_ref(), consumer.as_ref());
+
+        match self.request(subject, &json!({})).await? {
+            Response::Ok(delete_status) => Ok(delete_status),
+            Response::Err { error } => Err(error.into()),
+        }
     }
 
     /// Send a request to the jetstream JSON API.
