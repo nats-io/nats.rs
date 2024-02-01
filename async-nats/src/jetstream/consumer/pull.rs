@@ -2249,22 +2249,12 @@ async fn recreate_consumer_stream(
         sequence = sequence
     );
     let _span_handle = span.enter();
-    debug!("recreating consumer");
     let config = config.to_owned();
-    trace!("get stream");
-    let stream = tokio::time::timeout(Duration::from_secs(5), context.get_stream(stream_name))
-        .await
-        .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err)
-        })?
-        .map_err(|err| {
-            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
-        })?;
     trace!("delete old consumer before creating new one");
 
     tokio::time::timeout(
         Duration::from_secs(5),
-        stream.delete_consumer(consumer_name),
+        context.delete_consumer_from_stream(consumer_name, stream_name),
     )
     .await
     .ok();
@@ -2281,10 +2271,13 @@ async fn recreate_consumer_stream(
     trace!("create the new ordered consumer for sequence {}", sequence);
     let consumer = tokio::time::timeout(
         Duration::from_secs(5),
-        stream.create_consumer(jetstream::consumer::pull::OrderedConfig {
-            deliver_policy,
-            ..config.clone()
-        }),
+        context.create_consumer_on_stream(
+            jetstream::consumer::pull::OrderedConfig {
+                deliver_policy,
+                ..config.clone()
+            },
+            stream_name,
+        ),
     )
     .await
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
