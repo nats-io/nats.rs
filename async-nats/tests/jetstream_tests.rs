@@ -1157,6 +1157,10 @@ mod jetstream {
             .delete_consumer_from_stream("pull", "stream")
             .await
             .unwrap();
+        assert!(stream
+            .get_consumer::<consumer::Config>("pull")
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -1173,7 +1177,7 @@ mod jetstream {
             })
             .await
             .unwrap();
-        context
+        let consumer = context
             .create_consumer_on_stream(
                 consumer::push::Config {
                     durable_name: Some("push".into()),
@@ -1184,6 +1188,7 @@ mod jetstream {
             )
             .await
             .unwrap();
+        assert_eq!(consumer.cached_info().name, "push");
     }
 
     #[tokio::test]
