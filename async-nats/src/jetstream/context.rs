@@ -37,12 +37,13 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use super::consumer::{Consumer, FromConsumer, IntoConsumerConfig};
+use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{
-    self, Config, ConsumerError, DeleteStatus, DiscardPolicy, External, Info, Stream,
+    self, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy, External, Info,
+    Stream,
 };
 
 /// A context which can perform jetstream scoped requests.
@@ -801,30 +802,10 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let consumer: PullConsumer = jetstream
+    /// jetstream
     ///     .delete_consumer_from_stream("consumer", "stream")
     ///     .await?;
     ///
-    /// # Ok(())
-    /// # }
-    /// ```
-    /// Delete a [Consumer] from the server.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use async_nats::jetstream::consumer;
-    /// use futures::StreamExt;
-    /// let client = async_nats::connect("localhost:4222").await?;
-    /// let jetstream = async_nats::jetstream::new(client);
-    ///
-    /// jetstream
-    ///     .get_stream("events")
-    ///     .await?
-    ///     .delete_consumer("pull")
-    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -838,6 +819,83 @@ impl Context {
         match self.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),
             Response::Err { error } => Err(error.into()),
+        }
+    }
+
+    /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
+    /// returns the info from the server about created [Consumer] without binding to a [Stream] first.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: consumer::PullConsumer = jetstream
+    ///     .create_consumer_on_stream(
+    ///         consumer::pull::Config {
+    ///             durable_name: Some("pull".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///         "stream",
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_consumer_on_stream<C: IntoConsumerConfig + FromConsumer, S: AsRef<str>>(
+        &self,
+        config: C,
+        stream: S,
+    ) -> Result<Consumer<C>, ConsumerError> {
+        let config = config.into_consumer_config();
+
+        let subject = {
+            if self.client.is_server_compatible(2, 9, 0) {
+                let filter = if config.filter_subject.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(".{}", config.filter_subject)
+                };
+                config
+                    .name
+                    .as_ref()
+                    .or(config.durable_name.as_ref())
+                    .map(|name| format!("CONSUMER.CREATE.{}.{}{}", stream.as_ref(), name, filter))
+                    .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", stream.as_ref()))
+            } else if config.name.is_some() {
+                return Err(ConsumerError::with_source(
+                    ConsumerErrorKind::Other,
+                    "can't use consumer name with server < 2.9.0",
+                ));
+            } else if let Some(ref durable_name) = config.durable_name {
+                format!(
+                    "CONSUMER.DURABLE.CREATE.{}.{}",
+                    stream.as_ref(),
+                    durable_name
+                )
+            } else {
+                format!("CONSUMER.CREATE.{}", stream.as_ref())
+            }
+        };
+
+        match self
+            .request(
+                subject,
+                &json!({"stream_name": stream.as_ref(), "config": config}),
+            )
+            .await?
+        {
+            Response::Err { error } => Err(ConsumerError::new(ConsumerErrorKind::JetStream(error))),
+            Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
+                FromConsumer::try_from_consumer_config(info.clone().config)
+                    .map_err(|err| ConsumerError::with_source(ConsumerErrorKind::Other, err))?,
+                info,
+                self.clone(),
+            )),
         }
     }
 
