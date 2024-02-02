@@ -13,7 +13,7 @@
 
 #[cfg(feature = "compatibility_tests")]
 mod compatibility {
-    use futures::{pin_mut, stream::Peekable, StreamExt};
+    use futures::{pin_mut, stream::Peekable, StreamExt, TryStreamExt};
     use ring::digest::{self, SHA256};
 
     use core::panic;
@@ -27,7 +27,6 @@ mod compatibility {
         service::{self, ServiceExt},
     };
     use serde::{Deserialize, Serialize};
-    use tokio::io::AsyncReadExt;
 
     #[tokio::test]
     async fn kv() {
@@ -226,7 +225,9 @@ mod compatibility {
             let mut object = bucket.get(request.object).await.unwrap();
             let mut contents = vec![];
 
-            object.read_to_end(&mut contents).await.unwrap();
+            while let Some(chunk) = object.try_next().await.unwrap() {
+                contents.extend_from_slice(&chunk);
+            }
 
             let digest = digest::digest(&SHA256, &contents);
 
@@ -295,7 +296,9 @@ mod compatibility {
             let mut object = bucket.get(request.object).await.unwrap();
             let mut contents = vec![];
 
-            object.read_to_end(&mut contents).await.unwrap();
+            while let Some(chunk) = object.try_next().await.unwrap() {
+                contents.extend_from_slice(&chunk);
+            }
 
             let digest = digest::digest(&SHA256, &contents);
 

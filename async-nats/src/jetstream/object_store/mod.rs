@@ -12,21 +12,23 @@
 // limitations under the License.
 
 //! Object Store module
-use std::collections::VecDeque;
 use std::fmt::Display;
-use std::{cmp, str::FromStr, task::Poll, time::Duration};
+use std::io;
+use std::pin::Pin;
+use std::task::Context;
+use std::{str::FromStr, task::Poll, time::Duration};
 
 use crate::crypto::Sha256;
 use crate::subject::Subject;
 use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use base64::engine::Engine;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
 use tokio::io::AsyncReadExt;
 
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -92,24 +94,42 @@ pub struct ObjectStore {
 impl ObjectStore {
     /// Gets an [Object] from the [ObjectStore].
     ///
-    /// [Object] implements [tokio::io::AsyncRead] that allows
-    /// to read the data from Object Store.
+    /// [Object] implements [Stream] that allows
+    /// to stream chunks from Object Store.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use tokio::io::AsyncReadExt;
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    /// use std::env;
+    ///
+    /// use tokio::fs::File;
+    ///
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let bucket = jetstream.get_object_store("store").await?;
     /// let mut object = bucket.get("FOO").await?;
     ///
-    /// // Object implements `tokio::io::AsyncRead`.
-    /// let mut bytes = vec![];
-    /// object.read_to_end(&mut bytes).await?;
+    /// // Use the `Stream` implementation
+    /// use futures::TryStreamExt as _;
+    /// use tokio::io::AsyncWriteExt as _;
+    ///
+    /// let mut file = File::create(env::temp_dir().join("FOO.bin")).await?;
+    /// while let Some(chunk) = object.try_next().await? {
+    ///     file.write_all(&chunk).await?;
+    /// }
+    /// file.sync_all().await?;
+    ///
+    /// // Alternatively use `tokio_util` with the `io` feature
+    /// // to convert the `Stream` into `AsyncRead`
+    /// // (less efficient because of the added memcpy)
+    /// let mut reader = tokio_util::io::StreamReader::new(object);
+    ///
+    /// let mut file = File::create(env::temp_dir().join("FOO.bin")).await?;
+    /// tokio::io::copy(&mut reader, &mut file).await?;
+    /// file.sync_all().await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -920,7 +940,6 @@ impl Stream for List {
 /// Represents an object stored in a bucket.
 pub struct Object {
     pub info: ObjectInfo,
-    remaining_bytes: VecDeque<u8>,
     has_pending_messages: bool,
     digest: Option<Sha256>,
     subscription: Option<crate::jetstream::consumer::push::Ordered>,
@@ -933,7 +952,6 @@ impl Object {
         Object {
             subscription: None,
             info,
-            remaining_bytes: VecDeque::new(),
             has_pending_messages: true,
             digest: Some(Sha256::new()),
             subscription_future: None,
@@ -947,24 +965,19 @@ impl Object {
     }
 }
 
-impl tokio::io::AsyncRead for Object {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let (buf1, _buf2) = self.remaining_bytes.as_slices();
-        if !buf1.is_empty() {
-            let len = cmp::min(buf.remaining(), buf1.len());
-            buf.put_slice(&buf1[..len]);
-            self.remaining_bytes.drain(..len);
-            return Poll::Ready(Ok(()));
+impl Stream for Object {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if !self.has_pending_messages {
+            return Poll::Ready(None);
         }
 
-        if self.has_pending_messages {
-            if self.subscription.is_none() {
-                let future = match self.subscription_future.as_mut() {
-                    Some(future) => future,
+        let subscription = match &mut self.subscription {
+            Some(subscription) => subscription,
+            None => {
+                let subscription_future = match &mut self.subscription_future {
+                    Some(subscription_future) => subscription_future,
                     None => {
                         let stream = self.stream.clone();
                         let bucket = self.info.bucket.clone();
@@ -983,77 +996,68 @@ impl tokio::io::AsyncRead for Object {
                         }))
                     }
                 };
-                match future.as_mut().poll(cx) {
-                    Poll::Ready(subscription) => {
-                        self.subscription = Some(subscription.unwrap());
-                    }
-                    Poll::Pending => (),
-                }
-            }
-            if let Some(subscription) = self.subscription.as_mut() {
-                match subscription.poll_next_unpin(cx) {
-                    Poll::Ready(message) => match message {
-                        Some(message) => {
-                            let message = message.map_err(|err| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    format!("error from JetStream subscription: {err}"),
-                                )
-                            })?;
-                            let len = cmp::min(buf.remaining(), message.payload.len());
-                            buf.put_slice(&message.payload[..len]);
-                            if let Some(context) = &mut self.digest {
-                                context.update(&message.payload);
-                            }
-                            self.remaining_bytes.extend(&message.payload[len..]);
 
-                            let info = message.info().map_err(|err| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    format!("error from JetStream subscription: {err}"),
-                                )
-                            })?;
-                            if info.pending == 0 {
-                                let digest = self.digest.take().map(Sha256::finish);
-                                if let Some(digest) = digest {
-                                    if self
-                                        .info
-                                        .digest
-                                        .as_ref()
-                                        .map(|digest_self| {
-                                            format!("SHA-256={}", URL_SAFE.encode(digest))
-                                                != *digest_self
-                                        })
-                                        .unwrap_or(false)
-                                    {
-                                        return Poll::Ready(Err(std::io::Error::new(
-                                            std::io::ErrorKind::InvalidData,
-                                            "wrong digest",
-                                        )));
-                                    }
-                                } else {
-                                    return Poll::Ready(Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        "digest should be Some",
-                                    )));
-                                }
-                                self.has_pending_messages = false;
-                                self.subscription = None;
-                            }
-                            Poll::Ready(Ok(()))
-                        }
-                        None => Poll::Ready(Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "subscription ended before reading whole object",
-                        ))),
-                    },
-                    Poll::Pending => Poll::Pending,
+                match subscription_future.poll_unpin(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Ok(subscription)) => self.subscription.insert(subscription),
+                    Poll::Ready(Err(err)) => {
+                        return Poll::Ready(Some(Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("error from JetStream create subscription: {err}"),
+                        ))))
+                    }
                 }
-            } else {
-                Poll::Pending
             }
-        } else {
-            Poll::Ready(Ok(()))
+        };
+
+        match subscription.poll_next_unpin(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(Ok(message))) => {
+                if let Some(digest) = &mut self.digest {
+                    digest.update(&message.message.payload);
+                }
+
+                let info = message.info().map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("error from JetStream subscription: {err}"),
+                    )
+                })?;
+
+                if info.pending == 0 {
+                    self.has_pending_messages = false;
+                    self.subscription = None;
+
+                    if let Some(digest) = self.digest.take() {
+                        let digest = digest.finish();
+
+                        if self
+                            .info
+                            .digest
+                            .as_ref()
+                            .map(|digest_self| {
+                                format!("SHA-256={}", URL_SAFE.encode(digest)) != *digest_self
+                            })
+                            .unwrap_or(false)
+                        {
+                            return Poll::Ready(Some(Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "wrong digest",
+                            ))));
+                        }
+                    }
+                }
+
+                Poll::Ready(Some(Ok(message.message.payload)))
+            }
+            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("error from JetStream subscription: {err}"),
+            )))),
+            Poll::Ready(None) => Poll::Ready(Some(Err(io::Error::new(
+                io::ErrorKind::Other,
+                "subscription ended before reading whole object",
+            )))),
         }
     }
 }

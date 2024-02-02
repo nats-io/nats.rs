@@ -47,6 +47,7 @@ criterion =  { version = "0.5", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
 tokio = { version = "1.25.0", features = ["rt-multi-thread"] }
+tokio-util = { version = "0.7", features = ["io"] }
 futures = { version = "0.3.28", default-features = false, features = ["std", "async-await"] }
 tracing-subscriber = "0.3"
 async-nats = {path = ".", features = ["experimental"]}
