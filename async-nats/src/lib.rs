@@ -443,6 +443,7 @@ impl ConnectionHandler {
         struct ProcessFut<'a> {
             handler: &'a mut ConnectionHandler,
             receiver: &'a mut mpsc::Receiver<Command>,
+            recv_buf: &'a mut Vec<Command>,
         }
 
         enum ExitReason {
@@ -451,6 +452,8 @@ impl ConnectionHandler {
         }
 
         impl<'a> ProcessFut<'a> {
+            const RECV_CHUNK_SIZE: usize = 16;
+
             #[cold]
             fn ping(&mut self) -> Poll<ExitReason> {
                 self.handler.pending_pings += 1;
@@ -519,13 +522,24 @@ impl ConnectionHandler {
                 let mut made_progress = true;
                 loop {
                     while !self.handler.connection.is_write_buf_full() {
-                        match self.receiver.poll_recv(cx) {
+                        debug_assert!(self.recv_buf.is_empty());
+
+                        let Self {
+                            recv_buf,
+                            handler,
+                            receiver,
+                        } = &mut *self;
+                        match receiver.poll_recv_many(cx, recv_buf, Self::RECV_CHUNK_SIZE) {
                             Poll::Pending => break,
-                            Poll::Ready(Some(cmd)) => {
+                            Poll::Ready(1..) => {
                                 made_progress = true;
-                                self.handler.handle_command(cmd);
+
+                                for cmd in recv_buf.drain(..) {
+                                    handler.handle_command(cmd);
+                                }
                             }
-                            Poll::Ready(None) => return Poll::Ready(ExitReason::Closed),
+                            // TODO: replace `_` with `0` after bumping MSRV to 1.75
+                            Poll::Ready(_) => return Poll::Ready(ExitReason::Closed),
                         }
                     }
 
@@ -578,10 +592,12 @@ impl ConnectionHandler {
             }
         }
 
+        let mut recv_buf = Vec::with_capacity(ProcessFut::RECV_CHUNK_SIZE);
         loop {
             let process = ProcessFut {
                 handler: self,
                 receiver,
+                recv_buf: &mut recv_buf,
             };
             match process.await {
                 ExitReason::Disconnected(err) => {
