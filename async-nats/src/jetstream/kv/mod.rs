@@ -243,7 +243,10 @@ impl Store {
         let entry = self.entry(key.as_ref()).await?;
 
         match entry {
+            // key does not exist update with 0 revision to create it.
             None => Ok(self.update(key, value, 0).await?),
+
+            // deleted or Purged key, we can create it again.
             Some(Entry {
                 operation: Operation::Delete | Operation::Purge,
                 ..
@@ -252,6 +255,7 @@ impl Store {
                 Ok(revision)
             }
 
+            // key already exists.
             Some(_) => Err(CreateError::new(CreateErrorKind::AlreadyExists)),
         }
     }
