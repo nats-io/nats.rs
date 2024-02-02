@@ -240,13 +240,14 @@ impl Store {
         key: T,
         value: bytes::Bytes,
     ) -> Result<u64, CreateError> {
+        if let Ok(revision) = self.update(key.as_ref(), value.clone(), 0).await {
+            return Ok(revision);
+        };
+
         let entry = self.entry(key.as_ref()).await?;
 
         match entry {
-            // key does not exist update with 0 revision to create it.
-            None => Ok(self.update(key, value, 0).await?),
-
-            // deleted or Purged key, we can create it again.
+            // Deleted or Purged key, we can create it again.
             Some(Entry {
                 operation: Operation::Delete | Operation::Purge,
                 ..
@@ -257,6 +258,10 @@ impl Store {
 
             // key already exists.
             Some(_) => Err(CreateError::new(CreateErrorKind::AlreadyExists)),
+
+            // Something went wrong. Should not be possible, if there was no key the initial
+            // update should have worked.
+            None => Err(CreateError::new(CreateErrorKind::Other)),
         }
     }
 
