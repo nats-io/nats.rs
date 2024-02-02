@@ -209,8 +209,7 @@ impl Store {
         })
     }
 
-    /// Creates new key value pair into the bucket.
-    /// If the key already exists, it will return an error.
+    /// Create will add the key/value pair if it does not exist. If it does exist, it will return an error.
     ///
     /// # Examples
     ///
@@ -226,7 +225,9 @@ impl Store {
     ///         ..Default::default()
     ///     })
     ///     .await?;
+    ///
     /// let status = kv.create("key", "value".into()).await?;
+    /// assert!(status.is_ok());
     ///
     /// let status = kv.create("key", "value".into()).await;
     /// assert!(status.is_err());
