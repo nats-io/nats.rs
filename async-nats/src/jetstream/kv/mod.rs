@@ -226,7 +226,7 @@ impl Store {
     ///     })
     ///     .await?;
     ///
-    /// let status = kv.create("key", "value".into()).await?;
+    /// let status = kv.create("key", "value".into()).await;
     /// assert!(status.is_ok());
     ///
     /// let status = kv.create("key", "value".into()).await;
