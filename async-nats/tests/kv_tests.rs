@@ -25,7 +25,7 @@ mod kv {
     use futures::{StreamExt, TryStreamExt};
 
     #[tokio::test]
-    async fn create() {
+    async fn create_bucket() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
@@ -50,6 +50,45 @@ mod kv {
         assert_eq!("KV_test", kv.stream_name);
         assert_eq!(info.config.discard, DiscardPolicy::New);
         assert!(info.config.allow_direct);
+    }
+
+    #[tokio::test]
+    async fn create() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".into(),
+                description: "test_description".into(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload: Bytes = "data".into();
+        let create = kv.create("key", payload.clone()).await;
+        assert!(create.is_ok());
+
+        let create = kv.create("key", payload.clone()).await;
+        assert!(create.is_err());
+
+        kv.delete("key").await.unwrap();
+        let create = kv.create("key", payload.clone()).await;
+        assert!(create.is_ok());
+
+        kv.purge("key").await.unwrap();
+        let create = kv.create("key", payload.clone()).await;
+        assert!(create.is_ok());
     }
 
     #[tokio::test]
