@@ -21,7 +21,7 @@ impl Subject {
     /// let subject = Subject::from_static("Static string");
     /// assert_eq!(subject.as_str(), "Static string");
     /// ```
-    pub fn from_static(input: &'static str) -> Self {
+    pub const fn from_static(input: &'static str) -> Self {
         Subject {
             bytes: Bytes::from_static(input.as_bytes()),
         }
