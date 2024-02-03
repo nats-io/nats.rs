@@ -153,10 +153,7 @@ impl ObjectStore {
         })
     }
 
-    /// Gets an [Object] from the [ObjectStore].
-    ///
-    /// [Object] implements [tokio::io::AsyncRead] that allows
-    /// to read the data from Object Store.
+    /// Deletes an [Object] from the [ObjectStore].
     ///
     /// # Examples
     ///
