@@ -1277,7 +1277,7 @@ impl Display for CreateErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AlreadyExists => write!(f, "key already exists"),
-            Self::Publish => write!(f, "failed to put key into store"),
+            Self::Publish => write!(f, "failed to create key in store"),
             Self::Ack => write!(f, "ack error"),
             Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
             Self::Other => write!(f, "other error"),
