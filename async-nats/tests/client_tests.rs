@@ -866,4 +866,21 @@ mod client {
             Event::ClientError(async_nats::ClientError::MaxReconnects)
         );
     }
+
+    #[tokio::test]
+    async fn publish_payload_size() {
+        let server = nats_server::run_server("tests/configs/max_payload.conf");
+
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // this exceeds the small payload limit in server config.
+        let payload = vec![0u8; 1024 * 1024];
+
+        client.publish("big", payload.into()).await.unwrap_err();
+        client.publish("small", "data".into()).await.unwrap();
+        client
+            .publish("just_ok", vec![0u8; 1024 * 128].into())
+            .await
+            .unwrap();
+    }
 }

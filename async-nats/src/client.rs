@@ -23,7 +23,7 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Display;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -45,6 +45,14 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     }
 }
 
+pub struct MaxPayloadExceeded(String);
+
+impl From<MaxPayloadExceeded> for PublishError {
+    fn from(err: MaxPayloadExceeded) -> Self {
+        PublishError(crate::Error::from(err.0))
+    }
+}
+
 /// Client is a `Cloneable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [crate::connect] and [crate::ConnectOptions::connect]
@@ -57,6 +65,7 @@ pub struct Client {
     subscription_capacity: usize,
     inbox_prefix: String,
     request_timeout: Option<Duration>,
+    max_payload: Arc<AtomicUsize>,
 }
 
 impl Client {
@@ -67,6 +76,7 @@ impl Client {
         capacity: usize,
         inbox_prefix: String,
         request_timeout: Option<Duration>,
+        max_payload: Arc<AtomicUsize>,
     ) -> Client {
         Client {
             info,
@@ -76,6 +86,7 @@ impl Client {
             subscription_capacity: capacity,
             inbox_prefix,
             request_timeout,
+            max_payload,
         }
     }
 
@@ -154,6 +165,14 @@ impl Client {
         payload: Bytes,
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
+        let max_payload = self.max_payload.load(Ordering::Relaxed);
+        if payload.len() > max_payload {
+            return Err(PublishError::from(MaxPayloadExceeded(format!(
+                "Payload size limit of {} exceeded by message size of {}",
+                payload.len(),
+                max_payload
+            ))));
+        }
 
         self.sender
             .send(Command::Publish {

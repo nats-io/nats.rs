@@ -207,6 +207,8 @@ use std::option;
 use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
+use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
 use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
@@ -877,6 +879,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
+    // We're setting it to the default server payload size.
+    let max_payload = Arc::new(AtomicUsize::new(1024 * 1024));
 
     let mut connector = Connector::new(
         addrs,
@@ -900,6 +904,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         },
         events_tx,
         state_tx,
+        max_payload.clone(),
     )
     .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
@@ -912,7 +917,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         info = info_ok;
     }
 
-    let (info_sender, info_watcher) = tokio::sync::watch::channel(info);
+    let (info_sender, info_watcher) = tokio::sync::watch::channel(info.clone());
     let (sender, mut receiver) = mpsc::channel(options.sender_capacity);
 
     let client = Client::new(
@@ -922,6 +927,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.subscription_capacity,
         options.inbox_prefix,
         options.request_timeout,
+        max_payload,
     );
 
     task::spawn(async move {
