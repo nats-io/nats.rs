@@ -1,6 +1,4 @@
-use std::future::IntoFuture;
-
-use async_nats::jetstream::stream;
+use async_nats::jetstream::{context::PublishAckFuture, stream};
 use bytes::Bytes;
 use criterion::{criterion_group, Criterion};
 
@@ -199,16 +197,17 @@ async fn publish_sync_batch(context: async_nats::jetstream::Context, msg: Bytes,
 
 async fn publish_async_batch(context: async_nats::jetstream::Context, msg: Bytes, amount: u64) {
     // This acts as a semaphore that does not allow for more than 10 publish acks awaiting.
-    let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+    let (tx, mut rx) = tokio::sync::mpsc::channel(amount as usize);
 
     let handle = tokio::task::spawn(async move {
         for _ in 0..amount {
-            rx.recv().await.unwrap();
+            let ack: PublishAckFuture = rx.recv().await.unwrap();
+            ack.await.unwrap();
         }
     });
     for _ in 0..amount {
         let ack = context.publish("bench", msg.clone()).await.unwrap();
-        tx.send(ack.into_future()).await.unwrap();
+        tx.send(ack).await.unwrap();
     }
     handle.await.unwrap();
 }
