@@ -39,6 +39,7 @@ use rand::thread_rng;
 use std::cmp;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -72,6 +73,7 @@ pub(crate) struct Connector {
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
+    pub(crate) max_payload: Arc<AtomicUsize>,
 }
 
 pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
@@ -90,6 +92,7 @@ impl Connector {
         options: ConnectorOptions,
         events_tx: tokio::sync::mpsc::Sender<Event>,
         state_tx: tokio::sync::watch::Sender<State>,
+        max_payload: Arc<AtomicUsize>,
     ) -> Result<Connector, io::Error> {
         let servers = addrs.to_server_addrs()?.map(|addr| (addr, 0)).collect();
 
@@ -99,6 +102,7 @@ impl Connector {
             options,
             events_tx,
             state_tx,
+            max_payload,
         })
     }
 
@@ -282,6 +286,10 @@ impl Connector {
                                 self.attempts = 0;
                                 self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
+                                self.max_payload.store(
+                                    server_info.max_payload,
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
                                 return Ok((server_info, connection));
                             }
                             None => {
