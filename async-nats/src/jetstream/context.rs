@@ -29,7 +29,6 @@ use serde_json::{self, json};
 use std::borrow::Borrow;
 use std::fmt::Display;
 use std::future::IntoFuture;
-use std::io::ErrorKind;
 use std::pin::Pin;
 use std::str::from_utf8;
 use std::task::Poll;
@@ -39,6 +38,7 @@ use tracing::debug;
 
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
+use super::is_valid_name;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{
@@ -261,7 +261,7 @@ impl Context {
                 CreateStreamErrorKind::EmptyStreamName,
             ));
         }
-        if config.name.contains([' ', '.']) {
+        if !is_valid_name(config.name.as_str()) {
             return Err(CreateStreamError::new(
                 CreateStreamErrorKind::InvalidStreamName,
             ));
@@ -328,7 +328,7 @@ impl Context {
             return Err(GetStreamError::new(GetStreamErrorKind::EmptyName));
         }
 
-        if stream.contains([' ', '.']) {
+        if !is_valid_name(stream) {
             return Err(GetStreamError::new(GetStreamErrorKind::InvalidStreamName));
         }
 
@@ -379,13 +379,19 @@ impl Context {
         S: Into<Config>,
     {
         let config: Config = stream_config.into();
-        let subject = format!("STREAM.INFO.{}", config.name);
 
-        if config.name.contains([' ', '.']) {
+        if config.name.is_empty() {
+            return Err(CreateStreamError::new(
+                CreateStreamErrorKind::EmptyStreamName,
+            ));
+        }
+
+        if !is_valid_name(config.name.as_str()) {
             return Err(CreateStreamError::new(
                 CreateStreamErrorKind::InvalidStreamName,
             ));
         }
+        let subject = format!("STREAM.INFO.{}", config.name);
 
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
@@ -422,7 +428,7 @@ impl Context {
             return Err(DeleteStreamError::new(DeleteStreamErrorKind::EmptyName));
         }
 
-        if stream.contains([' ', '.']) {
+        if !is_valid_name(stream) {
             return Err(DeleteStreamError::new(
                 DeleteStreamErrorKind::InvalidStreamName,
             ));
@@ -471,7 +477,13 @@ impl Context {
     {
         let config = config.borrow();
 
-        if config.name.contains([' ', '.']) {
+        if config.name.is_empty() {
+            return Err(CreateStreamError::new(
+                CreateStreamErrorKind::EmptyStreamName,
+            ));
+        }
+
+        if !is_valid_name(config.name.as_str()) {
             return Err(CreateStreamError::new(
                 CreateStreamErrorKind::InvalidStreamName,
             ));

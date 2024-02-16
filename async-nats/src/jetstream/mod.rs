@@ -198,3 +198,27 @@ pub fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
 pub fn with_prefix(client: Client, prefix: &str) -> Context {
     context::Context::with_prefix(client, prefix)
 }
+
+/// Checks if a name passed in JS API is valid one.
+/// The restrictions are there because some fields in the JetStream configs are passed as part of the subject to apply permissions.
+/// Examples are stream names, consumer names, etc.
+pub(crate) fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(|c| char::is_ascii_whitespace(&c) || c == '.')
+        && name != ">"
+        && name != "*"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_name() {
+        assert!(is_valid_name("stream"));
+        assert!(!is_valid_name("name.name"));
+        assert!(!is_valid_name("name name"));
+        assert!(!is_valid_name(">"));
+        assert!(!is_valid_name(""));
+    }
+}
