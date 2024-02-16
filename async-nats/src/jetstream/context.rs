@@ -328,6 +328,10 @@ impl Context {
             return Err(GetStreamError::new(GetStreamErrorKind::EmptyName));
         }
 
+        if stream.contains([' ', '.']) {
+            return Err(GetStreamError::new(GetStreamErrorKind::InvalidStreamName));
+        }
+
         let subject = format!("STREAM.INFO.{stream}");
         let request: Response<Info> = self
             .request(subject, &())
@@ -377,6 +381,12 @@ impl Context {
         let config: Config = stream_config.into();
         let subject = format!("STREAM.INFO.{}", config.name);
 
+        if config.name.contains([' ', '.']) {
+            return Err(CreateStreamError::new(
+                CreateStreamErrorKind::InvalidStreamName,
+            ));
+        }
+
         let request: Response<Info> = self.request(subject, &()).await?;
         match request {
             Response::Err { error } if error.code() == 404 => self.create_stream(&config).await,
@@ -411,6 +421,13 @@ impl Context {
         if stream.is_empty() {
             return Err(DeleteStreamError::new(DeleteStreamErrorKind::EmptyName));
         }
+
+        if stream.contains([' ', '.']) {
+            return Err(DeleteStreamError::new(
+                DeleteStreamErrorKind::InvalidStreamName,
+            ));
+        }
+
         let subject = format!("STREAM.DELETE.{stream}");
         match self
             .request(subject, &json!({}))
@@ -453,6 +470,13 @@ impl Context {
         S: Borrow<Config>,
     {
         let config = config.borrow();
+
+        if config.name.contains([' ', '.']) {
+            return Err(CreateStreamError::new(
+                CreateStreamErrorKind::InvalidStreamName,
+            ));
+        }
+
         let subject = format!("STREAM.UPDATE.{}", config.name);
         match self.request(subject, config).await? {
             Response::Err { error } => Err(error.into()),
@@ -1454,6 +1478,7 @@ impl From<RequestError> for CreateStreamError {
 pub enum GetStreamErrorKind {
     EmptyName,
     Request,
+    InvalidStreamName,
     JetStream(super::errors::Error),
 }
 
@@ -1462,6 +1487,7 @@ impl Display for GetStreamErrorKind {
         match self {
             Self::EmptyName => write!(f, "empty name cannot be empty"),
             Self::Request => write!(f, "request error"),
+            Self::InvalidStreamName => write!(f, "invalid stream name"),
             Self::JetStream(err) => write!(f, "jetstream error: {}", err),
         }
     }
