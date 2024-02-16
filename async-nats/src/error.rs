@@ -60,7 +60,16 @@ where
     }
 }
 
-impl<Kind> std::error::Error for Error<Kind> where Kind: Clone + Debug + Display + PartialEq {}
+impl<Kind> std::error::Error for Error<Kind>
+where
+    Kind: Clone + Debug + Display + PartialEq,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|boxed| boxed.as_ref() as &(dyn std::error::Error + 'static))
+    }
+}
 
 impl<Kind> From<Kind> for Error<Kind>
 where
