@@ -1794,6 +1794,7 @@ pub enum ConsumerErrorKind {
     TimedOut,
     Request,
     InvalidConsumerType,
+    InvalidName,
     JetStream(super::errors::Error),
     Other,
 }
@@ -1806,6 +1807,7 @@ impl Display for ConsumerErrorKind {
             Self::JetStream(err) => write!(f, "JetStream error: {}", err),
             Self::Other => write!(f, "consumer error"),
             Self::InvalidConsumerType => write!(f, "invalid consumer type"),
+            Self::InvalidName => write!(f, "invalid consumer name"),
         }
     }
 }
