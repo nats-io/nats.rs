@@ -798,26 +798,34 @@ impl Context {
         &self,
         consumer: C,
         stream: S,
-    ) -> Result<Consumer<T>, crate::Error>
+    ) -> Result<Consumer<T>, ConsumerError>
     where
         T: FromConsumer + IntoConsumerConfig,
         S: AsRef<str>,
         C: AsRef<str>,
     {
+        if !is_valid_name(stream.as_ref()) {
+            return Err(ConsumerError::with_source(
+                ConsumerErrorKind::InvalidName,
+                "invalid stream",
+            ));
+        }
+
+        if !is_valid_name(consumer.as_ref()) {
+            return Err(ConsumerError::new(ConsumerErrorKind::InvalidName));
+        }
+
         let subject = format!("CONSUMER.INFO.{}.{}", stream.as_ref(), consumer.as_ref());
 
         let info: super::consumer::Info = match self.request(subject, &json!({})).await? {
             Response::Ok(info) => info,
-            Response::Err { error } => {
-                return Err(Box::new(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!("nats: error while getting consumer info: {}", error),
-                )))
-            }
+            Response::Err { error } => return Err(error.into()),
         };
 
         Ok(Consumer::new(
-            T::try_from_consumer_config(info.config.clone())?,
+            T::try_from_consumer_config(info.config.clone()).map_err(|err| {
+                ConsumerError::with_source(ConsumerErrorKind::InvalidConsumerType, err)
+            })?,
             info,
             self.clone(),
         ))
@@ -850,6 +858,17 @@ impl Context {
         consumer: C,
         stream: S,
     ) -> Result<DeleteStatus, ConsumerError> {
+        if !is_valid_name(consumer.as_ref()) {
+            return Err(ConsumerError::new(ConsumerErrorKind::InvalidName));
+        }
+
+        if !is_valid_name(stream.as_ref()) {
+            return Err(ConsumerError::with_source(
+                ConsumerErrorKind::Other,
+                "invalid stream name",
+            ));
+        }
+
         let subject = format!("CONSUMER.DELETE.{}.{}", stream.as_ref(), consumer.as_ref());
 
         match self.request(subject, &json!({})).await? {
