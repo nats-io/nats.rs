@@ -42,8 +42,8 @@ use super::is_valid_name;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{
-    self, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy, External, Info,
-    Stream,
+    self, Compression, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy,
+    External, Info, Stream,
 };
 
 /// A context which can perform jetstream scoped requests.
@@ -1045,6 +1045,11 @@ impl Context {
                 discard: DiscardPolicy::New,
                 allow_rollup: true,
                 allow_direct: true,
+                compression: if config.compression {
+                    Some(Compression::S2)
+                } else {
+                    None
+                },
                 ..Default::default()
             })
             .await
