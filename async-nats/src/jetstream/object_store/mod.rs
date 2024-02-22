@@ -76,6 +76,8 @@ pub struct Config {
     pub storage: StorageType,
     /// How many replicas to keep for each value in a cluster, maximum 5.
     pub num_replicas: usize,
+    /// Sets compression of the underlying stream.
+    pub compression: bool,
 }
 
 /// A blob store capable of storing large objects efficiently in streams.
