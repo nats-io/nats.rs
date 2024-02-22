@@ -35,21 +35,26 @@ static VERSION_RE: Lazy<Regex> =
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
-#[derive(Debug, Error)]
-#[error("failed to publish message: {0}")]
-pub struct PublishError(#[source] crate::Error);
+pub type PublishError = Error<PublishErrorKind>;
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        PublishError(Box::new(err))
+        PublishError::with_source(PublishErrorKind::Send, err)
     }
 }
 
-pub struct MaxPayloadExceeded(String);
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum PublishErrorKind {
+    MaxPayloadExceeded,
+    Send,
+}
 
-impl From<MaxPayloadExceeded> for PublishError {
-    fn from(err: MaxPayloadExceeded) -> Self {
-        PublishError(crate::Error::from(err.0))
+impl Display for PublishErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PublishErrorKind::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
+            PublishErrorKind::Send => write!(f, "failed to send message"),
+        }
     }
 }
 
@@ -167,11 +172,14 @@ impl Client {
         let subject = subject.to_subject();
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
-            return Err(PublishError::from(MaxPayloadExceeded(format!(
-                "Payload size limit of {} exceeded by message size of {}",
-                payload.len(),
-                max_payload
-            ))));
+            return Err(PublishError::with_source(
+                PublishErrorKind::MaxPayloadExceeded,
+                format!(
+                    "Payload size limit of {} exceeded by message size of {}",
+                    payload.len(),
+                    max_payload
+                ),
+            ));
         }
 
         self.sender
