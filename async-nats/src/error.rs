@@ -82,7 +82,7 @@ where
 
 /// Enables wrapping source errors to the crate-specific error type
 /// by additionally specifying the kind of the target error.
-trait WithKind<Kind>
+pub(crate) trait WithKind<Kind>
 where
     Kind: Clone + Debug + Display + PartialEq,
     Self: Into<crate::Error>,
