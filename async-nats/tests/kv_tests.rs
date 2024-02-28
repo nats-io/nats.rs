@@ -927,7 +927,17 @@ mod kv {
         let local_kv = leaf_js.get_key_value("MIRROR").await.unwrap();
 
         local_kv.put("name", "rip".into()).await.unwrap();
-
+        tryhard::retry_fn(|| async {
+            match local_kv.get("name").await {
+                Ok(Some(name)) => {
+                    assert_eq!(from_utf8(&name).unwrap(), "rip");
+                    Ok::<(), async_nats::Error>(())
+                }
+                _ => Err("key not found".into()),
+            }
+        })
+        .retries(5)
+        .exponential_backoff(Duration::from_millis(100));
         let name = local_kv.get("name").await.unwrap();
         assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip");
 
