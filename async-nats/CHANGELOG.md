@@ -1,3 +1,81 @@
+# 0.34.0
+
+## Overview
+
+This release introduces performance improvements (thanks to poll_recv_many #1189), improves resilience of
+ordered consumers by recreating them in more cases while having less server calls. It also adds some new features.
+
+## Breaking Changes
+Breaking changes are minor, however, all are worth mentioning.
+
+* Don't expose BoxFuture in public API by @oscarwcl in https://github.com/nats-io/nats.rs/pull/1167
+
+This change simplifies lifetimes of Boxed Futures, by making them static. It should not affect most users,
+and if it does, removal of the lifetime should be a quick fix.
+
+* Add check for max payload size when publishing messages by @Jarema in https://github.com/nats-io/nats.rs/pull/1211
+
+The client was not checking if the message payload size was not exceeding the limits of the server it is connected to.
+While doing the fix, the error returned was changed into one consistent with others: a struct with enum of possible
+error variants under `kind()` method, of which one is `MaxPayloadExceeded`. This should not break users,
+as before there was no enum in the first place, but it is a breaking change.
+
+* Add stream name check to all stream management methods by @Jarema in https://github.com/nats-io/nats.rs/pull/1214
+
+It added new enum variant to Consumer and Stream error kinds. Breaking for those who match those errors in exhaustive manner.
+
+* Remove clone in message split method by @AbstractiveNord in https://github.com/nats-io/nats.rs/pull/1172
+
+This changes to be a `mut self` from `self` while removing unnecessary clone.
+
+## Fixed
+* Fix ordered-consumer example by @ReubenMathew in https://github.com/nats-io/nats.rs/pull/1159
+* Fix Service::stop by @tinou98 in https://github.com/nats-io/nats.rs/pull/1160
+* Fix linter error in service test by @Jarema in https://github.com/nats-io/nats.rs/pull/1165
+* Fix minor cargo workspace warnings by @barafael in https://github.com/nats-io/nats.rs/pull/1179
+* Add missing docs for ConnectOptions by @barafael in https://github.com/nats-io/nats.rs/pull/1181
+* Fix copy-pasted doc comment by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1209
+* Fix benchmark linter error by @Jarema in https://github.com/nats-io/nats.rs/pull/1212
+* Ensure the ping interval waker is registered by @dodomorandi in https://github.com/nats-io/nats.rs/pull/1199
+* Add source implementation for Error by @Jarema in https://github.com/nats-io/nats.rs/pull/1215
+
+## Added
+* Add max reconnects to public API by @Jarema in https://github.com/nats-io/nats.rs/pull/1188
+* Add `create` function to kv store by @praveenperera in https://github.com/nats-io/nats.rs/pull/1206
+* Add compression to object store by @Jarema in https://github.com/nats-io/nats.rs/pull/1217
+* Add watch from revision for KV by @Jarema in https://github.com/nats-io/nats.rs/pull/1196
+* Add revision to kv operations by @boba2fett in https://github.com/nats-io/nats.rs/pull/1182
+* Add `into_string` method to `Subject` by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/1161
+
+## Changed
+* Allow async and sync nats to compile on MIPS and PowerPC by @protochron in https://github.com/nats-io/nats.rs/pull/1210
+* Always log `Event`s by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1123
+* Remove unused dependency on http by @oscarwcl in https://github.com/nats-io/nats.rs/pull/1164
+* Do asynchronous DNS lookups in `ServerAddr::socket_addrs` by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1191
+* Optimize consumer recreate by @Jarema in https://github.com/nats-io/nats.rs/pull/1202
+* Use poll_recv_many for processing commands to be written to the nats server by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1189
+* Make `Subject::from_static` a const fn by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1207
+* Bump base64 to v0.22 by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1223
+* Recreate ordered pull on heartbeats by @Jarema in https://github.com/nats-io/nats.rs/pull/1178
+* Changed `self` to a borrow in `Request::respond()` by @jlandahl in https://github.com/nats-io/nats.rs/pull/1139
+* Check min versions of transitive depencencies in CI by @nepalez in https://github.com/nats-io/nats.rs/pull/1115
+* Serialize/Deserialize Subject and HeaderName as strings by @oscarwcl in https://github.com/nats-io/nats.rs/pull/1168
+* Terminate fetch on `No Messages` by @Jarema in https://github.com/nats-io/nats.rs/pull/1171
+* Bump nkeys to 0.4 by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1195
+* Update rustls to v0.22 and related dependencies by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1170
+
+## New Contributors
+* @ReubenMathew made their first contribution in https://github.com/nats-io/nats.rs/pull/1159
+* @jlandahl made their first contribution in https://github.com/nats-io/nats.rs/pull/1139
+* @oscarwcl made their first contribution in https://github.com/nats-io/nats.rs/pull/1164
+* @AbstractiveNord made their first contribution in https://github.com/nats-io/nats.rs/pull/1172
+* @barafael made their first contribution in https://github.com/nats-io/nats.rs/pull/1179
+* @boba2fett made their first contribution in https://github.com/nats-io/nats.rs/pull/1182
+* @dodomorandi made their first contribution in https://github.com/nats-io/nats.rs/pull/1199
+* @praveenperera made their first contribution in https://github.com/nats-io/nats.rs/pull/1206
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/nats/v0.24.1...async-nats/v0.34.0
+
 # 0.33.0
 ## Overview
 
