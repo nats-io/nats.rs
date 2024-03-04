@@ -1400,11 +1400,11 @@ impl From<OrderedError> for WatcherError {
     }
 }
 
-type DeleteError = UpdateError;
-type DeleteErrorKind = UpdateErrorKind;
+pub type DeleteError = UpdateError;
+pub type DeleteErrorKind = UpdateErrorKind;
 
-type PurgeError = UpdateError;
-type PurgeErrorKind = UpdateErrorKind;
+pub type PurgeError = UpdateError;
+pub type PurgeErrorKind = UpdateErrorKind;
 
-type HistoryError = WatchError;
-type HistoryErrorKind = WatchErrorKind;
+pub type HistoryError = WatchError;
+pub type HistoryErrorKind = WatchErrorKind;
