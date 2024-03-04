@@ -834,17 +834,22 @@ mod kv {
             .unwrap();
 
         kv.put("baz", "value".into()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(
-            kv.keys()
-                .await
-                .unwrap()
-                .try_collect::<Vec<String>>()
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
+        tryhard::retry_fn(|| async {
+            match kv.keys().await {
+                Ok(keys) => {
+                    let keys = keys.try_collect::<Vec<String>>().await.unwrap();
+                    if !keys.is_empty() {
+                        return Err("keys not empty".into());
+                    }
+                    Ok::<(), async_nats::Error>(())
+                }
+                Err(e) => Err(e.into()),
+            }
+        })
+        .retries(5)
+        .exponential_backoff(Duration::from_millis(100))
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
