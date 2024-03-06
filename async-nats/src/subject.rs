@@ -2,10 +2,10 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
-use std::str::{from_utf8, Utf8Error};
+use std::str::{from_utf8, FromStr, Utf8Error};
 
 /// A `Subject` is an immutable string type that guarantees valid UTF-8 contents.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Subject {
     bytes: Bytes,
 }
@@ -102,6 +102,14 @@ impl From<String> for Subject {
         // safely transmute the internal Vec<u8> to a Bytes value.
         let bytes = Bytes::from(s.into_bytes());
         Subject { bytes }
+    }
+}
+
+impl FromStr for Subject {
+    type Err = Utf8Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
     }
 }
 
