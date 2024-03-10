@@ -338,7 +338,7 @@ pub struct Acker {
 impl Acker {
     /// Public constructor
     pub fn new(context: Context, reply: Option<Subject>) -> Self {
-        Self {context, reply}
+        Self { context, reply }
     }
     /// Acknowledges a message delivery by sending `+ACK` to the server.
     ///
