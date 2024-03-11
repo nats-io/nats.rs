@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::fmt::Display;
 use std::{cmp, str::FromStr, task::Poll, time::Duration};
 
+use crate::crypto::Sha256;
 use crate::subject::Subject;
 use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
@@ -23,7 +24,6 @@ use base64::engine::Engine;
 use bytes::BytesMut;
 use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
-use ring::digest::SHA256;
 use tokio::io::AsyncReadExt;
 
 use futures::{Stream, StreamExt};
@@ -306,7 +306,7 @@ impl ObjectStore {
 
         let chunk_size = object_meta.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE);
         let mut buffer = BytesMut::with_capacity(chunk_size);
-        let mut context = ring::digest::Context::new(&SHA256);
+        let mut sha256 = Sha256::new();
 
         loop {
             let n = data
@@ -319,7 +319,7 @@ impl ObjectStore {
             }
 
             let payload = buffer.split().freeze();
-            context.update(&payload);
+            sha256.update(&payload);
 
             object_size += payload.len();
             object_chunks += 1;
@@ -342,7 +342,7 @@ impl ObjectStore {
                     )
                 })?;
         }
-        let digest = context.finish();
+        let digest = sha256.finish();
         let subject = format!("$O.{}.M.{}", &self.name, &encoded_object_name);
         let object_info = ObjectInfo {
             name: object_meta.name,
@@ -922,7 +922,7 @@ pub struct Object {
     pub info: ObjectInfo,
     remaining_bytes: VecDeque<u8>,
     has_pending_messages: bool,
-    digest: Option<ring::digest::Context>,
+    digest: Option<Sha256>,
     subscription: Option<crate::jetstream::consumer::push::Ordered>,
     subscription_future: Option<BoxFuture<'static, Result<Ordered, StreamError>>>,
     stream: crate::jetstream::stream::Stream,
@@ -935,7 +935,7 @@ impl Object {
             info,
             remaining_bytes: VecDeque::new(),
             has_pending_messages: true,
-            digest: Some(ring::digest::Context::new(&SHA256)),
+            digest: Some(Sha256::new()),
             subscription_future: None,
             stream,
         }
@@ -1014,7 +1014,7 @@ impl tokio::io::AsyncRead for Object {
                                 )
                             })?;
                             if info.pending == 0 {
-                                let digest = self.digest.take().map(|context| context.finish());
+                                let digest = self.digest.take().map(Sha256::finish);
                                 if let Some(digest) = digest {
                                     if self
                                         .info

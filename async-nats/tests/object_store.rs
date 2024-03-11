@@ -12,7 +12,6 @@
 // limitations under the License.
 
 mod object_store {
-
     use std::{io, time::Duration};
 
     use async_nats::jetstream::{
@@ -22,8 +21,9 @@ mod object_store {
     use base64::Engine;
     use futures::StreamExt;
     use rand::RngCore;
-    use ring::digest::SHA256;
     use tokio::io::AsyncReadExt;
+
+    use ring::digest::{self, SHA256};
 
     #[tokio::test]
     async fn get_and_put() {
@@ -44,7 +44,7 @@ mod object_store {
         let mut bytes = vec![0; 1024 * 1024 + 22];
         rng.try_fill_bytes(&mut bytes).unwrap();
 
-        let digest = ring::digest::digest(&SHA256, &bytes);
+        let digest = digest::digest(&SHA256, &bytes);
 
         bucket.put("FOO", &mut bytes.as_slice()).await.unwrap();
 

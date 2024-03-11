@@ -41,6 +41,7 @@ webpki = { package = "rustls-webpki", version = "0.102" }
 portable-atomic = "1"
 
 [dev-dependencies]
+ring = "0.17"
 criterion =  { version = "0.5", features = ["async_tokio"]}
 nats-server = { path = "../nats-server" }
 rand = "0.8"
