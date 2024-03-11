@@ -250,6 +250,7 @@ pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
 pub use options::{AuthError, ConnectOptions};
 
+mod crypto;
 pub mod error;
 pub mod header;
 pub mod jetstream;

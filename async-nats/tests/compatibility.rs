@@ -14,6 +14,7 @@
 #[cfg(feature = "compatibility_tests")]
 mod compatibility {
     use futures::{pin_mut, stream::Peekable, StreamExt};
+    use ring::digest::{self, SHA256};
 
     use core::panic;
     use std::{collections::HashMap, pin::Pin, str::from_utf8};
@@ -25,7 +26,6 @@ mod compatibility {
         },
         service::{self, ServiceExt},
     };
-    use ring::digest::{self, SHA256};
     use serde::{Deserialize, Serialize};
     use tokio::io::AsyncReadExt;
 
