@@ -1,4 +1,12 @@
-use ring::digest::{Context, SHA256};
+#[cfg(feature = "aws_lc_rs")]
+use aws_lc_rs as crypto_backend;
+#[cfg(not(feature = "aws_lc_rs"))]
+use ring as crypto_backend;
+
+#[cfg(not(any(feature = "aws_lc_rs", feature = "ring")))]
+compile_error!("Please enable the `aws_lc_rs` or `ring` feature");
+
+use crypto_backend::digest::{Context, SHA256};
 
 pub(crate) struct Sha256(Context);
 

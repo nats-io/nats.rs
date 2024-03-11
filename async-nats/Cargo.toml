@@ -14,6 +14,7 @@ keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
+aws-lc-rs = { version = "1.6", optional = true }
 memchr = "2.4"
 bytes = { version = "1.4.0", features = ["serde"] }
 futures = { version = "0.3.28", default-features = false, features = ["std"] }
@@ -35,7 +36,7 @@ tracing = "0.1"
 thiserror = "1.0"
 base64 = "0.22"
 tryhard = "0.5"
-ring = "0.17"
+ring = { version = "0.17", optional = true }
 rand = "0.8"
 webpki = { package = "rustls-webpki", version = "0.102" }
 portable-atomic = "1"
@@ -58,8 +59,8 @@ num = "0.4.1"
 
 [features]
 default = ["server_2_10", "ring"]
-aws_lc_rs = ["tokio-rustls/aws_lc_rs"]
-ring = ["tokio-rustls/ring"]
+aws_lc_rs = ["dep:aws-lc-rs", "tokio-rustls/aws_lc_rs"]
+ring = ["dep:ring", "tokio-rustls/ring"]
 fips = ["aws_lc_rs", "tokio-rustls/fips"]
 service = []
 experimental = ["service"]
