@@ -58,7 +58,7 @@ num = "0.4.1"
 
 
 [features]
-default = ["server_2_10", "ring"]
+default = ["server_2_10", "aws_lc_rs"]
 aws_lc_rs = ["dep:aws-lc-rs", "tokio-rustls/aws_lc_rs"]
 ring = ["dep:ring", "tokio-rustls/ring"]
 fips = ["aws_lc_rs", "tokio-rustls/fips"]
