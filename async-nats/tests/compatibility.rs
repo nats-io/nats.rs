@@ -13,6 +13,7 @@
 
 #[cfg(feature = "compatibility_tests")]
 mod compatibility {
+    use aws_lc_rs::digest::{self, SHA256};
     use futures::{pin_mut, stream::Peekable, StreamExt};
 
     use core::panic;
@@ -25,7 +26,6 @@ mod compatibility {
         },
         service::{self, ServiceExt},
     };
-    use ring::digest::{self, SHA256};
     use serde::{Deserialize, Serialize};
     use tokio::io::AsyncReadExt;
 
