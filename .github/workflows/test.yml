@@ -140,7 +140,7 @@ jobs:
       - name: Install cargo hack
         run: cargo install cargo-hack
       - name: Check lint
-        run: cargo hack check --feature-powerset --no-dev-deps -p async-nats
+        run: cargo hack check --feature-powerset --at-least-one-of aws-lc-rs,ring --no-dev-deps -p async-nats
 
 
   check_licenses:
