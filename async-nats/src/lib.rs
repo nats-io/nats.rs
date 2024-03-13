@@ -1492,6 +1492,24 @@ impl ToServerAddrs for String {
     }
 }
 
+impl<T: AsRef<str>> ToServerAddrs for [T] {
+    type Iter = std::vec::IntoIter<ServerAddr>;
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        self.iter()
+            .map(AsRef::as_ref)
+            .map(str::parse)
+            .collect::<io::Result<_>>()
+            .map(Vec::into_iter)
+    }
+}
+
+impl<T: AsRef<str>> ToServerAddrs for Vec<T> {
+    type Iter = std::vec::IntoIter<ServerAddr>;
+    fn to_server_addrs(&self) -> io::Result<Self::Iter> {
+        self.as_slice().to_server_addrs()
+    }
+}
+
 impl<'a> ToServerAddrs for &'a [ServerAddr] {
     type Iter = iter::Cloned<slice::Iter<'a, ServerAddr>>;
 
@@ -1553,5 +1571,41 @@ mod tests {
     fn server_address_domain() {
         let address = ServerAddr::from_str("nats://example.com").unwrap();
         assert_eq!(address.host(), "example.com")
+    }
+
+    #[test]
+    fn to_server_addrs_vec_str() {
+        let vec = vec!["nats://127.0.0.1", "nats://[::]"];
+        let mut addrs_iter = vec.to_server_addrs().unwrap();
+        assert_eq!(addrs_iter.next().unwrap().host(), "127.0.0.1");
+        assert_eq!(addrs_iter.next().unwrap().host(), "::");
+        assert_eq!(addrs_iter.next(), None);
+    }
+
+    #[test]
+    fn to_server_addrs_arr_str() {
+        let arr = ["nats://127.0.0.1", "nats://[::]"];
+        let mut addrs_iter = arr.to_server_addrs().unwrap();
+        assert_eq!(addrs_iter.next().unwrap().host(), "127.0.0.1");
+        assert_eq!(addrs_iter.next().unwrap().host(), "::");
+        assert_eq!(addrs_iter.next(), None);
+    }
+
+    #[test]
+    fn to_server_addrs_vec_string() {
+        let vec = vec!["nats://127.0.0.1".to_string(), "nats://[::]".to_string()];
+        let mut addrs_iter = vec.to_server_addrs().unwrap();
+        assert_eq!(addrs_iter.next().unwrap().host(), "127.0.0.1");
+        assert_eq!(addrs_iter.next().unwrap().host(), "::");
+        assert_eq!(addrs_iter.next(), None);
+    }
+
+    #[test]
+    fn to_server_addrs_arr_string() {
+        let arr = ["nats://127.0.0.1".to_string(), "nats://[::]".to_string()];
+        let mut addrs_iter = arr.to_server_addrs().unwrap();
+        assert_eq!(addrs_iter.next().unwrap().host(), "127.0.0.1");
+        assert_eq!(addrs_iter.next().unwrap().host(), "::");
+        assert_eq!(addrs_iter.next(), None);
     }
 }
