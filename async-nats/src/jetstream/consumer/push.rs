@@ -35,6 +35,8 @@ use std::{
     sync::Arc,
 };
 use std::{sync::atomic::Ordering, time::Duration};
+#[cfg(feature = "server_2_11")]
+use time::{serde::rfc3339, OffsetDateTime};
 use tokio::{sync::oneshot::error::TryRecvError, task::JoinHandle};
 use tracing::{debug, trace};
 
@@ -274,6 +276,14 @@ pub struct Config {
     /// Threshold for consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+    /// Create a consumer paused until provided deadline.
+    #[cfg(feature = "server_2_11")]
+    #[serde(
+        default,
+        with = "rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pause_until: Option<OffsetDateTime>,
 }
 
 impl FromConsumer for Config {
@@ -312,6 +322,8 @@ impl FromConsumer for Config {
             metadata: config.metadata,
             backoff: config.backoff,
             inactive_threshold: config.inactive_threshold,
+            #[cfg(feature = "server_2_11")]
+            pause_until: config.pause_until,
         })
     }
 }
@@ -350,6 +362,8 @@ impl IntoConsumerConfig for Config {
             backoff: self.backoff,
             priority_policy: PriorityPolicy::None,
             priority_groups: Vec::new(),
+            #[cfg(feature = "server_2_11")]
+            pause_until: self.pause_until,
         }
     }
 }
@@ -477,6 +491,8 @@ impl IntoConsumerConfig for OrderedConfig {
             backoff: Vec::new(),
             priority_policy: PriorityPolicy::None,
             priority_groups: Vec::new(),
+            #[cfg(feature = "server_2_11")]
+            pause_until: None,
         }
     }
 }

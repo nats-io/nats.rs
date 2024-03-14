@@ -60,7 +60,7 @@ jsonschema = "0.17.1"
 num = "0.4.1"
 
 [features]
-default = ["server_2_10", "ring"]
+default = ["server_2_10", "server_2_11", "ring"]
 # Enables Service API for the client.
 service = []
 websockets = ["dep:tokio-websockets"]
@@ -72,6 +72,7 @@ experimental = []
 # Features that require nats-server version 2.10 or higher.
 # It is enabled by default since official 2.10 nats-server release.
 "server_2_10" = []
+"server_2_11" = []
 # Used for enabling/disabling tests that by design take a lot of time to  complete.
 # Those tests are usually used for time-sensitive checks, like consumer heartbeats, longer timeouts, etc.
 slow_tests = []

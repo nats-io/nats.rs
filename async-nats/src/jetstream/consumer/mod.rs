@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::serde::rfc3339;
 
+#[cfg(feature = "server_2_11")]
+use time::OffsetDateTime;
+
 use super::context::RequestError;
 use super::stream::ClusterInfo;
 use super::Context;
@@ -162,6 +165,14 @@ pub struct Info {
     /// Indicates if any client is connected and receiving messages from a push consumer
     #[serde(default, skip_serializing_if = "is_default")]
     pub push_bound: bool,
+    #[cfg(feature = "server_2_11")]
+    /// Indicates if the consumer is paused
+    #[serde(default)]
+    pub paused: bool,
+    #[cfg(feature = "server_2_11")]
+    /// The remaining time the consumer is paused
+    #[serde(default, with = "serde_nanos")]
+    pub pause_remaining: Option<Duration>,
 }
 
 /// Information about a consumer and the stream it is consuming
@@ -325,6 +336,14 @@ pub struct Config {
     pub priority_policy: PriorityPolicy,
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
+    // /// For suspending the consumer until the deadline.
+    #[cfg(feature = "server_2_11")]
+    #[serde(
+        default,
+        with = "rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pause_until: Option<OffsetDateTime>,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
