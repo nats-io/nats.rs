@@ -850,6 +850,64 @@ impl Stream {
         }
     }
 
+  /// Pause a [Consumer] until the given time.
+  ///
+  /// # Examples
+  ///
+  /// ```no_run
+  /// # #[tokio::main]
+  /// # async fn main() -> Result<(), async_nats::Error> {
+  /// use async_nats::jetstream::consumer;
+  /// use futures::StreamExt;
+  /// let client = async_nats::connect("localhost:4222").await?;
+  /// let jetstream = async_nats::jetstream::new(client);
+  /// let pause_until = time::OffsetDateTime::now_utc() +  time::Duration::from_secs(60);
+  ///
+  /// jetstream
+  ///     .get_stream("events")
+  ///     .await?
+  ///     .pause_consumer("my_consumer",  pause_until)
+  ///     .await?;
+  /// # Ok(())
+  /// # }
+  /// ```
+  pub async fn pause_consumer(&self, name: &str, pause_until: OffsetDateTime) -> Result<PauseResponse, ConsumerError> {
+    self.request_pause_consumer(name, Some(pause_until)).await
+  }
+
+  /// Resume a paused [Consumer].
+  ///
+  /// # Examples
+  ///
+  /// ```no_run
+  /// # #[tokio::main]
+  /// # async fn main() -> Result<(), async_nats::Error> {
+  /// use async_nats::jetstream::consumer;
+  /// use futures::StreamExt;
+  /// let client = async_nats::connect("localhost:4222").await?;
+  /// let jetstream = async_nats::jetstream::new(client);
+  ///
+  /// jetstream
+  ///     .get_stream("events")
+  ///     .await?
+  ///     .resume_consumer("my_consumer")
+  ///     .await?;
+  /// # Ok(())
+  /// # }
+  /// ```
+  pub async fn resume_consumer(&self, name: &str) -> Result<PauseResponse, ConsumerError> {
+    self.request_pause_consumer(name, None).await
+  }
+
+  async fn request_pause_consumer(&self, name: &str, pause_until: Option<OffsetDateTime>) -> Result<PauseResponse, ConsumerError> {
+    let subject = format!("CONSUMER.PAUSE.{}.{}", self.info.config.name, name);
+    let payload = &PauseConsumerRequest{ pause_until };
+    match self.context.request(subject, payload).await? {
+      Response::Ok::<PauseResponse>(resp) => { Ok(resp) }
+      Response::Err { error } => Err(error.into()),
+    }
+  }
+
     /// Lists names of all consumers for current stream.
     ///
     /// # Examples
@@ -1024,6 +1082,10 @@ pub struct Config {
     /// Sets the first sequence for the stream.
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "first_seq")]
     pub first_sequence: Option<u64>,
+
+    /// PauseUntil is for suspending the consumer until the deadline.
+    #[sende(with = "rfc3339")]
+    pub pause_until: Option<OffsetDateTime>,
 }
 
 impl From<&Config> for Config {
@@ -1165,6 +1227,21 @@ pub struct Info {
 #[derive(Deserialize)]
 pub struct DeleteStatus {
     pub success: bool,
+}
+
+#[derive(Deserialize)]
+pub struct PauseResponse {
+  pub paused: bool,
+  #[sende(with = "rfc3339")]
+  pub pause_until: Option<OffsetDateTime>,
+  #[sende(with = "serde_nanos")]
+  pub pause_remaining: Option<Duration>,
+}
+
+#[derive(Serialize)]
+struct PauseConsumerRequest {
+  #[serde(with = "rfc3339", skip_serializing_if = "Option::is_none")]
+  pause_until: Option<OffsetDateTime>,
 }
 
 /// information about the given stream.
