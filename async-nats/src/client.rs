@@ -69,7 +69,7 @@ pub struct Client {
     pub(crate) sender: mpsc::Sender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
-    inbox_prefix: String,
+    inbox_prefix: Arc<str>,
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
 }
@@ -90,7 +90,7 @@ impl Client {
             sender,
             next_subscription_id: Arc::new(AtomicU64::new(1)),
             subscription_capacity: capacity,
-            inbox_prefix,
+            inbox_prefix: inbox_prefix.into(),
             request_timeout,
             max_payload,
         }
