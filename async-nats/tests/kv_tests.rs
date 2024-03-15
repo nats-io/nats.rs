@@ -942,9 +942,9 @@ mod kv {
             }
         })
         .retries(5)
-        .exponential_backoff(Duration::from_millis(100));
-        let name = local_kv.get("name").await.unwrap();
-        assert_eq!(from_utf8(&name.unwrap()).unwrap(), "rip");
+        .exponential_backoff(Duration::from_millis(500))
+        .await
+        .unwrap();
 
         // Bind through leafnode connection but to origin KV.
         let leaf_hub_js = async_nats::jetstream::with_domain(leaf, "HUB");
