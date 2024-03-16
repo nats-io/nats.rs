@@ -336,7 +336,6 @@ pub struct Acker {
 // The async-trait crate is not a solution here, as it would mean we're allocating at every ack.
 // Creating separate function to ack just to avoid one duplication is not worth it either.
 impl Acker {
-    /// Public constructor
     pub fn new(context: Context, reply: Option<Subject>) -> Self {
         Self { context, reply }
     }
