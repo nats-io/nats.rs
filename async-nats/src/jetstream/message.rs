@@ -336,6 +336,9 @@ pub struct Acker {
 // The async-trait crate is not a solution here, as it would mean we're allocating at every ack.
 // Creating separate function to ack just to avoid one duplication is not worth it either.
 impl Acker {
+    pub fn new(context: Context, reply: Option<Subject>) -> Self {
+        Self { context, reply }
+    }
     /// Acknowledges a message delivery by sending `+ACK` to the server.
     ///
     /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
