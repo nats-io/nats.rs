@@ -88,7 +88,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
-            .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
+            .entry(&"retry_on_initial_connect", &self.retry_on_initial_connect)
             .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
             .finish()
     }
@@ -826,6 +826,28 @@ impl ConnectOptions {
     /// establish the connection in the background.
     pub fn retry_on_initial_connect(mut self) -> ConnectOptions {
         self.retry_on_initial_connect = true;
+        self
+    }
+
+    /// Select option to enable reconnect with backoff
+    /// on first failed connection attempt.
+    /// The reconnect logic with `max_reconnects` and the
+    /// `reconnect_delay_callback` will be specified the same
+    /// as before but will be invoked on the first failed
+    /// connection attempt.
+    ///
+    /// # Example
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// async_nats::ConnectOptions::new()
+    ///     .retry_on_failed_connect()
+    ///     .connect("demo.nats.io")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn retry_on_failed_connect(mut self) -> ConnectOptions {
+        self.retry_on_failed_connect = true;
         self
     }
 
