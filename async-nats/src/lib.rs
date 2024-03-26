@@ -264,7 +264,7 @@ pub use status::StatusCode;
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
-#[derive(Debug, Deserialize, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone, Eq, PartialEq)]
 pub struct ServerInfo {
     /// The unique identifier of the NATS server.
     #[serde(default)]
@@ -1293,7 +1293,7 @@ impl std::fmt::Display for ServerError {
 }
 
 /// Info to construct a CONNECT message.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
@@ -1354,7 +1354,7 @@ pub struct ConnectInfo {
 }
 
 /// Protocol version used by the client.
-#[derive(Serialize_repr, Deserialize_repr, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Eq, Hash, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum Protocol {
     /// Original protocol.
