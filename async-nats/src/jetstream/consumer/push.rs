@@ -650,7 +650,7 @@ impl futures::Stream for Ordered {
                                     debug!("received idle heartbeats");
                                     if let Some(headers) = message.headers.as_ref() {
                                         if let Some(sequence) =
-                                            headers.get(crate::header::NATS_LAST_CONSUMER)
+                                            headers.get_last(crate::header::NATS_LAST_CONSUMER)
                                         {
                                             let sequence: u64 =
                                                 sequence.as_str().parse().map_err(|err| {

@@ -357,7 +357,7 @@ impl Store {
                             kv_operation_from_message(&message).unwrap_or(Operation::Put);
 
                         let sequence = headers
-                            .get(header::NATS_SEQUENCE)
+                            .get_last(header::NATS_SEQUENCE)
                             .ok_or_else(|| {
                                 EntryError::with_source(
                                     EntryErrorKind::Other,
@@ -374,7 +374,7 @@ impl Store {
                             })?;
 
                         let created = headers
-                            .get(header::NATS_TIME_STAMP)
+                            .get_last(header::NATS_TIME_STAMP)
                             .ok_or_else(|| {
                                 EntryError::with_source(
                                     EntryErrorKind::Other,
