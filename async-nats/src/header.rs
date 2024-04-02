@@ -169,6 +169,23 @@ impl HeaderMap {
             .and_then(|x| x.first())
     }
 
+    /// Gets a last value for a given key. If key is not found, [Option::None] is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use async_nats::HeaderMap;
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// headers.append("Key", "Value");
+    /// let values = headers.get_last("Key").unwrap();
+    /// ```
+    pub fn get_last<K: IntoHeaderName>(&self, key: K) -> Option<&HeaderValue> {
+        self.inner
+            .get(&key.into_header_name())
+            .and_then(|x| x.last())
+    }
+
     /// Gets an iterator to the values for a given key.
     ///
     /// # Examples
@@ -679,6 +696,9 @@ mod tests {
         assert_eq!(key, "value".to_string());
 
         assert_eq!(headers.get("Key").unwrap().as_str(), "value");
+
+        let key: String = headers.get_last("Key").unwrap().as_str().into();
+        assert_eq!(key, "other".to_string());
     }
 
     #[test]

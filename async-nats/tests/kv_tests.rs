@@ -17,7 +17,7 @@ mod kv {
     use async_nats::{
         jetstream::{
             kv::Operation,
-            stream::{DiscardPolicy, Republish, Source, StorageType},
+            stream::{self, DiscardPolicy, Republish, Source, StorageType},
         },
         ConnectOptions,
     };
@@ -963,5 +963,86 @@ mod kv {
         drop(hub_server);
 
         local_kv.get("name").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn republish_headers_handling() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client.clone());
+
+        context
+            .create_stream(async_nats::jetstream::stream::Config {
+                subjects: vec!["A.>".into(), "B.>".into()],
+                name: "source".into(),
+                republish: Some(async_nats::jetstream::stream::Republish {
+                    source: "A.>".into(),
+                    destination: "$KV.test.>".into(),
+                    headers_only: false,
+                }),
+                max_messages_per_subject: 10,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let kv_stream = context
+            .create_stream(stream::Config {
+                subjects: vec!["$KV.test.>".into()],
+                name: "KV_test".into(),
+                max_messages_per_subject: 10,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let kv = context.get_key_value("test").await.unwrap();
+
+        // Publish some messages to alter the sequences for republished messages.
+        context
+            .publish("B.foo", "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        context
+            .publish("B.bar", "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        // now, publish the actual KV keys.
+        context
+            .publish("A.orange", "key".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        context
+            .publish("A.tomato", "hello".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(1, kv.entry("orange").await.unwrap().unwrap().revision);
+        assert_eq!(2, kv.entry("tomato").await.unwrap().unwrap().revision);
+
+        let mut config = kv_stream.cached_info().config.clone();
+        config.allow_direct = true;
+
+        // Update the stream to allow direct access.
+        context.update_stream(config).await.unwrap();
+        // Get a fresh instance, so owe are using direct get.
+        let kv = context.get_key_value("test").await.unwrap();
+
+        assert_eq!(1, kv.entry("orange").await.unwrap().unwrap().revision);
+        assert_eq!(2, kv.entry("tomato").await.unwrap().unwrap().revision);
     }
 }
