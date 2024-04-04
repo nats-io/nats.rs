@@ -25,6 +25,71 @@ mod client {
     use std::time::Duration;
 
     #[tokio::test]
+    async fn force_reconnect() {
+        let (dctx, mut dcrx) = tokio::sync::mpsc::channel(1);
+        let (rctx, mut rcrx) = tokio::sync::mpsc::channel(1);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        let server = nats_server::run_basic_server();
+
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(move |event| {
+                let dctx = dctx.clone();
+                let rctx = rctx.clone();
+                async move {
+                    match event {
+                        Event::Disconnected => dctx.send(()).await.unwrap(),
+                        Event::Connected => rctx.send(()).await.unwrap(),
+                        _ => (),
+                    }
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let second_client = async_nats::connect(server.client_url()).await.unwrap();
+        // second client to check if we properly flush before forcing reconnect.
+        let mut sub = second_client.subscribe("test").await.unwrap();
+        tokio::task::spawn({
+            async move {
+                sub.next().await.unwrap();
+                tx.send(()).await.unwrap();
+            }
+        });
+
+        let mut sub = client.subscribe("foo").await.unwrap();
+
+        // make sure message sent just before reconnect is flushed.
+        client.publish("test", "data".into()).await.unwrap();
+        client.force_reconnect().await.unwrap();
+
+        // initial connect event.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            rcrx.recv().await.unwrap();
+            dcrx.recv().await.unwrap();
+            rcrx.recv().await.unwrap();
+        })
+        .await
+        .unwrap();
+        // make sure we actually disconnected and reconnected.
+
+        // make sure our subscription is still active.
+        client.publish("foo", "data".into()).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap()
+            .unwrap();
+
+        // check if message sent just before reconnect is received.
+        tokio::time::timeout(Duration::from_secs(15), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn basic_pub_sub() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();

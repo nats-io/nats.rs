@@ -584,6 +584,29 @@ impl Client {
     pub fn connection_state(&self) -> State {
         self.state.borrow().to_owned()
     }
+
+    /// Forces the client to reconnect.
+    /// Keep in mind that client will reconnect automatically if the connection is lost and this
+    /// method does not have to be used in normal circumstances.
+    /// However, if you want to force the client to reconnect, for example to re-trigger
+    /// the `auth-callback`, or manually rebalance connections, this method can be useful.
+    /// This method does not wait for connection to be re-established.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// client.force_reconnect().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn force_reconnect(&self) -> Result<(), ReconnectError> {
+        self.sender
+            .send(Command::Reconnect)
+            .await
+            .map_err(Into::into)
+    }
 }
 
 /// Used for building customized requests.
@@ -681,6 +704,16 @@ impl Request {
     pub fn inbox(mut self, inbox: String) -> Request {
         self.inbox = Some(inbox);
         self
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("failed to send reconnect: {0}")]
+pub struct ReconnectError(#[source] crate::Error);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for ReconnectError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        ReconnectError(Box::new(err))
     }
 }
 
