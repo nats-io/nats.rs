@@ -193,6 +193,7 @@
 use thiserror::Error;
 
 use futures::stream::Stream;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
@@ -364,6 +365,7 @@ pub(crate) enum Command {
     Flush {
         observer: oneshot::Sender<()>,
     },
+    Reconnect,
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -415,6 +417,7 @@ pub(crate) struct ConnectionHandler {
     info_sender: tokio::sync::watch::Sender<ServerInfo>,
     ping_interval: Interval,
     is_flushing: bool,
+    should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
 }
 
@@ -437,6 +440,7 @@ impl ConnectionHandler {
             info_sender,
             ping_interval,
             is_flushing: false,
+            should_reconnect: false,
             flush_observers: Vec::new(),
         }
     }
@@ -450,6 +454,7 @@ impl ConnectionHandler {
 
         enum ExitReason {
             Disconnected(Option<io::Error>),
+            ReconnectRequested,
             Closed,
         }
 
@@ -590,6 +595,10 @@ impl ConnectionHandler {
                     }
                 }
 
+                if mem::take(&mut self.handler.should_reconnect) {
+                    return Poll::Ready(ExitReason::ReconnectRequested);
+                }
+
                 Poll::Pending
             }
         }
@@ -604,13 +613,20 @@ impl ConnectionHandler {
             match process.await {
                 ExitReason::Disconnected(err) => {
                     debug!(?err, "disconnected");
-
                     if self.handle_disconnect().await.is_err() {
                         break;
                     };
                     debug!("reconnected");
                 }
                 ExitReason::Closed => break,
+                ExitReason::ReconnectRequested => {
+                    debug!("reconnect requested");
+                    // Should be ok to ingore error, as that means we are not in connected state.
+                    self.connection.stream.shutdown().await.ok();
+                    if self.handle_disconnect().await.is_err() {
+                        break;
+                    };
+                }
             }
         }
     }
@@ -815,6 +831,10 @@ impl ConnectionHandler {
                     respond,
                     headers,
                 });
+            }
+
+            Command::Reconnect => {
+                self.should_reconnect = true;
             }
         }
     }
