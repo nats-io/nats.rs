@@ -247,7 +247,7 @@ mod options;
 
 pub use auth::Auth;
 pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
-pub use options::{AuthError, ConnectOptions};
+pub use options::{AuthError, AuthErrorKind, ConnectOptions};
 
 pub mod error;
 pub mod header;
@@ -1098,6 +1098,12 @@ impl From<io::Error> for ConnectError {
     }
 }
 
+impl From<AuthError> for ConnectError {
+    fn from(value: AuthError) -> Self {
+        value.with_kind(ConnectErrorKind::Authentication)
+    }
+}
+
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
 /// Implements [futures::stream::Stream] for ergonomic async message processing.
@@ -1549,6 +1555,7 @@ macro_rules! from_with_timeout {
         }
     };
 }
+use crate::error::WithKind;
 pub(crate) use from_with_timeout;
 
 #[cfg(test)]
