@@ -870,8 +870,6 @@ impl ConnectionHandler {
                 queue_group: None,
             });
         }
-
-        self.connector.events_tx.try_send(Event::Connected).ok();
         Ok(())
     }
 }
