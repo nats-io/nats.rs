@@ -52,6 +52,16 @@ pub enum State {
     Disconnected,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum ShouldFlush {
+    /// Write buffers are empty, but the connection hasn't been flushed yet
+    Yes,
+    /// The connection hasn't been flushed yet, but write buffers aren't empty
+    May,
+    /// Flushing would just be a no-op
+    No,
+}
+
 impl Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -92,8 +102,15 @@ impl Connection {
     }
 
     /// Returns `true` if [`Self::poll_flush`] should be polled.
-    pub(crate) fn should_flush(&self) -> bool {
-        self.can_flush && self.write_buf.is_empty() && self.flattened_writes.is_empty()
+    pub(crate) fn should_flush(&self) -> ShouldFlush {
+        match (
+            self.can_flush,
+            self.write_buf.is_empty() && self.flattened_writes.is_empty(),
+        ) {
+            (true, true) => ShouldFlush::Yes,
+            (true, false) => ShouldFlush::May,
+            (false, _) => ShouldFlush::No,
+        }
     }
 
     /// Attempts to read a server operation from the read buffer.
