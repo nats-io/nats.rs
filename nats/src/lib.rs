@@ -14,7 +14,7 @@
 //! A Rust client for the NATS.io ecosystem.
 //!
 //! <div class="warning"> This is the old legacy client. It will not get new features or updates beyond critical security fixes.
-//! Consider using <a href="https://crates.io/crates/async-nats">async-nats</a> instead. </div>
+//! Use <a href="https://crates.io/crates/async-nats">async-nats</a> instead. </div>
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
 //!
