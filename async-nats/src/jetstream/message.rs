@@ -556,7 +556,7 @@ pub struct Info<'a> {
     pub stream_sequence: u64,
     /// The consumer sequence number associated with this message
     pub consumer_sequence: u64,
-    /// the number of messages known by the server to be delivered to this consumer
+    /// The number of delivery attempts for this message
     pub delivered: i64,
     /// the number of messages known by the server to be pending to this consumer
     pub pending: u64,
