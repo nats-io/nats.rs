@@ -42,6 +42,10 @@ Supports:
 The API is stable, however it remains on 0.x.x versioning, as async ecosystem is still introducing a lot of ergonomic improvements. Some of our dependencies are also considered
 stable, yet versioned <1.0.0, like `rustls`, which might introduce breaking changes that can affect our users in some way.
 
+#### Feature flags
+
+Feature flags are Documented in `Cargo.toml` and can be viewed [here](https://docs.rs/crate/async-nats/latest/source/Cargo.toml.orig).
+
 ### nats
 
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
