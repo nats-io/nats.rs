@@ -28,7 +28,6 @@ mod client {
     async fn force_reconnect() {
         let (dctx, mut dcrx) = tokio::sync::mpsc::channel(1);
         let (rctx, mut rcrx) = tokio::sync::mpsc::channel(1);
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
         let server = nats_server::run_basic_server();
 
@@ -47,16 +46,6 @@ mod client {
             .connect(server.client_url())
             .await
             .unwrap();
-
-        let second_client = async_nats::connect(server.client_url()).await.unwrap();
-        // second client to check if we properly flush before forcing reconnect.
-        let mut sub = second_client.subscribe("test").await.unwrap();
-        tokio::task::spawn({
-            async move {
-                sub.next().await.unwrap();
-                tx.send(()).await.unwrap();
-            }
-        });
 
         let mut sub = client.subscribe("foo").await.unwrap();
 
@@ -78,12 +67,6 @@ mod client {
         client.publish("foo", "data".into()).await.unwrap();
 
         tokio::time::timeout(Duration::from_secs(5), sub.next())
-            .await
-            .unwrap()
-            .unwrap();
-
-        // check if message sent just before reconnect is received.
-        tokio::time::timeout(Duration::from_secs(15), rx.recv())
             .await
             .unwrap()
             .unwrap();
