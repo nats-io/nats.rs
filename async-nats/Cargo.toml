@@ -57,10 +57,18 @@ num = "0.4.1"
 
 [features]
 default = ["server_2_10"]
+# Enables Service API for the client.
 service = []
+# All experimental features are part of this feature flag.
 experimental = ["service"]
+# Features that require nats-server version 2.10 or higher.
+# It is enabled by default since official 2.10 nats-server release.
 "server_2_10" = []
+# Used for enabling/disabling tests that by design take a lot of time to  complete.
+# Those tests are usually used for time-sensitive checks, like consumer heartbeats, longer timeouts, etc.
 slow_tests = []
+# Used for tests that ensure compatibility across client libraries in APIs that are abstraction
+# layer build on top of NATS server features (Service API, KV, Object Store etc.)
 compatibility_tests = []
 
 
