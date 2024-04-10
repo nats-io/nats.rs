@@ -1,3 +1,18 @@
+# 0.25.0
+
+## Overview
+
+A small release that allows client compile on MIPS and PowerPC architectures.
+It also adds the legacy notice and examples how to use async client in sync environments.
+
+## What's Changed
+* Add sync client legacy notice
+* Updates Message Metadata docs
+* Allow client to compile on MIPS and PowerPC by @protochron in https://github.com/nats-io/nats.rs/pull/1210
+* Update NKEYS to v0.4.1
+
+Thank you @protochron for your contribution!
+
 # 0.24.1
 ## Overview
 
