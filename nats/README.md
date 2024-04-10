@@ -19,6 +19,8 @@ This is the old legacy client. It will not get new features or updates beyond cr
 
 Use [async nats](https://crates.io/crates/async-nats) instead.
 
+If you would like to use the async client in sync context, check the [async-nats examples](https://github.com/nats-io/nats.rs/tree/main/async-nats/examples).
+
 ## Motivation
 
 Rust may be one of the most interesting new languages the NATS ecosystem has seen.
