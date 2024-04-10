@@ -11,8 +11,13 @@
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Crates.io](https://img.shields.io/crates/v/nats.svg)](https://crates.io/crates/nats)
 [![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
-[![Build Status](https://github.com/nats-io/nats.rs/workflows/Rust/badge.svg)](https://github.com/nats-io/nats.rs/actions)
+[![Build Status](https://github.com/nats-io/nats.rs/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/nats-io/nats.rs/actions)
 
+## :warning: Legacy Notice
+
+This is the old legacy client. It will not get new features or updates beyond critical security fixes.
+
+Use [async nats](https://crates.io/crates/async-nats) instead.
 
 ## Motivation
 
