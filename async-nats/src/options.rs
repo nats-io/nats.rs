@@ -854,6 +854,28 @@ impl ConnectOptions {
         self
     }
 
+
+    /// Sets the number of bytes that can be cached if the connection to the NATS server is lost.
+    /// The publisher can still receive messages and will publish those once reconnected. 
+    /// When the maximum reconnect buffer is reached, messages will no longer be received
+    /// by the publisher and an error will be returned.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// async_nats::ConnectOptions::new()
+    ///     .reconnect_buffer_size(8 * 1024 * 1024) // 8mb
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reconnect_buffer_size(mut self, size: usize) -> ConnectOptions {
+        self.reconnect_buffer_size = size;
+        self
+    }
+
     /// By default, a server may advertise other servers in the cluster known to it.
     /// By setting this option, the client will ignore the advertised servers.
     /// This may be useful if the client may not be able to reach them.
