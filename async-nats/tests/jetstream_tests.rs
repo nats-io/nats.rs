@@ -3475,6 +3475,7 @@ mod jetstream {
                 max_ack_pending: 150,
             }),
             first_sequence: Some(505),
+            pause_until: None,
         };
 
         let stream = jetstream.create_stream(config.clone()).await.unwrap();
