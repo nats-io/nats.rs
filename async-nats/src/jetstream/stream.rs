@@ -1024,6 +1024,10 @@ pub struct Config {
     /// Sets the first sequence for the stream.
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "first_seq")]
     pub first_sequence: Option<u64>,
+
+    /// Placement configuration for clusters and tags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
 }
 
 impl From<&Config> for Config {
@@ -1096,6 +1100,17 @@ pub struct Republish {
     /// If true, only headers should be republished.
     #[serde(default)]
     pub headers_only: bool,
+}
+
+/// Placement describes on which cluster or tags the stream should be placed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Placement {
+    // Cluster where the stream should be placed.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub cluster: Option<String>,
+    // Matching tags for stream placement.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub tags: Vec<String>,
 }
 
 /// `DiscardPolicy` determines how we proceed when limits of messages or bytes are hit. The default, `Old` will
