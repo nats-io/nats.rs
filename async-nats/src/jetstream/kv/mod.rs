@@ -38,7 +38,7 @@ use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
     context::{PublishError, PublishErrorKind},
     stream::{
-        ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
+        self, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
         Republish, Source, StorageType, Stream,
     },
 };
@@ -123,6 +123,8 @@ pub struct Config {
     /// Compression
     #[cfg(feature = "server_2_10")]
     pub compression: bool,
+    /// Cluster and tag placement for the bucket.
+    pub placement: Option<stream::Placement>,
 }
 
 /// Describes what kind of operation and entry represents
