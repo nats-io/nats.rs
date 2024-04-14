@@ -78,6 +78,8 @@ pub struct Config {
     pub num_replicas: usize,
     /// Sets compression of the underlying stream.
     pub compression: bool,
+    // Cluster and tag placement.
+    pub placement: Option<stream::Placement>,
 }
 
 /// A blob store capable of storing large objects efficiently in streams.
