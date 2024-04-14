@@ -691,6 +691,7 @@ impl Context {
                 } else {
                     None
                 },
+                placement: config.placement,
                 ..Default::default()
             })
             .await
