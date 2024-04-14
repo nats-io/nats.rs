@@ -3475,10 +3475,14 @@ mod jetstream {
                 max_ack_pending: 150,
             }),
             first_sequence: Some(505),
+            placement: Some(stream::Placement {
+                cluster: Some("CLUSTER".to_string()),
+                tags: vec!["tag".to_string()],
+            }),
         };
 
-        let stream = jetstream.create_stream(config.clone()).await.unwrap();
-        assert_eq!(config, stream.cached_info().to_owned().config);
+        let mut stream = jetstream.create_stream(config.clone()).await.unwrap();
+        assert_eq!(config, stream.info().await.unwrap().config);
     }
 
     #[tokio::test]
