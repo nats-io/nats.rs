@@ -41,7 +41,7 @@ jobs:
         id:   setup-go
         uses: actions/setup-go@v4 # v4 uses caching out of the box
         with:
-          go-version: '1.20'
+          go-version: '1.22'
       - name: Install nats-server
         run:  go install github.com/nats-io/nats-server/v2@main
       - name: Install stable Rust on ${{ matrix.os }}
