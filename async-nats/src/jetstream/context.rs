@@ -44,8 +44,8 @@ use super::object_store::{is_valid_bucket_name, ObjectStore};
 #[cfg(feature = "server_2_10")]
 use super::stream::Compression;
 use super::stream::{
-    self, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy, External, Info,
-    Stream,
+    self, Config, ConsumerCreateStrictError, ConsumerError, ConsumerErrorKind, ConsumerUpdateError,
+    DeleteStatus, DiscardPolicy, External, Info, Stream,
 };
 
 /// A context which can perform jetstream scoped requests.
@@ -880,8 +880,9 @@ impl Context {
         }
     }
 
-    /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
+    /// Create or update a `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer] without binding to a [Stream] first.
+    /// If you want a strict update or create, use [Context::create_consumer_strict_on_stream] or [Context::update_consumer_on_stream].
     ///
     /// # Examples
     ///
@@ -908,6 +909,96 @@ impl Context {
         &self,
         config: C,
         stream: S,
+    ) -> Result<Consumer<C>, ConsumerError> {
+        self.create_consumer_on_stream_action(config, stream, ConsumerAction::CreateOrUpdate)
+            .await
+    }
+
+    /// Update an existing consumer.
+    /// This call will fail if the consumer does not exist.
+    /// returns the info from the server about updated [Consumer] without binding to a [Stream] first.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: consumer::PullConsumer = jetstream
+    ///     .update_consumer_on_stream(
+    ///         consumer::pull::Config {
+    ///             durable_name: Some("pull".to_string()),
+    ///             description: Some("updated pull consumer".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///         "stream",
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_10")]
+    pub async fn update_consumer_on_stream<C: IntoConsumerConfig + FromConsumer, S: AsRef<str>>(
+        &self,
+        config: C,
+        stream: S,
+    ) -> Result<Consumer<C>, ConsumerUpdateError> {
+        self.create_consumer_on_stream_action(config, stream, ConsumerAction::Update)
+            .await
+            .map_err(|err| err.into())
+    }
+
+    /// Create consumer on stream, but only if it does not exist or the existing config is exactly
+    /// the same.
+    /// This method will fail if consumer is already present with different config.
+    /// returns the info from the server about created [Consumer] without binding to a [Stream] first.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: consumer::PullConsumer = jetstream
+    ///     .create_consumer_strict_on_stream(
+    ///         consumer::pull::Config {
+    ///             durable_name: Some("pull".to_string()),
+    ///             ..Default::default()
+    ///         },
+    ///         "stream",
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_10")]
+    pub async fn create_consumer_strict_on_stream<
+        C: IntoConsumerConfig + FromConsumer,
+        S: AsRef<str>,
+    >(
+        &self,
+        config: C,
+        stream: S,
+    ) -> Result<Consumer<C>, ConsumerCreateStrictError> {
+        self.create_consumer_on_stream_action(config, stream, ConsumerAction::Create)
+            .await
+            .map_err(|err| err.into())
+    }
+
+    async fn create_consumer_on_stream_action<
+        C: IntoConsumerConfig + FromConsumer,
+        S: AsRef<str>,
+    >(
+        &self,
+        config: C,
+        stream: S,
+        action: ConsumerAction,
     ) -> Result<Consumer<C>, ConsumerError> {
         let config = config.into_consumer_config();
 
@@ -943,7 +1034,7 @@ impl Context {
         match self
             .request(
                 subject,
-                &json!({"stream_name": stream.as_ref(), "config": config}),
+                &json!({"stream_name": stream.as_ref(), "config": config, "action": action}),
             )
             .await?
         {
@@ -1637,4 +1728,14 @@ impl From<RequestError> for AccountError {
             RequestErrorKind::Other => AccountError::with_source(AccountErrorKind::Other, err),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+enum ConsumerAction {
+    #[serde(rename = "")]
+    CreateOrUpdate,
+    #[serde(rename = "create")]
+    Create,
+    #[serde(rename = "update")]
+    Update,
 }

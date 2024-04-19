@@ -679,8 +679,9 @@ impl Stream {
         self.purge().filter(subject).await
     }
 
-    /// Create a new `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
+    /// Create or update `Durable` or `Ephemeral` Consumer (if `durable_name` was not provided) and
     /// returns the info from the server about created [Consumer]
+    /// If you want a strict update or create, use [Stream::create_consumer_strict] or [Stream::update_consumer].
     ///
     /// # Examples
     ///
@@ -707,6 +708,73 @@ impl Stream {
     ) -> Result<Consumer<C>, ConsumerError> {
         self.context
             .create_consumer_on_stream(config, self.info.config.name.clone())
+            .await
+    }
+
+    /// Update an existing consumer.
+    /// This call will fail if the consumer does not exist.
+    /// returns the info from the server about updated [Consumer].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// let info = stream
+    ///     .update_consumer(consumer::pull::Config {
+    ///         durable_name: Some("pull".to_string()),
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_10")]
+    pub async fn update_consumer<C: IntoConsumerConfig + FromConsumer>(
+        &self,
+        config: C,
+    ) -> Result<Consumer<C>, ConsumerUpdateError> {
+        self.context
+            .update_consumer_on_stream(config, self.info.config.name.clone())
+            .await
+    }
+
+    /// Create consumer, but only if it does not exist or the existing config is exactly
+    /// the same.
+    /// This method will fail if consumer is already present with different config.
+    /// returns the info from the server about created [Consumer].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// let info = stream
+    ///     .create_consumer_strict(consumer::pull::Config {
+    ///         durable_name: Some("pull".to_string()),
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_10")]
+    pub async fn create_consumer_strict<C: IntoConsumerConfig + FromConsumer>(
+        &self,
+        config: C,
+    ) -> Result<Consumer<C>, ConsumerCreateStrictError> {
+        self.context
+            .create_consumer_strict_on_stream(config, self.info.config.name.clone())
             .await
     }
 
@@ -1829,6 +1897,141 @@ impl Display for ConsumerErrorKind {
 
 pub type ConsumerError = Error<ConsumerErrorKind>;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerCreateStrictErrorKind {
+    //TODO: get last should have timeout, which should be mapped here.
+    TimedOut,
+    Request,
+    InvalidConsumerType,
+    InvalidName,
+    AlreadyExists,
+    JetStream(super::errors::Error),
+    Other,
+}
+
+impl Display for ConsumerCreateStrictErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::Other => write!(f, "consumer error"),
+            Self::InvalidConsumerType => write!(f, "invalid consumer type"),
+            Self::InvalidName => write!(f, "invalid consumer name"),
+            Self::AlreadyExists => write!(f, "consumer already exists"),
+        }
+    }
+}
+
+pub type ConsumerCreateStrictError = Error<ConsumerCreateStrictErrorKind>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerUpdateErrorKind {
+    //TODO: get last should have timeout, which should be mapped here.
+    TimedOut,
+    Request,
+    InvalidConsumerType,
+    InvalidName,
+    DoesNotExist,
+    JetStream(super::errors::Error),
+    Other,
+}
+
+impl Display for ConsumerUpdateErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
+            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::Other => write!(f, "consumer error"),
+            Self::InvalidConsumerType => write!(f, "invalid consumer type"),
+            Self::InvalidName => write!(f, "invalid consumer name"),
+            Self::DoesNotExist => write!(f, "consumer does not exist"),
+        }
+    }
+}
+
+pub type ConsumerUpdateError = Error<ConsumerUpdateErrorKind>;
+
+impl From<super::errors::Error> for ConsumerError {
+    fn from(err: super::errors::Error) -> Self {
+        ConsumerError::new(ConsumerErrorKind::JetStream(err))
+    }
+}
+impl From<super::errors::Error> for ConsumerCreateStrictError {
+    fn from(err: super::errors::Error) -> Self {
+        if err.error_code() == super::errors::ErrorCode::CONSUMER_ALREADY_EXISTS {
+            ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::AlreadyExists)
+        } else {
+            ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::JetStream(err))
+        }
+    }
+}
+impl From<super::errors::Error> for ConsumerUpdateError {
+    fn from(err: super::errors::Error) -> Self {
+        if err.error_code() == super::errors::ErrorCode::CONSUMER_DOES_NOT_EXIST {
+            ConsumerUpdateError::new(ConsumerUpdateErrorKind::DoesNotExist)
+        } else {
+            ConsumerUpdateError::new(ConsumerUpdateErrorKind::JetStream(err))
+        }
+    }
+}
+impl From<ConsumerError> for ConsumerUpdateError {
+    fn from(err: ConsumerError) -> Self {
+        match err.kind() {
+            ConsumerErrorKind::JetStream(err) => {
+                if err.error_code() == super::errors::ErrorCode::CONSUMER_DOES_NOT_EXIST {
+                    ConsumerUpdateError::new(ConsumerUpdateErrorKind::DoesNotExist)
+                } else {
+                    ConsumerUpdateError::new(ConsumerUpdateErrorKind::JetStream(err))
+                }
+            }
+            ConsumerErrorKind::Request => {
+                ConsumerUpdateError::new(ConsumerUpdateErrorKind::Request)
+            }
+            ConsumerErrorKind::TimedOut => {
+                ConsumerUpdateError::new(ConsumerUpdateErrorKind::TimedOut)
+            }
+            ConsumerErrorKind::InvalidConsumerType => {
+                ConsumerUpdateError::new(ConsumerUpdateErrorKind::InvalidConsumerType)
+            }
+            ConsumerErrorKind::InvalidName => {
+                ConsumerUpdateError::new(ConsumerUpdateErrorKind::InvalidName)
+            }
+            ConsumerErrorKind::Other => ConsumerUpdateError::new(ConsumerUpdateErrorKind::Other),
+        }
+    }
+}
+
+impl From<ConsumerError> for ConsumerCreateStrictError {
+    fn from(err: ConsumerError) -> Self {
+        match err.kind() {
+            ConsumerErrorKind::JetStream(err) => {
+                if err.error_code() == super::errors::ErrorCode::CONSUMER_ALREADY_EXISTS {
+                    ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::AlreadyExists)
+                } else {
+                    ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::JetStream(err))
+                }
+            }
+            ConsumerErrorKind::Request => {
+                ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::Request)
+            }
+            ConsumerErrorKind::TimedOut => {
+                ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::TimedOut)
+            }
+            ConsumerErrorKind::InvalidConsumerType => {
+                ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::InvalidConsumerType)
+            }
+            ConsumerErrorKind::InvalidName => {
+                ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::InvalidName)
+            }
+            ConsumerErrorKind::Other => {
+                ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::Other)
+            }
+        }
+    }
+}
+
 impl From<super::context::RequestError> for ConsumerError {
     fn from(err: super::context::RequestError) -> Self {
         match err.kind() {
@@ -1837,9 +2040,25 @@ impl From<super::context::RequestError> for ConsumerError {
         }
     }
 }
-
-impl From<super::errors::Error> for ConsumerError {
-    fn from(err: super::errors::Error) -> Self {
-        ConsumerError::new(ConsumerErrorKind::JetStream(err))
+impl From<super::context::RequestError> for ConsumerUpdateError {
+    fn from(err: super::context::RequestError) -> Self {
+        match err.kind() {
+            RequestErrorKind::TimedOut => {
+                ConsumerUpdateError::new(ConsumerUpdateErrorKind::TimedOut)
+            }
+            _ => ConsumerUpdateError::with_source(ConsumerUpdateErrorKind::Request, err),
+        }
+    }
+}
+impl From<super::context::RequestError> for ConsumerCreateStrictError {
+    fn from(err: super::context::RequestError) -> Self {
+        match err.kind() {
+            RequestErrorKind::TimedOut => {
+                ConsumerCreateStrictError::new(ConsumerCreateStrictErrorKind::TimedOut)
+            }
+            _ => {
+                ConsumerCreateStrictError::with_source(ConsumerCreateStrictErrorKind::Request, err)
+            }
+        }
     }
 }

@@ -38,7 +38,9 @@ mod jetstream {
     };
     use async_nats::jetstream::context::{Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
-    use async_nats::jetstream::stream::{self, DiscardPolicy, StorageType};
+    use async_nats::jetstream::stream::{
+        self, ConsumerCreateStrictErrorKind, ConsumerUpdateErrorKind, DiscardPolicy, StorageType,
+    };
     #[cfg(feature = "server_2_10")]
     use async_nats::jetstream::stream::{Compression, ConsumerLimits, Source, SubjectTransform};
     use async_nats::jetstream::AckKind;
@@ -3518,5 +3520,92 @@ mod jetstream {
             .update_stream(config)
             .await
             .expect_err("cannot update stream. consumer `name` exceeds new limits");
+    }
+
+    #[tokio::test]
+    async fn consumer_create_strict() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // crate a consumer
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // strict create with the same config should be ok.
+        stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // strict create with different config should fail.
+        let err = stream
+            .create_consumer_strict(consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ack_policy: AckPolicy::All,
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), ConsumerCreateStrictErrorKind::AlreadyExists);
+    }
+
+    #[tokio::test]
+    async fn consumer_update() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // crate a consumer
+        let consumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut config = consumer.cached_info().config.clone();
+        config.description = Some("new description".to_string());
+
+        // update existing consumer
+        stream.update_consumer(config).await.unwrap();
+
+        // update non-existing consumer
+        let err = stream
+            .update_consumer(consumer::pull::Config {
+                durable_name: Some("non-existing".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ConsumerUpdateErrorKind::DoesNotExist);
     }
 }
