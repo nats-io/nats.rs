@@ -97,7 +97,7 @@ impl ErrorCode {
     /// General RAFT error
     pub const RAFT_GENERAL: ErrorCode = ErrorCode(10041);
 
-    /// Jetstream unable to subscribe to restore snapshot     
+    /// Jetstream unable to subscribe to restore snapshot
     pub const RESTORE_SUBSCRIBE_FAILED: ErrorCode = ErrorCode(10042);
 
     /// Stream deletion failed
@@ -435,6 +435,42 @@ impl ErrorCode {
 
     /// Duplicate source configuration detected
     pub const SOURCE_DUPLICATE_DETECTED: ErrorCode = ErrorCode(10140);
+
+    /// Sourced stream name is invalid
+    pub const SOURCE_INVALID_STREAM_NAME: ErrorCode = ErrorCode(10141);
+
+    /// Mirrored stream name is invalid
+    pub const MIRROR_INVALID_STREAM_NAME: ErrorCode = ErrorCode(10142);
+
+    /// Source with multiple subject transforms cannot also have a single subject filter
+    pub const SOURCE_MULTIPLE_FILTERS_NOT_ALLOWED: ErrorCode = ErrorCode(10144);
+
+    /// Source subject filter is invalid
+    pub const SOURCE_INVALID_SUBJECT_FILTER: ErrorCode = ErrorCode(10145);
+
+    /// Source transform destination is invalid
+    pub const SOURCE_INVALID_TRANSFORM_DESTINATION: ErrorCode = ErrorCode(10146);
+
+    /// Source filters cannot overlap
+    pub const SOURCE_OVERLAPPING_SUBJECT_FILTERS: ErrorCode = ErrorCode(10147);
+
+    /// Consumer already exists
+    pub const CONSUMER_ALREADY_EXISTS: ErrorCode = ErrorCode(10148);
+
+    /// Consumer does not exist
+    pub const CONSUMER_DOES_NOT_EXIST: ErrorCode = ErrorCode(10149);
+
+    /// Mirror with multiple subject transforms cannot also have a single subject filter
+    pub const MIRROR_MULTIPLE_FILTERS_NOT_ALLOWED: ErrorCode = ErrorCode(10150);
+
+    /// Mirror subject filter is invalid
+    pub const MIRROR_INVALID_SUBJECT_FILTER: ErrorCode = ErrorCode(10151);
+
+    /// Mirror subject filters cannot overlap
+    pub const MIRROR_OVERLAPPING_SUBJECT_FILTERS: ErrorCode = ErrorCode(10152);
+
+    /// Consumer inactive threshold exceeds system limit
+    pub const CONSUMER_INACTIVE_THRESHOLD_EXCESS: ErrorCode = ErrorCode(10153);
 }
 
 /// `Error` type returned from an API response when an error occurs.
