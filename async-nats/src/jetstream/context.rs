@@ -41,12 +41,12 @@ use super::errors::ErrorCode;
 use super::is_valid_name;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
-#[cfg(feature = "server_2_10")]
-use super::stream::Compression;
 use super::stream::{
-    self, Config, ConsumerCreateStrictError, ConsumerError, ConsumerErrorKind, ConsumerUpdateError,
-    DeleteStatus, DiscardPolicy, External, Info, Stream,
+    self, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy, External, Info,
+    Stream,
 };
+#[cfg(feature = "server_2_10")]
+use super::stream::{Compression, ConsumerCreateStrictError, ConsumerUpdateError};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -1735,7 +1735,9 @@ enum ConsumerAction {
     #[serde(rename = "")]
     CreateOrUpdate,
     #[serde(rename = "create")]
+    #[cfg(feature = "server_2_10")]
     Create,
     #[serde(rename = "update")]
+    #[cfg(feature = "server_2_10")]
     Update,
 }
