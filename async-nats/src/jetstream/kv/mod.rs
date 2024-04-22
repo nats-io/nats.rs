@@ -488,6 +488,76 @@ impl Store {
             .await
     }
 
+    /// Creates a [futures::Stream] over [Entries][Entry] for a given set of keys  in the bucket, which yields
+    /// values whenever there are changes for those keys.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let mut entries = kv.watch_many(&["one", "two"]).await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_10")]
+    pub async fn watch_many<T, I>(&self, keys: T) -> Result<Watch, WatchError>
+    where
+        T: IntoIterator<Item = I>,
+        I: AsRef<str>,
+    {
+        self.watch_many_with_deliver_policy(keys, DeliverPolicy::New)
+            .await
+    }
+
+    /// Creates a [futures::Stream] over [Entries][Entry] for a given set of keys  in the bucket.
+    /// It returns last entry for each key, and then starts streaming new entries for those keys.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let mut entries = kv.watch_many(&["one", "two"]).await?;
+    /// while let Some(entry) = entries.next().await {
+    ///     println!("entry: {:?}", entry);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_10")]
+    pub async fn watch_many_with_history<T, I>(&self, keys: T) -> Result<Watch, WatchError>
+    where
+        T: IntoIterator<Item = I>,
+        I: AsRef<str>,
+    {
+        self.watch_many_with_deliver_policy(keys, DeliverPolicy::LastPerSubject)
+            .await
+    }
+
     /// Creates a [futures::Stream] over [Entries][Entry] a given key in the bucket, starting from
     /// provided revision. This is useful to resume watching over big KV buckets without a need to
     /// replay all the history.
@@ -572,6 +642,54 @@ impl Store {
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("kv watch consumer".to_string()),
                 filter_subject: subject,
+                replay_policy: super::consumer::ReplayPolicy::Instant,
+                deliver_policy,
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| match err.kind() {
+                crate::jetstream::stream::ConsumerErrorKind::TimedOut => {
+                    WatchError::new(WatchErrorKind::TimedOut)
+                }
+                _ => WatchError::with_source(WatchErrorKind::Other, err),
+            })?;
+
+        Ok(Watch {
+            subscription: consumer.messages().await.map_err(|err| match err.kind() {
+                crate::jetstream::consumer::StreamErrorKind::TimedOut => {
+                    WatchError::new(WatchErrorKind::TimedOut)
+                }
+                crate::jetstream::consumer::StreamErrorKind::Other => {
+                    WatchError::with_source(WatchErrorKind::Other, err)
+                }
+            })?,
+            prefix: self.prefix.clone(),
+            bucket: self.name.clone(),
+        })
+    }
+
+    #[cfg(feature = "server_2_10")]
+    async fn watch_many_with_deliver_policy<T, I>(
+        &self,
+        key: T,
+        deliver_policy: DeliverPolicy,
+    ) -> Result<Watch, WatchError>
+    where
+        T: IntoIterator<Item = I>,
+        I: AsRef<str>,
+    {
+        let subjects = key
+            .into_iter()
+            .map(|k| format!("{}{}", self.prefix.as_str(), k.as_ref()))
+            .collect::<Vec<_>>();
+
+        debug!("initial consumer creation");
+        let consumer = self
+            .stream
+            .create_consumer(super::consumer::push::OrderedConfig {
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("kv watch consumer".to_string()),
+                filter_subjects: subjects,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
                 deliver_policy,
                 ..Default::default()

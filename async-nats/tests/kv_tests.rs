@@ -522,6 +522,7 @@ mod kv {
             }
         }
     }
+
     #[tokio::test]
     async fn watch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -579,6 +580,65 @@ mod kv {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn watch_many() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // check if we get only updated values. This should not pop up in watcher.
+        kv.put("foo", 22.to_string().into()).await.unwrap();
+        let mut watch = kv.watch_many(["foo", "bar"]).await.unwrap().enumerate();
+
+        for i in 0..5 {
+            kv.put("foo", i.to_string().into()).await.unwrap();
+        }
+        for _ in 0..10 {
+            kv.put("var", "value".into()).await.unwrap();
+        }
+
+        for i in 5..10 {
+            kv.put("bar", i.to_string().into()).await.unwrap();
+        }
+
+        while let Some((i, entry)) = watch.next().await {
+            let entry = entry.unwrap();
+            if entry.key != "foo" && entry.key != "bar" {
+                panic!("unexpected key: {}", entry.key);
+            }
+            assert_eq!(
+                i,
+                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            );
+            if i == 9 {
+                break;
+            }
+        }
+
+        let mut watch = kv
+            .watch_many_with_history(["foo", "bar"])
+            .await
+            .unwrap()
+            .enumerate();
     }
 
     #[tokio::test]
