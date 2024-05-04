@@ -1483,7 +1483,6 @@ pub trait ToServerAddrs {
     /// to.
     type Iter: Iterator<Item = ServerAddr>;
 
-    ///
     fn to_server_addrs(&self) -> io::Result<Self::Iter>;
 }
 
