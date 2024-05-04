@@ -102,7 +102,7 @@ jobs:
           save-if: false # the linter only run checks but not builds, so we don't have the full build to be cached.
 
       - name: Run linter
-        run: cargo clippy --benches --tests --examples --all-features -- --deny clippy::all
+        run: cargo clippy --benches --tests --examples --all-features --workspace --exclude nats -- --deny clippy::all
 
   check_docs:
     name: check docs (ubuntu-latest / stable)
