@@ -2,7 +2,7 @@
 
 ## Overview
 
-This release makes tls setup more flexible, leveraging rusls v0.23 and allowing to pick crypto backend:
+This release makes tls setup more flexible, leveraging rustls v0.23 and allowing to pick crypto backend:
 * ring
 * aws-lc-rs
 * fips
