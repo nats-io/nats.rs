@@ -1,3 +1,41 @@
+# 0.35.0
+
+## Overview
+
+This release makes tls setup more flexible, leveraging rustls v0.23 and allowing to pick crypto backend:
+* ring
+* aws-lc-rs
+* fips
+
+Some other highlights:
+* force reconnect via `force_reconnect` method
+* explicit create/update consumer API
+
+Thank you for all your contributions!
+
+## Added
+* Add `ToServerAddrs` impl for array/vector of strings by @mmalek in https://github.com/nats-io/nats.rs/pull/1231
+* Add public constructor for Acker by @AbstractiveNord in https://github.com/nats-io/nats.rs/pull/1232
+* Add force reconnect by @Jarema in https://github.com/nats-io/nats.rs/pull/1240
+* Add features check by @Jarema in https://github.com/nats-io/nats.rs/pull/1247
+* Add stream placement by @Jarema in https://github.com/nats-io/nats.rs/pull/1250
+* Add consumer action by @Jarema in https://github.com/nats-io/nats.rs/pull/1254
+* Add support for aws-lc-rs (rustls v0.23.0) by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1222
+
+## Fixed
+* Use last header value for JetStream messages by @Jarema in https://github.com/nats-io/nats.rs/pull/1239
+
+## Changed
+* Wrap inbox prefix in an `Arc` by @thomastaylor312 in https://github.com/nats-io/nats.rs/pull/1236
+* Document feature flags by @Jarema in https://github.com/nats-io/nats.rs/pull/1246
+* Don't force flush if write buffer isn't empty by @paolobarbolini in https://github.com/nats-io/nats.rs/pull/1241
+
+## New Contributors
+* @mmalek made their first contribution in https://github.com/nats-io/nats.rs/pull/1231
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.34.0...async-nats/v0.35.0
+
+
 # 0.34.0
 
 ## Overview
