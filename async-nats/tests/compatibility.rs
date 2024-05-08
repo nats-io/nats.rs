@@ -419,6 +419,26 @@ mod compatibility {
     }
 
     #[tokio::test]
+    async fn jetstream() {
+        let url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
+        tracing::info!("staring client for jetstream tests at {}", url);
+        let client = async_nats::connect(url).await.unwrap();
+
+        let mut tests = client
+            .subscribe("tests.jetstream.default-stream.>")
+            .await
+            .unwrap()
+            .peekable();
+
+        #[derive(Serialize, Deserialize)]
+        struct StreamConfig {
+            name: String,
+        }
+
+        let config = tests.next().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn service_core() {
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
         tracing::info!("staring client for service tests at {}", url);
