@@ -83,5 +83,6 @@ harness = false
 lto = true
 
 [package.metadata.docs.rs]
-all-features = true
+# We can't use `all-features` because the `fips` doesn't compile in restricted docs.rs environment.
+features = ["server_2_10",  "service", "experimental", "ring", "aws-lc-rs"]
 rustdoc-args = ["--cfg", "docsrs"]
