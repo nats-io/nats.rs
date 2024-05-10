@@ -1294,7 +1294,8 @@ impl ServerError {
     fn new(error: String) -> ServerError {
         match error.to_lowercase().as_str() {
             "authorization violation" => ServerError::AuthorizationViolation,
-            other => ServerError::Other(other.to_string()),
+            // error messages can contain case-sensitive values which should be preserved
+            _ => ServerError::Other(error),
         }
     }
 }
