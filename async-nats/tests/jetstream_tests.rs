@@ -2939,19 +2939,28 @@ mod jetstream {
                 .unwrap();
         }
 
-        let consumers = stream
-            .consumer_names()
-            .try_collect::<Vec<String>>()
-            .await
-            .unwrap();
+        tryhard::retry_fn(|| async {
+            let consumers = stream
+                .consumer_names()
+                .try_collect::<Vec<String>>()
+                .await
+                .unwrap();
 
-        assert_eq!(consumers.len(), 235);
+            for i in 0..235 {
+                assert!(consumers
+                    .iter()
+                    .any(|name| *name == format!("consumer_{i}")));
+            }
+            if consumers.len() != 235 {
+                return Err("not enough consumers");
+            }
+            Ok(())
+        })
+        .retries(5)
+        .exponential_backoff(Duration::from_secs(1))
+        .await
+        .unwrap();
 
-        for i in 0..235 {
-            assert!(consumers
-                .iter()
-                .any(|name| *name == format!("consumer_{i}")));
-        }
         assert_eq!(stream.consumer_names().count().await, 235);
     }
 

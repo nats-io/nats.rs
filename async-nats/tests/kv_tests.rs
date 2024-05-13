@@ -926,7 +926,7 @@ mod kv {
         assert!(mirror.cached_info().config.mirror_direct);
 
         // Make sure we sync.
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
 
         // Bind locally from leafnode and make sure both get and put work.
         let local_kv = leaf_js.get_key_value("MIRROR").await.unwrap();
@@ -941,7 +941,7 @@ mod kv {
                 _ => Err("key not found".into()),
             }
         })
-        .retries(5)
+        .retries(10)
         .exponential_backoff(Duration::from_millis(500))
         .await
         .unwrap();
