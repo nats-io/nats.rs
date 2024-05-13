@@ -1,3 +1,15 @@
+# 0.35.1
+## Overview
+
+This release fixes broken docs build caused by `fips`, which cannot be built in restricted docs.rs environment.
+
+## What's Changed
+* Fix docs.rs build by @Jarema in https://github.com/nats-io/nats.rs/pull/1259
+* Preserve case of server error messages by @oscarwcl in https://github.com/nats-io/nats.rs/pull/1258
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.35.0...async-nats/v0.35.1
+
 # 0.35.0
 
 ## Overview
