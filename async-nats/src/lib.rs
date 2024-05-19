@@ -54,9 +54,6 @@
 //!         client.publish("messages", "data".into()).await?;
 //!     }
 //!
-//!     // Flush internal buffer to make sure messages are sent
-//!     client.flush().await?;
-//!
 //!     // Receive and process messages
 //!     while let Some(message) = subscriber.next().await {
 //!         println!("Received message {:?}", message);
@@ -88,7 +85,7 @@
 //!     client.publish(subject, data.clone()).await?;
 //! }
 //!
-//! // Flush internal buffer to make sure messages are sent
+//! // Flush internal buffer before exiting to make sure all messages are sent
 //! client.flush().await?;
 //!
 //! #    Ok(())
