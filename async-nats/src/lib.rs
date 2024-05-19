@@ -87,10 +87,10 @@
 //! for _ in 0..10 {
 //!     client.publish(subject, data.clone()).await?;
 //! }
-//! 
+//!
 //! // Flush internal buffer to make sure messages are sent
 //! client.flush().await?;
-//! 
+//!
 //! #    Ok(())
 //! # }
 //! ```
