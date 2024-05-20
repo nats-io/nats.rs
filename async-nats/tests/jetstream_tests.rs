@@ -2375,7 +2375,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let mut iter = consumer.fetch().max_messages(100).messages().await.unwrap();
+        let mut iter = consumer.batch().max_messages(10).messages().await.unwrap();
         client.flush().await.unwrap();
 
         tryhard::retry_fn(|| async {
