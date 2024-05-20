@@ -84,6 +84,10 @@
 //! for _ in 0..10 {
 //!     client.publish(subject, data.clone()).await?;
 //! }
+//!
+//! // Flush internal buffer before exiting to make sure all messages are sent
+//! client.flush().await?;
+//!
 //! #    Ok(())
 //! # }
 //! ```
