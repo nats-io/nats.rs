@@ -42,12 +42,9 @@ use tokio_rustls::rustls;
 /// # }
 /// ```
 pub struct ConnectOptions {
-    // pub(crate) auth: AuthStyle,
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
-    pub(crate) retry_on_failed_connect: bool,
     pub(crate) max_reconnects: Option<usize>,
-    pub(crate) reconnect_buffer_size: usize,
     pub(crate) connection_timeout: Duration,
     pub(crate) auth: Auth,
     pub(crate) tls_required: bool,
@@ -75,8 +72,6 @@ impl fmt::Debug for ConnectOptions {
         f.debug_map()
             .entry(&"name", &self.name)
             .entry(&"no_echo", &self.no_echo)
-            .entry(&"retry_on_failed_connect", &self.retry_on_failed_connect)
-            .entry(&"reconnect_buffer_size", &self.reconnect_buffer_size)
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"connection_timeout", &self.connection_timeout)
             .entry(&"tls_required", &self.tls_required)
@@ -88,7 +83,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
-            .entry(&"retry_on_initial_connect", &self.retry_on_failed_connect)
+            .entry(&"retry_on_initial_connect", &self.retry_on_initial_connect)
             .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
             .finish()
     }
@@ -99,8 +94,6 @@ impl Default for ConnectOptions {
         ConnectOptions {
             name: None,
             no_echo: false,
-            retry_on_failed_connect: false,
-            reconnect_buffer_size: 8 * 1024 * 1024,
             max_reconnects: None,
             connection_timeout: Duration::from_secs(5),
             tls_required: false,
