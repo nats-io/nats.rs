@@ -1,4 +1,4 @@
-FROM rust:1.71.1
+FROM rust:1.78
 WORKDIR /usr/src/nats.rs/async-nats
 ARG PROFILE=test
 COPY . /usr/src/nats.rs
