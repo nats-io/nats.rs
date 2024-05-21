@@ -96,6 +96,15 @@ impl Client {
         }
     }
 
+    /// Returns a [`mpsc::Sender`] of [`Command`], that can be used to
+    /// asynchronously drive the client.
+    /// This is low-level API mostly suitable for advanced use cases,
+    /// most applications should rely on higher-level functionality like
+    /// [`Self::publish`] or [`Self::subscribe`]
+    pub fn command_sender(&self) -> mpsc::Sender<Command> {
+        self.sender.clone()
+    }
+
     /// Returns last received info from the server.
     ///
     /// # Examples
