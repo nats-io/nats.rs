@@ -344,7 +344,7 @@ pub(crate) enum ServerOp {
 
 /// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]
-pub enum Command {
+pub(crate) enum Command {
     Publish {
         subject: Subject,
         payload: Bytes,

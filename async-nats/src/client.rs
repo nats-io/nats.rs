@@ -11,15 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::pin::Pin;
+use core::task::{Context, Poll};
+
 use crate::connection::State;
-use crate::subject::ToSubject;
+use crate::subject::{Subject, ToSubject};
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
-use futures::StreamExt;
+use futures::{Sink, SinkExt as _, StreamExt};
 use once_cell::sync::Lazy;
 use portable_atomic::AtomicU64;
 use regex::Regex;
@@ -29,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::PollSender;
 use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
@@ -36,10 +40,17 @@ static VERSION_RE: Lazy<Regex> =
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
+/// This error is also used as [`Publisher::Error`]
 pub type PublishError = Error<PublishErrorKind>;
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        PublishError::with_source(PublishErrorKind::Send, err)
+    }
+}
+
+impl From<tokio_util::sync::PollSendError<Command>> for PublishError {
+    fn from(err: tokio_util::sync::PollSendError<Command>) -> Self {
         PublishError::with_source(PublishErrorKind::Send, err)
     }
 }
@@ -56,6 +67,46 @@ impl Display for PublishErrorKind {
             PublishErrorKind::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
             PublishErrorKind::Send => write!(f, "failed to send message"),
         }
+    }
+}
+
+/// [`Sink<Bytes>`] created by [`Client::publish_sink`], [`Client::publish_with_reply_sink`],
+/// [`Client::publish_with_headers_sink`] or [`Client::publish_with_reply_and_headers_sink`]
+#[derive(Clone, Debug)]
+pub struct Publisher {
+    subject: Subject,
+    respond: Option<Subject>,
+    headers: Option<HeaderMap>,
+    sender: PollSender<Command>,
+}
+
+impl Sink<Bytes> for Publisher {
+    type Error = PublishError;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.sender.poll_ready_unpin(cx).map_err(Into::into)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, payload: Bytes) -> Result<(), Self::Error> {
+        let headers = self.headers.clone();
+        let respond = self.respond.clone();
+        let subject = self.subject.clone();
+        self.sender
+            .start_send_unpin(Command::Publish {
+                subject,
+                payload,
+                respond,
+                headers,
+            })
+            .map_err(Into::into)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.sender.poll_flush_unpin(cx).map_err(Into::into)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.sender.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
@@ -94,15 +145,6 @@ impl Client {
             request_timeout,
             max_payload,
         }
-    }
-
-    /// Returns a [`mpsc::Sender`] of [`Command`], that can be used to
-    /// asynchronously drive the client.
-    /// This is low-level API mostly suitable for advanced use cases,
-    /// most applications should rely on higher-level functionality like
-    /// [`Self::publish`] or [`Self::subscribe`]
-    pub fn command_sender(&self) -> mpsc::Sender<Command> {
-        self.sender.clone()
     }
 
     /// Returns last received info from the server.
@@ -210,6 +252,16 @@ impl Client {
         Ok(())
     }
 
+    /// Returns a [Publisher], which can be used to send multiple [Messages](Message) to a given subject.
+    pub fn publish_sink<S: ToSubject>(&self, subject: S) -> Publisher {
+        Publisher {
+            subject: subject.to_subject(),
+            respond: None,
+            headers: None,
+            sender: PollSender::new(self.sender.clone()),
+        }
+    }
+
     /// Publish a [Message] with headers to a given subject.
     ///
     /// # Examples
@@ -248,6 +300,20 @@ impl Client {
         Ok(())
     }
 
+    /// Returns a [Publisher], which can be used to send multiple [Messages](Message) with headers to a given subject.
+    pub fn publish_with_headers_sink<S: ToSubject>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+    ) -> Publisher {
+        Publisher {
+            subject: subject.to_subject(),
+            respond: None,
+            headers: Some(headers),
+            sender: PollSender::new(self.sender.clone()),
+        }
+    }
+
     /// Publish a [Message] to a given subject, with specified response subject
     /// to which the subscriber can respond.
     /// This method does not await for the response.
@@ -282,6 +348,22 @@ impl Client {
             })
             .await?;
         Ok(())
+    }
+
+    /// Returns a [Publisher], which can be used to send multiple [Messages](Message) to a given subject,
+    /// with specified response subject to which the subscriber can respond.
+    /// [Publisher] does not await for the response.
+    pub fn publish_with_reply_sink<S: ToSubject, R: ToSubject>(
+        &self,
+        subject: S,
+        reply: R,
+    ) -> Publisher {
+        Publisher {
+            subject: subject.to_subject(),
+            respond: Some(reply.to_subject()),
+            headers: None,
+            sender: PollSender::new(self.sender.clone()),
+        }
     }
 
     /// Publish a [Message] to a given subject with headers and specified response subject
@@ -321,6 +403,23 @@ impl Client {
             })
             .await?;
         Ok(())
+    }
+
+    /// Returns a [Publisher], which can be used to send multiple [Messages](Message) to a given subject,
+    /// with headers and specified response subject to which the subscriber can respond.
+    /// [Publisher] does not await for the response.
+    pub fn publish_with_reply_and_headers_sink<S: ToSubject, R: ToSubject>(
+        &self,
+        subject: S,
+        reply: R,
+        headers: HeaderMap,
+    ) -> Publisher {
+        Publisher {
+            subject: subject.to_subject(),
+            respond: Some(reply.to_subject()),
+            headers: Some(headers),
+            sender: PollSender::new(self.sender.clone()),
+        }
     }
 
     /// Sends the request with headers.
