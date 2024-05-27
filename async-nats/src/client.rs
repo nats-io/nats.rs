@@ -115,6 +115,10 @@ impl Client {
 
     /// Returns true if the server version is compatible with the version components.
     ///
+    /// This has to be used with caution, as it is not guaranteed that the server
+    /// that client is connected to is the same version that the one that is
+    /// a JetStream meta/stream/consumer leader, especially across leafnodes.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -128,7 +132,10 @@ impl Client {
     pub fn is_server_compatible(&self, major: i64, minor: i64, patch: i64) -> bool {
         let info = self.server_info();
 
-        let server_version_captures = VERSION_RE.captures(&info.version).unwrap();
+        let server_version_captures = match VERSION_RE.captures(&info.version) {
+            Some(captures) => captures,
+            None => return false,
+        };
 
         let server_major = server_version_captures
             .get(1)
