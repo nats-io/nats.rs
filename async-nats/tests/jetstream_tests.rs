@@ -661,13 +661,7 @@ mod jetstream {
 
         let message = stream.direct_get_last_for_subject("events").await.unwrap();
 
-        let sequence = message
-            .headers
-            .as_ref()
-            .unwrap()
-            .get(header::NATS_SEQUENCE)
-            .unwrap()
-            .as_str();
+        let sequence = message.headers.get(header::NATS_SEQUENCE).unwrap().as_str();
 
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
@@ -860,13 +854,7 @@ mod jetstream {
 
         let message = stream.direct_get(2).await.unwrap();
 
-        let sequence = message
-            .headers
-            .as_ref()
-            .unwrap()
-            .get(header::NATS_SEQUENCE)
-            .unwrap()
-            .as_str();
+        let sequence = message.headers.get(header::NATS_SEQUENCE).unwrap().as_str();
 
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());

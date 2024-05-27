@@ -40,6 +40,7 @@ use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
     context::{RequestError, RequestErrorKind, StreamsError, StreamsErrorKind},
     errors::ErrorCode,
+    message::{StreamMessage, StreamMessageError},
     response::Response,
     Context, Message,
 };
@@ -87,6 +88,12 @@ impl From<crate::RequestError> for DirectGetError {
 
 impl From<serde_json::Error> for DirectGetError {
     fn from(err: serde_json::Error) -> Self {
+        DirectGetError::with_source(DirectGetErrorKind::Other, err)
+    }
+}
+
+impl From<StreamMessageError> for DirectGetError {
+    fn from(err: StreamMessageError) -> Self {
         DirectGetError::with_source(DirectGetErrorKind::Other, err)
     }
 }
@@ -372,7 +379,7 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn direct_get(&self, sequence: u64) -> Result<Message, DirectGetError> {
+    pub async fn direct_get(&self, sequence: u64) -> Result<StreamMessage, DirectGetError> {
         let subject = format!(
             "{}.DIRECT.GET.{}",
             &self.context.prefix, &self.info.config.name
@@ -385,11 +392,7 @@ impl Stream {
             .context
             .client
             .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
-            .await
-            .map(|message| Message {
-                context: self.context.clone(),
-                message,
-            })?;
+            .await?;
 
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
@@ -410,7 +413,7 @@ impl Stream {
                 }
             }
         }
-        Ok(response)
+        StreamMessage::try_from(response).map_err(Into::into)
     }
 
     /// Gets last message for a given `subject`.
@@ -447,7 +450,7 @@ impl Stream {
     pub async fn direct_get_last_for_subject<T: AsRef<str>>(
         &self,
         subject: T,
-    ) -> Result<Message, DirectGetError> {
+    ) -> Result<StreamMessage, DirectGetError> {
         let subject = format!(
             "{}.DIRECT.GET.{}.{}",
             &self.context.prefix,
@@ -455,15 +458,7 @@ impl Stream {
             subject.as_ref()
         );
 
-        let response = self
-            .context
-            .client
-            .request(subject, "".into())
-            .await
-            .map(|message| Message {
-                context: self.context.clone(),
-                message,
-            })?;
+        let response = self.context.client.request(subject, "".into()).await?;
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
                 match status {
@@ -483,7 +478,7 @@ impl Stream {
                 }
             }
         }
-        Ok(response)
+        StreamMessage::try_from(response).map_err(Into::into)
     }
     /// Get a raw message from the stream.
     ///
@@ -512,19 +507,32 @@ impl Stream {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_raw_message(&self, sequence: u64) -> Result<RawMessage, crate::Error> {
+    pub async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, RawMessageError> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
             "seq": sequence,
         });
 
-        let response: Response<GetRawMessage> = self.context.request(subject, &payload).await?;
+        let response: Response<GetRawMessage> = self
+            .context
+            .request(subject, &payload)
+            .map_err(|err| LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err))
+            .await?;
+
         match response {
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!("nats: error while getting message: {}", error),
-            ))),
-            Response::Ok(value) => Ok(value.message),
+            Response::Err { error } => {
+                if error.error_code() == ErrorCode::NO_MESSAGE_FOUND {
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::NoMessageFound,
+                    ))
+                } else {
+                    Err(LastRawMessageError::new(
+                        LastRawMessageErrorKind::JetStream(error),
+                    ))
+                }
+            }
+            Response::Ok(value) => StreamMessage::try_from(value.message)
+                .map_err(|err| RawMessageError::with_source(RawMessageErrorKind::Other, err)),
         }
     }
 
@@ -558,7 +566,7 @@ impl Stream {
     pub async fn get_last_raw_message_by_subject(
         &self,
         stream_subject: &str,
-    ) -> Result<RawMessage, LastRawMessageError> {
+    ) -> Result<StreamMessage, LastRawMessageError> {
         let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
         let payload = json!({
             "last_by_subj":  stream_subject,
@@ -581,7 +589,9 @@ impl Stream {
                     ))
                 }
             }
-            Response::Ok(value) => Ok(value.message),
+            Response::Ok(value) => Ok(value.message.try_into().map_err(|err| {
+                LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err)
+            })?),
         }
     }
 
@@ -1300,7 +1310,7 @@ pub struct RawMessage {
     pub time: time::OffsetDateTime,
 }
 
-impl TryFrom<RawMessage> for crate::Message {
+impl TryFrom<RawMessage> for StreamMessage {
     type Error = crate::Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
@@ -1312,23 +1322,15 @@ impl TryFrom<RawMessage> for crate::Message {
             .map(|header| STANDARD.decode(header))
             .map_or(Ok(None), |v| v.map(Some))?;
 
-        let length = decoded_headers
-            .as_ref()
-            .map_or_else(|| 0, |headers| headers.len())
-            + decoded_payload.len()
-            + value.subject.len();
+        let (headers, _, _) = decoded_headers
+            .map_or_else(|| Ok((HeaderMap::new(), None, None)), |h| parse_headers(&h))?;
 
-        let (headers, status, description) =
-            decoded_headers.map_or_else(|| Ok((None, None, None)), |h| parse_headers(&h))?;
-
-        Ok(crate::Message {
+        Ok(StreamMessage {
             subject: value.subject.into(),
-            reply: None,
             payload: decoded_payload.into(),
             headers,
-            status,
-            description,
-            length,
+            sequence: value.sequence,
+            time: value.time,
         })
     }
 }
@@ -1341,7 +1343,7 @@ const HEADER_LINE: &str = "NATS/1.0";
 #[allow(clippy::type_complexity)]
 fn parse_headers(
     buf: &[u8],
-) -> Result<(Option<HeaderMap>, Option<StatusCode>, Option<String>), crate::Error> {
+) -> Result<(HeaderMap, Option<StatusCode>, Option<String>), crate::Error> {
     let mut headers = HeaderMap::new();
     let mut maybe_status: Option<StatusCode> = None;
     let mut maybe_description: Option<String> = None;
@@ -1414,9 +1416,9 @@ fn parse_headers(
     }
 
     if headers.is_empty() {
-        Ok((None, maybe_status, maybe_description))
+        Ok((HeaderMap::new(), maybe_status, maybe_description))
     } else {
-        Ok((Some(headers), maybe_status, maybe_description))
+        Ok((headers, maybe_status, maybe_description))
     }
 }
 
@@ -1873,6 +1875,8 @@ impl Display for LastRawMessageErrorKind {
 }
 
 pub type LastRawMessageError = Error<LastRawMessageErrorKind>;
+pub type RawMessageErrorKind = LastRawMessageErrorKind;
+pub type RawMessageError = LastRawMessageError;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerErrorKind {
