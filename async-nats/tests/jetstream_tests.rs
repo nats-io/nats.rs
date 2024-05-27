@@ -3633,4 +3633,25 @@ mod jetstream {
 
         assert_eq!(err.kind(), ConsumerUpdateErrorKind::DoesNotExist);
     }
+
+    #[tokio::test]
+    async fn test_version_on_initial_connect() {
+        let client = async_nats::ConnectOptions::new()
+            .retry_on_initial_connect()
+            .connect("nats://localhost:4222")
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client.clone());
+
+        jetstream
+            .create_consumer_on_stream(
+                consumer::pull::Config {
+                    durable_name: Some("name".to_string()),
+                    ..Default::default()
+                },
+                "events",
+            )
+            .await
+            .expect_err("should fail but not panic because of lack of server info");
+    }
 }
