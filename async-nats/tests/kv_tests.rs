@@ -190,10 +190,14 @@ mod kv {
         let nothing = kv.get("nothing").await.unwrap();
         assert_eq!(None, nothing);
 
+        let value = kv.entry_for_revision("key", 1).await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap().value).unwrap(), "data");
+
         context
             .update_stream(async_nats::jetstream::stream::Config {
                 max_messages_per_subject: 10,
                 name: "KV_test".into(),
+                subjects: vec!["$KV.test.>".into()],
                 deny_delete: true,
                 allow_direct: false,
                 ..Default::default()
@@ -208,6 +212,9 @@ mod kv {
         assert_eq!(None, nothing);
         let value = kv.entry("key").await.unwrap();
         assert_eq!(from_utf8(&value.unwrap().value).unwrap(), payload);
+
+        let value = kv.entry_for_revision("key", 1).await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap().value).unwrap(), "data");
     }
 
     #[tokio::test]

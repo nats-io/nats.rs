@@ -19,7 +19,7 @@ use std::{cmp, str::FromStr, task::Poll, time::Duration};
 use crate::crypto::Sha256;
 use crate::subject::Subject;
 use crate::{HeaderMap, HeaderValue};
-use base64::engine::general_purpose::{STANDARD, URL_SAFE};
+use base64::engine::general_purpose::URL_SAFE;
 use base64::engine::Engine;
 use bytes::BytesMut;
 use futures::future::BoxFuture;
@@ -239,6 +239,7 @@ impl ObjectStore {
         // Grab last meta value we have.
         let subject = format!("$O.{}.M.{}", &self.name, &object_name);
 
+        // FIXME(jrm): we should use direct get here when possible.
         let message = self
             .stream
             .get_last_raw_message_by_subject(subject.as_str())
@@ -249,11 +250,8 @@ impl ObjectStore {
                 }
                 _ => InfoError::with_source(InfoErrorKind::Other, err),
             })?;
-        let decoded_payload = STANDARD
-            .decode(message.payload)
-            .map_err(|err| InfoError::with_source(InfoErrorKind::Other, err))?;
         let object_info =
-            serde_json::from_slice::<ObjectInfo>(&decoded_payload).map_err(|err| {
+            serde_json::from_slice::<ObjectInfo>(&message.payload).map_err(|err| {
                 InfoError::with_source(
                     InfoErrorKind::Other,
                     format!("failed to decode info payload: {}", err),

@@ -21,42 +21,31 @@ use std::{
     task::Poll,
 };
 
-use crate::{HeaderValue, StatusCode};
+use crate::HeaderValue;
 use bytes::Bytes;
 use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::OffsetDateTime;
 use tracing::debug;
 
 use crate::error::Error;
-use crate::{header, Message};
+use crate::header;
 
 use self::bucket::Status;
 
 use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
     context::{PublishError, PublishErrorKind},
+    message::StreamMessage,
     stream::{
-        self, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, RawMessage,
-        Republish, Source, StorageType, Stream,
+        self, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, Republish,
+        Source, StorageType, Stream,
     },
 };
 
-fn kv_operation_from_stream_message(message: &RawMessage) -> Operation {
-    match message.headers.as_deref() {
-        Some(headers) => headers.parse().unwrap_or(Operation::Put),
-        None => Operation::Put,
-    }
-}
-
-fn kv_operation_from_message(message: &Message) -> Result<Operation, EntryError> {
-    let headers = message
-        .headers
-        .as_ref()
-        .ok_or_else(|| EntryError::with_source(EntryErrorKind::Other, "missing headers"))?;
-
-    if let Some(op) = headers.get(KV_OPERATION) {
+fn kv_operation_from_stream_message(message: &StreamMessage) -> Result<Operation, EntryError> {
+    if let Some(op) = message.headers.get(KV_OPERATION) {
         Operation::from_str(op.as_str())
             .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
     } else {
@@ -64,6 +53,18 @@ fn kv_operation_from_message(message: &Message) -> Result<Operation, EntryError>
             EntryErrorKind::Other,
             "missing operation",
         ))
+    }
+}
+fn kv_operation_from_message(message: &crate::message::Message) -> Result<Operation, EntryError> {
+    let headers = match message.headers.as_ref() {
+        Some(headers) => headers,
+        None => return Ok(Operation::Put),
+    };
+    if let Some(op) = headers.get(KV_OPERATION) {
+        Operation::from_str(op.as_str())
+            .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
+    } else {
+        Ok(Operation::Put)
     }
 }
 
@@ -312,6 +313,108 @@ impl Store {
         Ok(ack.sequence)
     }
 
+    async fn entry_maybe_revision<T: Into<String>>(
+        &self,
+        key: T,
+        revision: Option<u64>,
+    ) -> Result<Option<Entry>, EntryError> {
+        let key: String = key.into();
+        if !is_valid_key(key.as_ref()) {
+            return Err(EntryError::new(EntryErrorKind::InvalidKey));
+        }
+
+        let subject = format!("{}{}", self.prefix.as_str(), &key);
+
+        let result: Option<(StreamMessage, Operation)> = {
+            if self.stream.info.config.allow_direct {
+                let message = match revision {
+                    Some(revision) => {
+                        let message = self.stream.direct_get(revision).await;
+                        if let Ok(message) = message.as_ref() {
+                            if message.subject.as_str() != subject {
+                                println!("subject mismatch {}", message.subject);
+                                return Ok(None);
+                            }
+                        }
+                        message
+                    }
+                    None => {
+                        self.stream
+                            .direct_get_last_for_subject(subject.as_str())
+                            .await
+                    }
+                };
+
+                match message {
+                    Ok(message) => {
+                        let operation =
+                            kv_operation_from_stream_message(&message).unwrap_or(Operation::Put);
+
+                        Some((message, operation))
+                    }
+                    Err(err) => {
+                        if err.kind() == DirectGetErrorKind::NotFound {
+                            None
+                        } else {
+                            return Err(err.into());
+                        }
+                    }
+                }
+            } else {
+                let raw_message = match revision {
+                    Some(revision) => {
+                        let message = self.stream.get_raw_message(revision).await;
+                        if let Ok(message) = message.as_ref() {
+                            if message.subject.as_str() != subject {
+                                return Ok(None);
+                            }
+                        }
+                        message
+                    }
+                    None => {
+                        self.stream
+                            .get_last_raw_message_by_subject(subject.as_str())
+                            .await
+                    }
+                };
+                match raw_message {
+                    Ok(raw_message) => {
+                        let operation = kv_operation_from_stream_message(&raw_message)
+                            .unwrap_or(Operation::Put);
+                        // TODO: unnecessary expensive, cloning whole Message.
+                        Some((raw_message, operation))
+                    }
+                    Err(err) => match err.kind() {
+                        crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
+                        crate::jetstream::stream::LastRawMessageErrorKind::Other => {
+                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
+                        }
+                        crate::jetstream::stream::LastRawMessageErrorKind::JetStream(err) => {
+                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
+                        }
+                    },
+                }
+            }
+        };
+
+        match result {
+            Some((message, operation)) => {
+                let entry = Entry {
+                    bucket: self.name.clone(),
+                    key,
+                    value: message.payload,
+                    revision: message.sequence,
+                    created: message.time,
+                    operation,
+                    delta: 0,
+                };
+                Ok(Some(entry))
+            }
+            // TODO: remember to touch this when Errors are in place.
+            None => Ok(None),
+        }
+    }
+
     /// Retrieves the last [Entry] for a given key from a bucket.
     ///
     /// # Examples
@@ -335,127 +438,38 @@ impl Store {
     /// # }
     /// ```
     pub async fn entry<T: Into<String>>(&self, key: T) -> Result<Option<Entry>, EntryError> {
-        let key: String = key.into();
-        if !is_valid_key(key.as_ref()) {
-            return Err(EntryError::new(EntryErrorKind::InvalidKey));
-        }
+        self.entry_maybe_revision(key, None).await
+    }
 
-        let subject = format!("{}{}", self.prefix.as_str(), &key);
-
-        let result: Option<(Message, Operation, u64, OffsetDateTime)> = {
-            if self.stream.info.config.allow_direct {
-                let message = self
-                    .stream
-                    .direct_get_last_for_subject(subject.as_str())
-                    .await;
-
-                match message {
-                    Ok(message) => {
-                        let headers = message.headers.as_ref().ok_or_else(|| {
-                            EntryError::with_source(EntryErrorKind::Other, "missing headers")
-                        })?;
-
-                        let operation =
-                            kv_operation_from_message(&message).unwrap_or(Operation::Put);
-
-                        let sequence = headers
-                            .get_last(header::NATS_SEQUENCE)
-                            .ok_or_else(|| {
-                                EntryError::with_source(
-                                    EntryErrorKind::Other,
-                                    "missing sequence headers",
-                                )
-                            })?
-                            .as_str()
-                            .parse()
-                            .map_err(|err| {
-                                EntryError::with_source(
-                                    EntryErrorKind::Other,
-                                    format!("failed to parse headers sequence value: {}", err),
-                                )
-                            })?;
-
-                        let created = headers
-                            .get_last(header::NATS_TIME_STAMP)
-                            .ok_or_else(|| {
-                                EntryError::with_source(
-                                    EntryErrorKind::Other,
-                                    "did not found timestamp header",
-                                )
-                            })
-                            .and_then(|created| {
-                                OffsetDateTime::parse(created.as_str(), &Rfc3339).map_err(|err| {
-                                    EntryError::with_source(
-                                        EntryErrorKind::Other,
-                                        format!(
-                                            "failed to parse headers timestampt value: {}",
-                                            err
-                                        ),
-                                    )
-                                })
-                            })?;
-
-                        Some((message.message, operation, sequence, created))
-                    }
-                    Err(err) => {
-                        if err.kind() == DirectGetErrorKind::NotFound {
-                            None
-                        } else {
-                            return Err(err.into());
-                        }
-                    }
-                }
-            } else {
-                let raw_message = self
-                    .stream
-                    .get_last_raw_message_by_subject(subject.as_str())
-                    .await;
-                match raw_message {
-                    Ok(raw_message) => {
-                        let operation = kv_operation_from_stream_message(&raw_message);
-                        // TODO: unnecessary expensive, cloning whole Message.
-                        let nats_message = Message::try_from(raw_message.clone())
-                            .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))?;
-                        Some((
-                            nats_message,
-                            operation,
-                            raw_message.sequence,
-                            raw_message.time,
-                        ))
-                    }
-                    Err(err) => match err.kind() {
-                        crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
-                        crate::jetstream::stream::LastRawMessageErrorKind::Other => {
-                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
-                        }
-                        crate::jetstream::stream::LastRawMessageErrorKind::JetStream(err) => {
-                            return Err(EntryError::with_source(EntryErrorKind::Other, err))
-                        }
-                    },
-                }
-            }
-        };
-
-        match result {
-            Some((message, operation, revision, created)) => {
-                if message.status == Some(StatusCode::NO_RESPONDERS) {
-                    return Ok(None);
-                }
-
-                let entry = Entry {
-                    bucket: self.name.clone(),
-                    key,
-                    value: message.payload,
-                    revision,
-                    created,
-                    operation,
-                    delta: 0,
-                };
-                Ok(Some(entry))
-            }
-            // TODO: remember to touch this when Errors are in place.
-            None => Ok(None),
-        }
+    /// Retrieves the [Entry] for a given key revision from a bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let status = kv.put("key", "value".into()).await?;
+    /// let status = kv.put("key", "value2".into()).await?;
+    /// let entry = kv.entry_for_revision("key", 2).await?;
+    /// println!("entry: {:?}", entry);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn entry_for_revision<T: Into<String>>(
+        &self,
+        key: T,
+        revision: u64,
+    ) -> Result<Option<Entry>, EntryError> {
+        self.entry_maybe_revision(key, Some(revision)).await
     }
 
     /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
@@ -1079,7 +1093,8 @@ impl futures::Stream for Watch {
                         )
                     })?;
 
-                    let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
+                    let operation =
+                        kv_operation_from_message(&message.message).unwrap_or(Operation::Put);
 
                     let key = message
                         .subject
