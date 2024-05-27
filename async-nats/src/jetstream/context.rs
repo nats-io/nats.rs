@@ -1003,32 +1003,17 @@ impl Context {
         let config = config.into_consumer_config();
 
         let subject = {
-            if self.client.is_server_compatible(2, 9, 0) {
-                let filter = if config.filter_subject.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(".{}", config.filter_subject)
-                };
-                config
-                    .name
-                    .as_ref()
-                    .or(config.durable_name.as_ref())
-                    .map(|name| format!("CONSUMER.CREATE.{}.{}{}", stream.as_ref(), name, filter))
-                    .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", stream.as_ref()))
-            } else if config.name.is_some() {
-                return Err(ConsumerError::with_source(
-                    ConsumerErrorKind::Other,
-                    "can't use consumer name with server < 2.9.0",
-                ));
-            } else if let Some(ref durable_name) = config.durable_name {
-                format!(
-                    "CONSUMER.DURABLE.CREATE.{}.{}",
-                    stream.as_ref(),
-                    durable_name
-                )
+            let filter = if config.filter_subject.is_empty() {
+                "".to_string()
             } else {
-                format!("CONSUMER.CREATE.{}", stream.as_ref())
-            }
+                format!(".{}", config.filter_subject)
+            };
+            config
+                .name
+                .as_ref()
+                .or(config.durable_name.as_ref())
+                .map(|name| format!("CONSUMER.CREATE.{}.{}{}", stream.as_ref(), name, filter))
+                .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", stream.as_ref()))
         };
 
         match self
