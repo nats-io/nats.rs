@@ -13,18 +13,102 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
-use crate::subject::Subject;
-use crate::Error;
+use crate::{error, header, Error};
+use crate::{subject::Subject, HeaderMap};
 use bytes::Bytes;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
+use std::fmt::Display;
 use std::{mem, time::Duration};
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+
+/// A message received directly from the stream, without leveraging a consumer.
+#[derive(Debug, Clone)]
+pub struct StreamMessage {
+    pub subject: Subject,
+    pub sequence: u64,
+    pub headers: HeaderMap,
+    pub payload: Bytes,
+    pub time: OffsetDateTime,
+}
 
 #[derive(Clone, Debug)]
 pub struct Message {
     pub message: crate::Message,
     pub context: Context,
+}
+
+impl TryFrom<crate::Message> for StreamMessage {
+    type Error = StreamMessageError;
+
+    fn try_from(message: crate::Message) -> Result<Self, Self::Error> {
+        let headers = message.headers.ok_or_else(|| {
+            StreamMessageError::with_source(StreamMessageErrorKind::MissingHeader, "no headers")
+        })?;
+
+        let sequence = headers
+            .get_last(header::NATS_SEQUENCE)
+            .ok_or_else(|| {
+                StreamMessageError::with_source(StreamMessageErrorKind::MissingHeader, "sequence")
+            })
+            .and_then(|seq| {
+                seq.as_str().parse().map_err(|err| {
+                    StreamMessageError::with_source(
+                        StreamMessageErrorKind::ParseError,
+                        format!("could not parse sequence header: {}", err),
+                    )
+                })
+            })?;
+
+        let time = headers
+            .get_last(header::NATS_TIME_STAMP)
+            .ok_or_else(|| {
+                StreamMessageError::with_source(StreamMessageErrorKind::MissingHeader, "timestamp")
+            })
+            .and_then(|time| {
+                OffsetDateTime::parse(time.as_str(), &Rfc3339).map_err(|err| {
+                    StreamMessageError::with_source(
+                        StreamMessageErrorKind::ParseError,
+                        format!("could not parse timestamp header: {}", err),
+                    )
+                })
+            })?;
+
+        let subject = headers
+            .get_last(header::NATS_SUBJECT)
+            .ok_or_else(|| {
+                StreamMessageError::with_source(StreamMessageErrorKind::MissingHeader, "subject")
+            })?
+            .as_str()
+            .into();
+
+        Ok(StreamMessage {
+            subject,
+            sequence,
+            headers,
+            payload: message.payload,
+            time,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamMessageErrorKind {
+    MissingHeader,
+    ParseError,
+}
+
+/// Error returned when library is unable to parse message got directly from the stream.
+pub type StreamMessageError = error::Error<StreamMessageErrorKind>;
+
+impl Display for StreamMessageErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamMessageErrorKind::MissingHeader => write!(f, "missing message header"),
+            StreamMessageErrorKind::ParseError => write!(f, "parse error"),
+        }
+    }
 }
 
 impl std::ops::Deref for Message {
