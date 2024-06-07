@@ -606,7 +606,7 @@ impl ConnectOptions {
 
     /// Sets the capacity for `Subscribers`. Exceeding it will trigger `slow consumer` error
     /// callback and drop messages.
-    /// Default is set to 1024 messages buffer.
+    /// Default is set to 65536 messages buffer.
     ///
     /// # Examples
     /// ```no_run
