@@ -80,7 +80,7 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
     if attempts <= 1 {
         Duration::from_millis(0)
     } else {
-        let exp: u32 = (attempts - 1).try_into().unwrap_or(std::u32::MAX);
+        let exp: u32 = (attempts - 1).try_into().unwrap_or(u32::MAX);
         let max = Duration::from_secs(4);
         cmp::min(Duration::from_millis(2_u64.saturating_pow(exp)), max)
     }
