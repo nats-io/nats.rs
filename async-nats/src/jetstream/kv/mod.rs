@@ -1027,50 +1027,32 @@ impl Store {
     /// ```
     pub async fn keys(&self) -> Result<Keys, HistoryError> {
         
-        self.keys_with_filter(">").await
+        self.keys_with_filters(vec![]).await
     }
 
-    pub async fn keys_with_filter(&self, filter: &str) -> Result<Keys, HistoryError> {
-        let subject: String = format!("{}{}", self.prefix.as_str(), filter);
+    pub async fn keys_with_filters(&self, filters: Vec<&str>) -> Result<Keys, HistoryError> {
+        
 
-        println!("Filtering by {}", filter);
-        let consumer = self
-            .stream
-            .create_consumer(super::consumer::push::OrderedConfig {
-                deliver_subject: self.stream.context.client.new_inbox(),
-                description: Some("kv history consumer".to_string()),
-                filter_subject: subject,
-                headers_only: true,
-                replay_policy: super::consumer::ReplayPolicy::Instant,
-                // We only need to know the latest state for each key, not the whole history
-                deliver_policy: DeliverPolicy::LastPerSubject,
-                ..Default::default()
-            })
-            .await?;
-
-        let entries = History {
-            done: consumer.info.num_pending == 0,
-            subscription: consumer.messages().await?,
-            prefix: self.prefix.clone(),
-            bucket: self.name.clone(),
+        let mut filters_config:super::consumer::push::OrderedConfig = Default::default();
+        
+        match filters.len() {
+            0 => filters_config.filter_subject = format!("{}{}", self.prefix.as_str(), ">"),
+            1 => filters_config.filter_subject = format!("{}{}", self.prefix.as_str(), filters[0]),
+            _ => filters_config.filter_subjects = filters.iter().map(|filter| format!("{}{}", self.prefix.as_str(), filter)).collect::<Vec<String>>()
         };
 
-        Ok(Keys { inner: entries })
-    }
-    pub async fn keys_with_filters(&self, filters: Vec<&str>) -> Result<Keys, HistoryError> {
-        let subjects = filters.iter().map(|filter| format!("{}{}", self.prefix.as_str(), filter)).collect::<Vec<String>>();
+        
 
         let consumer = self
             .stream
             .create_consumer(super::consumer::push::OrderedConfig {
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("kv history consumer".to_string()),
-                filter_subjects: subjects,
                 headers_only: true,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
                 // We only need to know the latest state for each key, not the whole history
                 deliver_policy: DeliverPolicy::LastPerSubject,
-                ..Default::default()
+                ..filters_config
             })
             .await?;
 
