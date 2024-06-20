@@ -1026,14 +1026,46 @@ impl Store {
     /// # }
     /// ```
     pub async fn keys(&self) -> Result<Keys, HistoryError> {
-        let subject = format!("{}>", self.prefix.as_str());
+        
+        self.keys_with_filter(">").await
+    }
 
+    pub async fn keys_with_filter(&self, filter: &str) -> Result<Keys, HistoryError> {
+        let subject: String = format!("{}{}", self.prefix.as_str(), filter);
+
+        println!("Filtering by {}", filter);
         let consumer = self
             .stream
             .create_consumer(super::consumer::push::OrderedConfig {
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("kv history consumer".to_string()),
                 filter_subject: subject,
+                headers_only: true,
+                replay_policy: super::consumer::ReplayPolicy::Instant,
+                // We only need to know the latest state for each key, not the whole history
+                deliver_policy: DeliverPolicy::LastPerSubject,
+                ..Default::default()
+            })
+            .await?;
+
+        let entries = History {
+            done: consumer.info.num_pending == 0,
+            subscription: consumer.messages().await?,
+            prefix: self.prefix.clone(),
+            bucket: self.name.clone(),
+        };
+
+        Ok(Keys { inner: entries })
+    }
+    pub async fn keys_with_filters(&self, filters: Vec<&str>) -> Result<Keys, HistoryError> {
+        let subjects = filters.iter().map(|filter| format!("{}{}", self.prefix.as_str(), filter)).collect::<Vec<String>>();
+
+        let consumer = self
+            .stream
+            .create_consumer(super::consumer::push::OrderedConfig {
+                deliver_subject: self.stream.context.client.new_inbox(),
+                description: Some("kv history consumer".to_string()),
+                filter_subjects: subjects,
                 headers_only: true,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
                 // We only need to know the latest state for each key, not the whole history

@@ -758,6 +758,7 @@ mod kv {
     #[tokio::test]
     async fn keys() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
+        println!("Server created");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
@@ -794,6 +795,28 @@ mod kv {
             .unwrap();
         keys.sort();
         assert_eq!(vec!["bar", "foo"], keys);
+
+
+        let mut keys_with_filter = kv
+        .keys_with_filter("bar")
+        .await
+        .unwrap()
+        .try_collect::<Vec<String>>()
+        .await
+        .unwrap();
+    keys_with_filter.sort();
+    assert_eq!(vec!["bar"], keys_with_filter);
+
+    let mut keys_with_filters = kv
+    .keys_with_filters(vec!["foo", "bar"])
+    .await
+    .unwrap()
+    .try_collect::<Vec<String>>()
+    .await
+    .unwrap();
+keys_with_filters.sort();
+assert_eq!(vec!["bar", "foo"], keys_with_filters);
+
 
         // Delete a key and make sure it doesn't show up in the keys list
         kv.delete("bar").await.unwrap();
