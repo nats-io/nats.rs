@@ -1027,7 +1027,7 @@ impl Store {
     /// ```
     pub async fn keys(&self) -> Result<Keys, HistoryError> {
         
-        self.keys_with_filters(vec![]).await
+        self.keys_with_filters(vec![">"]).await
     }
 
     pub async fn keys_with_filters(&self, filters: Vec<&str>) -> Result<Keys, HistoryError> {
@@ -1036,7 +1036,7 @@ impl Store {
         let mut filters_config:super::consumer::push::OrderedConfig = Default::default();
         
         match filters.len() {
-            0 => filters_config.filter_subject = format!("{}{}", self.prefix.as_str(), ">"),
+            0 => (),
             1 => filters_config.filter_subject = format!("{}{}", self.prefix.as_str(), filters[0]),
             _ => filters_config.filter_subjects = filters.iter().map(|filter| format!("{}{}", self.prefix.as_str(), filter)).collect::<Vec<String>>()
         };
