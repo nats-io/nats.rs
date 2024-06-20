@@ -1119,6 +1119,7 @@ impl Context {
                 description: config.description.clone(),
                 subjects: vec![chunk_subject, meta_subject],
                 max_age: config.max_age,
+                max_bytes: config.max_bytes,
                 storage: config.storage,
                 num_replicas: config.num_replicas,
                 discard: DiscardPolicy::New,

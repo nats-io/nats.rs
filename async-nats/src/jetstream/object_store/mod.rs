@@ -72,6 +72,8 @@ pub struct Config {
     /// Maximum age of any value in the bucket, expressed in nanoseconds
     #[serde(default, with = "serde_nanos")]
     pub max_age: Duration,
+    /// How large the storage bucket may become in total bytes.
+    pub max_bytes: i64,
     /// The type of storage backend, `File` (default) and `Memory`
     pub storage: StorageType,
     /// How many replicas to keep for each value in a cluster, maximum 5.
