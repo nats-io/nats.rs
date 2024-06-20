@@ -798,7 +798,7 @@ mod kv {
 
 
         let mut keys_with_filter = kv
-        .keys_with_filter("bar")
+        .keys_with_filters(vec!["bar"])
         .await
         .unwrap()
         .try_collect::<Vec<String>>()
