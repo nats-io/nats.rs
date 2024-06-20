@@ -1026,35 +1026,32 @@ impl Store {
     /// # }
     /// ```
     pub async fn keys(&self) -> Result<Keys, HistoryError> {
-        
         self.keys_with_filters(vec![">"]).await
     }
 
     pub async fn keys_with_filters(&self, filters: Vec<&str>) -> Result<Keys, HistoryError> {
-        
-
-        let mut filters_config:super::consumer::push::OrderedConfig = Default::default();
-        
-        match filters.len() {
-            0 => (),
-            1 => filters_config.filter_subject = format!("{}{}", self.prefix.as_str(), filters[0]),
-            _ => filters_config.filter_subjects = filters.iter().map(|filter| format!("{}{}", self.prefix.as_str(), filter)).collect::<Vec<String>>()
+        let mut config: super::consumer::push::OrderedConfig = super::consumer::push::OrderedConfig {
+            deliver_subject: self.stream.context.client.new_inbox(),
+            description: Some("kv history consumer".to_string()),
+            headers_only: true,
+            replay_policy: super::consumer::ReplayPolicy::Instant,
+            // We only need to know the latest state for each key, not the whole history
+            deliver_policy: DeliverPolicy::LastPerSubject,
+            ..Default::default()
         };
 
-        
+        match filters.len() {
+            0 => (),
+            1 => config.filter_subject = format!("{}{}", self.prefix.as_str(), filters[0]),
+            _ => {
+                config.filter_subjects = filters
+                    .iter()
+                    .map(|filter| format!("{}{}", self.prefix.as_str(), filter))
+                    .collect::<Vec<String>>()
+            }
+        };
 
-        let consumer = self
-            .stream
-            .create_consumer(super::consumer::push::OrderedConfig {
-                deliver_subject: self.stream.context.client.new_inbox(),
-                description: Some("kv history consumer".to_string()),
-                headers_only: true,
-                replay_policy: super::consumer::ReplayPolicy::Instant,
-                // We only need to know the latest state for each key, not the whole history
-                deliver_policy: DeliverPolicy::LastPerSubject,
-                ..filters_config
-            })
-            .await?;
+        let consumer = self.stream.create_consumer(config).await?;
 
         let entries = History {
             done: consumer.info.num_pending == 0,
