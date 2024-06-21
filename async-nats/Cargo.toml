@@ -27,6 +27,7 @@ serde_repr = "0.1.16"
 tokio = { version = "1.36", features = ["macros", "rt", "fs", "net", "sync", "time", "io-util"] }
 url = { version = "2"}
 tokio-rustls = { version = "0.26", default-features = false }
+tokio-util = "0.7"
 rustls-pemfile = "2"
 nuid = "0.5"
 serde_nanos = "0.1.3"
