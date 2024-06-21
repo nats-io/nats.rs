@@ -14,6 +14,7 @@
 //! A Key-Value store built on top of JetStream, allowing you to store and retrieve data using simple key-value pairs.
 
 pub mod bucket;
+pub mod lister;
 
 use std::{
     fmt::{self, Display},
