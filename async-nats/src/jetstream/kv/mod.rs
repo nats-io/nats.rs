@@ -1029,7 +1029,7 @@ impl Store {
         self.keys_with_filters(vec![">"]).await
     }
 
-    pub async fn keys_with_filters(&self, filters: Vec<&str>) -> Result<Keys, HistoryError> {
+    pub async fn keys_with_filters(&self, filters: impl IntoIterator<Item = &str>) -> Result<Keys, HistoryError> {
         let mut config: super::consumer::push::OrderedConfig = super::consumer::push::OrderedConfig {
             deliver_subject: self.stream.context.client.new_inbox(),
             description: Some("kv history consumer".to_string()),
@@ -1040,16 +1040,25 @@ impl Store {
             ..Default::default()
         };
 
-        match filters.len() {
-            0 => (),
-            1 => config.filter_subject = format!("{}{}", self.prefix.as_str(), filters[0]),
-            _ => {
-                config.filter_subjects = filters
-                    .iter()
-                    .map(|filter| format!("{}{}", self.prefix.as_str(), filter))
-                    .collect::<Vec<String>>()
+        let mut iter = filters.into_iter().enumerate();
+        
+        // iterate over filters and set them in the config  
+        while let Some(filter) = iter.next() {
+            match filter.0 {
+                0 => config.filter_subject = format!("{}{}", self.prefix.as_str(), filter.1),
+                1 => {
+                    // we ""move"" the filter_subject to filter_subjects, since there are > 1 filters
+                    config.filter_subjects.push(config.filter_subject );
+                    config.filter_subject = Default::default();
+                    // obv we also push the new filter
+                    config.filter_subjects.push(format!("{}{}", self.prefix.as_str(), filter.1));
+                }
+                _ => {
+                    // size() is > 2 here
+                    config.filter_subjects.push(format!("{}{}", self.prefix.as_str(), filter.1));
+                }
             }
-        };
+        }
 
         let consumer = self.stream.create_consumer(config).await?;
 
