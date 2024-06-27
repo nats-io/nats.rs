@@ -758,7 +758,6 @@ mod kv {
     #[tokio::test]
     async fn keys() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
-        println!("Server created");
         let client = ConnectOptions::new()
             .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
