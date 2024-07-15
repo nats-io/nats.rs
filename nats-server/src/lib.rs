@@ -391,8 +391,8 @@ mod tests {
         let client = async_nats::connect(cluster.servers[0].client_url())
             .await
             .unwrap();
-        let mut subscribe = client.subscribe("foo".into()).await.unwrap();
-        client.publish("foo".into(), "bar".into()).await.unwrap();
+        let mut subscribe = client.subscribe("foo").await.unwrap();
+        client.publish("foo", "bar".into()).await.unwrap();
         subscribe.next().await.unwrap();
     }
 }

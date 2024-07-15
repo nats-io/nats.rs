@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, Priority, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
 use crate::{
@@ -348,6 +348,8 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: self.backoff,
+            priority_policy: Priority::None,
+            priority_groups: Vec::new(),
         }
     }
 }
@@ -473,6 +475,8 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
+            priority_policy: Priority::None,
+            priority_groups: Vec::new(),
         }
     }
 }
