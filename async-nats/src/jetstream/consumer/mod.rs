@@ -316,6 +316,19 @@ pub struct Config {
     /// Custom backoff for missed acknowledgments.
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority_policy: Priority,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum Priority {
+    #[serde(rename = "overflow")]
+    Overflow,
+    #[serde(rename = "pinned_client")]
+    PinnedClient,
+    #[serde(rename = "none")]
+    #[default]
+    None,
 }
 
 impl From<&Config> for Config {

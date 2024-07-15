@@ -32,9 +32,10 @@ mod jetstream {
     use super::*;
     use async_nats::connection::State;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
+    use async_nats::jetstream::consumer::pull::BatchConfig;
     use async_nats::jetstream::consumer::{
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
-        PullConsumer, PushConsumer, ReplayPolicy,
+        Priority, PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
@@ -3653,5 +3654,64 @@ mod jetstream {
             )
             .await
             .expect_err("should fail but not panic because of lack of server info");
+    }
+
+    #[tokio::test]
+    async fn consumer_overflow() {
+        let client = async_nats::connect("nats://localhost:4222").await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client.clone());
+
+        let ack_future = jetstream.publish("subject", "data".into()).await?.await?;
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(jetstream::consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ack_policy: AckPolicy::Explicit,
+                filter_subject: "events.>".to_string(),
+                priority_policy: Priority::PinnedClient,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..100 {
+            jetstream
+                .publish("events.1", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        println!("start consuming");
+
+        let mut sub = client.subscribe("ONE").await.unwrap();
+        consumer
+            .request_batch(
+                BatchConfig {
+                    batch: 10,
+                    idle_heartbeat: Duration::from_secs(10),
+                    max_bytes: 0,
+                    expires: Some(Duration::from_secs(30)),
+                    no_wait: false,
+                    min_pending: Some(10),
+                },
+                "ONE".into(),
+            )
+            .await
+            .unwrap();
+
+        let msg = sub.next().await.unwrap();
+        println!("{:?}", msg);
     }
 }

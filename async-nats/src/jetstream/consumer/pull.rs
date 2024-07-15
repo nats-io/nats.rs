@@ -35,7 +35,7 @@ use crate::{
 use crate::subject::Subject;
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, Priority, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
@@ -90,6 +90,7 @@ impl Consumer<Config> {
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
+                min_pending: None,
             },
             self,
         )
@@ -134,7 +135,7 @@ impl Consumer<Config> {
         StreamBuilder::new(self)
     }
 
-    pub(crate) async fn request_batch<I: Into<BatchConfig>>(
+    pub async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
         inbox: Subject,
@@ -334,7 +335,7 @@ impl<'a> Batch {
     async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, BatchError> {
         let inbox = Subject::from(consumer.context.client.new_inbox());
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
-        consumer.request_batch(batch, inbox.clone()).await?;
+        consumer.request_batch(batch.clone(), inbox.clone()).await?;
 
         let sleep = batch.expires.map(|expires| {
             Box::pin(tokio::time::sleep(
@@ -556,6 +557,7 @@ impl Consumer<OrderedConfig> {
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
+                min_pending: None,
             },
             &config,
         )
@@ -660,6 +662,7 @@ impl From<OrderedConfig> for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: Vec::new(),
+            priority_policy: Priority::None,
         }
     }
 }
@@ -724,6 +727,7 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
+            priority_policy: Priority::None,
         }
     }
 }
@@ -891,7 +895,7 @@ impl Stream {
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let task_handle = tokio::task::spawn({
-            let batch = batch_config;
+            let batch = batch_config.clone();
             let consumer = consumer.clone();
             let mut context = consumer.context.clone();
             let inbox = inbox.clone();
@@ -1462,6 +1466,7 @@ impl<'a> StreamBuilder<'a> {
                 no_wait: false,
                 max_bytes: self.max_bytes,
                 idle_heartbeat: self.heartbeat,
+                min_pending: None,
             },
             self.consumer,
         )
@@ -1507,6 +1512,7 @@ pub struct FetchBuilder<'a> {
     max_bytes: usize,
     heartbeat: Duration,
     expires: Option<Duration>,
+    min_pending: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1517,6 +1523,7 @@ impl<'a> FetchBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: None,
+            min_pending: None,
             heartbeat: Duration::default(),
         }
     }
@@ -1709,6 +1716,7 @@ impl<'a> FetchBuilder<'a> {
                 no_wait: true,
                 max_bytes: self.max_bytes,
                 idle_heartbeat: self.heartbeat,
+                min_pending: self.min_pending,
             },
             self.consumer,
         )
@@ -1754,6 +1762,7 @@ pub struct BatchBuilder<'a> {
     max_bytes: usize,
     heartbeat: Duration,
     expires: Duration,
+    min_pending: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1765,6 +1774,7 @@ impl<'a> BatchBuilder<'a> {
             max_bytes: 0,
             expires: Duration::ZERO,
             heartbeat: Duration::default(),
+            min_pending: None,
         }
     }
 
@@ -1882,6 +1892,11 @@ impl<'a> BatchBuilder<'a> {
         self
     }
 
+    pub fn min_pending(mut self, min: usize) -> Self {
+        self.min_pending = Some(min);
+        self
+    }
+
     /// Low level API that does not need tweaking for most use cases.
     /// Sets how long each batch request waits for whole batch of messages before timing out.
     /// [Consumer] pending.
@@ -1950,22 +1965,20 @@ impl<'a> BatchBuilder<'a> {
     /// # }
     /// ```
     pub async fn messages(self) -> Result<Batch, BatchError> {
-        Batch::batch(
-            BatchConfig {
-                batch: self.batch,
-                expires: Some(self.expires),
-                no_wait: false,
-                max_bytes: self.max_bytes,
-                idle_heartbeat: self.heartbeat,
-            },
-            self.consumer,
-        )
-        .await
+        let config = BatchConfig {
+            batch: self.batch,
+            expires: Some(self.expires),
+            no_wait: false,
+            max_bytes: self.max_bytes,
+            idle_heartbeat: self.heartbeat,
+            min_pending: self.min_pending,
+        };
+        Batch::batch(config, self.consumer).await
     }
 }
 
 /// Used for next Pull Request for Pull Consumer
-#[derive(Debug, Default, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, Clone, PartialEq, Eq)]
 pub struct BatchConfig {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
@@ -1988,6 +2001,15 @@ pub struct BatchConfig {
     /// client
     #[serde(with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
+
+    pub min_pending: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct PriorityGroups {
+    min_pending: i64,
+    min_ack_pending: i64,
+    id: String,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -2082,6 +2104,9 @@ pub struct Config {
     /// Custom backoff for missed acknowledgments.
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority_policy: Priority,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -2122,6 +2147,7 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: self.backoff,
+            priority_policy: self.priority_policy,
         }
     }
 }
@@ -2159,6 +2185,7 @@ impl FromConsumer for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: config.backoff,
+            priority_policy: config.priority_policy,
         })
     }
 }
@@ -2299,6 +2326,7 @@ async fn recreate_consumer_stream(
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
+                min_pending: None,
             },
             &config,
         ),

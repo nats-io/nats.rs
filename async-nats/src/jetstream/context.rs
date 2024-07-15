@@ -727,6 +727,11 @@ impl Context {
         Ok(store)
     }
 
+    async fn kv_names(&self) -> StreamNames {
+        let mut stream_names = self.stream_names();
+        stream_names.subjec
+    }
+
     /// Deletes given key-value bucket.
     ///
     /// # Examples

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, Priority, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
 use crate::{
@@ -269,6 +269,8 @@ pub struct Config {
     /// Threshold for consumer inactivity
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
     pub inactive_threshold: Duration,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority: Priority,
 }
 
 impl FromConsumer for Config {
@@ -307,6 +309,7 @@ impl FromConsumer for Config {
             metadata: config.metadata,
             backoff: config.backoff,
             inactive_threshold: config.inactive_threshold,
+            priority: config.priority_policy,
         })
     }
 }
@@ -343,6 +346,7 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: self.backoff,
+            priority_policy: self.priority,
         }
     }
 }
@@ -463,6 +467,7 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
+            priority_policy: Priority::None,
         }
     }
 }
