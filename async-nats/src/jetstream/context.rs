@@ -19,10 +19,12 @@ use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
-use crate::{header, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
+use crate::{
+    header, Client, Command, HeaderMap, HeaderValue, Message, StatusCode, Subscriber, Subscription,
+};
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::{Future, TryFutureExt};
+use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
@@ -31,9 +33,11 @@ use std::fmt::Display;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::str::from_utf8;
+use std::sync::Arc;
 use std::task::Poll;
-use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, TryAcquireError};
+use tokio::time::Duration;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
@@ -54,14 +58,47 @@ pub struct Context {
     pub(crate) client: Client,
     pub(crate) prefix: String,
     pub(crate) timeout: Duration,
+    pub(crate) max_ack_semaphore: Arc<tokio::sync::Semaphore>,
+    pub(crate) acker_task: Arc<tokio::task::JoinHandle<()>>,
+    pub(crate) ack_sender:
+        tokio::sync::mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+}
+
+fn spawn_acker(
+    rx: tokio::sync::mpsc::Receiver<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let stream = ReceiverStream::new(rx);
+        let _ = stream.for_each_concurrent(None, |(subscription, permit)| async move {
+            tokio::time::timeout(Duration::from_secs(30), subscription)
+                .await
+                .ok();
+            drop(permit);
+        });
+    })
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        self.acker_task.abort();
+    }
 }
 
 impl Context {
     pub(crate) fn new(client: Client) -> Context {
+        let (tx, rx) = tokio::sync::mpsc::channel::<(
+            oneshot::Receiver<Message>,
+            OwnedSemaphorePermit,
+        )>(500_000);
+        let acker_task = Arc::new(spawn_acker(rx));
+
         Context {
             client,
             prefix: "$JS.API".to_string(),
             timeout: Duration::from_secs(5),
+            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(500_000)),
+            acker_task,
+            ack_sender: tx,
         }
     }
 
@@ -70,18 +107,34 @@ impl Context {
     }
 
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
+        let (tx, rx) = tokio::sync::mpsc::channel::<(
+            oneshot::Receiver<Message>,
+            OwnedSemaphorePermit,
+        )>(500_000);
+        let acker_task = Arc::new(spawn_acker(rx));
         Context {
             client,
             prefix: prefix.to_string(),
             timeout: Duration::from_secs(5),
+            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(500_000)),
+            acker_task,
+            ack_sender: tx,
         }
     }
 
     pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
+        let (tx, rx) = tokio::sync::mpsc::channel::<(
+            oneshot::Receiver<Message>,
+            OwnedSemaphorePermit,
+        )>(500_000);
+        let acker_task = Arc::new(spawn_acker(rx));
         Context {
             client,
             prefix: format!("$JS.{}.API", domain.as_ref()),
             timeout: Duration::from_secs(5),
+            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(500_000)),
+            acker_task,
+            ack_sender: tx,
         }
     }
 
@@ -192,6 +245,16 @@ impl Context {
         subject: S,
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
+        let permit =
+            self.max_ack_semaphore
+                .clone()
+                .try_acquire_owned()
+                .map_err(|err| match err {
+                    TryAcquireError::NoPermits => {
+                        PublishError::new(PublishErrorKind::MaxAckPending)
+                    }
+                    _ => PublishError::with_source(PublishErrorKind::Other, err),
+                })?;
         let subject = subject.to_subject();
         let (sender, receiver) = oneshot::channel();
 
@@ -215,7 +278,9 @@ impl Context {
 
         Ok(PublishAckFuture {
             timeout: self.timeout,
-            subscription: receiver,
+            subscription: Some(receiver),
+            permit: Some(permit),
+            tx: self.ack_sender.clone(),
         })
     }
 
@@ -1212,6 +1277,7 @@ pub enum PublishErrorKind {
     WrongLastSequence,
     TimedOut,
     BrokenPipe,
+    MaxAckPending,
     Other,
 }
 
@@ -1224,6 +1290,7 @@ impl Display for PublishErrorKind {
             Self::BrokenPipe => write!(f, "broken pipe"),
             Self::WrongLastMessageId => write!(f, "wrong last message id"),
             Self::WrongLastSequence => write!(f, "wrong last sequence"),
+            Self::MaxAckPending => write!(f, "max ack pending reached"),
         }
     }
 }
@@ -1233,12 +1300,25 @@ pub type PublishError = Error<PublishErrorKind>;
 #[derive(Debug)]
 pub struct PublishAckFuture {
     timeout: Duration,
-    subscription: oneshot::Receiver<Message>,
+    subscription: Option<oneshot::Receiver<Message>>,
+    permit: Option<OwnedSemaphorePermit>,
+    tx: mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+}
+
+impl Drop for PublishAckFuture {
+    fn drop(&mut self) {
+        match (self.subscription.take(), self.permit.take()) {
+            (Some(sub), Some(permit)) => {
+                self.tx.try_send((sub, permit)).ok();
+            }
+            _ => {}
+        }
+    }
 }
 
 impl PublishAckFuture {
-    async fn next_with_timeout(self) -> Result<PublishAck, PublishError> {
-        let next = tokio::time::timeout(self.timeout, self.subscription)
+    async fn next_with_timeout(mut self) -> Result<PublishAck, PublishError> {
+        let next = tokio::time::timeout(self.timeout, self.subscription.take().unwrap())
             .await
             .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))?;
         next.map_or_else(
