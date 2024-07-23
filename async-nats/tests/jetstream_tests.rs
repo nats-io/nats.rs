@@ -4608,4 +4608,28 @@ mod jetstream {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn test_async_publish_max_ack_pending() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..100_000 {
+            jetstream
+                .publish("events", format!("{i}").into())
+                .await
+                .unwrap();
+        }
+    }
 }
