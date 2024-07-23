@@ -69,12 +69,14 @@ fn spawn_acker(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let stream = ReceiverStream::new(rx);
-        let _ = stream.for_each_concurrent(None, |(subscription, permit)| async move {
-            tokio::time::timeout(Duration::from_secs(30), subscription)
-                .await
-                .ok();
-            drop(permit);
-        });
+        stream
+            .for_each_concurrent(None, |(subscription, permit)| async move {
+                tokio::time::timeout(Duration::from_secs(30), subscription)
+                    .await
+                    .ok();
+                drop(permit);
+            })
+            .await;
     })
 }
 
