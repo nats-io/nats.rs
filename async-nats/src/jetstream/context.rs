@@ -144,7 +144,7 @@ impl ContextBuilder<Yes> {
 
 impl ContextBuilder<Yes> {
     /// Set the prefix for the JetStream API.
-    pub fn prefix<T: Into<String>>(self, prefix: T) -> ContextBuilder<No> {
+    pub fn api_prefix<T: Into<String>>(self, prefix: T) -> ContextBuilder<No> {
         ContextBuilder {
             prefix: prefix.into(),
             timeout: self.timeout,
@@ -244,7 +244,7 @@ impl Context {
 
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
         ContextBuilder::new()
-            .prefix(prefix.to_string())
+            .api_prefix(prefix.to_string())
             .build(client)
     }
 
