@@ -19,9 +19,7 @@ use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
-use crate::{
-    header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode, Subscriber, Subscription,
-};
+use crate::{header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
@@ -29,6 +27,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::future::IntoFuture;
 use std::pin::Pin;
@@ -66,14 +65,13 @@ pub struct Context {
 
 fn spawn_acker(
     rx: tokio::sync::mpsc::Receiver<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    ack_timeout: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let stream = ReceiverStream::new(rx);
         stream
             .for_each_concurrent(None, |(subscription, permit)| async move {
-                tokio::time::timeout(Duration::from_secs(30), subscription)
-                    .await
-                    .ok();
+                tokio::time::timeout(ack_timeout, subscription).await.ok();
                 drop(permit);
             })
             .await;
@@ -86,22 +84,103 @@ impl Drop for Context {
     }
 }
 
-impl Context {
-    pub(crate) fn new(client: Client) -> Context {
+use std::marker::PhantomData;
+
+#[derive(Debug, Default)]
+pub struct Yes;
+#[derive(Debug, Default)]
+pub struct No;
+
+pub trait ToAssign: Debug {}
+
+impl ToAssign for Yes {}
+impl ToAssign for No {}
+
+pub struct ContextBuilder<PREFIX: ToAssign> {
+    prefix: String,
+    timeout: Duration,
+    semaphore_capacity: usize,
+    ack_timeout: Duration,
+    _phantom: PhantomData<PREFIX>,
+}
+
+impl Default for ContextBuilder<Yes> {
+    fn default() -> Self {
+        ContextBuilder {
+            prefix: "$JS.API".to_string(),
+            timeout: Duration::from_secs(5),
+            semaphore_capacity: 50_000,
+            ack_timeout: Duration::from_secs(30),
+            _phantom: PhantomData {},
+        }
+    }
+}
+
+impl ContextBuilder<Yes> {
+    pub fn new() -> ContextBuilder<Yes> {
+        ContextBuilder::default()
+    }
+}
+
+impl ContextBuilder<Yes> {
+    pub fn prefix<T: Into<String>>(self, prefix: T) -> ContextBuilder<No> {
+        ContextBuilder {
+            prefix: prefix.into(),
+            timeout: self.timeout,
+            semaphore_capacity: self.semaphore_capacity,
+            ack_timeout: self.ack_timeout,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn domain<T: Into<String>>(self, domain: T) -> ContextBuilder<No> {
+        ContextBuilder {
+            prefix: format!("$JS.{}.API", domain.into()),
+            timeout: self.timeout,
+            semaphore_capacity: self.semaphore_capacity,
+            ack_timeout: self.ack_timeout,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<PREFIX> ContextBuilder<PREFIX>
+where
+    PREFIX: ToAssign,
+{
+    pub fn timeout(self, timeout: Duration) -> ContextBuilder<Yes>
+    where
+        Yes: ToAssign,
+    {
+        ContextBuilder {
+            prefix: self.prefix,
+            timeout,
+            semaphore_capacity: self.semaphore_capacity,
+            ack_timeout: self.ack_timeout,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn build(self, client: Client) -> Context {
         let (tx, rx) = tokio::sync::mpsc::channel::<(
             oneshot::Receiver<Message>,
             OwnedSemaphorePermit,
-        )>(500_000);
-        let acker_task = Arc::new(spawn_acker(rx));
-
+        )>(self.semaphore_capacity);
+        let acker_task = Arc::new(spawn_acker(rx, self.ack_timeout));
         Context {
             client,
-            prefix: "$JS.API".to_string(),
-            timeout: Duration::from_secs(5),
-            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(500_000)),
+            prefix: self.prefix,
+            timeout: self.timeout,
+            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(self.semaphore_capacity)),
             acker_task,
             ack_sender: tx,
         }
+    }
+}
+
+impl Context {
+    pub(crate) fn new(client: Client) -> Context {
+        ContextBuilder::default().build(client)
     }
 
     pub fn set_timeout(&mut self, timeout: Duration) {
@@ -109,35 +188,13 @@ impl Context {
     }
 
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
-        let (tx, rx) = tokio::sync::mpsc::channel::<(
-            oneshot::Receiver<Message>,
-            OwnedSemaphorePermit,
-        )>(500_000);
-        let acker_task = Arc::new(spawn_acker(rx));
-        Context {
-            client,
-            prefix: prefix.to_string(),
-            timeout: Duration::from_secs(5),
-            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(500_000)),
-            acker_task,
-            ack_sender: tx,
-        }
+        ContextBuilder::new()
+            .prefix(prefix.to_string())
+            .build(client)
     }
 
     pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
-        let (tx, rx) = tokio::sync::mpsc::channel::<(
-            oneshot::Receiver<Message>,
-            OwnedSemaphorePermit,
-        )>(500_000);
-        let acker_task = Arc::new(spawn_acker(rx));
-        Context {
-            client,
-            prefix: format!("$JS.{}.API", domain.as_ref()),
-            timeout: Duration::from_secs(5),
-            max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(500_000)),
-            acker_task,
-            ack_sender: tx,
-        }
+        ContextBuilder::new().domain(domain.as_ref()).build(client)
     }
 
     /// Publishes [jetstream::Message][super::message::Message] to the [Stream] without waiting for
