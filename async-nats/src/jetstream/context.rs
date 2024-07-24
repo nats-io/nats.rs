@@ -96,6 +96,25 @@ pub trait ToAssign: Debug {}
 impl ToAssign for Yes {}
 impl ToAssign for No {}
 
+/// A builder for [Context]. Beyond what can be set by standard constructor, it allows tweaking
+/// pending publish ack backpressure settings.
+/// # Examples
+/// ```no_run
+/// # use async_nats::jetstream::context::ContextBuilder;
+/// # use async_nats::Client;
+/// # use std::time::Duration;
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), async_nats::Error> {
+/// let client = Client::new("demo.nats.io").connect().await?;
+/// let context = ContextBuilder::new()
+///    .timeout(Duration::from_secs(5))
+///    .prefix("MY.JS.API")
+///    .max_ack_inflight(1000)
+///    .build(client);
+/// # Ok(())
+/// # }
+/// ```
+///
 pub struct ContextBuilder<PREFIX: ToAssign> {
     prefix: String,
     timeout: Duration,
@@ -117,12 +136,14 @@ impl Default for ContextBuilder<Yes> {
 }
 
 impl ContextBuilder<Yes> {
+    /// Create a new [ContextBuilder] with default settings.
     pub fn new() -> ContextBuilder<Yes> {
         ContextBuilder::default()
     }
 }
 
 impl ContextBuilder<Yes> {
+    /// Set the prefix for the JetStream API.
     pub fn prefix<T: Into<String>>(self, prefix: T) -> ContextBuilder<No> {
         ContextBuilder {
             prefix: prefix.into(),
@@ -133,6 +154,8 @@ impl ContextBuilder<Yes> {
         }
     }
 
+    /// Set the domain for the JetStream API. Domain is the middle part of standard API prefix:
+    /// $JS.{domain}.API.
     pub fn domain<T: Into<String>>(self, domain: T) -> ContextBuilder<No> {
         ContextBuilder {
             prefix: format!("$JS.{}.API", domain.into()),
@@ -148,6 +171,7 @@ impl<PREFIX> ContextBuilder<PREFIX>
 where
     PREFIX: ToAssign,
 {
+    /// Set the timeout for all JetStream API requests.
     pub fn timeout(self, timeout: Duration) -> ContextBuilder<Yes>
     where
         Yes: ToAssign,
@@ -161,6 +185,37 @@ where
         }
     }
 
+    /// Sets the maximum time client waits for acks from the server when default backpressure is
+    /// used.
+    pub fn ack_timeout(self, ack_timeout: Duration) -> ContextBuilder<Yes>
+    where
+        Yes: ToAssign,
+    {
+        ContextBuilder {
+            prefix: self.prefix,
+            timeout: self.timeout,
+            semaphore_capacity: self.semaphore_capacity,
+            ack_timeout,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Sets the maximum number of pending acks that can be in flight at any given time.
+    /// If limit is reached, `publish` throws an error.
+    pub fn max_ack_inflight(self, capacity: usize) -> ContextBuilder<Yes>
+    where
+        Yes: ToAssign,
+    {
+        ContextBuilder {
+            prefix: self.prefix,
+            timeout: self.timeout,
+            semaphore_capacity: capacity,
+            ack_timeout: self.ack_timeout,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Build the [Context] with the given settings.
     pub fn build(self, client: Client) -> Context {
         let (tx, rx) = tokio::sync::mpsc::channel::<(
             oneshot::Receiver<Message>,
