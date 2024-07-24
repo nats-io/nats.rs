@@ -105,10 +105,10 @@ impl ToAssign for No {}
 /// # use std::time::Duration;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
-/// let client = Client::new("demo.nats.io").connect().await?;
+/// let client = async_nats::connect("demo.nats.io").await?;
 /// let context = ContextBuilder::new()
 ///    .timeout(Duration::from_secs(5))
-///    .prefix("MY.JS.API")
+///    .api_prefix("MY.JS.API")
 ///    .max_ack_inflight(1000)
 ///    .build(client);
 /// # Ok(())
