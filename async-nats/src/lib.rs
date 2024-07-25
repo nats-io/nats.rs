@@ -1555,9 +1555,11 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
 }
 
 pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
-    !subject.as_ref().contains([' ', '.', '\r', '\n'])
+    let subject_str = subject.as_ref();
+    !subject_str.starts_with('.')
+        && !subject_str.ends_with('.')
+        && subject_str.bytes().all(|c| !c.is_ascii_whitespace())
 }
-
 macro_rules! from_with_timeout {
     ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {
         impl From<$origin> for $t {
