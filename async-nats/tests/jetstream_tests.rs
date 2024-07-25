@@ -36,7 +36,7 @@ mod jetstream {
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
         PullConsumer, PushConsumer, ReplayPolicy,
     };
-    use async_nats::jetstream::context::{Publish, PublishErrorKind};
+    use async_nats::jetstream::context::{GetStreamByNameErrorKind, Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{
         self, ConsumerCreateStrictErrorKind, ConsumerUpdateErrorKind, DiscardPolicy, StorageType,
@@ -3653,5 +3653,28 @@ mod jetstream {
             )
             .await
             .expect_err("should fail but not panic because of lack of server info");
+    }
+
+    #[tokio::test]
+    async fn test_stream_by_subject() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream_name = jetstream.stream_by_subject("events.>").await.unwrap();
+        assert_eq!(stream_name, stream.cached_info().config.name);
+
+        let err = jetstream.stream_by_subject("foo").await.unwrap_err();
+        assert_eq!(err.kind(), GetStreamByNameErrorKind::NotFound);
     }
 }
