@@ -19,10 +19,12 @@ use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
-use crate::{header, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
+use crate::{
+    header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode,
+};
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::{Future, TryFutureExt};
+use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
@@ -498,6 +500,52 @@ impl Context {
         }
     }
 
+    /// Looks up Stream that contains provided subject.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let stream_name = jetstream.stream_by_subject("foo.>");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn stream_by_subject<T: Into<String>>(
+        &self,
+        subject: T,
+    ) -> Result<String, GetStreamByNameError> {
+        let subject = subject.into();
+        if !is_valid_subject(subject.as_str()) {
+            return Err(GetStreamByNameError::new(
+                GetStreamByNameErrorKind::InvalidSubject,
+            ));
+        }
+        let mut names = StreamNames {
+            context: self.clone(),
+            offset: 0,
+            page_request: None,
+            streams: Vec::new(),
+            subject: Some(subject),
+            done: false,
+        };
+        match names.next().await {
+            Some(name) => match name {
+                Ok(name) => Ok(name),
+                Err(err) => Err(GetStreamByNameError::with_source(
+                    GetStreamByNameErrorKind::Request,
+                    err,
+                )),
+            },
+            None => Err(GetStreamByNameError::new(
+                GetStreamByNameErrorKind::NotFound,
+            )),
+        }
+    }
+
     /// Lists names of all streams for current context.
     ///
     /// # Examples
@@ -521,6 +569,7 @@ impl Context {
             offset: 0,
             page_request: None,
             streams: Vec::new(),
+            subject: None,
             done: false,
         }
     }
@@ -1297,6 +1346,7 @@ pub struct StreamNames {
     context: Context,
     offset: usize,
     page_request: Option<PageRequest>,
+    subject: Option<String>,
     streams: Vec<String>,
     done: bool,
 }
@@ -1339,12 +1389,14 @@ impl futures::Stream for StreamNames {
                     }
                     let context = self.context.clone();
                     let offset = self.offset;
+                    let subject = self.subject.clone();
                     self.page_request = Some(Box::pin(async move {
                         match context
                             .request(
                                 "STREAM.NAMES",
                                 &json!({
                                     "offset": offset,
+                                    "subject": subject
                                 }),
                             )
                             .await?
@@ -1611,7 +1663,27 @@ impl Display for GetStreamErrorKind {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum GetStreamByNameErrorKind {
+    Request,
+    NotFound,
+    InvalidSubject,
+    JetStream(super::errors::Error),
+}
+
+impl Display for GetStreamByNameErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Request => write!(f, "request error"),
+            Self::NotFound => write!(f, "stream not found"),
+            Self::InvalidSubject => write!(f, "invalid subject"),
+            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+        }
+    }
+}
+
 pub type GetStreamError = Error<GetStreamErrorKind>;
+pub type GetStreamByNameError = Error<GetStreamByNameErrorKind>;
 
 pub type UpdateStreamError = CreateStreamError;
 pub type UpdateStreamErrorKind = CreateStreamErrorKind;
