@@ -795,72 +795,70 @@ mod kv {
         keys.sort();
         assert_eq!(vec!["bar", "foo"], keys);
 
-
         let mut keys_with_filter = kv
-        .keys_with_filters(vec!["bar"])
-        .await
-        .unwrap()
-        .try_collect::<Vec<String>>()
-        .await
-        .unwrap();
-    keys_with_filter.sort();
-    assert_eq!(vec!["bar"], keys_with_filter);
+            .keys_with_filters(vec!["bar"])
+            .await
+            .unwrap()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+        keys_with_filter.sort();
+        assert_eq!(vec!["bar"], keys_with_filter);
 
+        kv.put("foo1.bar", 37.to_string().into()).await.unwrap();
+        kv.put("foo1.baz.boo", 73.to_string().into()).await.unwrap();
+        kv.put("foo1.baz.baz", 89.to_string().into()).await.unwrap();
 
-    kv.put("foo1.bar", 37.to_string().into()).await.unwrap();
-    kv.put("foo1.baz.boo", 73.to_string().into()).await.unwrap();
-    kv.put("foo1.baz.baz", 89.to_string().into()).await.unwrap();
+        let mut keys_with_filters = kv
+            .keys_with_filters(vec!["foo", "bar"])
+            .await
+            .unwrap()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+        keys_with_filters.sort();
+        assert_eq!(vec!["bar", "foo"], keys_with_filters);
 
-    let mut keys_with_filters = kv
-        .keys_with_filters(vec!["foo", "bar"])
-        .await
-        .unwrap()
-        .try_collect::<Vec<String>>()
-        .await
-        .unwrap();
-    keys_with_filters.sort();
-    assert_eq!(vec!["bar", "foo"], keys_with_filters);
+        let mut keys_with_filters = kv
+            .keys_with_filters(vec!["foo1.*.*"])
+            .await
+            .unwrap()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+        keys_with_filters.sort();
+        assert_eq!(vec!["foo1.baz.baz", "foo1.baz.boo"], keys_with_filters);
 
-    let mut keys_with_filters = kv
-        .keys_with_filters(vec!["foo1.*.*"])
-        .await
-        .unwrap()
-        .try_collect::<Vec<String>>()
-        .await
-        .unwrap();
-    keys_with_filters.sort();
-    assert_eq!(vec!["foo1.baz.baz", "foo1.baz.boo"], keys_with_filters);
+        let mut keys_with_filters = kv
+            .keys_with_filters(vec!["foo1.*.*", "foo1.*"])
+            .await
+            .unwrap()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+        keys_with_filters.sort();
+        assert_eq!(
+            vec!["foo1.bar", "foo1.baz.baz", "foo1.baz.boo"],
+            keys_with_filters
+        );
 
+        let mut keys_with_filters = kv
+            .keys_with_filters(vec!["*.baz.*"])
+            .await
+            .unwrap()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
 
-    let mut keys_with_filters = kv
-        .keys_with_filters(vec!["foo1.*.*", "foo1.*"])
-        .await
-        .unwrap()
-        .try_collect::<Vec<String>>()
-        .await
-        .unwrap();
-    keys_with_filters.sort();
-    assert_eq!(vec!["foo1.bar", "foo1.baz.baz", "foo1.baz.boo"], keys_with_filters);
+        keys_with_filters.sort();
+        assert_eq!(vec!["foo1.baz.baz", "foo1.baz.boo"], keys_with_filters);
 
-    let mut keys_with_filters = kv
-    .keys_with_filters(vec!["*.baz.*",])
-    .await
-    .unwrap()
-    .try_collect::<Vec<String>>()
-    .await
-    .unwrap();
+        // cleanup the keys
+        kv.delete("foo1.bar").await.unwrap();
+        kv.delete("foo1.baz.boo").await.unwrap();
+        kv.delete("foo1.baz.baz").await.unwrap();
 
-    keys_with_filters.sort();
-    assert_eq!(vec!["foo1.baz.baz", "foo1.baz.boo"], keys_with_filters);
-
-
-    // cleanup the keys
-    kv.delete("foo1.bar").await.unwrap();
-    kv.delete("foo1.baz.boo").await.unwrap();
-    kv.delete("foo1.baz.baz").await.unwrap();
-
-    // filters like "foo.b*" should not return anything because it's not a valid filter
-
+        // filters like "foo.b*" should not return anything because it's not a valid filter
 
         // Delete a key and make sure it doesn't show up in the keys list
         kv.delete("bar").await.unwrap();
