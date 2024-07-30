@@ -1050,10 +1050,10 @@ impl Store {
             (Some(first), None) => {
                 config.filter_subject = first;
             }
-            (Some(first), Some(second)) => {
+            (Some(first), Some(_second)) => {
                 #[cfg(feature = "server_2_10")]
                 {
-                    config.filter_subjects = vec![first, second];
+                    config.filter_subjects = vec![first, _second];
                     config.filter_subjects.extend(filters);
                 }
                 #[cfg(not(feature = "server_2_10"))]
