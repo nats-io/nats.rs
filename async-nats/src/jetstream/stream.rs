@@ -20,7 +20,7 @@ use std::{
     future::IntoFuture,
     io::{self, ErrorKind},
     pin::Pin,
-    str::FromStr,
+    str::{from_utf8, FromStr},
     task::Poll,
     time::Duration,
 };
@@ -37,8 +37,11 @@ use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
-    consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
-    context::{RequestError, RequestErrorKind, StreamsError, StreamsErrorKind},
+    consumer::{self, pull::BatchConfig, Consumer, FromConsumer, IntoConsumerConfig},
+    context::{
+        self, BatchGet, BatchGetError, BatchGetErrorKind, BatchGetStream, RequestError,
+        RequestErrorKind, StreamsError, StreamsErrorKind,
+    },
     errors::ErrorCode,
     response::Response,
     Context, Message,
@@ -381,6 +384,12 @@ impl Stream {
             "seq": sequence,
         });
 
+        tracing::debug!(
+            "direct_get: subject: {}, payload: {:?}",
+            subject,
+            from_utf8(&serde_json::to_vec(&payload).unwrap()).unwrap()
+        );
+
         let response = self
             .context
             .client
@@ -411,6 +420,40 @@ impl Stream {
             }
         }
         Ok(response)
+    }
+
+    pub async fn batch_get(&self, config: BatchGet) -> Result<BatchGetStream, BatchGetError> {
+        let subject = format!(
+            "{}.DIRECT.GET.{}",
+            &self.context.prefix, &self.info.config.name
+        );
+        let payload = serde_json::to_vec(&config)
+            .map_err(|err| BatchGetError::with_source(BatchGetErrorKind::InvalidRequest, err))?;
+
+        tracing::debug!(
+            "batch_get: subject: {}, payload: {:?}",
+            subject,
+            from_utf8(&payload).unwrap()
+        );
+        let response_subject = self.context.client.new_inbox();
+
+        let subscription = self
+            .context
+            .client
+            .subscribe(response_subject.clone())
+            .await
+            .map_err(|err| BatchGetError::with_source(BatchGetErrorKind::Subscribe, err))?;
+
+        self.context
+            .client
+            .publish_with_reply(subject, response_subject, payload.into())
+            .await
+            .map_err(|err| BatchGetError::with_source(BatchGetErrorKind::Request, err))?;
+
+        Ok(BatchGetStream {
+            subscription,
+            timeout: self.context.timeout.clone(),
+        })
     }
 
     /// Gets last message for a given `subject`.

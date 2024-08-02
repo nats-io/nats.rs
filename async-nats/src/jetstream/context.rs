@@ -1799,3 +1799,94 @@ enum ConsumerAction {
     #[cfg(feature = "server_2_10")]
     Update,
 }
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BatchGet {
+    #[serde(rename = "seq", skip_serializing_if = "is_default")]
+    pub sequence: u64,
+    #[serde(rename = "next_by_subj", skip_serializing_if = "Option::is_none")]
+    pub next_for_subject: Option<String>,
+    #[serde(rename = "last_by_subj", skip_serializing_if = "Option::is_none")]
+    pub last_for_subject: Option<String>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub batch: usize,
+    #[serde(skip_serializing_if = "is_default")]
+    pub max_bytes: usize,
+    #[serde(rename = "multi_last_for", skip_serializing_if = "is_default")]
+    pub last_for: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub enum BatchGetForSubject {
+    Next(String),
+    Last(String),
+    #[default]
+    None,
+}
+
+#[derive(Debug)]
+pub struct BatchGetStream {
+    pub(crate) subscription: crate::Subscriber,
+    pub(crate) timeout: Duration,
+}
+
+impl futures::Stream for BatchGetStream {
+    type Item = Result<crate::Message, BatchGetError>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let timeout = self.timeout.clone();
+        let next_future = self.subscription.next();
+        let timeout_future = tokio::time::timeout(timeout, next_future);
+
+        futures::pin_mut!(timeout_future);
+        match timeout_future.poll(cx) {
+            Poll::Ready(Result::Ok(Some(message))) => match message.status {
+                Some(StatusCode::NO_RESPONDERS) => Poll::Ready(Some(Err(BatchGetError::new(
+                    BatchGetErrorKind::JetStreamUnavailable,
+                )))),
+                Some(StatusCode::SUCCESS) => Poll::Ready(None),
+                Some(status) => Poll::Ready(Some(Err(BatchGetError::with_source(
+                    BatchGetErrorKind::InvalidRequest,
+                    message.description.unwrap_or_else(|| status.to_string()),
+                )))),
+                None => Poll::Ready(Some(Ok(message))),
+            },
+            Poll::Ready(Result::Err(_)) => {
+                Poll::Ready(Some(Err(BatchGetError::new(BatchGetErrorKind::TimedOut))))
+            }
+            Poll::Ready(Ok(None)) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub type BatchGetError = crate::error::Error<BatchGetErrorKind>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BatchGetErrorKind {
+    InvalidRequest,
+    TooManySubjects,
+    TimedOut,
+    JetStreamUnavailable,
+    Subscribe,
+    Request,
+}
+
+impl Display for BatchGetErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BatchGetErrorKind::InvalidRequest => write!(f, "invalid request"),
+            BatchGetErrorKind::TooManySubjects => write!(f, "too many subjects"),
+            BatchGetErrorKind::TimedOut => write!(f, "timed out"),
+            BatchGetErrorKind::JetStreamUnavailable => write!(f, "JetStream unavailable"),
+            BatchGetErrorKind::Subscribe => write!(f, "could not subscribe to reply subject"),
+            BatchGetErrorKind::Request => write!(f, "failed to request batch"),
+        }
+    }
+}
+fn is_default<T: Default + Eq>(t: &T) -> bool {
+    t == &T::default()
+}

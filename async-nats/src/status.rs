@@ -257,6 +257,7 @@ impl TryFrom<u16> for StatusCode {
 impl StatusCode {
     pub const IDLE_HEARTBEAT: StatusCode = StatusCode(new_nonzero_u16(100));
     pub const OK: StatusCode = StatusCode(new_nonzero_u16(200));
+    pub const SUCCESS: StatusCode = StatusCode(new_nonzero_u16(204));
     pub const NOT_FOUND: StatusCode = StatusCode(new_nonzero_u16(404));
     pub const TIMEOUT: StatusCode = StatusCode(new_nonzero_u16(408));
     pub const NO_RESPONDERS: StatusCode = StatusCode(new_nonzero_u16(503));

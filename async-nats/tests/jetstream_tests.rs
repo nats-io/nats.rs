@@ -31,12 +31,14 @@ mod jetstream {
 
     use super::*;
     use async_nats::connection::State;
-    use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
+    use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID, NATS_SUBJECT};
     use async_nats::jetstream::consumer::{
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
         PullConsumer, PushConsumer, ReplayPolicy,
     };
-    use async_nats::jetstream::context::{GetStreamByNameErrorKind, Publish, PublishErrorKind};
+    use async_nats::jetstream::context::{
+        BatchGet, BatchGetForSubject, GetStreamByNameErrorKind, Publish, PublishErrorKind,
+    };
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{
         self, ConsumerCreateStrictErrorKind, ConsumerUpdateErrorKind, DiscardPolicy, StorageType,
@@ -47,7 +49,7 @@ mod jetstream {
     use async_nats::ConnectOptions;
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
-    use tracing::debug;
+    use tracing::{debug, Level};
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -3676,5 +3678,72 @@ mod jetstream {
 
         let err = jetstream.stream_by_subject("foo").await.unwrap_err();
         assert_eq!(err.kind(), GetStreamByNameErrorKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_batch_get() {
+        tracing_subscriber::fmt::fmt()
+            .with_max_level(Level::DEBUG)
+            .init();
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                allow_direct: true,
+                subjects: vec!["events.>".to_string(), "data.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..100 {
+            jetstream
+                .publish(format!("events.{}", i), "foo".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        for i in 0..100 {
+            jetstream
+                .publish(format!("data.{}", i), "foo".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut batch = stream
+            .batch_get(BatchGet {
+                sequence: 10,
+                next_for_subject: None,
+                last_for_subject: None,
+                batch: 15,
+                max_bytes: 0,
+                last_for: vec!["events.>".into()],
+            })
+            .await
+            .unwrap();
+
+        while let Some(message) = batch.next().await {
+            let message = message.unwrap();
+            println!("headers: {:?}", message.headers);
+            assert_eq!(
+                message
+                    .headers
+                    .as_ref()
+                    .unwrap()
+                    .get_last(NATS_SUBJECT)
+                    .unwrap()
+                    .to_string(),
+                format!("events.{}", 101)
+            );
+            assert_eq!(from_utf8(&message.payload).unwrap(), "foo");
+            println!("{:?}", message.headers.unwrap().get_last(NATS_SUBJECT));
+        }
     }
 }
