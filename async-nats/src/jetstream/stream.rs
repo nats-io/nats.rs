@@ -1120,14 +1120,17 @@ fn default_consumer_limits_as_none<'de, D>(
 where
     D: Deserializer<'de>,
 {
-    let consumer_limits = ConsumerLimits::deserialize(deserializer)?;
-    if consumer_limits == ConsumerLimits::default() {
-        Ok(None)
+    let consumer_limits = Option::<ConsumerLimits>::deserialize(deserializer)?;
+    if let Some(cl) = consumer_limits {
+        if cl == ConsumerLimits::default() {
+            Ok(None)
+        } else {
+            Ok(Some(cl))
+        }
     } else {
-        Ok(Some(consumer_limits))
+        Ok(None)
     }
 }
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct ConsumerLimits {
     /// Sets the maximum [crate::jetstream::consumer::Config::inactive_threshold] that can be set on the consumer.
@@ -2060,5 +2063,25 @@ impl From<super::context::RequestError> for ConsumerCreateStrictError {
                 ConsumerCreateStrictError::with_source(ConsumerCreateStrictErrorKind::Request, err)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consumer_limits_de() {
+        let config = Config {
+            ..Default::default()
+        };
+
+        let roundtrip: Config = {
+            let ser = serde_json::to_string(&config).unwrap();
+            let de = serde_json::from_str(&ser).unwrap();
+
+            de
+        };
+        assert_eq!(config, roundtrip);
     }
 }
