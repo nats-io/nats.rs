@@ -346,6 +346,12 @@ impl From<&str> for HeaderValue {
     }
 }
 
+impl From<String> for HeaderValue {
+    fn from(inner: String) -> Self {
+        Self { inner }
+    }
+}
+
 impl HeaderValue {
     pub fn new() -> Self {
         HeaderValue::default()
@@ -382,6 +388,14 @@ impl IntoHeaderName for &str {
     }
 }
 
+impl IntoHeaderName for String {
+    fn into_header_name(self) -> HeaderName {
+        HeaderName {
+            inner: HeaderRepr::Custom(self.into()),
+        }
+    }
+}
+
 impl IntoHeaderName for HeaderName {
     fn into_header_name(self) -> HeaderName {
         self
@@ -397,6 +411,12 @@ impl IntoHeaderValue for &str {
         HeaderValue {
             inner: self.to_string(),
         }
+    }
+}
+
+impl IntoHeaderValue for String {
+    fn into_header_value(self) -> HeaderValue {
+        HeaderValue { inner: self }
     }
 }
 
@@ -650,7 +670,7 @@ impl std::error::Error for ParseHeaderNameError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{HeaderMap, HeaderName, HeaderValue};
+    use super::{HeaderMap, HeaderName, HeaderValue, IntoHeaderName, IntoHeaderValue};
     use std::str::{from_utf8, FromStr};
 
     #[test]
@@ -813,5 +833,31 @@ mod tests {
             serde_json::from_str::<HeaderName>(raw_json).unwrap(),
             header
         );
+    }
+
+    #[test]
+    fn header_name_from_string() {
+        let string = "NATS-Stream".to_string();
+        let name = string.into_header_name();
+
+        assert_eq!("NATS-Stream", name.as_str());
+    }
+
+    #[test]
+    fn header_value_from_string_with_trait() {
+        let string = "some value".to_string();
+
+        let value = string.into_header_value();
+
+        assert_eq!("some value", value.as_str());
+    }
+
+    #[test]
+    fn header_value_from_string() {
+        let string = "some value".to_string();
+
+        let value: HeaderValue = string.into();
+
+        assert_eq!("some value", value.as_str());
     }
 }
