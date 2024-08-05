@@ -2078,9 +2078,7 @@ mod tests {
 
         let roundtrip: Config = {
             let ser = serde_json::to_string(&config).unwrap();
-            let de = serde_json::from_str(&ser).unwrap();
-
-            de
+            serde_json::from_str(&ser).unwrap()
         };
         assert_eq!(config, roundtrip);
     }
