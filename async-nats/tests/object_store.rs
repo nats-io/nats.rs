@@ -19,10 +19,8 @@ mod object_store {
         stream::DirectGetErrorKind,
     };
     use base64::Engine;
-    use futures::StreamExt;
+    use futures::{StreamExt, TryStreamExt};
     use rand::RngCore;
-    use tokio::io::AsyncReadExt;
-
     use ring::digest::{self, SHA256};
 
     #[tokio::test]
@@ -51,16 +49,8 @@ mod object_store {
         let mut object = bucket.get("FOO").await.unwrap();
 
         let mut result = Vec::new();
-        loop {
-            let mut buffer = [0; 1024];
-            if let Ok(n) = object.read(&mut buffer).await {
-                if n == 0 {
-                    println!("finished");
-                    break;
-                }
-
-                result.extend_from_slice(&buffer[..n]);
-            }
+        while let Some(chunk) = object.try_next().await.unwrap() {
+            result.extend_from_slice(&chunk);
         }
         assert_eq!(
             Some(format!(
@@ -79,7 +69,9 @@ mod object_store {
         let mut contents = Vec::new();
 
         tracing::info!("reading content");
-        object_link.read_to_end(&mut contents).await.unwrap();
+        while let Some(chunk) = object_link.try_next().await.unwrap() {
+            contents.extend_from_slice(&chunk);
+        }
         assert_eq!(contents, result);
 
         bucket
@@ -350,7 +342,9 @@ mod object_store {
             assert_eq!(object.info.digest, Some(format!("SHA-256={digest}")));
 
             let mut result = Vec::new();
-            object.read_to_end(&mut result).await.unwrap();
+            while let Some(chunk) = object.try_next().await.unwrap() {
+                result.extend_from_slice(&chunk);
+            }
             assert_eq!(result, file);
         }
     }
