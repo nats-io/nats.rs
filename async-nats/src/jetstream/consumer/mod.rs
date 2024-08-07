@@ -271,7 +271,12 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(
+        rename = "sample_freq",
+        with = "from_str",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -426,6 +431,26 @@ pub enum ReplayPolicy {
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
+}
+
+pub(crate) mod from_str {
+    pub(crate) fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        T: std::str::FromStr,
+        T::Err: std::fmt::Display,
+        D: serde::Deserializer<'de>,
+    {
+        let s = <String as serde::Deserialize>::deserialize(deserializer)?;
+        T::from_str(&s).map_err(serde::de::Error::custom)
+    }
+
+    pub(crate) fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        T: std::fmt::Display,
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
