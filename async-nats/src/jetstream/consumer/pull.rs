@@ -603,7 +603,12 @@ pub struct OrderedConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(
+        rename = "sample_freq",
+        with = "super::from_str",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub sample_frequency: u8,
     /// Only deliver headers without payloads.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -2044,7 +2049,12 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(
+        rename = "sample_freq",
+        with = "super::from_str",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub sample_frequency: u8,
     /// The maximum number of waiting consumers.
     #[serde(default, skip_serializing_if = "is_default")]
