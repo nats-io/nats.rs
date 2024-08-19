@@ -251,10 +251,9 @@ impl Store {
             // Deleted or Purged key, we can create it again.
             Some(Entry {
                 operation: Operation::Delete | Operation::Purge,
-                revision,
                 ..
             }) => {
-                let revision = self.update(key, value, revision).await?;
+                let revision = self.put(key, value).await?;
                 Ok(revision)
             }
 
@@ -1251,7 +1250,6 @@ impl From<UpdateError> for CreateError {
         match error.kind() {
             UpdateErrorKind::InvalidKey => Error::from(CreateErrorKind::InvalidKey),
             UpdateErrorKind::TimedOut => Error::from(CreateErrorKind::Publish),
-            UpdateErrorKind::WrongLastRevision => Error::from(CreateErrorKind::AlreadyExists),
             UpdateErrorKind::Other => Error::from(CreateErrorKind::Other),
         }
     }
@@ -1364,7 +1362,6 @@ crate::from_with_timeout!(WatchError, WatchErrorKind, StreamError, StreamErrorKi
 pub enum UpdateErrorKind {
     InvalidKey,
     TimedOut,
-    WrongLastRevision,
     Other,
 }
 
@@ -1373,7 +1370,6 @@ impl Display for UpdateErrorKind {
         match self {
             Self::InvalidKey => write!(f, "key cannot be empty or start/end with `.`"),
             Self::TimedOut => write!(f, "timed out"),
-            Self::WrongLastRevision => write!(f, "wrong last revision"),
             Self::Other => write!(f, "failed getting entry"),
         }
     }
@@ -1381,17 +1377,7 @@ impl Display for UpdateErrorKind {
 
 pub type UpdateError = Error<UpdateErrorKind>;
 
-impl From<PublishError> for UpdateError {
-    fn from(err: PublishError) -> Self {
-        match err.kind() {
-            PublishErrorKind::TimedOut => Self::new(UpdateErrorKind::TimedOut),
-            PublishErrorKind::WrongLastSequence => {
-                Self::with_source(UpdateErrorKind::WrongLastRevision, err)
-            }
-            _ => Self::with_source(UpdateErrorKind::Other, err),
-        }
-    }
-}
+crate::from_with_timeout!(UpdateError, UpdateErrorKind, PublishError, PublishErrorKind);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WatcherErrorKind {
