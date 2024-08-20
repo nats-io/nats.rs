@@ -229,7 +229,7 @@ impl Client {
             .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: None,
+                reply: None,
                 headers: None,
             }))
             .await?;
@@ -267,7 +267,7 @@ impl Client {
             .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: None,
+                reply: None,
                 headers: Some(headers),
             }))
             .await?;
@@ -303,7 +303,7 @@ impl Client {
             .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: Some(reply),
+                reply: Some(reply),
                 headers: None,
             }))
             .await?;
@@ -342,7 +342,7 @@ impl Client {
             .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: Some(reply),
+                reply: Some(reply),
                 headers: Some(headers),
             }))
             .await?;

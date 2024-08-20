@@ -347,7 +347,7 @@ pub(crate) enum ServerOp {
 pub struct PublishMessage {
     pub subject: Subject,
     pub payload: Bytes,
-    pub respond: Option<Subject>,
+    pub reply: Option<Subject>,
     pub headers: Option<HeaderMap>,
 }
 
@@ -830,7 +830,7 @@ impl ConnectionHandler {
             Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond,
+                reply: respond,
                 headers,
             }) => {
                 self.connection.enqueue_write_op(&ClientOp::Publish {
