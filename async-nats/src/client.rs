@@ -11,15 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::pin::Pin;
+use core::task::{Context, Poll};
+
 use crate::connection::State;
 use crate::subject::ToSubject;
-use crate::ServerInfo;
+use crate::{PublishMessage, ServerInfo};
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
-use futures::StreamExt;
+use futures::{Sink, SinkExt as _, StreamExt};
 use once_cell::sync::Lazy;
 use portable_atomic::AtomicU64;
 use regex::Regex;
@@ -29,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::PollSender;
 use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
@@ -40,6 +44,12 @@ pub type PublishError = Error<PublishErrorKind>;
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for PublishError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        PublishError::with_source(PublishErrorKind::Send, err)
+    }
+}
+
+impl From<tokio_util::sync::PollSendError<Command>> for PublishError {
+    fn from(err: tokio_util::sync::PollSendError<Command>) -> Self {
         PublishError::with_source(PublishErrorKind::Send, err)
     }
 }
@@ -67,11 +77,34 @@ pub struct Client {
     info: tokio::sync::watch::Receiver<ServerInfo>,
     pub(crate) state: tokio::sync::watch::Receiver<State>,
     pub(crate) sender: mpsc::Sender<Command>,
+    poll_sender: PollSender<Command>,
     next_subscription_id: Arc<AtomicU64>,
     subscription_capacity: usize,
     inbox_prefix: Arc<str>,
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
+}
+
+impl Sink<PublishMessage> for Client {
+    type Error = PublishError;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_sender.poll_ready_unpin(cx).map_err(Into::into)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, msg: PublishMessage) -> Result<(), Self::Error> {
+        self.poll_sender
+            .start_send_unpin(Command::Publish(msg))
+            .map_err(Into::into)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_sender.poll_flush_unpin(cx).map_err(Into::into)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_sender.poll_close_unpin(cx).map_err(Into::into)
+    }
 }
 
 impl Client {
@@ -84,10 +117,12 @@ impl Client {
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
     ) -> Client {
+        let poll_sender = PollSender::new(sender.clone());
         Client {
             info,
             state,
             sender,
+            poll_sender,
             next_subscription_id: Arc::new(AtomicU64::new(1)),
             subscription_capacity: capacity,
             inbox_prefix: inbox_prefix.into(),
@@ -191,12 +226,12 @@ impl Client {
         }
 
         self.sender
-            .send(Command::Publish {
+            .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: None,
+                reply: None,
                 headers: None,
-            })
+            }))
             .await?;
         Ok(())
     }
@@ -229,12 +264,12 @@ impl Client {
         let subject = subject.to_subject();
 
         self.sender
-            .send(Command::Publish {
+            .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: None,
+                reply: None,
                 headers: Some(headers),
-            })
+            }))
             .await?;
         Ok(())
     }
@@ -265,12 +300,12 @@ impl Client {
         let reply = reply.to_subject();
 
         self.sender
-            .send(Command::Publish {
+            .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: Some(reply),
+                reply: Some(reply),
                 headers: None,
-            })
+            }))
             .await?;
         Ok(())
     }
@@ -304,12 +339,12 @@ impl Client {
         let reply = reply.to_subject();
 
         self.sender
-            .send(Command::Publish {
+            .send(Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond: Some(reply),
+                reply: Some(reply),
                 headers: Some(headers),
-            })
+            }))
             .await?;
         Ok(())
     }

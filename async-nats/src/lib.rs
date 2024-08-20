@@ -342,14 +342,19 @@ pub(crate) enum ServerOp {
     },
 }
 
+/// `PublishMessage` represents a message being published
+#[derive(Debug)]
+pub struct PublishMessage {
+    pub subject: Subject,
+    pub payload: Bytes,
+    pub reply: Option<Subject>,
+    pub headers: Option<HeaderMap>,
+}
+
+/// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]
 pub(crate) enum Command {
-    Publish {
-        subject: Subject,
-        payload: Bytes,
-        respond: Option<Subject>,
-        headers: Option<HeaderMap>,
-    },
+    Publish(PublishMessage),
     Request {
         subject: Subject,
         payload: Bytes,
@@ -822,12 +827,12 @@ impl ConnectionHandler {
                 self.connection.enqueue_write_op(&pub_op);
             }
 
-            Command::Publish {
+            Command::Publish(PublishMessage {
                 subject,
                 payload,
-                respond,
+                reply: respond,
                 headers,
-            } => {
+            }) => {
                 self.connection.enqueue_write_op(&ClientOp::Publish {
                     subject,
                     payload,
