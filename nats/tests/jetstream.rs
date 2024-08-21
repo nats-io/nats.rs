@@ -806,7 +806,7 @@ fn jetstream_consumer_configs_sample_frequency() {
     };
     let consumer = js.add_consumer("SampledStream", cconfig).unwrap();
 
-    assert_eq!(80, consumer.config.sample_frequency); 
+    assert_eq!(80, consumer.config.sample_frequency);
 }
 
 // Helper function to return server and client.
