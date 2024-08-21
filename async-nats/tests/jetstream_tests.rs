@@ -2515,6 +2515,59 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn consumer_configs_sample_frequency() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {err:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let js = async_nats::jetstream::new(client.clone());
+
+        let stream = js
+            .create_stream(stream::Config {
+                name: "StreamWithSampledConsumers".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        {
+            let consumer = stream
+                .create_consumer(consumer::pull::Config {
+                    name: Some("SampledPullConsumer".into()),
+                    description: Some(
+                        "See below to check that Ack Sampling has been set to 100%!".to_string(),
+                    ),
+                    sample_frequency: 100, // <--- sample all the messages
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+
+            assert_eq!(100, consumer.cached_info().config.sample_frequency);
+        }
+
+        {
+            let consumer = stream
+                .create_consumer(consumer::pull::Config {
+                    name: Some("SampledPushConsumer".into()),
+                    description: Some(
+                        "See below to check that Ack Sampling has been set to 100%!".to_string(),
+                    ),
+                    sample_frequency: 100, // <--- sample all the messages
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+
+            assert_eq!(100, consumer.cached_info().config.sample_frequency);
+        }
+    }
+
+    #[tokio::test]
     async fn timeout_out_request() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         tokio::time::sleep(Duration::from_secs(5)).await;
