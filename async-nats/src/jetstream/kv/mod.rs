@@ -1226,7 +1226,7 @@ impl futures::Stream for Keys {
 }
 
 /// An entry in a key-value bucket.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     /// Name of the bucket the entry is in.
     pub bucket: String,
