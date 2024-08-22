@@ -215,6 +215,9 @@ mod kv {
 
         let value = kv.entry_for_revision("key", 1).await.unwrap();
         assert_eq!(from_utf8(&value.unwrap().value).unwrap(), "data");
+
+        let value = kv.entry_for_revision("key", 250).await.unwrap();
+        assert!(value.is_none());
     }
 
     #[tokio::test]
