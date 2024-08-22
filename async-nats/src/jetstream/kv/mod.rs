@@ -451,6 +451,7 @@ impl Store {
                     created,
                     operation,
                     delta: 0,
+                    seen_current: false,
                 };
                 Ok(Some(entry))
             }
@@ -596,6 +597,7 @@ impl Store {
             })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
+            seen_current: false,
         })
     }
 
@@ -1056,6 +1058,7 @@ impl Store {
 
 /// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
 pub struct Watch {
+    seen_current: bool,
     subscription: super::consumer::push::Ordered,
     prefix: String,
     bucket: String,
@@ -1088,6 +1091,10 @@ impl futures::Stream for Watch {
                         .map(|s| s.to_string())
                         .unwrap();
 
+                    if !self.seen_current && info.pending == 0 {
+                        self.seen_current = true;
+                    }
+
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
@@ -1096,6 +1103,7 @@ impl futures::Stream for Watch {
                         created: info.published,
                         delta: info.pending,
                         operation,
+                        seen_current: self.seen_current,
                     })))
                 }
             },
@@ -1157,6 +1165,7 @@ impl futures::Stream for History {
                         created: info.published,
                         delta: info.pending,
                         operation,
+                        seen_current: self.done,
                     })))
                 }
             },
@@ -1218,6 +1227,9 @@ pub struct Entry {
     pub created: OffsetDateTime,
     /// The kind of operation that caused this entry.
     pub operation: Operation,
+    /// Set to true after all historical messages have been received, and
+    /// now all Entries are the new ones.
+    pub seen_current: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

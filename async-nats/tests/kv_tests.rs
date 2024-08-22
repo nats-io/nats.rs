@@ -582,6 +582,69 @@ mod kv {
     }
 
     #[tokio::test]
+    async fn watch_seen_current() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..10 {
+            kv.put(format!("key.{i}"), i.to_string().into())
+                .await
+                .unwrap();
+        }
+
+        let mut watcher = kv
+            .watch_with_history("key.>")
+            .await
+            .unwrap()
+            .enumerate()
+            .take(20);
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 10..20 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put(format!("key.{i}"), i.to_string().into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        while let Some((i, entry)) = watcher.next().await {
+            let entry = entry.unwrap();
+            assert_eq!(entry.key, format!("key.{i}"));
+            assert_eq!(
+                i,
+                from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
+            );
+            if i >= 9 {
+                assert!(entry.seen_current);
+            } else {
+                assert!(!entry.seen_current);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn watch_with_history() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
