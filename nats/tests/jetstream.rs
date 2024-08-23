@@ -783,6 +783,32 @@ fn jetstream_pull_subscribe_bad_stream() {
         .expect_err("expected not found stream for a given subject");
 }
 
+#[test]
+fn jetstream_consumer_configs_sample_frequency() {
+    let s = nats_server::run_server("tests/configs/jetstream.conf");
+    let nc = nats::Options::new()
+        .error_callback(|err| println!("error!: {err}"))
+        .connect(s.client_url())
+        .unwrap();
+    let js = nats::jetstream::new(nc);
+
+    let sconfig = StreamConfig {
+        name: "SampledStream".into(),
+        ..Default::default()
+    };
+    js.add_stream(sconfig).unwrap();
+
+    let cconfig = ConsumerConfig {
+        durable_name: Some("SampledConsumer".into()),
+        filter_subject: "SampledSubject".into(),
+        sample_frequency: 80,
+        ..Default::default()
+    };
+    let consumer = js.add_consumer("SampledStream", cconfig).unwrap();
+
+    assert_eq!(80, consumer.config.sample_frequency);
+}
+
 // Helper function to return server and client.
 pub fn run_basic_jetstream() -> (nats_server::Server, Connection, JetStream) {
     let s = nats_server::run_server("tests/configs/jetstream.conf");
