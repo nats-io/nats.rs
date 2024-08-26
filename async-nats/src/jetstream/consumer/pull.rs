@@ -961,7 +961,7 @@ impl Stream {
                                 .into()
                         }))
                         .await
-                        .unwrap();
+                        .ok();
                     trace!("result send over tx");
                 }
             }
@@ -1092,7 +1092,7 @@ impl futures::Stream for Stream {
                 && !self.pending_request
             {
                 debug!("pending messages reached threshold to send new fetch request");
-                self.request_tx.send(()).unwrap();
+                self.request_tx.send(()).ok();
                 self.pending_request = true;
             }
 
