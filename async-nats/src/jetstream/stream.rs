@@ -119,12 +119,13 @@ pub type DeleteMessageError = Error<DeleteMessageErrorKind>;
 
 /// Handle to operations that can be performed on a `Stream`.
 #[derive(Debug, Clone)]
-pub struct Stream {
-    pub(crate) info: Info,
+pub struct Stream<T = Info> {
+    pub(crate) info: T,
     pub(crate) context: Context,
+    pub(crate) name: String,
 }
 
-impl Stream {
+impl Stream<Info> {
     /// Retrieves `info` about [Stream] from the server, updates the cached `info` inside
     /// [Stream] and returns it.
     ///
@@ -175,7 +176,9 @@ impl Stream {
     pub fn cached_info(&self) -> &Info {
         &self.info
     }
+}
 
+impl<I> Stream<I> {
     /// Gets next message for a [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
@@ -218,10 +221,7 @@ impl Stream {
         if !is_valid_subject(&subject) {
             return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
         }
-        let request_subject = format!(
-            "{}.DIRECT.GET.{}",
-            &self.context.prefix, &self.info.config.name
-        );
+        let request_subject = format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.name);
         let payload;
         if let Some(sequence) = sequence {
             payload = json!({
@@ -246,6 +246,7 @@ impl Stream {
                 message,
                 context: self.context.clone(),
             })?;
+
         if let Some(status) = response.status {
             if let Some(ref description) = response.description {
                 match status {
@@ -306,10 +307,7 @@ impl Stream {
         if !is_valid_subject(&subject) {
             return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
         }
-        let request_subject = format!(
-            "{}.DIRECT.GET.{}",
-            &self.context.prefix, &self.info.config.name
-        );
+        let request_subject = format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.name);
         let payload = json!({
             "next_by_subj": subject.as_ref(),
         });
@@ -380,10 +378,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn direct_get(&self, sequence: u64) -> Result<StreamMessage, DirectGetError> {
-        let subject = format!(
-            "{}.DIRECT.GET.{}",
-            &self.context.prefix, &self.info.config.name
-        );
+        let subject = format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.name);
         let payload = json!({
             "seq": sequence,
         });
@@ -454,7 +449,7 @@ impl Stream {
         let subject = format!(
             "{}.DIRECT.GET.{}.{}",
             &self.context.prefix,
-            &self.info.config.name,
+            &self.name,
             subject.as_ref()
         );
 
@@ -508,7 +503,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, RawMessageError> {
-        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let subject = format!("STREAM.MSG.GET.{}", &self.name);
         let payload = json!({
             "seq": sequence,
         });
@@ -567,7 +562,7 @@ impl Stream {
         &self,
         stream_subject: &str,
     ) -> Result<StreamMessage, LastRawMessageError> {
-        let subject = format!("STREAM.MSG.GET.{}", &self.info.config.name);
+        let subject = format!("STREAM.MSG.GET.{}", &self.name);
         let payload = json!({
             "last_by_subj":  stream_subject,
         });
@@ -619,7 +614,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn delete_message(&self, sequence: u64) -> Result<bool, DeleteMessageError> {
-        let subject = format!("STREAM.MSG.DELETE.{}", &self.info.config.name);
+        let subject = format!("STREAM.MSG.DELETE.{}", &self.name);
         let payload = json!({
             "seq": sequence,
         });
@@ -717,7 +712,7 @@ impl Stream {
         config: C,
     ) -> Result<Consumer<C>, ConsumerError> {
         self.context
-            .create_consumer_on_stream(config, self.info.config.name.clone())
+            .create_consumer_on_stream(config, self.name.clone())
             .await
     }
 
@@ -750,7 +745,7 @@ impl Stream {
         config: C,
     ) -> Result<Consumer<C>, ConsumerUpdateError> {
         self.context
-            .update_consumer_on_stream(config, self.info.config.name.clone())
+            .update_consumer_on_stream(config, self.name.clone())
             .await
     }
 
@@ -784,7 +779,7 @@ impl Stream {
         config: C,
     ) -> Result<Consumer<C>, ConsumerCreateStrictError> {
         self.context
-            .create_consumer_strict_on_stream(config, self.info.config.name.clone())
+            .create_consumer_strict_on_stream(config, self.name.clone())
             .await
     }
 
@@ -810,7 +805,7 @@ impl Stream {
     ) -> Result<consumer::Info, crate::Error> {
         let name = name.as_ref();
 
-        let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
+        let subject = format!("CONSUMER.INFO.{}.{}", self.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(info) => Ok(info),
@@ -884,7 +879,7 @@ impl Stream {
         name: &str,
         config: T,
     ) -> Result<Consumer<T>, ConsumerError> {
-        let subject = format!("CONSUMER.INFO.{}.{}", self.info.config.name, name);
+        let subject = format!("CONSUMER.INFO.{}.{}", self.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Err { error } if error.code() == 404 => self.create_consumer(config).await,
@@ -920,7 +915,7 @@ impl Stream {
     /// # }
     /// ```
     pub async fn delete_consumer(&self, name: &str) -> Result<DeleteStatus, ConsumerError> {
-        let subject = format!("CONSUMER.DELETE.{}.{}", self.info.config.name, name);
+        let subject = format!("CONSUMER.DELETE.{}.{}", self.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(delete_status) => Ok(delete_status),
@@ -949,7 +944,7 @@ impl Stream {
     pub fn consumer_names(&self) -> ConsumerNames {
         ConsumerNames {
             context: self.context.clone(),
-            stream: self.info.config.name.clone(),
+            stream: self.name.clone(),
             offset: 0,
             page_request: None,
             consumers: Vec::new(),
@@ -978,7 +973,7 @@ impl Stream {
     pub fn consumers(&self) -> Consumers {
         Consumers {
             context: self.context.clone(),
-            stream: self.info.config.name.clone(),
+            stream: self.name.clone(),
             offset: 0,
             page_request: None,
             consumers: Vec::new(),
@@ -1570,33 +1565,35 @@ impl ToAssign for Yes {}
 impl ToAssign for No {}
 
 #[derive(Debug)]
-pub struct Purge<'a, SEQUENCE, KEEP>
+pub struct Purge<SEQUENCE, KEEP>
 where
     SEQUENCE: ToAssign,
     KEEP: ToAssign,
 {
-    stream: &'a Stream,
     inner: PurgeRequest,
     sequence_set: PhantomData<SEQUENCE>,
     keep_set: PhantomData<KEEP>,
+    context: Context,
+    stream_name: String,
 }
 
-impl<'a, SEQUENCE, KEEP> Purge<'a, SEQUENCE, KEEP>
+impl<SEQUENCE, KEEP> Purge<SEQUENCE, KEEP>
 where
     SEQUENCE: ToAssign,
     KEEP: ToAssign,
 {
     /// Adds subject filter to [PurgeRequest]
-    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<'a, SEQUENCE, KEEP> {
+    pub fn filter<T: Into<String>>(mut self, filter: T) -> Purge<SEQUENCE, KEEP> {
         self.inner.filter = Some(filter.into());
         self
     }
 }
 
-impl<'a> Purge<'a, No, No> {
-    pub(crate) fn build(stream: &'a Stream) -> Purge<'a, No, No> {
+impl Purge<No, No> {
+    pub(crate) fn build<I>(stream: &Stream<I>) -> Purge<No, No> {
         Purge {
-            stream,
+            context: stream.context.clone(),
+            stream_name: stream.name.clone(),
             inner: Default::default(),
             sequence_set: PhantomData {},
             keep_set: PhantomData {},
@@ -1604,15 +1601,16 @@ impl<'a> Purge<'a, No, No> {
     }
 }
 
-impl<'a, KEEP> Purge<'a, No, KEEP>
+impl<KEEP> Purge<No, KEEP>
 where
     KEEP: ToAssign,
 {
     /// Creates a new [PurgeRequest].
     /// `keep` and `sequence` are exclusive, enforced compile time by generics.
-    pub fn keep(self, keep: u64) -> Purge<'a, No, Yes> {
+    pub fn keep(self, keep: u64) -> Purge<No, Yes> {
         Purge {
-            stream: self.stream,
+            context: self.context.clone(),
+            stream_name: self.stream_name.clone(),
             sequence_set: PhantomData {},
             keep_set: PhantomData {},
             inner: PurgeRequest {
@@ -1622,15 +1620,16 @@ where
         }
     }
 }
-impl<'a, SEQUENCE> Purge<'a, SEQUENCE, No>
+impl<SEQUENCE> Purge<SEQUENCE, No>
 where
     SEQUENCE: ToAssign,
 {
     /// Creates a new [PurgeRequest].
     /// `keep` and `sequence` are exclusive, enforces compile time by generics.
-    pub fn sequence(self, sequence: u64) -> Purge<'a, Yes, No> {
+    pub fn sequence(self, sequence: u64) -> Purge<Yes, No> {
         Purge {
-            stream: self.stream,
+            context: self.context.clone(),
+            stream_name: self.stream_name.clone(),
             sequence_set: PhantomData {},
             keep_set: PhantomData {},
             inner: PurgeRequest {
@@ -1660,20 +1659,19 @@ impl Display for PurgeErrorKind {
 
 pub type PurgeError = Error<PurgeErrorKind>;
 
-impl<'a, S, K> IntoFuture for Purge<'a, S, K>
+impl<S, K> IntoFuture for Purge<S, K>
 where
     S: ToAssign + std::marker::Send,
     K: ToAssign + std::marker::Send,
 {
     type Output = Result<PurgeResponse, PurgeError>;
 
-    type IntoFuture = BoxFuture<'a, Result<PurgeResponse, PurgeError>>;
+    type IntoFuture = BoxFuture<'static, Result<PurgeResponse, PurgeError>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(std::future::IntoFuture::into_future(async move {
-            let request_subject = format!("STREAM.PURGE.{}", self.stream.info.config.name);
+            let request_subject = format!("STREAM.PURGE.{}", self.stream_name);
             let response: Response<PurgeResponse> = self
-                .stream
                 .context
                 .request(request_subject, &self.inner)
                 .map_err(|err| match err.kind() {
