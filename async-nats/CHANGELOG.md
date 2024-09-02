@@ -1,3 +1,46 @@
+# v0.36.0
+
+## Overview
+This release adds a useful `futures::Sink<PublishMessage>`, and ability to get `Stream` handle without IO call,
+among other changes.
+
+## Breaking changes
+
+This release introduces `StramMessage`, which makes both `get_raw_message` and `direct_get` methods return the same type, allowing
+for more easier interop between two.
+
+* Rework get_raw_message to return `StreamMessage` by @Jarema in https://github.com/nats-io/nats.rs/pull/1292
+
+
+## Added
+* Add stream_by_subject by @Jarema in https://github.com/nats-io/nats.rs/pull/1287
+* Add `seen_current` to kv by @Jarema in https://github.com/nats-io/nats.rs/pull/1304
+* Add get stream no io by @Jarema in https://github.com/nats-io/nats.rs/pull/1306
+* Add `futures::Sink<PublishMessage>` on `async_nats::Client` by @rvolosatovs in https://github.com/nats-io/nats.rs/pull/1267
+* Create header name/value from String without reallocating by @glueball in https://github.com/nats-io/nats.rs/pull/1296
+
+## Fixed
+* Fix `subscription_capacity` documention default value by @nazar-pc in https://github.com/nats-io/nats.rs/pull/1277
+* Fix serde Stream roundtrip by @Jarema in https://github.com/nats-io/nats.rs/pull/1294
+* Fix KV create race after delete/purge by @fnichol in https://github.com/nats-io/nats.rs/pull/1301
+* Allow setting size limit for object storage buckets by @liamkinne in https://github.com/nats-io/nats.rs/pull/1278
+* Fix De/Serialize `sample_frequency` correctly for Push and Pull Consumers by @bengsparks in https://github.com/nats-io/nats.rs/pull/1300
+
+## Changed
+* Remove server version validation by @Jarema in https://github.com/nats-io/nats.rs/pull/1273
+* Remove unwrap from consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/1305
+
+## New Contributors
+* @HeCorr made their first contribution in https://github.com/nats-io/nats.rs/pull/1263
+* @liamkinne made their first contribution in https://github.com/nats-io/nats.rs/pull/1278
+* @nazar-pc made their first contribution in https://github.com/nats-io/nats.rs/pull/1277
+* @glueball made their first contribution in https://github.com/nats-io/nats.rs/pull/1296
+* @fnichol made their first contribution in https://github.com/nats-io/nats.rs/pull/1301
+* @rvolosatovs made their first contribution in https://github.com/nats-io/nats.rs/pull/1267
+* @bengsparks made their first contribution in https://github.com/nats-io/nats.rs/pull/1300
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.35.1...async-nats/v0.36.0
+
 # 0.35.1
 ## Overview
 
