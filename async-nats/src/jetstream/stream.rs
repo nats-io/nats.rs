@@ -118,6 +118,8 @@ impl Display for DeleteMessageErrorKind {
 pub type DeleteMessageError = Error<DeleteMessageErrorKind>;
 
 /// Handle to operations that can be performed on a `Stream`.
+/// It's generic over the type of `info` field to allow `Stream` with or without
+/// info contents.
 #[derive(Debug, Clone)]
 pub struct Stream<T = Info> {
     pub(crate) info: T,
@@ -179,6 +181,17 @@ impl Stream<Info> {
 }
 
 impl<I> Stream<I> {
+    /// Retrieves `info` about [Stream] from the server. Does not update the cache.
+    /// Can be used on Stream retrieved by [Context::get_stream_no_info]
+    pub async fn get_info(&self) -> Result<Info, InfoError> {
+        let subject = format!("STREAM.INFO.{}", self.name);
+
+        match self.context.request(subject, &json!({})).await? {
+            Response::Ok::<Info>(info) => Ok(info),
+            Response::Err { error } => Err(error.into()),
+        }
+    }
+
     /// Gets next message for a [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
@@ -1234,7 +1247,7 @@ pub enum StorageType {
 }
 
 /// Shows config and current state for this stream.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct Info {
     /// The configuration associated with this stream.
     pub config: Config,
@@ -1259,7 +1272,7 @@ pub struct DeleteStatus {
 }
 
 /// information about the given stream.
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -1454,7 +1467,7 @@ pub struct PeerInfo {
     pub lag: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SourceInfo {
     /// Source name.
     pub name: String,

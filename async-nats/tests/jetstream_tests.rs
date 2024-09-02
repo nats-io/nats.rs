@@ -2304,6 +2304,45 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn stream_info() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|err| async move { println!("error: {err:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut stream = context.get_stream("events").await.unwrap();
+        assert_eq!(
+            stream.info().await.unwrap().clone(),
+            stream.cached_info().clone()
+        );
+
+        assert_eq!(
+            stream.get_info().await.unwrap().clone(),
+            stream.cached_info().clone()
+        );
+
+        let no_info_stream = context.get_stream_no_info("events").await.unwrap();
+
+        assert_eq!(
+            no_info_stream.get_info().await.unwrap(),
+            stream.cached_info().clone()
+        );
+    }
+
+    #[tokio::test]
     async fn consumer_info() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
