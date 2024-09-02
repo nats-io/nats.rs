@@ -255,7 +255,10 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn create_stream<S>(&self, stream_config: S) -> Result<Stream, CreateStreamError>
+    pub async fn create_stream<S>(
+        &self,
+        stream_config: S,
+    ) -> Result<Stream<Info>, CreateStreamError>
     where
         Config: From<S>,
     {
@@ -307,8 +310,48 @@ impl Context {
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
+                name: config.name,
             }),
         }
+    }
+
+    /// Checks for [Stream] existence on the server and returns handle to it.
+    /// That handle can be used to manage and use [Consumer].
+    /// This variant does not fetch [Stream] info from the server.
+    /// It means it does not check if the stream actually exists.
+    /// If you run more operations on few streams, it is better to use [Context::get_stream] instead.
+    /// If you however run single operations on many streams, this method is more efficient.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_stream_no_info<T: AsRef<str>>(
+        &self,
+        stream: T,
+    ) -> Result<Stream<()>, GetStreamError> {
+        let stream = stream.as_ref();
+        if stream.is_empty() {
+            return Err(GetStreamError::new(GetStreamErrorKind::EmptyName));
+        }
+
+        if !is_valid_name(stream) {
+            return Err(GetStreamError::new(GetStreamErrorKind::InvalidStreamName));
+        }
+
+        Ok(Stream {
+            context: self.clone(),
+            info: (),
+            name: stream.to_string(),
+        })
     }
 
     /// Checks for [Stream] existence on the server and returns handle to it.
@@ -348,6 +391,7 @@ impl Context {
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
+                name: stream.to_string(),
             }),
         }
     }
@@ -404,6 +448,7 @@ impl Context {
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
+                name: config.name,
             }),
         }
     }

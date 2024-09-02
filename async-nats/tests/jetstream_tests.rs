@@ -39,7 +39,8 @@ mod jetstream {
     use async_nats::jetstream::context::{GetStreamByNameErrorKind, Publish, PublishErrorKind};
     use async_nats::jetstream::response::Response;
     use async_nats::jetstream::stream::{
-        self, ConsumerCreateStrictErrorKind, ConsumerUpdateErrorKind, DiscardPolicy, StorageType,
+        self, ConsumerCreateStrictErrorKind, ConsumerUpdateErrorKind, DirectGetErrorKind,
+        DiscardPolicy, StorageType,
     };
     #[cfg(feature = "server_2_10")]
     use async_nats::jetstream::stream::{Compression, ConsumerLimits, Source, SubjectTransform};
@@ -860,6 +861,20 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream.direct_get(22).await.expect_err("should error");
+    }
+
+    #[tokio::test]
+    async fn direct_get_no_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context.get_stream_no_info("NO_STREAM").await.unwrap();
+
+        assert_eq!(
+            stream.direct_get(1).await.unwrap_err().kind(),
+            DirectGetErrorKind::TimedOut
+        );
     }
 
     #[tokio::test]
