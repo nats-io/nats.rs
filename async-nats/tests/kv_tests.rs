@@ -53,6 +53,57 @@ mod kv {
     }
 
     #[tokio::test]
+    async fn get_or_create_bucket() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let mut kv = context
+            .get_or_create_key_value(
+                "test",
+                async_nats::jetstream::kv::Config {
+                    bucket: "test".into(),
+                    description: "test_description".into(),
+                    history: 10,
+                    storage: StorageType::File,
+                    num_replicas: 1,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let info = kv.stream.info().await.unwrap();
+        assert_eq!("KV_test", kv.stream_name);
+        assert_eq!(info.config.discard, DiscardPolicy::New);
+        assert!(info.config.allow_direct);
+
+        let mut kv2 = context
+            .get_or_create_key_value(
+                "test",
+                async_nats::jetstream::kv::Config {
+                    bucket: "test".into(),
+                    description: "test_description".into(),
+                    history: 10,
+                    storage: StorageType::File,
+                    num_replicas: 1,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let info2 = kv2.stream.info().await.unwrap();
+        assert_eq!(kv2.stream_name, kv.stream_name);
+        assert_eq!(info2.config.discard, info.config.discard);
+        assert_eq!(info2.config.allow_direct, info.config.allow_direct);
+    }
+
+    #[tokio::test]
     async fn create() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
