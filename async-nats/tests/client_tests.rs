@@ -931,4 +931,22 @@ mod client {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn client_statistics() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let stats = client.statistics().await;
+        println!("{:#?}", stats);
+
+        let mut sub = client.subscribe("test").await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
+        sub.next().await.unwrap();
+        sub.next().await.unwrap();
+
+        client.flush().await.unwrap();
+        let stats = client.statistics().await;
+        println!("{:#?}", stats);
+    }
 }

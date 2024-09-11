@@ -15,6 +15,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use crate::connection::State;
+use crate::connector::ConnectionStats;
 use crate::subject::ToSubject;
 use crate::{PublishMessage, ServerInfo};
 
@@ -83,6 +84,7 @@ pub struct Client {
     inbox_prefix: Arc<str>,
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
+    connection_stats: Arc<ConnectionStats>,
 }
 
 impl Sink<PublishMessage> for Client {
@@ -116,6 +118,7 @@ impl Client {
         inbox_prefix: String,
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
+        connection_stats: Arc<ConnectionStats>,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -128,6 +131,7 @@ impl Client {
             inbox_prefix: inbox_prefix.into(),
             request_timeout,
             max_payload,
+            connection_stats,
         }
     }
 
@@ -648,6 +652,10 @@ impl Client {
             .send(Command::Reconnect)
             .await
             .map_err(Into::into)
+    }
+
+    pub async fn statistics(&self) -> &ConnectionStats {
+        &self.connection_stats
     }
 }
 

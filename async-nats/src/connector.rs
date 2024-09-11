@@ -34,12 +34,14 @@ use crate::LANG;
 use crate::VERSION;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
+use portable_atomic::AtomicU64;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -65,11 +67,21 @@ pub(crate) struct ConnectorOptions {
     pub(crate) max_reconnects: Option<usize>,
 }
 
+#[derive(Default, Debug)]
+pub struct ConnectionStats {
+    pub in_bytes: AtomicU64,
+    pub out_bytes: AtomicU64,
+    pub in_msgs: AtomicU64,
+    pub out_msgs: AtomicU64,
+    pub reconnects: AtomicU64,
+}
+
 /// Maintains a list of servers and establishes connections.
 pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     servers: Vec<(ServerAddr, usize)>,
     options: ConnectorOptions,
+    pub(crate) connect_stats: Arc<ConnectionStats>,
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
@@ -93,6 +105,7 @@ impl Connector {
         events_tx: tokio::sync::mpsc::Sender<Event>,
         state_tx: tokio::sync::watch::Sender<State>,
         max_payload: Arc<AtomicUsize>,
+        connect_stats: Arc<ConnectionStats>,
     ) -> Result<Connector, io::Error> {
         let servers = addrs.to_server_addrs()?.map(|addr| (addr, 0)).collect();
 
@@ -103,13 +116,17 @@ impl Connector {
             events_tx,
             state_tx,
             max_payload,
+            connect_stats,
         })
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         loop {
             match self.try_connect().await {
-                Ok(inner) => return Ok(inner),
+                Ok(inner) => {
+                    self.connect_stats.reconnects.add(1, Ordering::Relaxed);
+                    return Ok(inner);
+                }
                 Err(error) => match error.kind() {
                     ConnectErrorKind::MaxReconnects => {
                         return Err(ConnectError::with_source(
