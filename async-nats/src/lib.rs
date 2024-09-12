@@ -194,7 +194,6 @@
 #![deny(rustdoc::invalid_rust_codeblocks)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-pub use connector::ConnectionStats;
 use thiserror::Error;
 
 use futures::stream::Stream;
@@ -253,7 +252,9 @@ mod connector;
 mod options;
 
 pub use auth::Auth;
-pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
+pub use client::{
+    Client, PublishError, Request, RequestError, RequestErrorKind, Statistics, SubscribeError,
+};
 pub use options::{AuthError, ConnectOptions};
 
 mod crypto;
@@ -671,7 +672,7 @@ impl ConnectionHandler {
             } => {
                 self.connector
                     .connect_stats
-                    .in_msgs
+                    .in_messages
                     .add(1, Ordering::Relaxed);
                 self.connector
                     .connect_stats
@@ -812,10 +813,6 @@ impl ConnectionHandler {
                     .map(|headers| headers.len())
                     .unwrap_or_default();
 
-                self.connector.connect_stats.out_bytes.add(
-                    (payload.len() + respond.len() + subject.len() + header_len) as u64,
-                    Ordering::Relaxed,
-                );
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
@@ -836,15 +833,21 @@ impl ConnectionHandler {
                 };
                 self.connector
                     .connect_stats
-                    .out_msgs
+                    .out_messages
                     .add(1, Ordering::Relaxed);
 
                 multiplexer.senders.insert(token.to_owned(), sender);
 
+                let respond: Subject = format!("{}{}", multiplexer.prefix, token).into();
+
+                self.connector.connect_stats.out_bytes.add(
+                    (payload.len() + respond.len() + subject.len() + header_len) as u64,
+                    Ordering::Relaxed,
+                );
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
-                    respond: Some(format!("{}{}", multiplexer.prefix, token).into()),
+                    respond: Some(respond),
                     headers,
                 };
 
@@ -859,7 +862,7 @@ impl ConnectionHandler {
             }) => {
                 self.connector
                     .connect_stats
-                    .out_msgs
+                    .out_messages
                     .add(1, Ordering::Relaxed);
 
                 let header_len = headers
@@ -949,7 +952,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
     // We're setting it to the default server payload size.
     let max_payload = Arc::new(AtomicUsize::new(1024 * 1024));
-    let connection_stats = Arc::new(ConnectionStats::default());
+    let connection_stats = Arc::new(Statistics::default());
 
     let mut connector = Connector::new(
         addrs,

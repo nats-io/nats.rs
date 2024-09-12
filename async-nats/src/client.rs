@@ -15,7 +15,6 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use crate::connection::State;
-use crate::connector::ConnectionStats;
 use crate::subject::ToSubject;
 use crate::{PublishMessage, ServerInfo};
 
@@ -84,7 +83,7 @@ pub struct Client {
     inbox_prefix: Arc<str>,
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
-    connection_stats: Arc<ConnectionStats>,
+    connection_stats: Arc<Statistics>,
 }
 
 impl Sink<PublishMessage> for Client {
@@ -118,7 +117,7 @@ impl Client {
         inbox_prefix: String,
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
-        connection_stats: Arc<ConnectionStats>,
+        connection_stats: Arc<Statistics>,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -654,8 +653,24 @@ impl Client {
             .map_err(Into::into)
     }
 
-    pub async fn statistics(&self) -> &ConnectionStats {
-        &self.connection_stats
+    /// Returns struct representing statistics of the whole lifecycle of the client.
+    /// This includes number of bytes sent/received, number of messages sent/received,
+    /// and number of times the connection was established.
+    /// As this returns [Arc] with [AtomicU64] fields, it can be safely reused and shared
+    /// across threads.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let statistics = client.statistics();
+    /// println!("client statistics: {:$?}", statistics);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn statistics(&self) -> Arc<Statistics> {
+        self.connection_stats.clone()
     }
 }
 
@@ -834,3 +849,19 @@ impl Display for FlushErrorKind {
 }
 
 pub type FlushError = Error<FlushErrorKind>;
+
+/// Represents statistics for the instance of the client throughout its lifecycle.
+#[derive(Default, Debug)]
+pub struct Statistics {
+    /// Number of bytes received. This does not include the protocol overhead.
+    pub in_bytes: AtomicU64,
+    /// Number of bytes sent. This doe not include the protocol overhead.
+    pub out_bytes: AtomicU64,
+    /// Number of messages received.
+    pub in_messages: AtomicU64,
+    /// Number of messages sent.
+    pub out_messages: AtomicU64,
+    /// Number of times connection was established.
+    /// Initial connect will be counted as well, then all successful reconnects.
+    pub connects: AtomicU64,
+}

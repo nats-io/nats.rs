@@ -22,6 +22,7 @@ mod client {
     use futures::stream::StreamExt;
     use std::path::PathBuf;
     use std::str::FromStr;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     #[tokio::test]
@@ -935,9 +936,45 @@ mod client {
     #[tokio::test]
     async fn client_statistics() {
         let server = nats_server::run_basic_server();
-        let client = async_nats::connect(server.client_url()).await.unwrap();
-        let stats = client.statistics().await;
-        println!("{:#?}", stats);
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(move |event| {
+                let tx = tx.clone();
+                async move {
+                    if let Event::Connected = event {
+                        tx.send(()).await.unwrap();
+                    }
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let stats = client.statistics();
+
+        assert_eq!(stats.in_messages.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.out_messages.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.in_bytes.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.out_bytes.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.connects.load(Ordering::Relaxed), 1);
+
+        let mut responder = client.subscribe("request").await.unwrap();
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                let msg = responder.next().await.unwrap();
+                client
+                    .publish(msg.reply.unwrap(), "response".into())
+                    .await
+                    .unwrap();
+            }
+        });
+        client.request("request", "data".into()).await.unwrap();
 
         let mut sub = client.subscribe("test").await.unwrap();
         client.publish("test", "data".into()).await.unwrap();
@@ -946,7 +983,17 @@ mod client {
         sub.next().await.unwrap();
 
         client.flush().await.unwrap();
-        let stats = client.statistics().await;
-        println!("{:#?}", stats);
+        client.force_reconnect().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(stats.in_messages.load(Ordering::Relaxed), 4);
+        assert_eq!(stats.out_messages.load(Ordering::Relaxed), 4);
+        assert_eq!(stats.in_bytes.load(Ordering::Relaxed), 139);
+        assert_eq!(stats.out_bytes.load(Ordering::Relaxed), 139);
+        assert_eq!(stats.connects.load(Ordering::Relaxed), 2);
     }
 }
