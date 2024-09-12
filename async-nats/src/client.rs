@@ -666,7 +666,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let statistics = client.statistics();
-    /// println!("client statistics: {:$?}", statistics);
+    /// println!("client statistics: {:#?}", statistics);
     /// # Ok(())
     /// # }
     /// ```
