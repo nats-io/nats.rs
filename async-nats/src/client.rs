@@ -109,6 +109,7 @@ impl Sink<PublishMessage> for Client {
 }
 
 impl Client {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         info: tokio::sync::watch::Receiver<ServerInfo>,
         state: tokio::sync::watch::Receiver<State>,
