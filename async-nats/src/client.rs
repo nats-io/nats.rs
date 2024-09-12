@@ -118,7 +118,7 @@ impl Client {
         inbox_prefix: String,
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
-        connection_stats: Arc<Statistics>,
+        statistics: Arc<Statistics>,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -131,7 +131,7 @@ impl Client {
             inbox_prefix: inbox_prefix.into(),
             request_timeout,
             max_payload,
-            connection_stats,
+            connection_stats: statistics,
         }
     }
 

@@ -952,7 +952,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
     // We're setting it to the default server payload size.
     let max_payload = Arc::new(AtomicUsize::new(1024 * 1024));
-    let connection_stats = Arc::new(Statistics::default());
+    let statistics = Arc::new(Statistics::default());
 
     let mut connector = Connector::new(
         addrs,
@@ -977,7 +977,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         events_tx,
         state_tx,
         max_payload.clone(),
-        connection_stats.clone(),
+        statistics.clone(),
     )
     .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
@@ -1001,7 +1001,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.inbox_prefix,
         options.request_timeout,
         max_payload,
-        connection_stats,
+        statistics,
     );
 
     task::spawn(async move {
