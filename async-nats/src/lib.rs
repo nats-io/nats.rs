@@ -213,6 +213,7 @@ use std::pin::Pin;
 use std::slice;
 use std::str::{self, FromStr};
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
@@ -251,7 +252,9 @@ mod connector;
 mod options;
 
 pub use auth::Auth;
-pub use client::{Client, PublishError, Request, RequestError, RequestErrorKind, SubscribeError};
+pub use client::{
+    Client, PublishError, Request, RequestError, RequestErrorKind, Statistics, SubscribeError,
+};
 pub use options::{AuthError, ConnectOptions};
 
 mod crypto;
@@ -667,6 +670,15 @@ impl ConnectionHandler {
                 description,
                 length,
             } => {
+                self.connector
+                    .connect_stats
+                    .in_messages
+                    .add(1, Ordering::Relaxed);
+                self.connector
+                    .connect_stats
+                    .in_bytes
+                    .add(length as u64, Ordering::Relaxed);
+
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message: Message = Message {
                         subject,
@@ -796,6 +808,11 @@ impl ConnectionHandler {
             } => {
                 let (prefix, token) = respond.rsplit_once('.').expect("malformed request subject");
 
+                let header_len = headers
+                    .as_ref()
+                    .map(|headers| headers.len())
+                    .unwrap_or_default();
+
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
@@ -814,13 +831,23 @@ impl ConnectionHandler {
                         senders: HashMap::new(),
                     })
                 };
+                self.connector
+                    .connect_stats
+                    .out_messages
+                    .add(1, Ordering::Relaxed);
 
                 multiplexer.senders.insert(token.to_owned(), sender);
 
+                let respond: Subject = format!("{}{}", multiplexer.prefix, token).into();
+
+                self.connector.connect_stats.out_bytes.add(
+                    (payload.len() + respond.len() + subject.len() + header_len) as u64,
+                    Ordering::Relaxed,
+                );
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
-                    respond: Some(format!("{}{}", multiplexer.prefix, token).into()),
+                    respond: Some(respond),
                     headers,
                 };
 
@@ -833,6 +860,24 @@ impl ConnectionHandler {
                 reply: respond,
                 headers,
             }) => {
+                self.connector
+                    .connect_stats
+                    .out_messages
+                    .add(1, Ordering::Relaxed);
+
+                let header_len = headers
+                    .as_ref()
+                    .map(|headers| headers.len())
+                    .unwrap_or_default();
+
+                self.connector.connect_stats.out_bytes.add(
+                    (payload.len()
+                        + respond.as_ref().map_or_else(|| 0, |r| r.len())
+                        + subject.len()
+                        + header_len) as u64,
+                    Ordering::Relaxed,
+                );
+
                 self.connection.enqueue_write_op(&ClientOp::Publish {
                     subject,
                     payload,
@@ -907,6 +952,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
     // We're setting it to the default server payload size.
     let max_payload = Arc::new(AtomicUsize::new(1024 * 1024));
+    let statistics = Arc::new(Statistics::default());
 
     let mut connector = Connector::new(
         addrs,
@@ -931,6 +977,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         events_tx,
         state_tx,
         max_payload.clone(),
+        statistics.clone(),
     )
     .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
@@ -954,6 +1001,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.inbox_prefix,
         options.request_timeout,
         max_payload,
+        statistics,
     );
 
     task::spawn(async move {
