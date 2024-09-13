@@ -185,7 +185,7 @@ impl ServiceBuilder {
     }
 
     /// Disables queue group for the service.
-    pub fn no_queue_group(mut self) -> Self {
+    pub fn disabled_queue_group(mut self) -> Self {
         self.disabled_queue_group = true;
         self
     }
