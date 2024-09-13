@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::auth::Auth;
+use crate::client::Statistics;
 use crate::connection::Connection;
 use crate::connection::State;
 use crate::options::CallbackArg1;
@@ -40,6 +41,7 @@ use std::cmp;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -70,6 +72,7 @@ pub(crate) struct Connector {
     /// A map of servers and number of connect attempts.
     servers: Vec<(ServerAddr, usize)>,
     options: ConnectorOptions,
+    pub(crate) connect_stats: Arc<Statistics>,
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
@@ -93,6 +96,7 @@ impl Connector {
         events_tx: tokio::sync::mpsc::Sender<Event>,
         state_tx: tokio::sync::watch::Sender<State>,
         max_payload: Arc<AtomicUsize>,
+        connect_stats: Arc<Statistics>,
     ) -> Result<Connector, io::Error> {
         let servers = addrs.to_server_addrs()?.map(|addr| (addr, 0)).collect();
 
@@ -103,13 +107,16 @@ impl Connector {
             events_tx,
             state_tx,
             max_payload,
+            connect_stats,
         })
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         loop {
             match self.try_connect().await {
-                Ok(inner) => return Ok(inner),
+                Ok(inner) => {
+                    return Ok(inner);
+                }
                 Err(error) => match error.kind() {
                     ConnectErrorKind::MaxReconnects => {
                         return Err(ConnectError::with_source(
@@ -284,6 +291,7 @@ impl Connector {
                             Some(_) => {
                                 tracing::debug!("connected to {}", server_info.port);
                                 self.attempts = 0;
+                                self.connect_stats.connects.add(1, Ordering::Relaxed);
                                 self.events_tx.send(Event::Connected).await.ok();
                                 self.state_tx.send(State::Connected).ok();
                                 self.max_payload.store(

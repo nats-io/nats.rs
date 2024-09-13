@@ -83,6 +83,7 @@ pub struct Client {
     inbox_prefix: Arc<str>,
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
+    connection_stats: Arc<Statistics>,
 }
 
 impl Sink<PublishMessage> for Client {
@@ -108,6 +109,7 @@ impl Sink<PublishMessage> for Client {
 }
 
 impl Client {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         info: tokio::sync::watch::Receiver<ServerInfo>,
         state: tokio::sync::watch::Receiver<State>,
@@ -116,6 +118,7 @@ impl Client {
         inbox_prefix: String,
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
+        statistics: Arc<Statistics>,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -128,6 +131,7 @@ impl Client {
             inbox_prefix: inbox_prefix.into(),
             request_timeout,
             max_payload,
+            connection_stats: statistics,
         }
     }
 
@@ -649,6 +653,26 @@ impl Client {
             .await
             .map_err(Into::into)
     }
+
+    /// Returns struct representing statistics of the whole lifecycle of the client.
+    /// This includes number of bytes sent/received, number of messages sent/received,
+    /// and number of times the connection was established.
+    /// As this returns [Arc] with [AtomicU64] fields, it can be safely reused and shared
+    /// across threads.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let statistics = client.statistics();
+    /// println!("client statistics: {:#?}", statistics);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn statistics(&self) -> Arc<Statistics> {
+        self.connection_stats.clone()
+    }
 }
 
 /// Used for building customized requests.
@@ -826,3 +850,19 @@ impl Display for FlushErrorKind {
 }
 
 pub type FlushError = Error<FlushErrorKind>;
+
+/// Represents statistics for the instance of the client throughout its lifecycle.
+#[derive(Default, Debug)]
+pub struct Statistics {
+    /// Number of bytes received. This does not include the protocol overhead.
+    pub in_bytes: AtomicU64,
+    /// Number of bytes sent. This doe not include the protocol overhead.
+    pub out_bytes: AtomicU64,
+    /// Number of messages received.
+    pub in_messages: AtomicU64,
+    /// Number of messages sent.
+    pub out_messages: AtomicU64,
+    /// Number of times connection was established.
+    /// Initial connect will be counted as well, then all successful reconnects.
+    pub connects: AtomicU64,
+}
