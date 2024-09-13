@@ -13,7 +13,7 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::{collections::HashMap, str::from_utf8};
+    use std::{collections::HashMap, str::from_utf8, time::Duration};
 
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures::StreamExt;
@@ -55,6 +55,7 @@ mod service {
                 stats_handler: None,
                 metadata: None,
                 queue_group: None,
+                disabled_queue_group: false,
             })
             .await
             .unwrap_err()
@@ -72,6 +73,7 @@ mod service {
                 stats_handler: None,
                 metadata: None,
                 queue_group: None,
+                disabled_queue_group: false,
             })
             .await
             .unwrap_err()
@@ -122,6 +124,157 @@ mod service {
     }
 
     #[tokio::test]
+    async fn no_queue_group() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .add_service(async_nats::service::Config {
+                name: "serviceA".into(),
+                description: None,
+                version: "1.0.0".to_string(),
+                stats_handler: None,
+                metadata: None,
+                queue_group: None,
+                disabled_queue_group: true,
+            })
+            .await
+            .unwrap();
+
+        let mut endpoint = service.endpoint("products").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let second_service = client
+            .add_service(async_nats::service::Config {
+                name: "serviceB".into(),
+                description: None,
+                version: "1.0.0".to_string(),
+                stats_handler: None,
+                metadata: None,
+                queue_group: None,
+                disabled_queue_group: true,
+            })
+            .await
+            .unwrap();
+
+        let mut second_endpoint = second_service.endpoint("products").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = second_endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let responses = client.subscribe("responses").await.unwrap();
+        client
+            .publish_with_reply("products", "responses", "data".into())
+            .await
+            .unwrap();
+
+        let responses = tokio::time::timeout(Duration::from_secs(5), responses.take(2).count())
+            .await
+            .unwrap();
+
+        assert_eq!(responses, 2);
+
+        service.stop().await.unwrap();
+        second_service.stop().await.unwrap();
+
+        // Now check if disabling queue group at group level works.
+        let service = client
+            .add_service(async_nats::service::Config {
+                name: "serviceA".into(),
+                description: None,
+                version: "1.0.0".to_string(),
+                stats_handler: None,
+                metadata: None,
+                queue_group: None,
+                disabled_queue_group: false,
+            })
+            .await
+            .unwrap();
+
+        let group = service.group_with_disabled_queue_group("v1");
+        let mut endpoint = group.endpoint("products").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let second_service = client
+            .add_service(async_nats::service::Config {
+                name: "serviceB".into(),
+                description: None,
+                version: "1.0.0".to_string(),
+                stats_handler: None,
+                metadata: None,
+                queue_group: None,
+                disabled_queue_group: false,
+            })
+            .await
+            .unwrap();
+
+        let second_group = second_service.group_with_disabled_queue_group("v1");
+        let mut second_endpoint = second_group.endpoint("products").await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = second_endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let responses = client.subscribe("responses").await.unwrap();
+        client
+            .publish_with_reply("v1.products", "responses", "data".into())
+            .await
+            .unwrap();
+
+        let responses = tokio::time::timeout(Duration::from_secs(5), responses.take(2).count())
+            .await
+            .unwrap();
+        assert_eq!(responses, 2);
+
+        let mut no_group_endpoint = service
+            .endpoint_builder()
+            .disabled_queue_group()
+            .add("events")
+            .await
+            .unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = no_group_endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let mut second_no_group_endpoint = second_service
+            .endpoint_builder()
+            .disabled_queue_group()
+            .add("events")
+            .await
+            .unwrap();
+
+        tokio::task::spawn(async move {
+            while let Some(request) = second_no_group_endpoint.next().await {
+                request.respond(Ok("ok".into())).await.unwrap();
+            }
+        });
+
+        let responses = client.subscribe("events_responses").await.unwrap();
+        client
+            .publish_with_reply("events", "events_responses", "data".into())
+            .await
+            .unwrap();
+
+        let responses = tokio::time::timeout(Duration::from_secs(5), responses.take(2).count())
+            .await
+            .unwrap();
+        assert_eq!(responses, 2);
+    }
+
+    #[tokio::test]
     async fn ping() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -133,6 +286,7 @@ mod service {
                 stats_handler: None,
                 metadata: None,
                 queue_group: None,
+                disabled_queue_group: false,
             })
             .await
             .unwrap();
@@ -145,6 +299,7 @@ mod service {
                 stats_handler: None,
                 metadata: None,
                 queue_group: None,
+                disabled_queue_group: false,
             })
             .await
             .unwrap();
@@ -172,6 +327,7 @@ mod service {
                 stats_handler: None,
                 metadata: None,
                 queue_group: None,
+                disabled_queue_group: false,
             })
             .await
             .unwrap();
@@ -212,6 +368,7 @@ mod service {
                 stats_handler: None,
                 metadata: None,
                 queue_group: None,
+                disabled_queue_group: false,
             })
             .await
             .unwrap();

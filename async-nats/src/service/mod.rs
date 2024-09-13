@@ -133,6 +133,7 @@ pub struct Config {
     pub metadata: Option<HashMap<String, String>>,
     /// Custom queue group config
     pub queue_group: Option<String>,
+    pub disabled_queue_group: bool,
 }
 
 pub struct ServiceBuilder {
@@ -141,6 +142,7 @@ pub struct ServiceBuilder {
     stats_handler: Option<StatsHandler>,
     metadata: Option<HashMap<String, String>>,
     queue_group: Option<String>,
+    disabled_queue_group: bool,
 }
 
 impl ServiceBuilder {
@@ -151,6 +153,7 @@ impl ServiceBuilder {
             stats_handler: None,
             metadata: None,
             queue_group: None,
+            disabled_queue_group: false,
         }
     }
 
@@ -181,6 +184,12 @@ impl ServiceBuilder {
         self
     }
 
+    /// Disables queue group for the service.
+    pub fn no_queue_group(mut self) -> Self {
+        self.disabled_queue_group = true;
+        self
+    }
+
     /// Starts the service with configured options.
     pub async fn start<S: ToString>(self, name: S, version: S) -> Result<Service, Error> {
         Service::add(
@@ -192,6 +201,7 @@ impl ServiceBuilder {
                 stats_handler: self.stats_handler,
                 metadata: self.metadata,
                 queue_group: self.queue_group,
+                disabled_queue_group: self.disabled_queue_group,
             },
         )
         .await
@@ -322,6 +332,7 @@ pub struct Service {
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     subjects: Arc<Mutex<Vec<String>>>,
     queue_group: String,
+    disabled_queue_group: bool,
 }
 
 impl Service {
@@ -344,9 +355,14 @@ impl Service {
             endpoints: HashMap::new(),
         }));
 
-        let queue_group = config
-            .queue_group
-            .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
+        let queue_group = config.queue_group.unwrap_or_else(|| {
+            if config.disabled_queue_group {
+                "".to_string()
+            } else {
+                DEFAULT_QUEUE_GROUP.to_string()
+            }
+        });
+
         let id = nuid::next().to_string();
         let started = time::OffsetDateTime::now_utc();
         let subjects = Arc::new(Mutex::new(Vec::new()));
@@ -441,6 +457,7 @@ impl Service {
             shutdown_tx,
             subjects,
             queue_group,
+            disabled_queue_group: config.disabled_queue_group,
         })
     }
     /// Stops this instance of the [Service].
@@ -527,6 +544,19 @@ impl Service {
             client: self.client.clone(),
             shutdown_tx: self.shutdown_tx.clone(),
             queue_group: queue_group.to_string(),
+            disabled_queue_group: false,
+        }
+    }
+
+    pub fn group_with_disabled_queue_group<S: ToString>(&self, prefix: S) -> Group {
+        Group {
+            subjects: self.subjects.clone(),
+            prefix: prefix.to_string(),
+            stats: self.endpoints_state.clone(),
+            client: self.client.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+            queue_group: "".to_string(),
+            disabled_queue_group: true,
         }
     }
 
@@ -556,6 +586,7 @@ impl Service {
             self.shutdown_tx.clone(),
             self.subjects.clone(),
             self.queue_group.clone(),
+            self.disabled_queue_group,
         )
     }
 
@@ -581,6 +612,7 @@ impl Service {
             self.shutdown_tx.clone(),
             self.subjects.clone(),
             self.queue_group.clone(),
+            self.disabled_queue_group,
         )
         .add(subject)
         .await
@@ -594,6 +626,7 @@ pub struct Group {
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     subjects: Arc<Mutex<Vec<String>>>,
     queue_group: String,
+    disabled_queue_group: bool,
 }
 
 impl Group {
@@ -645,6 +678,7 @@ impl Group {
             shutdown_tx: self.shutdown_tx.clone(),
             subjects: self.subjects.clone(),
             queue_group: queue_group.to_string(),
+            disabled_queue_group: false,
         }
     }
 
@@ -671,6 +705,7 @@ impl Group {
             self.shutdown_tx.clone(),
             self.subjects.clone(),
             self.queue_group.clone(),
+            self.disabled_queue_group,
         );
         endpoint.prefix = Some(self.prefix.clone());
         endpoint.add(subject.to_string()).await
@@ -699,6 +734,7 @@ impl Group {
             self.shutdown_tx.clone(),
             self.subjects.clone(),
             self.queue_group.clone(),
+            self.disabled_queue_group,
         );
         endpoint.prefix = Some(self.prefix.clone());
         endpoint
@@ -802,6 +838,7 @@ pub struct EndpointBuilder {
     subjects: Arc<Mutex<Vec<String>>>,
     queue_group: String,
     prefix: Option<String>,
+    disabled_queue_group: bool,
 }
 
 impl EndpointBuilder {
@@ -811,6 +848,7 @@ impl EndpointBuilder {
         shutdown_tx: Sender<()>,
         subjects: Arc<Mutex<Vec<String>>>,
         queue_group: String,
+        disabled_queue_group: bool,
     ) -> EndpointBuilder {
         EndpointBuilder {
             client,
@@ -821,6 +859,7 @@ impl EndpointBuilder {
             metadata: None,
             queue_group,
             prefix: None,
+            disabled_queue_group,
         }
     }
 
@@ -842,6 +881,11 @@ impl EndpointBuilder {
         self
     }
 
+    pub fn disabled_queue_group(mut self) -> EndpointBuilder {
+        self.disabled_queue_group = true;
+        self
+    }
+
     /// Finalizes the builder and adds the [Endpoint].
     pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, Error> {
         let mut subject = subject.to_string();
@@ -853,10 +897,21 @@ impl EndpointBuilder {
             .name
             .clone()
             .unwrap_or_else(|| subject.clone().replace('.', "-"));
-        let requests = self
-            .client
-            .queue_subscribe(subject.to_owned(), self.queue_group.to_string())
-            .await?;
+
+        let queue_group = if self.disabled_queue_group {
+            // if queue group is disabled, we do not want to pass the default/inherited one.
+            "".to_string()
+        } else {
+            self.queue_group
+        };
+        let requests = if self.disabled_queue_group {
+            self.client.subscribe(subject.to_owned()).await?
+        } else {
+            self.client
+                .queue_subscribe(subject.to_owned(), queue_group.clone())
+                .await?
+        };
+
         debug!("created service for endpoint {subject}");
 
         let shutdown_rx = self.shutdown_tx.subscribe();
@@ -869,7 +924,7 @@ impl EndpointBuilder {
                 name,
                 subject: subject.clone(),
                 metadata: self.metadata.unwrap_or_default(),
-                queue_group: self.queue_group.clone(),
+                queue_group: queue_group.clone(),
                 ..Default::default()
             });
         self.subjects.lock().unwrap().push(subject.clone());
