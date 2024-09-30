@@ -959,8 +959,8 @@ mod client {
 
         assert_eq!(stats.in_messages.load(Ordering::Relaxed), 0);
         assert_eq!(stats.out_messages.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.in_bytes.load(Ordering::Relaxed), 0);
-        assert_eq!(stats.out_bytes.load(Ordering::Relaxed), 0);
+        assert!(stats.in_bytes.load(Ordering::Relaxed) != 0);
+        assert!(stats.out_bytes.load(Ordering::Relaxed) != 0);
         assert_eq!(stats.connects.load(Ordering::Relaxed), 1);
 
         let mut responder = client.subscribe("request").await.unwrap();
@@ -992,8 +992,8 @@ mod client {
 
         assert_eq!(stats.in_messages.load(Ordering::Relaxed), 4);
         assert_eq!(stats.out_messages.load(Ordering::Relaxed), 4);
-        assert_eq!(stats.in_bytes.load(Ordering::Relaxed), 139);
-        assert_eq!(stats.out_bytes.load(Ordering::Relaxed), 139);
+        assert!(stats.in_bytes.load(Ordering::Relaxed) != 0);
+        assert!(stats.out_bytes.load(Ordering::Relaxed) != 0);
         assert_eq!(stats.connects.load(Ordering::Relaxed), 2);
     }
 }

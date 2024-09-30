@@ -335,6 +335,7 @@ impl Connector {
         let mut connection = Connection::new(
             Box::new(tcp_stream),
             self.options.read_buffer_capacity.into(),
+            self.connect_stats.clone(),
         );
 
         let tls_connection = |connection: Connection| async {
@@ -352,7 +353,11 @@ impl Connector {
                 .connect(domain.to_owned(), connection.stream)
                 .await?;
 
-            Ok::<Connection, ConnectError>(Connection::new(Box::new(tls_stream), 0))
+            Ok::<Connection, ConnectError>(Connection::new(
+                Box::new(tls_stream),
+                0,
+                self.connect_stats.clone(),
+            ))
         };
 
         // If `tls_first` was set, establish TLS connection before getting INFO.
