@@ -674,10 +674,6 @@ impl ConnectionHandler {
                     .connect_stats
                     .in_messages
                     .add(1, Ordering::Relaxed);
-                self.connector
-                    .connect_stats
-                    .in_bytes
-                    .add(length as u64, Ordering::Relaxed);
 
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     let message: Message = Message {
@@ -808,11 +804,6 @@ impl ConnectionHandler {
             } => {
                 let (prefix, token) = respond.rsplit_once('.').expect("malformed request subject");
 
-                let header_len = headers
-                    .as_ref()
-                    .map(|headers| headers.len())
-                    .unwrap_or_default();
-
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
@@ -840,10 +831,6 @@ impl ConnectionHandler {
 
                 let respond: Subject = format!("{}{}", multiplexer.prefix, token).into();
 
-                self.connector.connect_stats.out_bytes.add(
-                    (payload.len() + respond.len() + subject.len() + header_len) as u64,
-                    Ordering::Relaxed,
-                );
                 let pub_op = ClientOp::Publish {
                     subject,
                     payload,
