@@ -616,6 +616,22 @@ impl Client {
         Ok(())
     }
 
+    /// Drains all subscriptions, stops any new messages from being published, and flushes any remaining
+    /// messages, then closes the connection
+    ///
+    /// # Examples
+    /// TODO
+    pub async fn drain(&self) -> Result<(), DrainError> {
+        // Drain all subscriptions
+        self.sender.send(Command::Drain { sid: None }).await?;
+
+        // Ensure any outgoing messages are flushed
+        self.flush().await?;
+
+        // Remaining process is handled on the handler-side
+        Ok(())
+    }
+
     /// Returns the current state of the connection.
     ///
     /// # Examples
@@ -790,6 +806,22 @@ pub struct SubscribeError(#[source] crate::Error);
 impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
         SubscribeError(Box::new(err))
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("failed to send drain: {0}")]
+pub struct DrainError(#[source] crate::Error);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for DrainError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        DrainError(Box::new(err))
+    }
+}
+
+impl From<FlushError> for DrainError {
+    fn from(err: FlushError) -> Self {
+        DrainError(Box::new(err))
     }
 }
 

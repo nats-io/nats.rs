@@ -378,6 +378,9 @@ pub(crate) enum Command {
     Flush {
         observer: oneshot::Sender<()>,
     },
+    Drain {
+        sid: Option<u64>,
+    },
     Reconnect,
 }
 
@@ -411,6 +414,7 @@ struct Subscription {
     queue_group: Option<String>,
     delivered: u64,
     max: Option<u64>,
+    is_draining: bool,
 }
 
 #[derive(Debug)]
@@ -431,6 +435,7 @@ pub(crate) struct ConnectionHandler {
     ping_interval: Interval,
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
+    is_draining: bool,
 }
 
 impl ConnectionHandler {
@@ -453,6 +458,7 @@ impl ConnectionHandler {
             ping_interval,
             should_reconnect: false,
             flush_observers: Vec::new(),
+            is_draining: false,
         }
     }
 
@@ -530,6 +536,19 @@ impl ConnectionHandler {
                             return Poll::Ready(ExitReason::Disconnected(Some(err)))
                         }
                     }
+                }
+
+                // Before handling any commands, drop any subscriptions which are draining
+                // Note: safe to assume drain has completed, as we would have flushed all outgoing
+                // UNSUB messages in the previous call to this fn, and we would have processed and delivered
+                // any remaining messages to the subscription in the loop above.
+                self.handler.subscriptions.retain(|_, s| !s.is_draining);
+
+                if self.handler.is_draining {
+                    // The entire connection is draining. This means we flushed outgoing messages and all subs
+                    // were drained by the above retain and we should exit instead of processing any further
+                    // messages
+                    return Poll::Ready(ExitReason::Closed);
                 }
 
                 // WARNING: after the following loop `handle_command`,
@@ -777,6 +796,25 @@ impl ConnectionHandler {
             Command::Flush { observer } => {
                 self.flush_observers.push(observer);
             }
+            Command::Drain { sid } => {
+                let mut drain_sub = |sid: &u64, sub: &mut Subscription| {
+                    sub.is_draining = true;
+                    self.connection.enqueue_write_op(&ClientOp::Unsubscribe {
+                        sid: *sid,
+                        max: None,
+                    });
+                };
+
+                if let Some(sid) = sid {
+                    if let Some(sub) = self.subscriptions.get_mut(&sid) {
+                        drain_sub(&sid, sub);
+                    }
+                } else {
+                    for (sid, sub) in self.subscriptions.iter_mut() {
+                        drain_sub(sid, sub);
+                    }
+                }
+            }
             Command::Subscribe {
                 sid,
                 subject,
@@ -789,6 +827,7 @@ impl ConnectionHandler {
                     max: None,
                     subject: subject.to_owned(),
                     queue_group: queue_group.to_owned(),
+                    is_draining: false,
                 };
 
                 self.subscriptions.insert(sid, subscription);
@@ -1262,6 +1301,48 @@ impl Subscriber {
                 max: Some(unsub_after),
             })
             .await?;
+        Ok(())
+    }
+
+    /// Unsubscribes from subscription immediately leaves the stream open for the configured drain period
+    /// to allow any in-flight messages on the subscription to be delivered. The stream will be closed
+    /// at the end of the drain period
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures::StreamExt;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    ///
+    /// let mut subscriber = client.subscribe("test").await?;
+    ///
+    /// tokio::spawn({
+    ///     let task_client = client.clone();
+    ///     async move {
+    ///         loop {
+    ///             _ = task_client.publish("test", "data".into()).await;
+    ///         }
+    ///     }
+    /// });
+    ///
+    /// client.flush().await?;
+    /// subscriber.drain().await?;
+    ///
+    /// while let Some(message) = subscriber.next().await {
+    ///     println!("message received: {:?}", message);
+    /// }
+    /// println!("no more messages, unsubscribed");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn drain(&mut self) -> Result<(), UnsubscribeError> {
+        self.sender
+            .send(Command::Drain {
+                sid: Some(self.sid),
+            })
+            .await?;
+
         Ok(())
     }
 }
