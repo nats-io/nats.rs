@@ -625,9 +625,6 @@ impl Client {
         // Drain all subscriptions
         self.sender.send(Command::Drain { sid: None }).await?;
 
-        // Ensure any outgoing messages are flushed
-        self.flush().await?;
-
         // Remaining process is handled on the handler-side
         Ok(())
     }
@@ -815,12 +812,6 @@ pub struct DrainError(#[source] crate::Error);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for DrainError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        DrainError(Box::new(err))
-    }
-}
-
-impl From<FlushError> for DrainError {
-    fn from(err: FlushError) -> Self {
         DrainError(Box::new(err))
     }
 }
