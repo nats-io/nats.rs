@@ -925,8 +925,6 @@ impl RequestMany {
             .max_wait
             .map(|max_wait| Box::pin(tokio::time::sleep(max_wait)));
 
-        println!("max wait: {:?}", self.max_wait);
-
         Ok(Responses {
             timer,
             stall: None,
