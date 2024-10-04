@@ -22,7 +22,7 @@ use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber}
 use crate::error::Error;
 use bytes::Bytes;
 use futures::future::TryFutureExt;
-use futures::{Sink, SinkExt as _, StreamExt};
+use futures::{FutureExt, Sink, SinkExt as _, Stream, StreamExt};
 use once_cell::sync::Lazy;
 use portable_atomic::AtomicU64;
 use regex::Regex;
@@ -673,6 +673,10 @@ impl Client {
     pub fn statistics(&self) -> Arc<Statistics> {
         self.connection_stats.clone()
     }
+
+    pub fn request_many(&self) -> RequestMany {
+        RequestMany::new(self.clone(), self.request_timeout)
+    }
 }
 
 /// Used for building customized requests.
@@ -865,4 +869,144 @@ pub struct Statistics {
     /// Number of times connection was established.
     /// Initial connect will be counted as well, then all successful reconnects.
     pub connects: AtomicU64,
+}
+
+pub struct RequestMany {
+    client: Client,
+    sentinel: Option<Box<dyn Fn(&crate::Message) -> bool + 'static>>,
+    max_wait: Option<Duration>,
+    stall_wait: Option<Duration>,
+    max_messags: Option<usize>,
+}
+
+impl RequestMany {
+    pub fn new(client: Client, max_wait: Option<Duration>) -> Self {
+        RequestMany {
+            client,
+            sentinel: None,
+            max_wait,
+            stall_wait: None,
+            max_messags: None,
+        }
+    }
+
+    pub fn sentinel(mut self, sentinel: impl Fn(&crate::Message) -> bool + 'static) -> Self {
+        self.sentinel = Some(Box::new(sentinel));
+        self
+    }
+
+    pub fn stall_wait(mut self, stall_wait: Duration) -> Self {
+        self.stall_wait = Some(stall_wait);
+        self
+    }
+
+    pub fn max_messages(mut self, max_messages: usize) -> Self {
+        self.max_messags = Some(max_messages);
+        self
+    }
+
+    pub fn max_wait(mut self, max_wait: Option<Duration>) -> Self {
+        self.max_wait = max_wait;
+        self
+    }
+
+    pub async fn send<S: ToSubject>(
+        self,
+        subject: S,
+        payload: Bytes,
+    ) -> Result<Responses, RequestError> {
+        let response_subject = self.client.new_inbox();
+        let responses = self.client.subscribe(response_subject.clone()).await?;
+        self.client
+            .publish_with_reply(subject, response_subject, payload)
+            .await?;
+
+        let timer = self
+            .max_wait
+            .map(|max_wait| Box::pin(tokio::time::sleep(max_wait)));
+
+        println!("max wait: {:?}", self.max_wait);
+
+        Ok(Responses {
+            timer,
+            stall: None,
+            responses,
+            messages_received: 0,
+            sentinel: self.sentinel,
+            max_messages: self.max_messags,
+            stall_wait: self.stall_wait,
+        })
+    }
+}
+
+pub struct Responses {
+    responses: Subscriber,
+    messages_received: usize,
+    timer: Option<Pin<Box<tokio::time::Sleep>>>,
+    stall: Option<Pin<Box<tokio::time::Sleep>>>,
+    sentinel: Option<Box<dyn Fn(&crate::Message) -> bool + 'static>>,
+    max_messages: Option<usize>,
+    stall_wait: Option<Duration>,
+}
+
+impl Stream for Responses {
+    type Item = crate::Message;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // max_wait
+        if let Some(timer) = self.timer.as_mut() {
+            match timer.poll_unpin(cx) {
+                Poll::Ready(_) => {
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => {}
+            }
+        }
+
+        // max_messages
+        if let Some(max_messages) = self.max_messages {
+            if self.messages_received >= max_messages {
+                return Poll::Ready(None);
+            }
+        }
+
+        // stall_wait
+        if let Some(stall) = self.stall_wait {
+            let stall = self
+                .stall
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(stall)));
+
+            match stall.as_mut().poll_unpin(cx) {
+                Poll::Ready(_) => {
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => {}
+            }
+        }
+
+        match self.responses.receiver.poll_recv(cx) {
+            Poll::Ready(message) => match message {
+                Some(message) => {
+                    self.messages_received += 1;
+
+                    // reset timer
+                    self.stall = None;
+
+                    // sentinel
+                    match self.sentinel {
+                        Some(ref sentinel) => {
+                            if sentinel(&message) {
+                                Poll::Ready(None)
+                            } else {
+                                return Poll::Ready(Some(message));
+                            }
+                        }
+                        None => Poll::Ready(Some(message)),
+                    }
+                }
+                None => Poll::Ready(None),
+            },
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }

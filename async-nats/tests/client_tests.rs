@@ -996,4 +996,109 @@ mod client {
         assert!(stats.out_bytes.load(Ordering::Relaxed) != 0);
         assert_eq!(stats.connects.load(Ordering::Relaxed), 2);
     }
+
+    #[tokio::test]
+    async fn request_many() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // request many with sentinel
+        let mut requests = client.subscribe("test").await.unwrap();
+        let responses = client
+            .request_many()
+            .sentinel(|msg| msg.payload.is_empty())
+            .send("test", "data".into())
+            .await
+            .unwrap();
+
+        let request = requests.next().await.unwrap();
+
+        for _ in 0..100 {
+            client
+                .publish(request.reply.clone().unwrap(), "data".into())
+                .await
+                .unwrap();
+        }
+        client
+            .publish(request.reply.unwrap(), "".into())
+            .await
+            .unwrap();
+
+        assert_eq!(responses.count().await, 100);
+        requests.unsubscribe().await.unwrap();
+
+        // request many with max messages
+        let mut requests = client.subscribe("test").await.unwrap();
+        let responses = client
+            .request_many()
+            .max_messages(20)
+            .send("test", "data".into())
+            .await
+            .unwrap();
+
+        let request = requests.next().await.unwrap();
+
+        for _ in 1..=100 {
+            client
+                .publish(request.reply.clone().unwrap(), "data".into())
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(responses.count().await, 20);
+        requests.unsubscribe().await.unwrap();
+
+        // request many with stall
+        let mut requests = client.subscribe("test").await.unwrap();
+        let responses = client
+            .request_many()
+            .stall_wait(Duration::from_millis(100))
+            .send("test", "data".into())
+            .await
+            .unwrap();
+
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                let request = requests.next().await.unwrap();
+                for i in 1..=100 {
+                    if i == 51 {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    client
+                        .publish(request.reply.clone().unwrap(), "data".into())
+                        .await
+                        .unwrap();
+                }
+                requests.unsubscribe().await.unwrap();
+            }
+        });
+        assert_eq!(responses.count().await, 50);
+
+        // request many with max wait
+        let mut requests = client.subscribe("test").await.unwrap();
+        let responses = client
+            .request_many()
+            .max_wait(Some(Duration::from_secs(5)))
+            .send("test", "data".into())
+            .await
+            .unwrap();
+
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                let request = requests.next().await.unwrap();
+                for i in 1..=100 {
+                    if i == 21 {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                    client
+                        .publish(request.reply.clone().unwrap(), "data".into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+        assert_eq!(responses.count().await, 20);
+    }
 }
