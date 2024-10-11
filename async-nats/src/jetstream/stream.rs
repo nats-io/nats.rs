@@ -16,6 +16,7 @@
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{
+    collections,
     fmt::{self, Debug, Display},
     future::IntoFuture,
     io::{self, ErrorKind},
@@ -31,7 +32,7 @@ use crate::{
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
 use bytes::Bytes;
-use futures::{future::BoxFuture, TryFutureExt};
+use futures::{future::BoxFuture, FutureExt, TryFutureExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use time::{serde::rfc3339, OffsetDateTime};
@@ -155,6 +156,35 @@ impl Stream<Info> {
             }
             Response::Err { error } => Err(error.into()),
         }
+    }
+
+    pub async fn info_with_subjects<F: AsRef<str>>(
+        &self,
+        subjects_filter: F,
+    ) -> Result<InfoWithSubjects, InfoError> {
+        let subjects_filter = subjects_filter.as_ref().to_string();
+        // TODO: validate the subject and decide if this should be a `Subject`
+        let info = stream_info_with_details(
+            self.context.clone(),
+            self.name.clone(),
+            0,
+            false,
+            subjects_filter.clone(),
+        )
+        .await?;
+
+        let subjects = info.state.subjects.clone().unwrap_or_default();
+
+        Ok(InfoWithSubjects {
+            context: self.context.clone(),
+            info,
+            pages_done: subjects.is_empty(),
+            offset: subjects.len(),
+            subjects: subjects.into_iter(),
+            subjects_filter,
+            stream: self.name.clone(),
+            info_request: None,
+        })
     }
 
     /// Returns cached [Info] for the [Stream].
@@ -1246,6 +1276,105 @@ pub enum StorageType {
     Memory = 1,
 }
 
+async fn stream_info_with_details(
+    context: Context,
+    stream: String,
+    offset: usize,
+    deleted_details: bool,
+    subjects_filter: String,
+) -> Result<Info, InfoError> {
+    let subject = format!("STREAM.INFO.{}", stream);
+
+    let payload = StreamInfoRequest {
+        offset,
+        deleted_details,
+        subjects_filter,
+    };
+
+    let response: Response<Info> = context.request(subject, &payload).await?;
+
+    match response {
+        Response::Ok(info) => Ok(info),
+        Response::Err { error } => Err(error.into()),
+    }
+}
+
+type InfoRequest = BoxFuture<'static, Result<Info, InfoError>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StreamInfoRequest {
+    offset: usize,
+    deleted_details: bool,
+    subjects_filter: String,
+}
+
+pub struct InfoWithSubjects {
+    stream: String,
+    context: Context,
+    pub info: Info,
+    offset: usize,
+    subjects: collections::hash_map::IntoIter<String, usize>,
+    info_request: Option<InfoRequest>,
+    subjects_filter: String,
+    pages_done: bool,
+}
+
+impl futures::Stream for InfoWithSubjects {
+    type Item = Result<(String, usize), InfoError>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        match self.subjects.next() {
+            Some((subject, count)) => Poll::Ready(Some(Ok((subject, count)))),
+            None => {
+                // If we have already requested all pages, stop the iterator.
+                if self.pages_done {
+                    return Poll::Ready(None);
+                }
+                let stream = self.stream.clone();
+                let context = self.context.clone();
+                let subjects_filter = self.subjects_filter.clone();
+                let offset = self.offset;
+                match self
+                    .info_request
+                    .get_or_insert_with(|| {
+                        Box::pin(stream_info_with_details(
+                            context,
+                            stream,
+                            offset,
+                            false,
+                            subjects_filter,
+                        ))
+                    })
+                    .poll_unpin(cx)
+                {
+                    Poll::Ready(resp) => match resp {
+                        Ok(info) => {
+                            let subjects = info.state.subjects.clone();
+                            self.offset += subjects.as_ref().map_or_else(|| 0, |s| s.len());
+                            self.info_request = None;
+                            let subjects = subjects.unwrap_or_default();
+                            self.subjects = info.state.subjects.unwrap_or_default().into_iter();
+                            let total = info.paged_info.map(|info| info.total).unwrap_or(0);
+                            if total <= self.offset || subjects.is_empty() {
+                                self.pages_done = true;
+                            }
+                            match self.subjects.next() {
+                                Some((subject, count)) => Poll::Ready(Some(Ok((subject, count)))),
+                                None => Poll::Ready(None),
+                            }
+                        }
+                        Err(err) => Poll::Ready(Some(Err(err))),
+                    },
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+    }
+}
+
 /// Shows config and current state for this stream.
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct Info {
@@ -1264,6 +1393,15 @@ pub struct Info {
     /// Information about sources configs if present.
     #[serde(default)]
     pub sources: Vec<SourceInfo>,
+    #[serde(flatten)]
+    paged_info: Option<PagedInfo>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+pub struct PagedInfo {
+    offset: usize,
+    total: usize,
+    limit: usize,
 }
 
 #[derive(Deserialize)]
@@ -1272,7 +1410,7 @@ pub struct DeleteStatus {
 }
 
 /// information about the given stream.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct State {
     /// The number of messages contained in this stream
     pub messages: u64,
@@ -1292,6 +1430,7 @@ pub struct State {
     pub last_timestamp: time::OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
+    pub(crate) subjects: Option<HashMap<String, usize>>,
 }
 
 /// A raw stream message in the representation it is stored.
