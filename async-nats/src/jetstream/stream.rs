@@ -158,13 +158,35 @@ impl Stream<Info> {
         }
     }
 
+    /// Retrieves [[stream::Info]] from the server and returns a [[futures::Stream]] that allows
+    /// iterating over all subjects in the stream fetched via paged API.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut stream = jetstream.get_stream("events").await?;
+    ///
+    /// let info = stream.info_with_subjects().await?;
+    ///
+    /// while let Some(subject) = info.next().await {
+    ///    println!("Subject: {}", subject.unwrap());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn info_with_subjects<F: AsRef<str>>(
         &self,
         subjects_filter: F,
     ) -> Result<InfoWithSubjects, InfoError> {
         let subjects_filter = subjects_filter.as_ref().to_string();
         // TODO: validate the subject and decide if this should be a `Subject`
-        let info = stream_info_with_details(
+        let mut info = stream_info_with_details(
             self.context.clone(),
             self.name.clone(),
             0,
@@ -173,7 +195,7 @@ impl Stream<Info> {
         )
         .await?;
 
-        let subjects = info.state.subjects.clone().unwrap_or_default();
+        let subjects = info.state.subjects.take().unwrap_or_default();
 
         Ok(InfoWithSubjects {
             context: self.context.clone(),
