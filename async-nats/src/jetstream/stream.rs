@@ -251,9 +251,9 @@ impl<I> Stream<I> {
     ///
     /// let mut info = stream
     ///     .info_builder()
-    ///     .with_deleted()
+    ///     .with_deleted(true)
     ///     .subjects("events.>")
-    ///     .try_next()
+    ///     .fetch()
     ///     .await?;
     ///
     /// while let Some((subject, count)) = info.try_next().await? {
