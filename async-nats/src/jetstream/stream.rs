@@ -172,10 +172,11 @@ impl Stream<Info> {
     ///
     /// let mut stream = jetstream.get_stream("events").await?;
     ///
-    /// let info = stream.info_with_subjects().await?;
+    /// let mut info = stream.info_with_subjects("events.>").await?;
     ///
     /// while let Some(subject) = info.next().await {
-    ///    println!("Subject: {}", subject.unwrap());
+    ///    let (subject, count) = subject?;
+    ///    println!("Subject: {} count: {}", subject, count);
     /// }
     /// # Ok(())
     /// # }
