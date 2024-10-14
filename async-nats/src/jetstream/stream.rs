@@ -210,7 +210,7 @@ impl<I> Stream<I> {
     /// let mut info = stream.info_with_subjects("events.>").await?;
     ///
     /// while let Some((subject, count)) = info.try_next().await? {
-    ///    println!("Subject: {} count: {}", subject, count);
+    ///     println!("Subject: {} count: {}", subject, count);
     /// }
     /// # Ok(())
     /// # }
@@ -249,12 +249,15 @@ impl<I> Stream<I> {
     ///
     /// let mut stream = jetstream.get_stream("events").await?;
     ///
-    /// let mut info = stream.info_builder()
+    /// let mut info = stream
+    ///     .info_builder()
     ///     .with_deleted()
-    ///     .subjects("events.>").try_next().await?;
+    ///     .subjects("events.>")
+    ///     .try_next()
+    ///     .await?;
     ///
     /// while let Some((subject, count)) = info.try_next().await? {
-    ///    println!("Subject: {} count: {}", subject, count);
+    ///     println!("Subject: {} count: {}", subject, count);
     /// }
     /// # Ok(())
     /// # }
