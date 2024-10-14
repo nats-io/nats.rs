@@ -166,7 +166,7 @@ impl Stream<Info> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures::TryStreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -174,8 +174,7 @@ impl Stream<Info> {
     ///
     /// let mut info = stream.info_with_subjects("events.>").await?;
     ///
-    /// while let Some(subject) = info.next().await {
-    ///    let (subject, count) = subject?;
+    /// while let Some((subject, count)) = info.try_next().await? {
     ///    println!("Subject: {} count: {}", subject, count);
     /// }
     /// # Ok(())
