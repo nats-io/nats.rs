@@ -158,57 +158,6 @@ impl Stream<Info> {
         }
     }
 
-    /// Retrieves [[stream::Info]] from the server and returns a [[futures::Stream]] that allows
-    /// iterating over all subjects in the stream fetched via paged API.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::TryStreamExt;
-    /// let client = async_nats::connect("localhost:4222").await?;
-    /// let jetstream = async_nats::jetstream::new(client);
-    ///
-    /// let mut stream = jetstream.get_stream("events").await?;
-    ///
-    /// let mut info = stream.info_with_subjects("events.>").await?;
-    ///
-    /// while let Some((subject, count)) = info.try_next().await? {
-    ///    println!("Subject: {} count: {}", subject, count);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn info_with_subjects<F: AsRef<str>>(
-        &self,
-        subjects_filter: F,
-    ) -> Result<InfoWithSubjects, InfoError> {
-        let subjects_filter = subjects_filter.as_ref().to_string();
-        // TODO: validate the subject and decide if this should be a `Subject`
-        let mut info = stream_info_with_details(
-            self.context.clone(),
-            self.name.clone(),
-            0,
-            false,
-            subjects_filter.clone(),
-        )
-        .await?;
-
-        let subjects = info.state.subjects.take().unwrap_or_default();
-
-        Ok(InfoWithSubjects {
-            context: self.context.clone(),
-            info,
-            pages_done: subjects.is_empty(),
-            offset: subjects.len(),
-            subjects: subjects.into_iter(),
-            subjects_filter,
-            stream: self.name.clone(),
-            info_request: None,
-        })
-    }
-
     /// Returns cached [Info] for the [Stream].
     /// Cache is either from initial creation/retrieval of the [Stream] or last call to
     /// [Stream::info].
@@ -242,6 +191,76 @@ impl<I> Stream<I> {
             Response::Ok::<Info>(info) => Ok(info),
             Response::Err { error } => Err(error.into()),
         }
+    }
+
+    /// Retrieves [[stream::Info]] from the server and returns a [[futures::Stream]] that allows
+    /// iterating over all subjects in the stream fetched via paged API.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut stream = jetstream.get_stream("events").await?;
+    ///
+    /// let mut info = stream.info_with_subjects("events.>").await?;
+    ///
+    /// while let Some((subject, count)) = info.try_next().await? {
+    ///    println!("Subject: {} count: {}", subject, count);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn info_with_subjects<F: AsRef<str>>(
+        &self,
+        subjects_filter: F,
+    ) -> Result<InfoWithSubjects, InfoError> {
+        let subjects_filter = subjects_filter.as_ref().to_string();
+        // TODO: validate the subject and decide if this should be a `Subject`
+        let info = stream_info_with_details(
+            self.context.clone(),
+            self.name.clone(),
+            0,
+            false,
+            subjects_filter.clone(),
+        )
+        .await?;
+
+        Ok(InfoWithSubjects::new(
+            self.context.clone(),
+            info,
+            subjects_filter,
+        ))
+    }
+
+    /// Creates a builder that allows to customize `Stream::Info`.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::TryStreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut stream = jetstream.get_stream("events").await?;
+    ///
+    /// let mut info = stream.info_builder()
+    ///     .with_deleted()
+    ///     .subjects("events.>").try_next().await?;
+    ///
+    /// while let Some((subject, count)) = info.try_next().await? {
+    ///    println!("Subject: {} count: {}", subject, count);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn info_builder(&self) -> StreamInfoBuilder {
+        StreamInfoBuilder::new(self.context.clone(), self.name.clone())
     }
 
     /// Gets next message for a [Stream].
@@ -1047,6 +1066,47 @@ impl<I> Stream<I> {
     }
 }
 
+pub struct StreamInfoBuilder {
+    pub(crate) context: Context,
+    pub(crate) name: String,
+    pub(crate) deleted: bool,
+    pub(crate) subject: String,
+}
+
+impl StreamInfoBuilder {
+    fn new(context: Context, name: String) -> Self {
+        Self {
+            context,
+            name,
+            deleted: false,
+            subject: "".to_string(),
+        }
+    }
+
+    pub fn with_deleted(mut self, deleted: bool) -> Self {
+        self.deleted = deleted;
+        self
+    }
+
+    pub fn subjects<S: Into<String>>(mut self, subject: S) -> Self {
+        self.subject = subject.into();
+        self
+    }
+
+    pub async fn fetch(self) -> Result<InfoWithSubjects, InfoError> {
+        let info = stream_info_with_details(
+            self.context.clone(),
+            self.name.clone(),
+            0,
+            self.deleted,
+            self.subject.clone(),
+        )
+        .await?;
+
+        Ok(InfoWithSubjects::new(self.context, info, self.subject))
+    }
+}
+
 /// `StreamConfig` determines the properties for a stream.
 /// There are sensible defaults for most. If no subjects are
 /// given the name will be used as the only subject.
@@ -1341,6 +1401,23 @@ pub struct InfoWithSubjects {
     pages_done: bool,
 }
 
+impl InfoWithSubjects {
+    pub fn new(context: Context, mut info: Info, subject: String) -> Self {
+        let subjects = info.state.subjects.take().unwrap_or_default();
+        let name = info.config.name.clone();
+        InfoWithSubjects {
+            context,
+            info,
+            pages_done: subjects.is_empty(),
+            offset: subjects.len(),
+            subjects: subjects.into_iter(),
+            subjects_filter: subject,
+            stream: name,
+            info_request: None,
+        }
+    }
+}
+
 impl futures::Stream for InfoWithSubjects {
     type Item = Result<(String, usize), InfoError>;
 
@@ -1452,6 +1529,17 @@ pub struct State {
     pub last_timestamp: time::OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
+    /// The number of subjects in the stream
+    #[serde(default, rename = "num_subjects")]
+    pub subjects_count: u64,
+    /// The number of deleted messages in the stream
+    #[serde(default, rename = "num_deleted")]
+    pub deleted_count: Option<u64>,
+    /// The list of deleted subjects from the Stream.
+    /// This field will be filled only if [[StreamInfoBuilder::with_deleted]] option is set.
+    #[serde(default)]
+    pub deleted: Option<Vec<u64>>,
+
     pub(crate) subjects: Option<HashMap<String, usize>>,
 }
 

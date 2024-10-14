@@ -938,6 +938,14 @@ mod jetstream {
                 .stream_sequence,
             3
         );
+
+        let info = stream
+            .info_builder()
+            .with_deleted(true)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(info.info.state.deleted_count, Some(1));
     }
 
     #[tokio::test]
@@ -3746,7 +3754,20 @@ mod jetstream {
         let i = info.info.clone();
         let count = info.count().await;
         println!("messages: {:?}", i.state.messages);
-        // println!("info: {:?}", i);
+        println!("count: {count}");
+        assert!(count.eq(&220_000));
+
+        let info = stream
+            .info_builder()
+            .subjects("events.>")
+            .with_deleted(true)
+            .fetch()
+            .await
+            .unwrap();
+
+        let i = info.info.clone();
+        let count = info.count().await;
+        println!("messages: {:?}", i.state.messages);
         println!("count: {count}");
         assert!(count.eq(&220_000));
     }
