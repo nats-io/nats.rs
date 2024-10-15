@@ -193,7 +193,7 @@ impl<I> Stream<I> {
         }
     }
 
-    /// Retrieves [[stream::Info]] from the server and returns a [[futures::Stream]] that allows
+    /// Retrieves [[Info]] from the server and returns a [[futures::Stream]] that allows
     /// iterating over all subjects in the stream fetched via paged API.
     ///
     /// # Examples
