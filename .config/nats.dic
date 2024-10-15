@@ -158,3 +158,5 @@ get_stream
 get_stream_no_info
 lifecycle
 AtomicU64
+with_deleted
+StreamInfoBuilder
