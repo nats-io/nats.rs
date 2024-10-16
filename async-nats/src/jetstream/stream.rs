@@ -13,10 +13,8 @@
 //
 //! Manage operations on a [Stream], create/delete/update [Consumer].
 
-#[cfg(feature = "server_2_10")]
-use std::collections::HashMap;
 use std::{
-    collections,
+    collections::{self, HashMap},
     fmt::{self, Debug, Display},
     future::IntoFuture,
     io::{self, ErrorKind},
