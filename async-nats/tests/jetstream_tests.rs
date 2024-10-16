@@ -36,7 +36,9 @@ mod jetstream {
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
         PullConsumer, PushConsumer, ReplayPolicy,
     };
-    use async_nats::jetstream::context::{GetStreamByNameErrorKind, Publish, PublishErrorKind};
+    use async_nats::jetstream::context::{
+        GetStreamByNameErrorKind, Publish, PublishAckFuture, PublishErrorKind,
+    };
     use async_nats::jetstream::response::Response;
     #[cfg(feature = "server_2_10")]
     use async_nats::jetstream::stream::ConsumerLimits;
@@ -936,6 +938,14 @@ mod jetstream {
                 .stream_sequence,
             3
         );
+
+        let info = stream
+            .info_builder()
+            .with_deleted(true)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(info.info.state.deleted_count, Some(1));
     }
 
     #[tokio::test]
@@ -3701,5 +3711,64 @@ mod jetstream {
 
         let err = jetstream.stream_by_subject("foo").await.unwrap_err();
         assert_eq!(err.kind(), GetStreamByNameErrorKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn stream_subjects() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<PublishAckFuture>(1000);
+
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        tokio::task::spawn(async move {
+            while let Some(ack) = rx.recv().await {
+                ack.await.unwrap();
+            }
+            done_tx.send(()).unwrap();
+        });
+
+        for i in 0..220_000 {
+            let ack = jetstream
+                .publish(format!("events.{i}"), "data".into())
+                .await
+                .unwrap();
+            tx.send(ack).await.unwrap();
+        }
+        drop(tx);
+        done_rx.await.unwrap();
+
+        let info = stream.info_with_subjects("events.>").await.unwrap();
+
+        let i = info.info.clone();
+        let count = info.count().await;
+        println!("messages: {:?}", i.state.messages);
+        println!("count: {count}");
+        assert!(count.eq(&220_000));
+
+        let info = stream
+            .info_builder()
+            .subjects("events.>")
+            .with_deleted(true)
+            .fetch()
+            .await
+            .unwrap();
+
+        let i = info.info.clone();
+        let count = info.count().await;
+        println!("messages: {:?}", i.state.messages);
+        println!("count: {count}");
+        assert!(count.eq(&220_000));
     }
 }
