@@ -24,7 +24,10 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::{Buf, Bytes, BytesMut};
-use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
+use futures::{SinkExt, StreamExt};
+use pin_project::pin_project;
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use tokio_websockets::{Message, WebSocketStream};
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
@@ -680,6 +683,109 @@ impl Connection {
             }
             Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
         }
+    }
+}
+
+#[pin_project]
+pub(crate) struct WebSocketAdapter<T> {
+    #[pin]
+    pub(crate) inner: WebSocketStream<T>,
+    pub(crate) read_buf: BytesMut,
+}
+
+impl<T> WebSocketAdapter<T> {
+    pub(crate) fn new(inner: WebSocketStream<T>) -> Self {
+        Self {
+            inner,
+            read_buf: BytesMut::new(),
+        }
+    }
+}
+
+impl<T> AsyncRead for WebSocketAdapter<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        println!("WSSSSSSSSSSSSSSSS poll_read");
+        let mut this = self.project();
+
+        loop {
+            // If we have data in the read buffer, let's move it to the output buffer.
+            if !this.read_buf.is_empty() {
+                let len = std::cmp::min(buf.remaining(), this.read_buf.len());
+                buf.put_slice(&this.read_buf.split_to(len));
+                return Poll::Ready(Ok(()));
+            }
+
+            match this.inner.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(message))) => {
+                    println!("WSSSSSSSSSSSSSSSS message: {:?}", message);
+                    this.read_buf.extend_from_slice(message.as_payload());
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    println!("WSSSSSSSSSSSSSSSS error: {:?}", e);
+                    return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)));
+                }
+                Poll::Ready(None) => {
+                    println!("WSSSSSSSSSSSSSSSS closed");
+                    return Poll::Ready(Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "WebSocket closed",
+                    )));
+                }
+                Poll::Pending => {
+                    println!("WSSSSSSSSSSSSSSSS pending");
+                    return Poll::Pending;
+                }
+            }
+        }
+    }
+}
+
+impl<T> AsyncWrite for WebSocketAdapter<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let mut this = self.project();
+
+        let data = buf.to_vec();
+        match this.inner.poll_ready_unpin(cx) {
+            Poll::Ready(Ok(())) => match this
+                .inner
+                .start_send_unpin(tokio_websockets::Message::binary(data))
+            {
+                Ok(()) => Poll::Ready(Ok(buf.len())),
+                Err(e) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            },
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.project()
+            .inner
+            .poll_flush_unpin(cx)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.project()
+            .inner
+            .poll_close_unpin(cx)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 }
 

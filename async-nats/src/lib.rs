@@ -1455,7 +1455,7 @@ impl FromStr for ServerAddr {
 impl ServerAddr {
     /// Check if the URL is a valid NATS server address.
     pub fn from_url(url: Url) -> io::Result<Self> {
-        if url.scheme() != "nats" && url.scheme() != "tls" {
+        if url.scheme() != "nats" && url.scheme() != "tls" && url.scheme() != "ws" {
             return Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("invalid scheme for NATS server URL: {}", url.scheme()),

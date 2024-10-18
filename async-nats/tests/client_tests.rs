@@ -996,4 +996,14 @@ mod client {
         assert!(stats.out_bytes.load(Ordering::Relaxed) != 0);
         assert_eq!(stats.connects.load(Ordering::Relaxed), 2);
     }
+
+    #[tokio::test]
+    async fn test_ws() {
+        let client = async_nats::connect("ws://localhost:5555").await.unwrap();
+
+        let mut sub = client.subscribe("test").await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
+        let msg = sub.next().await.unwrap();
+        assert_eq!(msg.payload, Bytes::from("data"));
+    }
 }
