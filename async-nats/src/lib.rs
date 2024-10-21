@@ -1480,6 +1480,10 @@ impl ServerAddr {
         self.0.username() != ""
     }
 
+    pub fn scheme(&self) -> &str {
+        self.0.scheme()
+    }
+
     /// Returns the host.
     pub fn host(&self) -> &str {
         match self.0.host() {
