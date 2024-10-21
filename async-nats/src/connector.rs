@@ -36,12 +36,10 @@ use crate::LANG;
 use crate::VERSION;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
-use bytes::BytesMut;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp;
 use std::io;
-use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -50,7 +48,6 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tokio_rustls::rustls;
-use tokio_websockets::WebSocketStream;
 
 pub(crate) struct ConnectorOptions {
     pub(crate) tls_required: bool,
@@ -172,7 +169,11 @@ impl Connector {
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
             for socket_addr in socket_addrs {
                 match self
-                    .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
+                    .try_connect_to(
+                        &socket_addr,
+                        server_addr.tls_required(),
+                        server_addr.clone(),
+                    )
                     .await
                 {
                     Ok((server_info, mut connection)) => {
@@ -325,40 +326,57 @@ impl Connector {
         &self,
         socket_addr: &SocketAddr,
         tls_required: bool,
-        tls_host: &str,
+        server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
-        println!("trying to connect to {:?}", socket_addr);
-        let mut connection = if socket_addr.to_string().contains("5555") {
-            println!("trying ws");
-            let ws = tokio_websockets::client::Builder::new()
-                // .uri(socket_addr.to_string().as_str())
-                .uri("ws://localhost:5555")
-                .unwrap()
-                .connect()
+        println!("trying to connect to {:?}", socket_addr.to_string());
+        let mut connection = match server_addr.scheme() {
+            "ws" => {
+                println!("trying ws");
+                let ws = tokio_websockets::client::Builder::new()
+                    .uri(format!("{}://{}", server_addr.scheme(), socket_addr.to_string()).as_str())
+                    .unwrap()
+                    .connect()
+                    .await
+                    .unwrap();
+                println!("Connected to WebSocket: {:?}", ws.1);
+                let con = WebSocketAdapter::new(ws.0);
+                Connection::new(Box::new(con), 0, self.connect_stats.clone())
+            }
+            "wss" => {
+                println!("trying ws");
+                let tls_config =
+                    Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
+                    })?);
+                let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
+                let ws = tokio_websockets::client::Builder::new()
+                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                    .uri(format!("{}://{}", server_addr.scheme(), socket_addr.to_string()).as_str())
+                    .unwrap()
+                    .connect()
+                    .await
+                    .unwrap();
+                println!("Connected to WebSocket: {:?}", ws.1);
+                let con = WebSocketAdapter::new(ws.0);
+                Connection::new(Box::new(con), 0, self.connect_stats.clone())
+            }
+            _ => {
+                println!("trying tcp");
+                let tcp_stream = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    TcpStream::connect(socket_addr),
+                )
                 .await
-                .unwrap();
-            println!("Connected to WebSocket: {:?}", ws.1);
-            let con = WebSocketAdapter {
-                inner: ws.0,
-                read_buf: BytesMut::new(),
-            };
-            Connection::new(Box::new(con), 0, self.connect_stats.clone())
-        } else {
-            println!("trying tcp");
-            let tcp_stream = tokio::time::timeout(
-                self.options.connection_timeout,
-                TcpStream::connect(socket_addr),
-            )
-            .await
-            .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
 
-            tcp_stream.set_nodelay(true)?;
+                tcp_stream.set_nodelay(true)?;
 
-            Connection::new(
-                Box::new(tcp_stream),
-                self.options.read_buffer_capacity.into(),
-                self.connect_stats.clone(),
-            )
+                Connection::new(
+                    Box::new(tcp_stream),
+                    self.options.read_buffer_capacity.into(),
+                    self.connect_stats.clone(),
+                )
+            }
         };
 
         let tls_connection = |connection: Connection| async {
@@ -369,7 +387,7 @@ impl Connector {
             );
             let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
 
-            let domain = webpki::types::ServerName::try_from(tls_host)
+            let domain = webpki::types::ServerName::try_from(server_addr.host())
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
             let tls_stream = tls_connector
