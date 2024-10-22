@@ -328,22 +328,18 @@ impl Connector {
         tls_required: bool,
         server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
-        println!("trying to connect to {:?}", socket_addr.to_string());
         let mut connection = match server_addr.scheme() {
             "ws" => {
-                println!("trying ws");
                 let ws = tokio_websockets::client::Builder::new()
                     .uri(format!("{}://{}", server_addr.scheme(), socket_addr.to_string()).as_str())
                     .unwrap()
                     .connect()
                     .await
                     .unwrap();
-                println!("Connected to WebSocket: {:?}", ws.1);
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             "wss" => {
-                println!("trying ws");
                 let tls_config =
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
@@ -351,17 +347,23 @@ impl Connector {
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
                 let ws = tokio_websockets::client::Builder::new()
                     .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                    .uri(format!("{}://{}", server_addr.scheme(), socket_addr.to_string()).as_str())
+                    .uri(
+                        format!(
+                            "{}://{}:{}",
+                            server_addr.scheme(),
+                            server_addr.host(),
+                            server_addr.port()
+                        )
+                        .as_str(),
+                    )
                     .unwrap()
                     .connect()
                     .await
                     .unwrap();
-                println!("Connected to WebSocket: {:?}", ws.1);
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             _ => {
-                println!("trying tcp");
                 let tcp_stream = tokio::time::timeout(
                     self.options.connection_timeout,
                     TcpStream::connect(socket_addr),
@@ -404,7 +406,7 @@ impl Connector {
         // If `tls_first` was set, establish TLS connection before getting INFO.
         // There is no point in  checking if tls is required, because
         // the connection has to be be upgraded to TLS anyway as it's different flow.
-        if self.options.tls_first {
+        if self.options.tls_first && !server_addr.is_websocket() {
             connection = tls_connection(connection).await?;
         }
 
@@ -427,6 +429,7 @@ impl Connector {
 
         // If `tls_first` was not set, establish TLS connection if it is required.
         if !self.options.tls_first
+            && !server_addr.is_websocket()
             && (self.options.tls_required || info.tls_required || tls_required)
         {
             connection = tls_connection(connection).await?;

@@ -1455,7 +1455,11 @@ impl FromStr for ServerAddr {
 impl ServerAddr {
     /// Check if the URL is a valid NATS server address.
     pub fn from_url(url: Url) -> io::Result<Self> {
-        if url.scheme() != "nats" && url.scheme() != "tls" && url.scheme() != "ws" {
+        if url.scheme() != "nats"
+            && url.scheme() != "tls"
+            && url.scheme() != "ws"
+            && url.scheme() != "wss"
+        {
             return Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("invalid scheme for NATS server URL: {}", url.scheme()),
@@ -1495,6 +1499,10 @@ impl ServerAddr {
             }
             None => "",
         }
+    }
+
+    pub fn is_websocket(&self) -> bool {
+        self.0.scheme() == "ws" || self.0.scheme() == "wss"
     }
 
     /// Returns the port.
