@@ -711,7 +711,6 @@ where
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        println!("WSSSSSSSSSSSSSSSS poll_read");
         let mut this = self.project();
 
         loop {
@@ -724,22 +723,18 @@ where
 
             match this.inner.poll_next_unpin(cx) {
                 Poll::Ready(Some(Ok(message))) => {
-                    println!("WSSSSSSSSSSSSSSSS message: {:?}", message);
                     this.read_buf.extend_from_slice(message.as_payload());
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    println!("WSSSSSSSSSSSSSSSS error: {:?}", e);
                     return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)));
                 }
                 Poll::Ready(None) => {
-                    println!("WSSSSSSSSSSSSSSSS closed");
                     return Poll::Ready(Err(std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
                         "WebSocket closed",
                     )));
                 }
                 Poll::Pending => {
-                    println!("WSSSSSSSSSSSSSSSS pending");
                     return Poll::Pending;
                 }
             }
