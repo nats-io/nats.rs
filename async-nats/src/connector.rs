@@ -332,14 +332,18 @@ impl Connector {
             "ws" => {
                 let ws = tokio_websockets::client::Builder::new()
                     .uri(format!("{}://{}", server_addr.scheme(), socket_addr.to_string()).as_str())
-                    .unwrap()
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?
                     .connect()
                     .await
-                    .unwrap();
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             "wss" => {
+                let domain = webpki::types::ServerName::try_from(server_addr.host())
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
                 let tls_config =
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
@@ -351,15 +355,17 @@ impl Connector {
                         format!(
                             "{}://{}:{}",
                             server_addr.scheme(),
-                            server_addr.host(),
+                            domain.to_str(),
                             server_addr.port()
                         )
                         .as_str(),
                     )
-                    .unwrap()
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?
                     .connect()
                     .await
-                    .unwrap();
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
