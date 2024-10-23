@@ -17,7 +17,7 @@ mod websocket {
     use futures::StreamExt;
 
     #[tokio::test]
-    async fn simple() {
+    async fn core() {
         let _server = nats_server::run_server("tests/configs/ws.conf");
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let client = async_nats::ConnectOptions::new()
@@ -26,9 +26,36 @@ mod websocket {
             .await
             .unwrap();
 
+        // Simple pub/sub
         let mut sub = client.subscribe("foo").await.unwrap();
         client.publish("foo", "hello".into()).await.unwrap();
         assert_eq!(sub.next().await.unwrap().payload, "hello");
+
+        // Large messages
+        let payload = bytes::Bytes::from(vec![22; 1024 * 1024]);
+
+        let mut sub = client.subscribe("foo").await.unwrap().take(10);
+        for _ in 0..10 {
+            client.publish("foo", payload.clone()).await.unwrap();
+        }
+        while let Some(msg) = sub.next().await {
+            assert_eq!(msg.payload, payload);
+        }
+
+        // Request/reply
+        let mut requests = client.subscribe("foo").await.unwrap();
+        tokio::task::spawn({
+            let client = client.clone();
+            async move {
+                let request = requests.next().await.unwrap();
+                client
+                    .publish(request.reply.unwrap(), request.payload)
+                    .await
+                    .unwrap();
+            }
+        });
+        let response = client.request("foo", "hello".into()).await.unwrap();
+        assert_eq!(response.payload, "hello");
     }
 
     #[tokio::test]
