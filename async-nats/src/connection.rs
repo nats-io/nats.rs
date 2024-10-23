@@ -27,7 +27,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures::{SinkExt, StreamExt};
 use pin_project::pin_project;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
-use tokio_websockets::{Message, WebSocketStream};
+use tokio_websockets::WebSocketStream;
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
