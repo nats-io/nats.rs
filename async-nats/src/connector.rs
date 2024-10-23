@@ -331,7 +331,7 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             "ws" => {
                 let ws = tokio_websockets::client::Builder::new()
-                    .uri(format!("{}://{}", server_addr.scheme(), socket_addr.to_string()).as_str())
+                    .uri(format!("{}://{}", server_addr.scheme(), socket_addr).as_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
                     })?
