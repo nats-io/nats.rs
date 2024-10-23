@@ -328,7 +328,6 @@ impl Connector {
         tls_required: bool,
         server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
-        println!("entering try connect");
         let mut connection = match server_addr.scheme() {
             "ws" => {
                 let ws = tokio::time::timeout(
@@ -380,14 +379,12 @@ impl Connector {
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             _ => {
-                println!("Connecting to {}", socket_addr);
                 let tcp_stream = tokio::time::timeout(
                     self.options.connection_timeout,
                     TcpStream::connect(socket_addr),
                 )
                 .await
                 .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
-                println!("Connected to {:?}", tcp_stream);
                 tcp_stream.set_nodelay(true)?;
 
                 Connection::new(
