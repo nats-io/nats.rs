@@ -617,10 +617,26 @@ impl Client {
     }
 
     /// Drains all subscriptions, stops any new messages from being published, and flushes any remaining
-    /// messages, then closes the connection
+    /// messages, then closes the connection. Once completed, any associated streams associated with the
+    /// client will be closed, and further client commands will fail
     ///
     /// # Examples
-    /// TODO
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut subscription = client.subscribe("events.>").await?;
+    ///
+    /// client.drain().await?;
+    ///
+    /// # // existing subscriptions are closed and further commands will fail
+    /// assert!(subscription.next().await.is_none());
+    /// client.subscribe().await.expect_err("Expected further commands to fail");
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn drain(&self) -> Result<(), DrainError> {
         // Drain all subscriptions
         self.sender.send(Command::Drain { sid: None }).await?;

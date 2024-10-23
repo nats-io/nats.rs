@@ -539,15 +539,16 @@ impl ConnectionHandler {
                 }
 
                 // Before handling any commands, drop any subscriptions which are draining
-                // Note: safe to assume drain has completed, as we would have flushed all outgoing
-                // UNSUB messages in the previous call to this fn, and we would have processed and delivered
-                // any remaining messages to the subscription in the loop above.
+                // Note: safe to assume subscription drain has completed at this point, as we would have flushed
+                // all outgoing UNSUB messages in the previous call to this fn, and we would have processed and
+                // delivered any remaining messages to the subscription in the loop above.
                 self.handler.subscriptions.retain(|_, s| !s.is_draining);
 
                 if self.handler.is_draining {
-                    // The entire connection is draining. This means we flushed outgoing messages and all subs
-                    // were drained by the above retain and we should exit instead of processing any further
-                    // messages
+                    // The entire connection is draining. This means we flushed outgoing messages in the previous
+                    // call to this fn, we handled any remaining messages from the server in the loop above, and
+                    // all subs were drained, so drain is complete and we should exit instead of processing any
+                    // further messages
                     return Poll::Ready(ExitReason::Closed);
                 }
 
@@ -806,6 +807,8 @@ impl ConnectionHandler {
                         drain_sub(&sid, sub);
                     }
                 } else {
+                    // sid isn't set, so drain the whole client
+                    self.is_draining = true;
                     for (sid, sub) in self.subscriptions.iter_mut() {
                         drain_sub(sid, sub);
                     }
@@ -1291,9 +1294,9 @@ impl Subscriber {
         Ok(())
     }
 
-    /// Unsubscribes from subscription immediately leaves the stream open for the configured drain period
-    /// to allow any in-flight messages on the subscription to be delivered. The stream will be closed
-    /// at the end of the drain period
+    /// Unsubscribes immediately but leaves the stream open to allow any in-flight messages on the
+    /// subscription to be delivered. The stream will be closed after any remaining messages are
+    /// delivered
     ///
     /// # Examples
     /// ```
