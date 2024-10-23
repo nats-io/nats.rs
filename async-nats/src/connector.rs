@@ -328,16 +328,22 @@ impl Connector {
         tls_required: bool,
         server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
+        println!("entering try connect");
         let mut connection = match server_addr.scheme() {
             "ws" => {
-                let ws = tokio_websockets::client::Builder::new()
-                    .uri(format!("{}://{}", server_addr.scheme(), socket_addr).as_str())
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
-                    .connect()
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                let ws = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    tokio_websockets::client::Builder::new()
+                        .uri(format!("{}://{}", server_addr.scheme(), socket_addr).as_str())
+                        .map_err(|err| {
+                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                        })?
+                        .connect(),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
@@ -349,34 +355,39 @@ impl Connector {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio_websockets::client::Builder::new()
-                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                    .uri(
-                        format!(
-                            "{}://{}:{}",
-                            server_addr.scheme(),
-                            domain.to_str(),
-                            server_addr.port()
+                let ws = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    tokio_websockets::client::Builder::new()
+                        .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                        .uri(
+                            format!(
+                                "{}://{}:{}",
+                                server_addr.scheme(),
+                                domain.to_str(),
+                                server_addr.port()
+                            )
+                            .as_str(),
                         )
-                        .as_str(),
-                    )
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
-                    .connect()
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                        .map_err(|err| {
+                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                        })?
+                        .connect(),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             _ => {
+                println!("Connecting to {}", socket_addr);
                 let tcp_stream = tokio::time::timeout(
                     self.options.connection_timeout,
                     TcpStream::connect(socket_addr),
                 )
                 .await
                 .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
-
+                println!("Connected to {:?}", tcp_stream);
                 tcp_stream.set_nodelay(true)?;
 
                 Connection::new(
