@@ -7,7 +7,6 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lazy_static = "1.4.0"
 regex = { version = "1.7.1", default-features = false, features = ["std", "unicode-perl"] }
 url = "2"
 serde_json = "1.0.104"
@@ -17,5 +16,5 @@ tokio-retry = "0.3.0"
 
 [dev-dependencies]
 async-nats = "0.31"
-tokio = { version = "1", features = ["full"]  }
+tokio = { version = "1", features = ["full"] }
 futures = "0.3"
