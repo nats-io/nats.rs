@@ -494,7 +494,7 @@ impl<I> Stream<I> {
     ///
     /// ```no_run
     /// #[tokio::main]
-    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// use futures::TryStreamExt;
     ///
@@ -550,7 +550,7 @@ impl<I> Stream<I> {
     ///
     /// ```no_run
     /// #[tokio::main]
-    /// # async fn mains() -> Result<(), async_nats::Error> {
+    /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
     /// use futures::TryStreamExt;
     ///
