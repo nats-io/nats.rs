@@ -11,7 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod websocket {
+#[cfg(feature = "websockets")]
+mod websockets {
     use std::path::PathBuf;
 
     use futures::StreamExt;

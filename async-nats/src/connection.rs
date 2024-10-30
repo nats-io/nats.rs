@@ -23,11 +23,16 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+#[cfg(feature = "websockets")]
+use {
+    futures::{SinkExt, StreamExt},
+    pin_project::pin_project,
+    tokio::io::ReadBuf,
+    tokio_websockets::WebSocketStream,
+};
+
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{SinkExt, StreamExt};
-use pin_project::pin_project;
-use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
-use tokio_websockets::WebSocketStream;
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
@@ -686,6 +691,7 @@ impl Connection {
     }
 }
 
+#[cfg(feature = "websockets")]
 #[pin_project]
 pub(crate) struct WebSocketAdapter<T> {
     #[pin]
@@ -693,6 +699,7 @@ pub(crate) struct WebSocketAdapter<T> {
     pub(crate) read_buf: BytesMut,
 }
 
+#[cfg(feature = "websockets")]
 impl<T> WebSocketAdapter<T> {
     pub(crate) fn new(inner: WebSocketStream<T>) -> Self {
         Self {
@@ -702,6 +709,7 @@ impl<T> WebSocketAdapter<T> {
     }
 }
 
+#[cfg(feature = "websockets")]
 impl<T> AsyncRead for WebSocketAdapter<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -742,6 +750,7 @@ where
     }
 }
 
+#[cfg(feature = "websockets")]
 impl<T> AsyncWrite for WebSocketAdapter<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,

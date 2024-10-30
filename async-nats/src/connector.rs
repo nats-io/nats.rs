@@ -15,6 +15,7 @@ use crate::auth::Auth;
 use crate::client::Statistics;
 use crate::connection::Connection;
 use crate::connection::State;
+#[cfg(feature = "websockets")]
 use crate::connection::WebSocketAdapter;
 use crate::options::CallbackArg1;
 use crate::tls;
@@ -329,6 +330,7 @@ impl Connector {
         server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
         let mut connection = match server_addr.scheme() {
+            #[cfg(feature = "websockets")]
             "ws" => {
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
@@ -346,6 +348,7 @@ impl Connector {
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
+            #[cfg(feature = "websockets")]
             "wss" => {
                 let domain = webpki::types::ServerName::try_from(server_addr.host())
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
