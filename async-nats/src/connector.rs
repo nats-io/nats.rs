@@ -15,6 +15,8 @@ use crate::auth::Auth;
 use crate::client::Statistics;
 use crate::connection::Connection;
 use crate::connection::State;
+#[cfg(feature = "websockets")]
+use crate::connection::WebSocketAdapter;
 use crate::options::CallbackArg1;
 use crate::tls;
 use crate::AuthError;
@@ -168,7 +170,11 @@ impl Connector {
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
             for socket_addr in socket_addrs {
                 match self
-                    .try_connect_to(&socket_addr, server_addr.tls_required(), server_addr.host())
+                    .try_connect_to(
+                        &socket_addr,
+                        server_addr.tls_required(),
+                        server_addr.clone(),
+                    )
                     .await
                 {
                     Ok((server_info, mut connection)) => {
@@ -321,22 +327,76 @@ impl Connector {
         &self,
         socket_addr: &SocketAddr,
         tls_required: bool,
-        tls_host: &str,
+        server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
-        let tcp_stream = tokio::time::timeout(
-            self.options.connection_timeout,
-            TcpStream::connect(socket_addr),
-        )
-        .await
-        .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+        let mut connection = match server_addr.scheme() {
+            #[cfg(feature = "websockets")]
+            "ws" => {
+                let ws = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    tokio_websockets::client::Builder::new()
+                        .uri(format!("{}://{}", server_addr.scheme(), socket_addr).as_str())
+                        .map_err(|err| {
+                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                        })?
+                        .connect(),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
 
-        tcp_stream.set_nodelay(true)?;
+                let con = WebSocketAdapter::new(ws.0);
+                Connection::new(Box::new(con), 0, self.connect_stats.clone())
+            }
+            #[cfg(feature = "websockets")]
+            "wss" => {
+                let domain = webpki::types::ServerName::try_from(server_addr.host())
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
+                let tls_config =
+                    Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
+                    })?);
+                let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
+                let ws = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    tokio_websockets::client::Builder::new()
+                        .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                        .uri(
+                            format!(
+                                "{}://{}:{}",
+                                server_addr.scheme(),
+                                domain.to_str(),
+                                server_addr.port()
+                            )
+                            .as_str(),
+                        )
+                        .map_err(|err| {
+                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                        })?
+                        .connect(),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                let con = WebSocketAdapter::new(ws.0);
+                Connection::new(Box::new(con), 0, self.connect_stats.clone())
+            }
+            _ => {
+                let tcp_stream = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    TcpStream::connect(socket_addr),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+                tcp_stream.set_nodelay(true)?;
 
-        let mut connection = Connection::new(
-            Box::new(tcp_stream),
-            self.options.read_buffer_capacity.into(),
-            self.connect_stats.clone(),
-        );
+                Connection::new(
+                    Box::new(tcp_stream),
+                    self.options.read_buffer_capacity.into(),
+                    self.connect_stats.clone(),
+                )
+            }
+        };
 
         let tls_connection = |connection: Connection| async {
             let tls_config = Arc::new(
@@ -346,7 +406,7 @@ impl Connector {
             );
             let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
 
-            let domain = webpki::types::ServerName::try_from(tls_host)
+            let domain = webpki::types::ServerName::try_from(server_addr.host())
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
             let tls_stream = tls_connector
@@ -363,7 +423,7 @@ impl Connector {
         // If `tls_first` was set, establish TLS connection before getting INFO.
         // There is no point in  checking if tls is required, because
         // the connection has to be be upgraded to TLS anyway as it's different flow.
-        if self.options.tls_first {
+        if self.options.tls_first && !server_addr.is_websocket() {
             connection = tls_connection(connection).await?;
         }
 
@@ -386,6 +446,7 @@ impl Connector {
 
         // If `tls_first` was not set, establish TLS connection if it is required.
         if !self.options.tls_first
+            && !server_addr.is_websocket()
             && (self.options.tls_required || info.tls_required || tls_required)
         {
             connection = tls_connection(connection).await?;
