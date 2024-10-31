@@ -996,4 +996,28 @@ mod client {
         assert!(stats.out_bytes.load(Ordering::Relaxed) != 0);
         assert_eq!(stats.connects.load(Ordering::Relaxed), 2);
     }
+
+    #[tokio::test]
+    async fn client_timeout() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        assert_eq!(client.timeout(), Some(Duration::from_secs(10)));
+
+        let client = async_nats::ConnectOptions::new()
+            .request_timeout(Some(Duration::from_secs(30)))
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        assert_eq!(client.timeout(), Some(Duration::from_secs(30)));
+
+        let client = async_nats::ConnectOptions::new()
+            .request_timeout(None)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        assert_eq!(client.timeout(), None);
+    }
 }
