@@ -135,6 +135,21 @@ impl Client {
         }
     }
 
+    /// Returns the default timeout for requests set when creating the client.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("default request timeout: {:?}", client.timeout());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
     /// Returns last received info from the server.
     ///
     /// # Examples
