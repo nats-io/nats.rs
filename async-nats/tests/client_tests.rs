@@ -888,6 +888,28 @@ mod client {
     }
 
     #[tokio::test]
+    async fn custom_auth_callback_jwt() {
+        let server = nats_server::run_server("tests/configs/jwt.conf");
+
+        ConnectOptions::with_auth_callback(move |nonce| async move {
+            let mut auth = async_nats::Auth::new();
+            auth.jwt = Some("eyJ0eXAiOiJKV1QiLCJhbGciOiJlZDI1NTE5LW5rZXkifQ.".to_owned() +
+                "eyJqdGkiOiJMN1dBT1hJU0tPSUZNM1QyNEhMQ09ENzJRT1czQkNVWEdETjRKVU1SSUtHTlQ3RzdZVFRRIiwiaWF0IjoxNjUxNzkwOTgyLCJpc3MiOiJBRFRRUzdaQ0ZWSk5XNTcyNkdPWVhXNVRTQ1pGTklRU0hLMlpHWVVCQ0Q1RDc3T1ROTE9PS1pPWiIsIm5hbWUiOiJUZXN0V" +
+                "XNlciIsInN1YiI6IlVBRkhHNkZVRDJVVTRTREZWQUZVTDVMREZPMlhNNFdZTTc2VU5YVFBKWUpLN0VFTVlSQkhUMlZFIiwibmF0cyI6eyJwdWIiOnt9LCJzdWIiOnt9LCJzdWJzIjotMSwiZGF0YSI6LTEsInBheWxvYWQiOi0xLCJ0eXBlIjoidXNlciIsInZlcnNpb24iOjJ9fQ." +
+                "bp2-Jsy33l4ayF7Ku1MNdJby4WiMKUrG-rSVYGBusAtV3xP4EdCa-zhSNUaBVIL3uYPPCQYCEoM1pCUdOnoJBg");
+            
+            let key_pair = nkeys::KeyPair::from_seed("SUACH75SWCM5D2JMJM6EKLR2WDARVGZT4QC6LX3AGHSWOMVAKERABBBRWM").unwrap();
+            let sign = key_pair.sign(&nonce).map_err(async_nats::AuthError::new)?;
+            auth.signature = Some(sign);
+
+            Ok(auth)
+        })
+        .connect(server.client_url())
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn max_reconnects() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let _client = ConnectOptions::new()
