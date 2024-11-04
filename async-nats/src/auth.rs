@@ -5,7 +5,7 @@ pub struct Auth {
     pub jwt: Option<String>,
     pub nkey: Option<String>,
     pub(crate) signature_callback: Option<CallbackArg1<String, Result<String, AuthError>>>,
-    pub signature: Option<String>,
+    pub signature: Option<Vec<u8>>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub token: Option<String>,
