@@ -639,7 +639,7 @@ impl Group {
         queue_group: Z,
     ) -> Group {
         Group {
-            prefix: prefix.to_string(),
+            prefix: format!("{}.{}", self.prefix.to_string(), prefix.to_string()),
             stats: self.stats.clone(),
             client: self.client.clone(),
             shutdown_tx: self.shutdown_tx.clone(),
