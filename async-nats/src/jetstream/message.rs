@@ -183,6 +183,10 @@ impl Message {
         }
     }
 
+    pub async fn nack(&self) -> Result<(), Error> {
+        self.ack_with(AckKind::Nak(None))
+    }
+
     /// Acknowledges a message delivery by sending a chosen [AckKind] variant to the server.
     ///
     /// # Examples
