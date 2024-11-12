@@ -29,6 +29,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use std::borrow::Borrow;
+use std::env;
 use std::fmt::Display;
 use std::future::IntoFuture;
 use std::pin::Pin;
@@ -734,7 +735,7 @@ impl Context {
             }
             config.history
         } else {
-            1
+            env::var("NATS_KV_DEFAULT_MAX_HISTORY").unwrap_or("1".to_string()).parse().map_err(|_| CreateKeyValueErrorKind::TooLongHistory)?
         };
 
         let num_replicas = if config.num_replicas == 0 {
