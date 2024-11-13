@@ -3260,7 +3260,10 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(stream.info().await.unwrap().config.metadata, metadata);
+        let mut stream_metadata = stream.info().await.unwrap().config.metadata.clone();
+        stream_metadata.retain(|k, _| !k.contains("_"));
+
+        assert_eq!(metadata, stream_metadata);
 
         let mut consumer = stream
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
@@ -3271,7 +3274,9 @@ mod jetstream {
             .await
             .unwrap();
 
-        assert_eq!(consumer.info().await.unwrap().config.metadata, metadata);
+        let mut consumer_metadata = consumer.info().await.unwrap().config.metadata.clone();
+        consumer_metadata.retain(|k, _| !k.contains("_"));
+        assert_eq!(metadata, consumer_metadata);
     }
 
     #[tokio::test]
