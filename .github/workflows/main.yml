@@ -21,7 +21,7 @@ jobs:
         with:
           go-version: '1.22'
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@optional-strict-json-decoding
+        run: go install github.com/nats-io/nats-server/v2@main
 
       - name: Install gunplot
         run: |
