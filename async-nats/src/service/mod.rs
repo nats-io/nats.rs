@@ -903,7 +903,9 @@ mod tests {
 
         let group = Group {
             prefix: "test".to_string(),
-            stats: Arc::new(Mutex::new(Endpoints { endpoints: HashMap::new() })),
+            stats: Arc::new(Mutex::new(Endpoints {
+                endpoints: HashMap::new(),
+            })),
             client,
             shutdown_tx: tokio::sync::broadcast::channel(1).0,
             subjects: Arc::new(Mutex::new(vec![])),
@@ -916,4 +918,3 @@ mod tests {
         assert_eq!(new_group.queue_group, "custom_queue");
     }
 }
-
