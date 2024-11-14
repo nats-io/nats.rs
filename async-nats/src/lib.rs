@@ -257,9 +257,11 @@ pub use client::{
 };
 pub use options::{AuthError, ConnectOptions};
 
+#[cfg(feature = "crypto")]
 mod crypto;
 pub mod error;
 pub mod header;
+#[cfg(feature = "jetstream")]
 pub mod jetstream;
 pub mod message;
 #[cfg(feature = "service")]
