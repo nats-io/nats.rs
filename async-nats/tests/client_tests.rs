@@ -1131,7 +1131,7 @@ mod client {
         tokio::time::sleep(Duration::from_millis(1)).await;
 
         // assert the subscription stream is closed after draining
-        let sleep_fut = async move { while let Some(_) = sub.next().await {} };
+        let sleep_fut = async move { while sub.next().await.is_some() {} };
         tokio::time::timeout(Duration::from_secs(10), sleep_fut)
             .await
             .expect("Expected stream to drain within 10s");

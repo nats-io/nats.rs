@@ -651,7 +651,7 @@ impl ConnectionHandler {
                     debug!("reconnected");
                 }
                 ExitReason::Closed => {
-                    //
+                    // Safe to ignore result as we're shutting down anyway
                     self.connector.events_tx.try_send(Event::Closed).ok();
                     break;
                 }
