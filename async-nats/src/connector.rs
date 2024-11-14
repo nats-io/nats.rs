@@ -225,6 +225,7 @@ impl Connector {
                             no_responders: true,
                         };
 
+                        #[cfg(feature = "nkeys")]
                         if let Some(nkey) = self.options.auth.nkey.as_ref() {
                             match nkeys::KeyPair::from_seed(nkey.as_str()) {
                                 Ok(key_pair) => {
@@ -252,6 +253,7 @@ impl Connector {
                             }
                         }
 
+                        #[cfg(feature = "nkeys")]
                         if let Some(jwt) = self.options.auth.jwt.as_ref() {
                             if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
                                 match sign_fn.call(server_info.nonce.clone()).await {
