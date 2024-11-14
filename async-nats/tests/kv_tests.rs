@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "kv")]
 mod kv {
     use std::{collections::HashMap, error::Error, str::from_utf8, time::Duration};
 

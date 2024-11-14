@@ -41,7 +41,10 @@ use tracing::debug;
 
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
+use super::is_valid_name;
+#[cfg(feature = "kv")]
 use super::kv::{Store, MAX_HISTORY};
+#[cfg(feature = "object-store")]
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{
     self, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy, External, Info,
@@ -49,7 +52,6 @@ use super::stream::{
 };
 #[cfg(feature = "server_2_10")]
 use super::stream::{Compression, ConsumerCreateStrictError, ConsumerUpdateError};
-use super::{is_valid_name, kv};
 
 pub mod traits {
     use std::{future::Future, time::Duration};
@@ -1004,6 +1006,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "kv")]
     pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, KeyValueError> {
         let bucket: String = bucket.into();
         if !crate::jetstream::kv::is_valid_bucket_name(&bucket) {
@@ -1062,6 +1065,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "kv")]
     pub async fn create_key_value(
         &self,
         config: crate::jetstream::kv::Config,
@@ -1213,6 +1217,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "kv")]
     pub async fn delete_key_value<T: AsRef<str>>(
         &self,
         bucket: T,
@@ -1595,6 +1600,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "object-store")]
     pub async fn create_object_store(
         &self,
         config: super::object_store::Config,
@@ -1655,6 +1661,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "object-store")]
     pub async fn get_object_store<T: AsRef<str>>(
         &self,
         bucket_name: T,
@@ -2388,6 +2395,7 @@ enum ConsumerAction {
     Update,
 }
 
+#[cfg(feature = "kv")]
 // Maps a Stream config to KV Store.
 fn map_to_kv(stream: super::stream::Stream, prefix: String, bucket: String) -> Store {
     let mut store = Store {
@@ -2413,12 +2421,14 @@ fn map_to_kv(stream: super::stream::Stream, prefix: String, bucket: String) -> S
     store
 }
 
+#[cfg(feature = "kv")]
 enum KvToStreamConfigError {
     TooLongHistory,
     #[allow(dead_code)]
     LimitMarkersNotSupported,
 }
 
+#[cfg(feature = "kv")]
 impl From<KvToStreamConfigError> for CreateKeyValueError {
     fn from(err: KvToStreamConfigError) -> Self {
         match err {
@@ -2432,6 +2442,7 @@ impl From<KvToStreamConfigError> for CreateKeyValueError {
     }
 }
 
+#[cfg(feature = "kv")]
 impl From<KvToStreamConfigError> for UpdateKeyValueError {
     fn from(err: KvToStreamConfigError) -> Self {
         match err {
@@ -2445,9 +2456,10 @@ impl From<KvToStreamConfigError> for UpdateKeyValueError {
     }
 }
 
+#[cfg(feature = "kv")]
 // Maps the KV config to Stream config.
 fn kv_to_stream_config(
-    config: kv::Config,
+    config: crate::jetstream::kv::Config,
     _account: Account,
 ) -> Result<super::stream::Config, KvToStreamConfigError> {
     let history = if config.history > 0 {
