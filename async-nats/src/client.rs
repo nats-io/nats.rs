@@ -640,6 +640,7 @@ impl Client {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut subscription = client.subscribe("events.>").await?;
     ///
@@ -648,7 +649,7 @@ impl Client {
     /// # // existing subscriptions are closed and further commands will fail
     /// assert!(subscription.next().await.is_none());
     /// client
-    ///     .subscribe()
+    ///     .subscribe("events.>")
     ///     .await
     ///     .expect_err("Expected further commands to fail");
     ///
