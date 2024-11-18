@@ -156,3 +156,7 @@ create_consumer_strict_on_stream
 leafnodes
 get_stream
 get_stream_no_info
+lifecycle
+AtomicU64
+with_deleted
+StreamInfoBuilder

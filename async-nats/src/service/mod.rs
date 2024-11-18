@@ -639,7 +639,7 @@ impl Group {
         queue_group: Z,
     ) -> Group {
         Group {
-            prefix: prefix.to_string(),
+            prefix: format!("{}.{}", self.prefix, prefix.to_string()),
             stats: self.stats.clone(),
             client: self.client.clone(),
             shutdown_tx: self.shutdown_tx.clone(),
@@ -889,5 +889,32 @@ pub struct StatsHandler(pub Box<dyn FnMut(String, endpoint::Stats) -> serde_json
 impl std::fmt::Debug for StatsHandler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Stats handler")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_group_with_queue_group() {
+        let server = nats_server::run_basic_server();
+        let client = crate::connect(server.client_url()).await.unwrap();
+
+        let group = Group {
+            prefix: "test".to_string(),
+            stats: Arc::new(Mutex::new(Endpoints {
+                endpoints: HashMap::new(),
+            })),
+            client,
+            shutdown_tx: tokio::sync::broadcast::channel(1).0,
+            subjects: Arc::new(Mutex::new(vec![])),
+            queue_group: "default".to_string(),
+        };
+
+        let new_group = group.group_with_queue_group("v1", "custom_queue");
+
+        assert_eq!(new_group.prefix, "test.v1");
+        assert_eq!(new_group.queue_group, "custom_queue");
     }
 }

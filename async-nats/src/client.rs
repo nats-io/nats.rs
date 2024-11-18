@@ -83,6 +83,7 @@ pub struct Client {
     inbox_prefix: Arc<str>,
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
+    connection_stats: Arc<Statistics>,
 }
 
 impl Sink<PublishMessage> for Client {
@@ -108,6 +109,7 @@ impl Sink<PublishMessage> for Client {
 }
 
 impl Client {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         info: tokio::sync::watch::Receiver<ServerInfo>,
         state: tokio::sync::watch::Receiver<State>,
@@ -116,6 +118,7 @@ impl Client {
         inbox_prefix: String,
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
+        statistics: Arc<Statistics>,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -128,7 +131,23 @@ impl Client {
             inbox_prefix: inbox_prefix.into(),
             request_timeout,
             max_payload,
+            connection_stats: statistics,
         }
+    }
+
+    /// Returns the default timeout for requests set when creating the client.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("default request timeout: {:?}", client.timeout());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn timeout(&self) -> Option<Duration> {
+        self.request_timeout
     }
 
     /// Returns last received info from the server.
@@ -612,6 +631,39 @@ impl Client {
         Ok(())
     }
 
+    /// Drains all subscriptions, stops any new messages from being published, and flushes any remaining
+    /// messages, then closes the connection. Once completed, any associated streams associated with the
+    /// client will be closed, and further client commands will fail
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut subscription = client.subscribe("events.>").await?;
+    ///
+    /// client.drain().await?;
+    ///
+    /// # // existing subscriptions are closed and further commands will fail
+    /// assert!(subscription.next().await.is_none());
+    /// client
+    ///     .subscribe("events.>")
+    ///     .await
+    ///     .expect_err("Expected further commands to fail");
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn drain(&self) -> Result<(), DrainError> {
+        // Drain all subscriptions
+        self.sender.send(Command::Drain { sid: None }).await?;
+
+        // Remaining process is handled on the handler-side
+        Ok(())
+    }
+
     /// Returns the current state of the connection.
     ///
     /// # Examples
@@ -648,6 +700,26 @@ impl Client {
             .send(Command::Reconnect)
             .await
             .map_err(Into::into)
+    }
+
+    /// Returns struct representing statistics of the whole lifecycle of the client.
+    /// This includes number of bytes sent/received, number of messages sent/received,
+    /// and number of times the connection was established.
+    /// As this returns [Arc] with [AtomicU64] fields, it can be safely reused and shared
+    /// across threads.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let statistics = client.statistics();
+    /// println!("client statistics: {:#?}", statistics);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn statistics(&self) -> Arc<Statistics> {
+        self.connection_stats.clone()
     }
 }
 
@@ -769,6 +841,16 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     }
 }
 
+#[derive(Error, Debug)]
+#[error("failed to send drain: {0}")]
+pub struct DrainError(#[source] crate::Error);
+
+impl From<tokio::sync::mpsc::error::SendError<Command>> for DrainError {
+    fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        DrainError(Box::new(err))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RequestErrorKind {
     /// There are services listening on requested subject, but they didn't respond
@@ -826,3 +908,19 @@ impl Display for FlushErrorKind {
 }
 
 pub type FlushError = Error<FlushErrorKind>;
+
+/// Represents statistics for the instance of the client throughout its lifecycle.
+#[derive(Default, Debug)]
+pub struct Statistics {
+    /// Number of bytes received. This does not include the protocol overhead.
+    pub in_bytes: AtomicU64,
+    /// Number of bytes sent. This doe not include the protocol overhead.
+    pub out_bytes: AtomicU64,
+    /// Number of messages received.
+    pub in_messages: AtomicU64,
+    /// Number of messages sent.
+    pub out_messages: AtomicU64,
+    /// Number of times connection was established.
+    /// Initial connect will be counted as well, then all successful reconnects.
+    pub connects: AtomicU64,
+}

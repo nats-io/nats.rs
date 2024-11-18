@@ -1,9 +1,9 @@
 [package]
 name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
-version = "0.36.0"
+version = "0.37.0"
 edition = "2021"
-rust = "1.74.0"
+rust = "1.79.0"
 description = "A async Rust NATS client"
 license = "Apache-2.0"
 documentation = "https://docs.rs/async-nats"
@@ -41,6 +41,8 @@ ring = { version = "0.17", optional = true }
 rand = "0.8"
 webpki = { package = "rustls-webpki", version = "0.102" }
 portable-atomic = "1"
+tokio-websockets = { version = "0.10", features = ["client", "rand", "rustls-native-roots"], optional = true }
+pin-project = "1.0"
 
 [dev-dependencies]
 ring = "0.17"
@@ -57,13 +59,13 @@ jsonschema = "0.17.1"
 # for -Z minimal-versions
 num = "0.4.1"
 
-
 [features]
 default = ["server_2_10", "ring"]
 # Enables Service API for the client.
 service = []
-aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs"]
-ring = ["dep:ring", "tokio-rustls/ring"]
+websockets = ["dep:tokio-websockets"]
+aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets/aws-lc-rs"]
+ring = ["dep:ring", "tokio-rustls/ring", "tokio-websockets/ring"]
 fips = ["aws-lc-rs", "tokio-rustls/fips"]
 # All experimental features are part of this feature flag.
 experimental = ["service"]

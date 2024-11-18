@@ -1,5 +1,15 @@
-# v0.36.0
+# v0.37.0
+## Overview
 
+A smaller release containing stats and Watcher improvements.
+
+## What's Changed
+* Add Client stats by @Jarema in https://github.com/nats-io/nats.rs/pull/1314
+* Improve kv::Watcher without messages by @Jarema in https://github.com/nats-io/nats.rs/pull/1321
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.36.0...async-nats/v0.37.0
+
+# v0.36.0
 ## Overview
 This release adds a useful `futures::Sink<PublishMessage>`, and ability to get `Stream` handle without IO call,
 among other changes.

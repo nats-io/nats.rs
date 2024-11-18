@@ -330,7 +330,7 @@ impl Context {
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream.get_stream("events").await?;
+    /// let stream = jetstream.get_stream_no_info("events").await?;
     /// # Ok(())
     /// # }
     /// ```

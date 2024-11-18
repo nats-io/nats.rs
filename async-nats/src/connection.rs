@@ -19,7 +19,17 @@ use std::future::{self, Future};
 use std::io::IoSlice;
 use std::pin::Pin;
 use std::str::{self, FromStr};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::task::{Context, Poll};
+
+#[cfg(feature = "websockets")]
+use {
+    futures::{SinkExt, StreamExt},
+    pin_project::pin_project,
+    tokio::io::ReadBuf,
+    tokio_websockets::WebSocketStream,
+};
 
 use bytes::{Buf, Bytes, BytesMut};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
@@ -27,7 +37,7 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
 use crate::subject::Subject;
-use crate::{ClientOp, ServerError, ServerOp};
+use crate::{ClientOp, ServerError, ServerOp, Statistics};
 
 /// Soft limit for the amount of bytes in [`Connection::write_buf`]
 /// and [`Connection::flattened_writes`].
@@ -80,12 +90,17 @@ pub(crate) struct Connection {
     write_buf_len: usize,
     flattened_writes: BytesMut,
     can_flush: bool,
+    statistics: Arc<Statistics>,
 }
 
 /// Internal representation of the connection.
 /// Holds connection with NATS Server and communicates with `Client` via channels.
 impl Connection {
-    pub(crate) fn new(stream: Box<dyn AsyncReadWrite>, read_buffer_capacity: usize) -> Self {
+    pub(crate) fn new(
+        stream: Box<dyn AsyncReadWrite>,
+        read_buffer_capacity: usize,
+        statistics: Arc<Statistics>,
+    ) -> Self {
         Self {
             stream,
             read_buf: BytesMut::with_capacity(read_buffer_capacity),
@@ -93,6 +108,7 @@ impl Connection {
             write_buf_len: 0,
             flattened_writes: BytesMut::new(),
             can_flush: false,
+            statistics,
         }
     }
 
@@ -407,7 +423,10 @@ impl Connection {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Ok(0)) if self.read_buf.is_empty() => Poll::Ready(Ok(None)),
                 Poll::Ready(Ok(0)) => Poll::Ready(Err(io::ErrorKind::ConnectionReset.into())),
-                Poll::Ready(Ok(_n)) => continue,
+                Poll::Ready(Ok(n)) => {
+                    self.statistics.in_bytes.add(n as u64, Ordering::Relaxed);
+                    continue;
+                }
                 Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
             };
         }
@@ -544,6 +563,7 @@ impl Connection {
             match Pin::new(&mut self.stream).poll_write(cx, buf) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Ok(n)) => {
+                    self.statistics.out_bytes.add(n as u64, Ordering::Relaxed);
                     self.write_buf_len -= n;
                     self.can_flush = true;
 
@@ -564,7 +584,6 @@ impl Connection {
             }
         }
     }
-
     /// Write the internal buffers into the write stream using vectored write operations
     ///
     /// Writes [`WRITE_VECTORED_CHUNKS`] at a time. More efficient _if_
@@ -595,6 +614,7 @@ impl Connection {
             match Pin::new(&mut self.stream).poll_write_vectored(cx, &writes[..writes_len]) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Ok(mut n)) => {
+                    self.statistics.out_bytes.add(n as u64, Ordering::Relaxed);
                     self.write_buf_len -= n;
                     self.can_flush = true;
 
@@ -671,16 +691,120 @@ impl Connection {
     }
 }
 
+#[cfg(feature = "websockets")]
+#[pin_project]
+pub(crate) struct WebSocketAdapter<T> {
+    #[pin]
+    pub(crate) inner: WebSocketStream<T>,
+    pub(crate) read_buf: BytesMut,
+}
+
+#[cfg(feature = "websockets")]
+impl<T> WebSocketAdapter<T> {
+    pub(crate) fn new(inner: WebSocketStream<T>) -> Self {
+        Self {
+            inner,
+            read_buf: BytesMut::new(),
+        }
+    }
+}
+
+#[cfg(feature = "websockets")]
+impl<T> AsyncRead for WebSocketAdapter<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut this = self.project();
+
+        loop {
+            // If we have data in the read buffer, let's move it to the output buffer.
+            if !this.read_buf.is_empty() {
+                let len = std::cmp::min(buf.remaining(), this.read_buf.len());
+                buf.put_slice(&this.read_buf.split_to(len));
+                return Poll::Ready(Ok(()));
+            }
+
+            match this.inner.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(message))) => {
+                    this.read_buf.extend_from_slice(message.as_payload());
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)));
+                }
+                Poll::Ready(None) => {
+                    return Poll::Ready(Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "WebSocket closed",
+                    )));
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "websockets")]
+impl<T> AsyncWrite for WebSocketAdapter<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let mut this = self.project();
+
+        let data = buf.to_vec();
+        match this.inner.poll_ready_unpin(cx) {
+            Poll::Ready(Ok(())) => match this
+                .inner
+                .start_send_unpin(tokio_websockets::Message::binary(data))
+            {
+                Ok(()) => Poll::Ready(Ok(buf.len())),
+                Err(e) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            },
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.project()
+            .inner
+            .poll_flush_unpin(cx)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.project()
+            .inner
+            .poll_close_unpin(cx)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+}
+
 #[cfg(test)]
 mod read_op {
+    use std::sync::Arc;
+
     use super::Connection;
-    use crate::{HeaderMap, ServerError, ServerInfo, ServerOp, StatusCode};
+    use crate::{HeaderMap, ServerError, ServerInfo, ServerOp, Statistics, StatusCode};
     use tokio::io::{self, AsyncWriteExt};
 
     #[tokio::test]
     async fn ok() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"+OK\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -690,7 +814,7 @@ mod read_op {
     #[tokio::test]
     async fn ping() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"PING\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -700,7 +824,7 @@ mod read_op {
     #[tokio::test]
     async fn pong() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"PONG\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -710,7 +834,7 @@ mod read_op {
     #[tokio::test]
     async fn info() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"INFO {}\r\n").await.unwrap();
         server.flush().await.unwrap();
@@ -737,7 +861,7 @@ mod read_op {
     #[tokio::test]
     async fn error() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"INFO {}\r\n").await.unwrap();
         let result = connection.read_op().await.unwrap();
@@ -759,7 +883,7 @@ mod read_op {
     #[tokio::test]
     async fn message() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server
             .write_all(b"MSG FOO.BAR 9 11\r\nHello World\r\n")
@@ -906,7 +1030,7 @@ mod read_op {
     #[tokio::test]
     async fn unknown() {
         let (stream, mut server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"ONE\r\n").await.unwrap();
         connection.read_op().await.unwrap_err();
@@ -956,14 +1080,16 @@ mod read_op {
 
 #[cfg(test)]
 mod write_op {
+    use std::sync::Arc;
+
     use super::Connection;
-    use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol};
+    use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol, Statistics};
     use tokio::io::{self, AsyncBufReadExt, BufReader};
 
     #[tokio::test]
     async fn publish() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         connection
             .easy_write_and_flush(
@@ -1032,7 +1158,7 @@ mod write_op {
     #[tokio::test]
     async fn subscribe() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         connection
             .easy_write_and_flush(
@@ -1071,7 +1197,7 @@ mod write_op {
     #[tokio::test]
     async fn unsubscribe() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         connection
             .easy_write_and_flush([ClientOp::Unsubscribe { sid: 11, max: None }].iter())
@@ -1102,7 +1228,7 @@ mod write_op {
     #[tokio::test]
     async fn ping() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
@@ -1120,7 +1246,7 @@ mod write_op {
     #[tokio::test]
     async fn pong() {
         let (stream, server) = io::duplex(128);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
@@ -1138,7 +1264,7 @@ mod write_op {
     #[tokio::test]
     async fn connect() {
         let (stream, server) = io::duplex(1024);
-        let mut connection = Connection::new(Box::new(stream), 0);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         let mut reader = BufReader::new(server);
         let mut buffer = String::new();
