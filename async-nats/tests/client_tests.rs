@@ -785,7 +785,7 @@ mod client {
     #[tokio::test]
     async fn retry_on_initial_connect() {
         let _client = ConnectOptions::new()
-            .connect("localhost:7777")
+            .connect("localhost:7779")
             .await
             .expect_err("should fail to connect");
         let client = ConnectOptions::new()
@@ -793,14 +793,14 @@ mod client {
                 println!("event: {ev}");
             })
             .retry_on_initial_connect()
-            .connect("localhost:7777")
+            .connect("localhost:7779")
             .await
             .unwrap();
 
         let mut sub = client.subscribe("DATA").await.unwrap();
         client.publish("DATA", "payload".into()).await.unwrap();
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let _server = nats_server::run_server_with_port("", Some("7777"));
+        let _server = nats_server::run_server_with_port("", Some("7779"));
         sub.next().await.unwrap();
     }
 
@@ -922,7 +922,7 @@ mod client {
                     tx.send(event).unwrap();
                 }
             })
-            .connect("localhost:7777")
+            .connect("localhost:7778")
             .await
             .unwrap();
 
