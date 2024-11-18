@@ -66,7 +66,6 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          nats-server --jetstream --port=4222 &
           cargo test --features=${{ matrix.features }} --features slow_tests -- --nocapture
 
   check_format:
