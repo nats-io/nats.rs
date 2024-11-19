@@ -1,3 +1,29 @@
+# v0.38.0
+## Overview
+
+This release adds Websockets support, using `tokio-websocket` implementation.
+Feature is behind a feature flag `websockets`, enabled by default.
+
+## Breaking Changes
+* Change Auth struct signature field to `Vec<u8>` by @mnordstr in https://github.com/nats-io/nats.rs/pull/1337
+
+## Added
+* Add Websockets support by @Jarema in https://github.com/nats-io/nats.rs/pull/1330
+* Add ability to fetch stream subjects by @Jarema in https://github.com/nats-io/nats.rs/pull/1329
+* Add getter for Client request timeout by @Jarema in https://github.com/nats-io/nats.rs/pull/1338
+* Implement the "drain" feature for subscriptions and connections by @jsudano in https://github.com/nats-io/nats.rs/pull/1332
+
+## Fixed
+* Fix adding back prefix in service group creation by @rexf in https://github.com/nats-io/nats.rs/pull/1339
+
+## New Contributors
+* @mnordstr made their first contribution in https://github.com/nats-io/nats.rs/pull/1337
+* @rexf made their first contribution in https://github.com/nats-io/nats.rs/pull/1339
+* @jsudano made their first contribution in https://github.com/nats-io/nats.rs/pull/1332
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.37.0...async-nats/v0.38.0
+
+
 # v0.37.0
 ## Overview
 
