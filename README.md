@@ -70,6 +70,10 @@ Please refer each crate docs for API reference and examples.
 
 **Additionally Check out [NATS by example](https://natsbyexample.com) - An evolving collection of runnable, cross-client reference examples for NATS.**
 
+### Extensions
+
+Client extensions are available in separate repo under the umbrella project called [Orbit](https://github.com/synadia-io/orbit.rs)
+
 ## Feedback
 
 We encourage all folks in the NATS and Rust ecosystems to help us
