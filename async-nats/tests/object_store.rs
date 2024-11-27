@@ -12,11 +12,14 @@
 // limitations under the License.
 
 mod object_store {
-    use std::{io, time::Duration};
+    use std::{collections::HashMap, io, time::Duration};
 
-    use async_nats::jetstream::{
-        object_store::{AddLinkErrorKind, ObjectMetadata, UpdateMetadata},
-        stream::DirectGetErrorKind,
+    use async_nats::{
+        jetstream::{
+            object_store::{AddLinkErrorKind, ObjectMetadata, UpdateMetadata},
+            stream::DirectGetErrorKind,
+        },
+        HeaderMap,
     };
     use base64::Engine;
     use futures::StreamExt;
@@ -88,6 +91,7 @@ mod object_store {
                     name: "BAR".to_string(),
                     description: Some("custom object".to_string()),
                     chunk_size: Some(64 * 1024),
+                    ..Default::default()
                 },
                 &mut bytes.as_slice(),
             )
@@ -217,8 +221,21 @@ mod object_store {
             .await
             .unwrap();
 
+        let metadata = HashMap::from([("foo".to_string(), "bar".to_string())]);
+        let mut headers = HeaderMap::new();
+        headers.append("foo", "bar");
+
         bucket
-            .put("FOO", &mut io::Cursor::new(vec![2, 3, 4, 5]))
+            .put(
+                ObjectMetadata {
+                    name: "FOO".to_string(),
+                    description: Some("description".to_string()),
+                    chunk_size: None,
+                    metadata: metadata.clone(),
+                    headers: Some(headers.clone()),
+                },
+                &mut io::Cursor::new(vec![2, 3, 4, 5]),
+            )
             .await
             .unwrap();
 
@@ -228,6 +245,8 @@ mod object_store {
         assert_eq!(info.name, "FOO");
         assert_eq!(info.bucket, "bucket");
         assert_eq!(info.size, 4);
+        assert_eq!(info.metadata, metadata);
+        assert_eq!(info.headers, Some(headers));
         assert!(!info.deleted);
 
         let modified = info.modified;
@@ -375,6 +394,7 @@ mod object_store {
                     name: "Foo".to_string(),
                     description: Some("foo desc".to_string()),
                     chunk_size: None,
+                    ..Default::default()
                 },
                 &mut "dadada".as_bytes(),
             )
