@@ -12,7 +12,7 @@
 // limitations under the License.
 
 //! Object Store module
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::{cmp, str::FromStr, task::Poll, time::Duration};
 
@@ -358,6 +358,8 @@ impl ObjectStore {
             digest: Some(format!("SHA-256={}", URL_SAFE.encode(digest))),
             modified: Some(OffsetDateTime::now_utc()),
             deleted: false,
+            metadata: object_meta.metadata,
+            headers: object_meta.headers,
         };
 
         let mut headers = HeaderMap::new();
@@ -722,6 +724,8 @@ impl ObjectStore {
             modified: Some(OffsetDateTime::now_utc()),
             digest: None,
             deleted: false,
+            metadata: HashMap::default(),
+            headers: None,
         };
         publish_meta(self, &info).await?;
         Ok(info)
@@ -785,6 +789,8 @@ impl ObjectStore {
             modified: Some(OffsetDateTime::now_utc()),
             digest: None,
             deleted: false,
+            metadata: HashMap::default(),
+            headers: None,
         };
         publish_meta(self, &info).await?;
         Ok(info)
@@ -1072,6 +1078,12 @@ pub struct ObjectInfo {
     /// A short human readable description of the object.
     #[serde(default)]
     pub description: Option<String>,
+    /// Metadata for given object.
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
+    /// Headers for given object.
+    #[serde(default)]
+    pub headers: Option<HeaderMap>,
     /// Link this object points to, if any.
     #[serde(default)]
     pub options: Option<ObjectOptions>,
@@ -1127,6 +1139,10 @@ pub struct ObjectMetadata {
     pub description: Option<String>,
     /// Max chunk size. Default is 128k.
     pub chunk_size: Option<usize>,
+    /// Metadata for given object.
+    pub metadata: HashMap<String, String>,
+    /// Headers for given object.
+    pub headers: Option<HeaderMap>,
 }
 
 impl From<&str> for ObjectMetadata {
@@ -1158,6 +1174,8 @@ impl From<ObjectInfo> for ObjectMetadata {
         ObjectMetadata {
             name: info.name,
             description: info.description,
+            metadata: info.metadata,
+            headers: info.headers,
             chunk_size: None,
         }
     }
