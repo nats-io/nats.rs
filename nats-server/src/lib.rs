@@ -145,6 +145,8 @@ pub fn set_lame_duck_mode(s: &Server) {
     cmd.arg("--signal")
         .arg(format!("ldm={}", s.client_pid()))
         .spawn()
+        .unwrap()
+        .wait()
         .unwrap();
 }
 
