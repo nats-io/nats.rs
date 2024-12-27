@@ -475,7 +475,7 @@ impl ConnectionHandler {
             Closed,
         }
 
-        impl<'a> ProcessFut<'a> {
+        impl ProcessFut<'_> {
             const RECV_CHUNK_SIZE: usize = 16;
 
             #[cold]
@@ -497,7 +497,7 @@ impl ConnectionHandler {
             }
         }
 
-        impl<'a> Future for ProcessFut<'a> {
+        impl Future for ProcessFut<'_> {
             type Output = ExitReason;
 
             /// Drives the connection forward.

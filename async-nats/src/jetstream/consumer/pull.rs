@@ -330,7 +330,7 @@ pub struct Batch {
     terminated: bool,
 }
 
-impl<'a> Batch {
+impl Batch {
     async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, BatchError> {
         let inbox = Subject::from(consumer.context.client.new_inbox());
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
