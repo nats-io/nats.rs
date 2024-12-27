@@ -17,7 +17,7 @@ mod kv {
     use async_nats::{
         jetstream::{
             kv::Operation,
-            stream::{self, DiscardPolicy, Republish, Source, StorageType},
+            stream::{self, DiscardPolicy, External, Republish, Source, StorageType},
         },
         ConnectOptions,
     };
@@ -1008,7 +1008,10 @@ mod kv {
             bucket: "MIRROR".into(),
             mirror: Some(Source {
                 name: "TEST".into(),
-                domain: Some("HUB".into()),
+                external: Some(External {
+                    api_prefix: "$JS.HUB.API".into(),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }),
             ..Default::default()
