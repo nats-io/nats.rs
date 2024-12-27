@@ -666,7 +666,7 @@ impl Connection {
             this: &'a mut Connection,
         }
 
-        impl<'a> fmt::Write for Writer<'a> {
+        impl fmt::Write for Writer<'_> {
             fn write_str(&mut self, s: &str) -> fmt::Result {
                 self.this.write_buf_len += s.len();
                 self.this.flattened_writes.write_str(s)
