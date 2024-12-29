@@ -273,7 +273,7 @@ pub struct Config {
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
         rename = "sample_freq",
-        with = "from_str",
+        with = "sample_freq_deser",
         default,
         skip_serializing_if = "is_default"
     )]
@@ -433,7 +433,7 @@ fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
 
-pub(crate) mod from_str {
+pub(crate) mod sample_freq_deser {
     pub(crate) fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
     where
         T: std::str::FromStr,
@@ -441,7 +441,15 @@ pub(crate) mod from_str {
         D: serde::Deserializer<'de>,
     {
         let s = <String as serde::Deserialize>::deserialize(deserializer)?;
-        T::from_str(&s).map_err(serde::de::Error::custom)
+
+        let mut spliterator = s.split('%');
+        match (spliterator.next(), spliterator.next()) {
+            // No percentage occurred, parse as number
+            (Some(number), None) => T::from_str(number).map_err(serde::de::Error::custom),
+            // A percentage sign occurred right at the end
+            (Some(number), Some("")) => T::from_str(number).map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(format!("Malformed sample frequency: {s}")))
+        }
     }
 
     pub(crate) fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
