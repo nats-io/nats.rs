@@ -448,7 +448,9 @@ pub(crate) mod sample_freq_deser {
             (Some(number), None) => T::from_str(number).map_err(serde::de::Error::custom),
             // A percentage sign occurred right at the end
             (Some(number), Some("")) => T::from_str(number).map_err(serde::de::Error::custom),
-            _ => Err(serde::de::Error::custom(format!("Malformed sample frequency: {s}")))
+            _ => Err(serde::de::Error::custom(format!(
+                "Malformed sample frequency: {s}"
+            ))),
         }
     }
 
