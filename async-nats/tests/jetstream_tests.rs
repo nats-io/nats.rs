@@ -2617,6 +2617,31 @@ mod jetstream {
 
             assert_eq!(100, consumer.cached_info().config.sample_frequency);
         }
+
+        // `sample_frequency` can contain a %, which occurs in the wild
+        // when managing NATS resources using Terraform / OpenTofu's NATS JetStream provider.
+        {
+            let stream = &stream.cached_info().config.name;
+            let consumer = serde_json::json!({
+                "stream_name": stream,
+                "config": {
+                    "name": "consumer",
+                    "sample_freq": "10%",
+                },
+            });
+
+            let response: Response<Info> = js
+                .request(format!("CONSUMER.CREATE.{}", stream), &consumer)
+                .await
+                .unwrap();
+
+            match response {
+                Response::Ok(info) => {
+                    assert_eq!(info.config.sample_frequency, 10);
+                }
+                Response::Err { error } => panic!("expected ok response, got: {:?}", error),
+            }
+        }
     }
 
     #[tokio::test]
