@@ -605,7 +605,7 @@ pub struct OrderedConfig {
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
         rename = "sample_freq",
-        with = "super::from_str",
+        with = "super::sample_freq_deser",
         default,
         skip_serializing_if = "is_default"
     )]
@@ -2051,7 +2051,7 @@ pub struct Config {
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
         rename = "sample_freq",
-        with = "super::from_str",
+        with = "super::sample_freq_deser",
         default,
         skip_serializing_if = "is_default"
     )]
