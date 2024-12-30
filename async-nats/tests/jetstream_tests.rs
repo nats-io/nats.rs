@@ -2586,7 +2586,6 @@ mod jetstream {
             .await
             .unwrap();
 
-        // Pull Consumer
         {
             let consumer = stream
                 .create_consumer(consumer::pull::Config {
@@ -2603,12 +2602,10 @@ mod jetstream {
             assert_eq!(100, consumer.cached_info().config.sample_frequency);
         }
 
-        // Push Consumer
         {
             let consumer = stream
-                .create_consumer(consumer::push::Config {
+                .create_consumer(consumer::pull::Config {
                     name: Some("SampledPushConsumer".into()),
-                    deliver_subject: "DeliverSubject".into(),
                     description: Some(
                         "See below to check that Ack Sampling has been set to 100%!".to_string(),
                     ),
