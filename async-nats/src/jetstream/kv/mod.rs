@@ -387,6 +387,9 @@ impl Store {
                     }
                     Err(err) => match err.kind() {
                         crate::jetstream::stream::LastRawMessageErrorKind::NoMessageFound => None,
+                        crate::jetstream::stream::LastRawMessageErrorKind::InvalidSubject => {
+                            return Err(EntryError::new(EntryErrorKind::InvalidKey))
+                        }
                         crate::jetstream::stream::LastRawMessageErrorKind::Other => {
                             return Err(EntryError::with_source(EntryErrorKind::Other, err))
                         }
