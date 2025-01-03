@@ -3799,4 +3799,67 @@ mod jetstream {
         println!("count: {count}");
         assert!(count.eq(&220_000));
     }
+
+    #[tokio::test]
+    async fn raw_messages() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 1..=10 {
+            jetstream
+                .publish(format!("events.{i}"), format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        jetstream
+            .publish("events.2", "2".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        // by sequence
+        let message = stream.get_raw_message(5).await.unwrap();
+        assert_eq!(message.sequence, 5);
+        assert_eq!(from_utf8(&message.payload).unwrap(), "5");
+
+        // next by subject
+        let message = stream
+            .get_next_raw_message_by_subject("events.2")
+            .await
+            .unwrap();
+        assert_eq!(message.sequence, 2);
+        assert_eq!(from_utf8(&message.payload).unwrap(), "2");
+
+        // last by subject
+        let message = stream
+            .get_last_raw_message_by_subject("events.2")
+            .await
+            .unwrap();
+        assert_eq!(message.sequence, 11);
+        assert_eq!(from_utf8(&message.payload).unwrap(), "2");
+
+        // first by subject starting from sequence
+        let message = stream
+            .get_first_raw_message_by_subject("events.2", 5)
+            .await
+            .unwrap();
+        assert_eq!(message.sequence, 11);
+        assert_eq!(from_utf8(&message.payload).unwrap(), "2");
+    }
 }

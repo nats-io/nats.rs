@@ -160,3 +160,6 @@ lifecycle
 AtomicU64
 with_deleted
 StreamInfoBuilder
+direct_get
+direct_get_next_for_subject
+direct_get_last_for_subject
