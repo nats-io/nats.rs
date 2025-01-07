@@ -1041,7 +1041,7 @@ mod kv {
             }
         })
         .retries(5)
-        .exponential_backoff(Duration::from_millis(500))
+        .exponential_backoff(Duration::from_millis(2000))
         .await
         .unwrap();
 
