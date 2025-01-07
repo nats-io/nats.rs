@@ -13,10 +13,10 @@
 
 use crate::connector::ConnectorOptions;
 use crate::tls;
+use rustls_webpki::types::{CertificateDer, PrivateKeyDer};
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-use webpki::types::{CertificateDer, PrivateKeyDer};
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
@@ -67,8 +67,10 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<ClientC
                 let trust_anchors = load_certs(cafile.to_owned())
                     .await?
                     .into_iter()
-                    .map(|cert| webpki::anchor_from_trusted_cert(&cert).map(|ta| ta.to_owned()))
-                    .collect::<Result<Vec<_>, webpki::Error>>()
+                    .map(|cert| {
+                        rustls_webpki::anchor_from_trusted_cert(&cert).map(|ta| ta.to_owned())
+                    })
+                    .collect::<Result<Vec<_>, rustls_webpki::Error>>()
                     .map_err(|err| {
                         io::Error::new(
                             ErrorKind::InvalidInput,

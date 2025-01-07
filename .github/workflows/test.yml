@@ -66,7 +66,15 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test --features=${{ matrix.features }} --features slow_tests -- --nocapture
+          cargo test --features slow_tests,websockets -- --nocapture
+      - name: TLS tests (ring, aws-lc-rs, fips)
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          # we do not want to create more matrices just for tls test.
+          # It's easier to test it manually here.
+          cargo test tls --features=ring --no-default-features -- --nocapture
+          cargo test tls --features=aws-lc-rs --no-default-features -- --nocapture
+          cargo test tls --features=fips --no-default-features -- --nocapture
 
   check_format:
     name: check format (ubuntu-latest / nightly)
