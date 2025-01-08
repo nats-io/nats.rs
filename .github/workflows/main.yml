@@ -43,7 +43,7 @@ jobs:
           RUST_LOG: trace
         run: cargo bench nats
       - name: Archive benchmarks
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: benchmarks-report
           path: target/criterion
