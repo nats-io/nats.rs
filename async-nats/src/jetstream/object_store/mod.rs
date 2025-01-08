@@ -1128,6 +1128,11 @@ pub struct UpdateMetadata {
     pub name: String,
     /// A short human readable description of the object.
     pub description: Option<String>,
+    /// Metadata for given object.
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
+    /// Headers for given object.
+    pub headers: Option<HeaderMap>,
 }
 
 /// Meta information about an object.
@@ -1140,6 +1145,7 @@ pub struct ObjectMetadata {
     /// Max chunk size. Default is 128k.
     pub chunk_size: Option<usize>,
     /// Metadata for given object.
+    #[serde(default)]
     pub metadata: HashMap<String, String>,
     /// Headers for given object.
     pub headers: Option<HeaderMap>,

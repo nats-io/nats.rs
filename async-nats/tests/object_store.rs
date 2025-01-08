@@ -478,6 +478,7 @@ mod object_store {
         let given_metadata = UpdateMetadata {
             name: "new_object".to_owned(),
             description: Some("description".to_string()),
+            ..Default::default()
         };
 
         bucket
