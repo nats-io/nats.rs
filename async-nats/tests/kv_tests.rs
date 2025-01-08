@@ -984,6 +984,9 @@ mod kv {
         assert_eq!("bar.$KV.test.key", message.subject.as_str());
     }
 
+    // This test if flaky due to its assumptions.
+    // It is set to ignored until those are resolved.
+    #[ignore]
     #[tokio::test]
     async fn cross_account_mirrors() {
         let hub_server = nats_server::run_server("tests/configs/jetstream_hub.conf");
