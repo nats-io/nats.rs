@@ -550,6 +550,7 @@ impl ObjectStore {
     ///         object_store::UpdateMetadata {
     ///             name: "new_name".to_string(),
     ///             description: Some("a new description".to_string()),
+    ///             ..Default::default()
     ///         },
     ///     )
     ///     .await?;
