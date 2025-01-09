@@ -600,7 +600,7 @@ impl<I> Stream<I> {
 
     /// Get a fist message from the stream for a given subject starting from provided sequence..
     /// This low-level API always reaches stream leader.
-    /// This should be discouraged in favor of using [Stream::direct_get_next_for_subject].
+    /// This should be discouraged in favor of using [Stream::direct_get_first_for_subject].
     ///
     /// # Examples
     ///
