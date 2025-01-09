@@ -19,9 +19,7 @@ use std::process::{Child, Command};
 use std::{env, fs};
 use std::{thread, time::Duration};
 
-use lazy_static::lazy_static;
 use rand::Rng;
-use regex::Regex;
 use serde_json::{self, Value};
 
 pub struct Server {
@@ -37,9 +35,11 @@ struct Inner {
     pidfile: PathBuf,
 }
 
-lazy_static! {
-    static ref SD_RE: Regex = Regex::new(r#".+\sStore Directory:\s+"([^"]+)""#).unwrap();
-    static ref CLIENT_RE: Regex = Regex::new(r".+\sclient connections on\s+(\S+)").unwrap();
+macro_rules! regex {
+    ($re:literal $(,)?) => {{
+        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| regex::Regex::new($re).unwrap())
+    }};
 }
 
 impl Drop for Server {
@@ -48,7 +48,7 @@ impl Drop for Server {
         self.inner.child.wait().unwrap();
         if let Ok(log) = fs::read_to_string(self.inner.logfile.as_os_str()) {
             // Check if we had JetStream running and if so cleanup the storage directory.
-            if let Some(caps) = SD_RE.captures(&log) {
+            if let Some(caps) = regex!(r#".+\sStore Directory:\s+"([^"]+)""#).captures(&log) {
                 let sd = caps.get(1).map_or("", |m| m.as_str());
                 fs::remove_dir_all(sd).ok();
             }
@@ -120,7 +120,7 @@ impl Server {
         for _ in 0..100 {
             match fs::read_to_string(self.inner.logfile.as_os_str()) {
                 Ok(l) => {
-                    if let Some(cre) = CLIENT_RE.captures(&l) {
+                    if let Some(cre) = regex!(r".+\sclient connections on\s+(\S+)").captures(&l) {
                         return cre.get(1).unwrap().as_str().replace("0.0.0.0", "localhost");
                     } else {
                         thread::sleep(Duration::from_millis(500));
