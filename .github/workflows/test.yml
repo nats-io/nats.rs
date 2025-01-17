@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest-8-cores, macos-latest]
         go-bin: ['~/go/bin']
         include:
           - os: windows-latest
@@ -78,7 +78,7 @@ jobs:
 
   check_format:
     name: check format (ubuntu-latest / nightly)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -92,7 +92,7 @@ jobs:
 
   check_lint:
     name: check linter (ubuntu-latest / stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -113,7 +113,7 @@ jobs:
 
   check_docs:
     name: check docs (ubuntu-latest / stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -152,7 +152,7 @@ jobs:
 
   check_licenses:
     name: check licenses (ubuntu-latest / stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -164,7 +164,7 @@ jobs:
 
   check_msrv:
     name: check minimal supported rust version (ubuntu-latest / msrv)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -186,7 +186,7 @@ jobs:
 
   check_examples:
     name: check examples (ubuntu-latest / stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -207,7 +207,7 @@ jobs:
 
   check_spelling:
     name: check spelling (ubuntu-latest / nightly)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -232,7 +232,7 @@ jobs:
 
   check_min_versions:
     name: check minimal versions of transitive dependencies (ubuntu-latest / stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
