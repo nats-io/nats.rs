@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod kv {
-    use std::{str::from_utf8, time::Duration};
+    use std::{collections::HashMap, str::from_utf8, time::Duration};
 
     use async_nats::{
         jetstream::{
@@ -559,7 +559,6 @@ mod kv {
     async fn watch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .event_callback(|event| async move { println!("event: {event:?}") })
             .connect(server.client_url())
             .await
             .unwrap();
@@ -609,6 +608,80 @@ mod kv {
                 from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
             );
             if i == 9 {
+                break;
+            }
+        }
+    }
+    #[tokio::test]
+    async fn watch_many() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // check if we get only updated values. This should not pop up in watcher.
+        kv.put("foo", 22.to_string().into()).await.unwrap();
+        kv.put("bar", 22.to_string().into()).await.unwrap();
+        let mut watch = kv.watch_many(["foo.>", "bar.>"]).await.unwrap();
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put(format!("foo.{i}"), i.to_string().into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put(format!("bar.{i}"), i.to_string().into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("var", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+
+        let mut keys = HashMap::new();
+        for i in 0..10 {
+            keys.insert(format!("foo.{i}"), ());
+            keys.insert(format!("bar.{i}"), ());
+        }
+        while let Some(entry) = watch.next().await {
+            let entry = entry.unwrap();
+            assert!(keys.contains_key(&entry.key));
+            keys.remove(&entry.key);
+            if keys.is_empty() {
                 break;
             }
         }
@@ -747,6 +820,92 @@ mod kv {
                 from_utf8(&entry.value).unwrap().parse::<usize>().unwrap()
             );
             if i == 9 {
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn watch_many_with_history() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // check if we get updated values. This should not pop up in watcher.
+        kv.put("foo.bar", 42.to_string().into()).await.unwrap();
+        let mut watch = kv
+            .watch_many_with_history(["foo.>", "bar.>"])
+            .await
+            .unwrap();
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put(format!("foo.{i}"), i.to_string().into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put("var", i.to_string().into()).await.unwrap();
+                }
+            }
+        });
+
+        tokio::task::spawn({
+            let kv = kv.clone();
+            async move {
+                for i in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    kv.put(format!("bar.{i}"), i.to_string().into())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        let entry = watch.next().await.unwrap();
+        let entry = entry.unwrap();
+        assert_eq!("foo.bar", entry.key);
+
+        let mut keys = HashMap::new();
+        for i in 0..10 {
+            keys.insert(format!("foo.{i}"), ());
+            keys.insert(format!("bar.{i}"), ());
+        }
+
+        // make sure we get the rest correctly
+        while let Some(entry) = watch.next().await {
+            let entry = entry.unwrap();
+            // we now start at 1, we've done one iteration
+            assert!(keys.contains_key(&entry.key));
+            keys.remove(&entry.key);
+            if keys.is_empty() {
                 break;
             }
         }
