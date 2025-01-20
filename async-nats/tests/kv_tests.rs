@@ -613,6 +613,7 @@ mod kv {
         }
     }
     #[tokio::test]
+    #[cfg(feature = "server_2_10")]
     async fn watch_many() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
@@ -826,6 +827,7 @@ mod kv {
     }
 
     #[tokio::test]
+    #[cfg(feature = "server_2_10")]
     async fn watch_many_with_history() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
