@@ -532,7 +532,8 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(not(feature = "server_2_10"))]
+
+    #[cfg(feature = "server_2_10")]
     pub async fn watch_many<T, K>(&self, keys: K) -> Result<Watch, WatchError>
     where
         T: AsRef<str>,
