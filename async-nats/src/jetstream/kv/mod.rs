@@ -507,7 +507,7 @@ impl Store {
             .await
     }
 
-    /// Creates a [futures::Stream] over [Entries][Entry]  a given key in the bucket, which yields
+    /// Creates a [futures::Stream] over [Entries][Entry] in the bucket, which yields
     /// values whenever there are changes for given keys.
     ///
     /// # Examples
@@ -543,7 +543,7 @@ impl Store {
             .await
     }
 
-    /// Creates a [futures::Stream] over [Entries][Entry] a given key in the bucket, starting from
+    /// Creates a [futures::Stream] over [Entries][Entry] for a given key in the bucket, starting from
     /// provided revision. This is useful to resume watching over big KV buckets without a need to
     /// replay all the history.
     ///
