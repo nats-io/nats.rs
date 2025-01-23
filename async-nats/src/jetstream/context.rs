@@ -680,6 +680,7 @@ impl Context {
             stream: stream.clone(),
             put_prefix: None,
             use_jetstream_prefix: self.prefix != "$JS.API",
+            codec: None,
         };
         if let Some(ref mirror) = stream.info.config.mirror {
             let bucket = mirror.name.trim_start_matches("KV_");
@@ -804,6 +805,7 @@ impl Context {
             stream_name: stream.info.config.name,
             put_prefix: None,
             use_jetstream_prefix: self.prefix != "$JS.API",
+            codec: None,
         };
         if let Some(ref mirror) = stream.info.config.mirror {
             let bucket = mirror.name.trim_start_matches("KV_");
@@ -1296,6 +1298,113 @@ impl Context {
             .await
             .map_err(|err| ObjectStoreError::with_source(ObjectStoreErrorKind::GetStore, err))?;
         Ok(())
+    }
+
+    pub async fn create_key_value_with_codec<C: Codec>(
+        &self,
+        mut config: crate::jetstream::kv::Config,
+        codec: C,
+    ) -> Result<Store, CreateKeyValueError> {
+        if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
+            return Err(CreateKeyValueError::new(
+                CreateKeyValueErrorKind::InvalidStoreName,
+            ));
+        }
+
+        let history = if config.history > 0 {
+            if config.history > MAX_HISTORY {
+                return Err(CreateKeyValueError::new(
+                    CreateKeyValueErrorKind::TooLongHistory,
+                ));
+            }
+            config.history
+        } else {
+            1
+        };
+
+        let num_replicas = if config.num_replicas == 0 {
+            1
+        } else {
+            config.num_replicas
+        };
+
+        let mut subjects = Vec::new();
+        if let Some(ref mut mirror) = config.mirror {
+            if !mirror.name.starts_with("KV_") {
+                mirror.name = format!("KV_{}", mirror.name);
+            }
+            config.mirror_direct = true;
+        } else if let Some(ref mut sources) = config.sources {
+            for source in sources {
+                if !source.name.starts_with("KV_") {
+                    source.name = format!("KV_{}", source.name);
+                }
+            }
+        } else {
+            subjects = vec![format!("$KV.{}.>", config.bucket)];
+        }
+
+        let stream = self
+            .create_stream(stream::Config {
+                name: format!("KV_{}", config.bucket),
+                description: Some(config.description),
+                subjects,
+                max_messages_per_subject: history,
+                max_bytes: config.max_bytes,
+                max_age: config.max_age,
+                max_message_size: config.max_value_size,
+                storage: config.storage,
+                republish: config.republish,
+                allow_rollup: true,
+                deny_delete: true,
+                deny_purge: false,
+                allow_direct: true,
+                sources: config.sources,
+                mirror: config.mirror,
+                num_replicas,
+                discard: stream::DiscardPolicy::New,
+                mirror_direct: config.mirror_direct,
+                #[cfg(feature = "server_2_10")]
+                compression: if config.compression {
+                    Some(stream::Compression::S2)
+                } else {
+                    None
+                },
+                placement: config.placement,
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| {
+                if err.kind() == CreateStreamErrorKind::TimedOut {
+                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::TimedOut, err)
+                } else {
+                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
+                }
+            })?;
+
+        let mut store = Store {
+            prefix: format!("$KV.{}.", &config.bucket),
+            name: config.bucket,
+            stream: stream.clone(),
+            stream_name: stream.info.config.name,
+            put_prefix: None,
+            use_jetstream_prefix: self.prefix != "$JS.API",
+            codec: None,
+        };
+        if let Some(ref mirror) = stream.info.config.mirror {
+            let bucket = mirror.name.trim_start_matches("KV_");
+            if let Some(ref external) = mirror.external {
+                if !external.api_prefix.is_empty() {
+                    store.use_jetstream_prefix = false;
+                    store.prefix = format!("$KV.{bucket}.");
+                    store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
+                } else {
+                    store.put_prefix = Some(format!("$KV.{bucket}."));
+                }
+            }
+        };
+
+        Ok(store)
     }
 }
 
@@ -1843,4 +1952,66 @@ enum ConsumerAction {
     #[serde(rename = "update")]
     #[cfg(feature = "server_2_10")]
     Update,
+}
+
+pub type CodecError = Error<CodecErrorKind>;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum CodecErrorKind {
+    Encode,
+    Decode,
+    Other,
+}
+
+impl Display for CodecErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CodecErrorKind::Encode => write!(f, "encode error"),
+            CodecErrorKind::Decode => write!(f, "decode error"),
+            CodecErrorKind::Other => write!(f, "error"),
+        }
+    }
+}
+
+pub trait Codec {
+    async fn encode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), CodecError>;
+    async fn decode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), CodecError>;
+}
+
+pub struct LowerCaseCodec;
+
+impl Codec for LowerCaseCodec {
+    async fn encode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), CodecError> {
+        let key = key.to_lowercase();
+        let payload = from_utf8(&payload)
+            .map_err(|err| CodecError::with_source(CodecErrorKind::Encode, err))?
+            .to_lowercase()
+            .into();
+        Ok((key, payload))
+    }
+
+    async fn decode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), CodecError> {
+        let key = key.to_lowercase();
+        let payload = from_utf8(&payload)
+            .map_err(|err| CodecError::with_source(CodecErrorKind::Decode, err))?
+            .to_lowercase()
+            .into();
+        Ok((key, payload))
+    }
 }

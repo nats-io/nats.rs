@@ -36,7 +36,7 @@ use self::bucket::Status;
 
 use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
-    context::{PublishError, PublishErrorKind},
+    context::{Codec, PublishError, PublishErrorKind},
     message::StreamMessage,
     stream::{
         self, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, Republish,
@@ -163,9 +163,30 @@ impl fmt::Display for ParseOperationError {
 
 impl std::error::Error for ParseOperationError {}
 
+#[derive(Debug, Clone)]
+pub struct NoOp;
+
+impl Codec for NoOp {
+    async fn encode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), super::context::CodecError> {
+        Ok((key, payload))
+    }
+
+    async fn decode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), super::context::CodecError> {
+        Ok((key, payload))
+    }
+}
+
 /// A struct used as a handle for the bucket.
 #[derive(Debug, Clone)]
-pub struct Store {
+pub struct Store<C: Codec = NoOp> {
     /// The name of the Store.
     pub name: String,
     /// The name of the stream associated with the Store.
@@ -178,9 +199,10 @@ pub struct Store {
     pub use_jetstream_prefix: bool,
     /// The stream associated with the Store.
     pub stream: Stream,
+    pub codec: Option<C>,
 }
 
-impl Store {
+impl<C: Codec> Store<C> {
     /// Queries the server and returns status from the server.
     ///
     /// # Examples
@@ -293,6 +315,16 @@ impl Store {
         if !is_valid_key(key.as_ref()) {
             return Err(PutError::new(PutErrorKind::InvalidKey));
         }
+
+        let mut key = key.as_ref().to_string();
+        let mut value = value.clone();
+        if let Some(codec) = self.codec.as_ref() {
+            (key, value) = codec
+                .encode(key, value.clone())
+                .await
+                .map_err(|err| PutError::with_source(PutErrorKind::Publish, err))?;
+        }
+
         let mut subject = String::new();
         if self.use_jetstream_prefix {
             subject.push_str(&self.stream.context.prefix);
