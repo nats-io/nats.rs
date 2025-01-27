@@ -502,8 +502,8 @@ impl fmt::Display for Error {
         write!(
             fmt,
             "{} (code {}, error code {})",
-            self.code,
             self.description.as_ref().unwrap_or(&"unknown".to_string()),
+            self.code,
             self.err_code.0,
         )
     }
