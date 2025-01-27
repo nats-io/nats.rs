@@ -288,12 +288,8 @@ impl ObjectStore {
     {
         let object_meta: ObjectMetadata = meta.into();
 
-        let encoded_object_name = encode_object_name(&object_meta.name);
-        if !is_valid_object_name(&encoded_object_name) {
-            return Err(PutError::new(PutErrorKind::InvalidName));
-        }
         // Fetch any existing object info, if there is any for later use.
-        let maybe_existing_object_info = match self.info(&encoded_object_name).await {
+        let maybe_existing_object_info = match self.info(&object_meta.name).await {
             Ok(object_info) => Some(object_info),
             Err(_) => None,
         };
@@ -343,7 +339,13 @@ impl ObjectStore {
                 })?;
         }
         let digest = sha256.finish();
+
+        let encoded_object_name = encode_object_name(&object_meta.name);
+        if !is_valid_object_name(&encoded_object_name) {
+            return Err(PutError::new(PutErrorKind::InvalidName));
+        }
         let subject = format!("$O.{}.M.{}", &self.name, &encoded_object_name);
+
         let object_info = ObjectInfo {
             name: object_meta.name,
             description: object_meta.description,
