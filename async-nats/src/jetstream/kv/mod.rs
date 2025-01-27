@@ -18,12 +18,14 @@ pub mod bucket;
 use std::{
     fmt::{self, Display},
     str::FromStr,
+    sync::Arc,
     task::Poll,
 };
 
-use crate::HeaderValue;
+use crate::{subject::ToSubject, HeaderValue};
+use async_trait::async_trait;
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{future::BoxFuture, FutureExt, StreamExt};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use time::OffsetDateTime;
@@ -36,7 +38,7 @@ use self::bucket::Status;
 
 use super::{
     consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
-    context::{Codec, PublishError, PublishErrorKind},
+    context::{Codec, CodecError, PublishError, PublishErrorKind},
     message::StreamMessage,
     stream::{
         self, ConsumerError, ConsumerErrorKind, DirectGetError, DirectGetErrorKind, Republish,
@@ -166,6 +168,7 @@ impl std::error::Error for ParseOperationError {}
 #[derive(Debug, Clone)]
 pub struct NoOp;
 
+#[async_trait]
 impl Codec for NoOp {
     async fn encode(
         &self,
@@ -199,10 +202,10 @@ pub struct Store<C: Codec = NoOp> {
     pub use_jetstream_prefix: bool,
     /// The stream associated with the Store.
     pub stream: Stream,
-    pub codec: Option<C>,
+    pub codec: Option<Arc<C>>,
 }
 
-impl<C: Codec> Store<C> {
+impl<C: Codec + Send + Sync> Store<C> {
     /// Queries the server and returns status from the server.
     ///
     /// # Examples
@@ -265,12 +268,22 @@ impl<C: Codec> Store<C> {
         key: T,
         value: bytes::Bytes,
     ) -> Result<u64, CreateError> {
-        let update_err = match self.update(key.as_ref(), value.clone(), 0).await {
+        let mut key = key.as_ref().to_string();
+        let mut value = value.clone();
+
+        if let Some(codec) = &self.codec {
+            (key, value) = codec
+                .encode(key, value.clone())
+                .await
+                .map_err(|err| CreateError::with_source(CreateErrorKind::Publish, err))?;
+        }
+
+        let update_err = match self.update(key.as_str(), value.clone(), 0).await {
             Ok(revision) => return Ok(revision),
             Err(err) => err,
         };
 
-        match self.entry(key.as_ref()).await? {
+        match self.entry(key.as_str()).await? {
             // Deleted or Purged key, we can create it again.
             Some(Entry {
                 operation: Operation::Delete | Operation::Purge,
@@ -351,11 +364,17 @@ impl<C: Codec> Store<C> {
         key: T,
         revision: Option<u64>,
     ) -> Result<Option<Entry>, EntryError> {
-        let key: String = key.into();
+        let mut key: String = key.into();
         if !is_valid_key(key.as_ref()) {
             return Err(EntryError::new(EntryErrorKind::InvalidKey));
         }
 
+        if let Some(codec) = self.codec.as_ref() {
+            (key, _) = codec
+                .encode(key.clone(), Bytes::new())
+                .await
+                .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))?;
+        }
         let subject = format!("{}{}", self.prefix.as_str(), &key);
 
         let result: Option<(StreamMessage, Operation)> = {
@@ -379,11 +398,26 @@ impl<C: Codec> Store<C> {
                 };
 
                 match message {
-                    Ok(message) => {
+                    Ok(mut message) => {
                         let operation =
                             kv_operation_from_stream_message(&message).unwrap_or(Operation::Put);
 
-                        Some((message, operation))
+                        if let Some(codec) = self.codec.as_ref() {
+                            let subject = message.subject.clone().to_string();
+                            let payload = message.payload.clone();
+
+                            let (s, payload) =
+                                codec.decode(subject, payload).await.map_err(|err| {
+                                    EntryError::with_source(EntryErrorKind::Other, err)
+                                })?;
+
+                            message.subject = s.to_subject();
+                            message.payload = payload;
+
+                            Some((message, operation))
+                        } else {
+                            Some((message, operation))
+                        }
                     }
                     Err(err) => {
                         if err.kind() == DirectGetErrorKind::NotFound {
@@ -411,10 +445,23 @@ impl<C: Codec> Store<C> {
                     }
                 };
                 match raw_message {
-                    Ok(raw_message) => {
+                    Ok(mut raw_message) => {
                         let operation = kv_operation_from_stream_message(&raw_message)
                             .unwrap_or(Operation::Put);
                         // TODO: unnecessary expensive, cloning whole Message.
+
+                        let mut subject = raw_message.subject.clone().to_string();
+                        let mut payload = raw_message.payload.clone();
+
+                        if let Some(codec) = self.codec.as_ref() {
+                            (subject, payload) =
+                                codec.decode(subject, payload).await.map_err(|err| {
+                                    EntryError::with_source(EntryErrorKind::Other, err)
+                                })?;
+                        }
+
+                        raw_message.subject = subject.to_subject();
+                        raw_message.payload = payload;
                         Some((raw_message, operation))
                     }
                     Err(err) => match err.kind() {
@@ -435,9 +482,12 @@ impl<C: Codec> Store<C> {
 
         match result {
             Some((message, operation)) => {
+                println!("message: {:?}", message.subject);
+                println!("strip: {:?}", self.prefix);
+                let key = message.subject.strip_prefix(&self.prefix).unwrap();
                 let entry = Entry {
                     bucket: self.name.clone(),
-                    key,
+                    key: key.to_string(),
                     value: message.payload,
                     revision: message.sequence,
                     created: message.time,
@@ -534,7 +584,7 @@ impl<C: Codec> Store<C> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch, WatchError> {
+    pub async fn watch<T: AsRef<str>>(&self, key: T) -> Result<Watch<C>, WatchError> {
         self.watch_with_deliver_policy(key, DeliverPolicy::New)
             .await
     }
@@ -569,7 +619,7 @@ impl<C: Codec> Store<C> {
         &self,
         key: T,
         revision: u64,
-    ) -> Result<Watch, WatchError> {
+    ) -> Result<Watch<C>, WatchError> {
         self.watch_with_deliver_policy(
             key,
             DeliverPolicy::ByStartSequence {
@@ -590,8 +640,7 @@ impl<C: Codec> Store<C> {
     /// use futures::StreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream
-    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    /// let kv = jetstream .create_key_value(async_nats::jetstream::kv::Config {
     ///         bucket: "kv".to_string(),
     ///         history: 10,
     ///         ..Default::default()
@@ -604,7 +653,7 @@ impl<C: Codec> Store<C> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch, WatchError> {
+    pub async fn watch_with_history<T: AsRef<str>>(&self, key: T) -> Result<Watch<C>, WatchError> {
         self.watch_with_deliver_policy(key, DeliverPolicy::LastPerSubject)
             .await
     }
@@ -613,7 +662,7 @@ impl<C: Codec> Store<C> {
         &self,
         key: T,
         deliver_policy: DeliverPolicy,
-    ) -> Result<Watch, WatchError> {
+    ) -> Result<Watch<C>, WatchError> {
         let subject = format!("{}{}", self.prefix.as_str(), key.as_ref());
 
         debug!("initial consumer creation");
@@ -649,6 +698,8 @@ impl<C: Codec> Store<C> {
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
             seen_current: false,
+            codec: self.codec.clone(),
+            decode_future: None,
         })
     }
 
@@ -677,7 +728,7 @@ impl<C: Codec> Store<C> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_all(&self) -> Result<Watch, WatchError> {
+    pub async fn watch_all(&self) -> Result<Watch<C>, WatchError> {
         self.watch(ALL_KEYS).await
     }
 
@@ -707,7 +758,7 @@ impl<C: Codec> Store<C> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn watch_all_from_revision(&self, revision: u64) -> Result<Watch, WatchError> {
+    pub async fn watch_all_from_revision(&self, revision: u64) -> Result<Watch<C>, WatchError> {
         self.watch_from_revision(ALL_KEYS, revision).await
     }
 
@@ -1108,15 +1159,17 @@ impl<C: Codec> Store<C> {
 }
 
 /// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
-pub struct Watch {
+pub struct Watch<C: Codec> {
     no_messages: bool,
     seen_current: bool,
     subscription: super::consumer::push::Ordered,
     prefix: String,
     bucket: String,
+    codec: Option<Arc<C>>,
+    decode_future: Option<BoxFuture<'static, Result<(String, bytes::Bytes), CodecError>>>,
 }
 
-impl futures::Stream for Watch {
+impl<C: Codec + Send + Sync + 'static> futures::Stream for Watch<C> {
     type Item = Result<Entry, WatcherError>;
 
     fn poll_next(
@@ -1141,20 +1194,46 @@ impl futures::Stream for Watch {
                     let operation =
                         kv_operation_from_message(&message.message).unwrap_or(Operation::Put);
 
-                    let key = message
+                    let mut key = message
                         .subject
                         .strip_prefix(&self.prefix)
                         .map(|s| s.to_string())
                         .unwrap();
 
+                    let mut payload = message.payload.clone();
+
                     if !self.seen_current && info.pending == 0 {
                         self.seen_current = true;
                     }
 
+                    if let Some(codec) = self.codec.as_ref() {
+                        let codec = codec.clone();
+
+                        let subject = message.subject.clone();
+                        let payload_cone = message.payload.clone();
+
+                        match self
+                            .decode_future
+                            .get_or_insert(Box::pin(async move {
+                                codec.decode(subject.to_string(), payload_cone).await
+                            }))
+                            .poll_unpin(cx)
+                        {
+                            Poll::Ready(decoded) => {
+                                let (subject, payload_decoded) = decoded.map_err(|err| {
+                                    WatcherError::with_source(WatcherErrorKind::Other, err)
+                                })?;
+                                key = subject;
+                                payload = payload_decoded;
+                                self.decode_future = None;
+                            }
+                            Poll::Pending => (),
+                        }
+                    }
                     Poll::Ready(Some(Ok(Entry {
                         bucket: self.bucket.clone(),
                         key,
-                        value: message.payload.clone(),
+                        value: payload,
                         revision: info.stream_sequence,
                         created: info.published,
                         delta: info.pending,

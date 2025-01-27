@@ -22,6 +22,7 @@ use crate::subject::ToSubject;
 use crate::{
     header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode,
 };
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
@@ -33,6 +34,7 @@ use std::fmt::Display;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::str::from_utf8;
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -41,7 +43,7 @@ use tracing::debug;
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
 use super::is_valid_name;
-use super::kv::{Store, MAX_HISTORY};
+use super::kv::{NoOp, Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{
     self, Config, ConsumerError, ConsumerErrorKind, DeleteStatus, DiscardPolicy, External, Info,
@@ -658,7 +660,10 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, KeyValueError> {
+    pub async fn get_key_value<T: Into<String>>(
+        &self,
+        bucket: T,
+    ) -> Result<Store<NoOp>, KeyValueError> {
         let bucket: String = bucket.into();
         if !crate::jetstream::kv::is_valid_bucket_name(&bucket) {
             return Err(KeyValueError::new(KeyValueErrorKind::InvalidStoreName));
@@ -698,29 +703,14 @@ impl Context {
         Ok(store)
     }
 
-    /// Creates a new key-value bucket.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), async_nats::Error> {
-    /// let client = async_nats::connect("demo.nats.io:4222").await?;
-    /// let jetstream = async_nats::jetstream::new(client);
-    /// let kv = jetstream
-    ///     .create_key_value(async_nats::jetstream::kv::Config {
-    ///         bucket: "kv".to_string(),
-    ///         history: 10,
-    ///         ..Default::default()
-    ///     })
-    ///     .await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn create_key_value(
+    pub async fn create_key_value_maybe_codec<C>(
         &self,
         mut config: crate::jetstream::kv::Config,
-    ) -> Result<Store, CreateKeyValueError> {
+        codec: Option<C>,
+    ) -> Result<Store<C>, CreateKeyValueError>
+    where
+        C: Codec,
+    {
         if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
             return Err(CreateKeyValueError::new(
                 CreateKeyValueErrorKind::InvalidStoreName,
@@ -798,6 +788,12 @@ impl Context {
                 }
             })?;
 
+        let c = if let Some(codec) = codec {
+            Some(Arc::new(codec))
+        } else {
+            None
+        };
+
         let mut store = Store {
             prefix: format!("$KV.{}.", &config.bucket),
             name: config.bucket,
@@ -805,7 +801,7 @@ impl Context {
             stream_name: stream.info.config.name,
             put_prefix: None,
             use_jetstream_prefix: self.prefix != "$JS.API",
-            codec: None,
+            codec: c,
         };
         if let Some(ref mirror) = stream.info.config.mirror {
             let bucket = mirror.name.trim_start_matches("KV_");
@@ -821,6 +817,32 @@ impl Context {
         };
 
         Ok(store)
+    }
+
+    /// Creates a new key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_key_value(
+        &self,
+        config: crate::jetstream::kv::Config,
+    ) -> Result<Store, CreateKeyValueError> {
+        self.create_key_value_maybe_codec(config, None).await
     }
 
     /// Deletes given key-value bucket.
@@ -1973,6 +1995,7 @@ impl Display for CodecErrorKind {
     }
 }
 
+#[async_trait]
 pub trait Codec {
     async fn encode(
         &self,
@@ -1988,6 +2011,7 @@ pub trait Codec {
 
 pub struct LowerCaseCodec;
 
+#[async_trait]
 impl Codec for LowerCaseCodec {
     async fn encode(
         &self,
@@ -2007,11 +2031,34 @@ impl Codec for LowerCaseCodec {
         key: String,
         payload: bytes::Bytes,
     ) -> Result<(String, Bytes), CodecError> {
-        let key = key.to_lowercase();
+        let key = key.to_uppercase();
         let payload = from_utf8(&payload)
             .map_err(|err| CodecError::with_source(CodecErrorKind::Decode, err))?
-            .to_lowercase()
+            .to_uppercase()
             .into();
+        Ok((key, payload))
+    }
+}
+
+pub struct SlashCodec;
+
+#[async_trait]
+impl Codec for SlashCodec {
+    async fn encode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), CodecError> {
+        let key = key.replace(".", "/");
+        Ok((key, payload))
+    }
+
+    async fn decode(
+        &self,
+        key: String,
+        payload: bytes::Bytes,
+    ) -> Result<(String, Bytes), CodecError> {
+        let key = key.replace("/", ".");
         Ok((key, payload))
     }
 }

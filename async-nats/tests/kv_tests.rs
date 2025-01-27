@@ -16,6 +16,7 @@ mod kv {
 
     use async_nats::{
         jetstream::{
+            context::{LowerCaseCodec, SlashCodec},
             kv::Operation,
             stream::{self, DiscardPolicy, External, Republish, Source, StorageType},
         },
@@ -1146,5 +1147,36 @@ mod kv {
 
         assert_eq!(1, kv.entry("orange").await.unwrap().unwrap().revision);
         assert_eq!(2, kv.entry("tomato").await.unwrap().unwrap().revision);
+    }
+
+    #[tokio::test]
+    async fn kv_with_codec() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client.clone());
+
+        let kv = context
+            .create_key_value_maybe_codec(
+                async_nats::jetstream::kv::Config {
+                    bucket: "test".into(),
+                    description: "test_description".into(),
+                    history: 10,
+                    storage: StorageType::File,
+                    num_replicas: 1,
+                    ..Default::default()
+                },
+                Some(SlashCodec {}),
+            )
+            .await
+            .unwrap();
+
+        kv.put("key/test", "payload".into()).await.unwrap();
+        let value = kv.entry("key/test").await.unwrap().unwrap();
+        assert_eq!(value.value, "payload".as_bytes());
+        assert_eq!(value.key, "key/test");
     }
 }
