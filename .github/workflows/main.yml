@@ -11,6 +11,9 @@ env:
 
 jobs:
   benchmark:
+    defaults:
+      run:
+        working-directory: ./async-nats
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -36,7 +39,7 @@ jobs:
         with:
           shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
       - name: Build the package # for caching
-        run: cargo build --all --all-targets
+        run: cargo build --all-targets
 
       - name: Run benchmarks
         env:
