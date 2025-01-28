@@ -2049,7 +2049,7 @@ impl Codec for SlashCodec {
         key: String,
         payload: bytes::Bytes,
     ) -> Result<(String, Bytes), CodecError> {
-        let key = key.replace(".", "/");
+        let key = key.replace("/", ".");
         Ok((key, payload))
     }
 
@@ -2058,7 +2058,7 @@ impl Codec for SlashCodec {
         key: String,
         payload: bytes::Bytes,
     ) -> Result<(String, Bytes), CodecError> {
-        let key = key.replace("/", ".");
+        let key = key.replace(".", "/");
         Ok((key, payload))
     }
 }

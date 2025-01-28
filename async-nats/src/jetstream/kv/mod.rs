@@ -364,7 +364,8 @@ impl<C: Codec + Send + Sync> Store<C> {
         key: T,
         revision: Option<u64>,
     ) -> Result<Option<Entry>, EntryError> {
-        let mut key: String = key.into();
+        let original_key = key.into();
+        let mut key: String = original_key.clone();
         if !is_valid_key(key.as_ref()) {
             return Err(EntryError::new(EntryErrorKind::InvalidKey));
         }
@@ -482,12 +483,9 @@ impl<C: Codec + Send + Sync> Store<C> {
 
         match result {
             Some((message, operation)) => {
-                println!("message: {:?}", message.subject);
-                println!("strip: {:?}", self.prefix);
-                let key = message.subject.strip_prefix(&self.prefix).unwrap();
                 let entry = Entry {
                     bucket: self.name.clone(),
-                    key: key.to_string(),
+                    key: original_key,
                     value: message.payload,
                     revision: message.sequence,
                     created: message.time,
