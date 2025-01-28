@@ -478,7 +478,7 @@ impl IntoConsumerConfig for OrderedConfig {
 }
 
 impl Consumer<OrderedConfig> {
-    pub async fn messages<'a>(self) -> Result<Ordered, StreamError> {
+    pub async fn messages(self) -> Result<Ordered, StreamError> {
         let subscriber = self
             .context
             .client
