@@ -21,6 +21,9 @@ defaults:
 
 jobs:
   test_matrix:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: test (${{ matrix.os }} / stable)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -91,6 +94,9 @@ jobs:
         run: cargo fmt -- --check
 
   check_lint:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: check linter (ubuntu-latest / stable)
     runs-on: ubuntu-latest
     steps:
@@ -112,6 +118,9 @@ jobs:
         run: cargo clippy --benches --tests --examples --all-features --workspace --exclude nats -- --deny clippy::all
 
   check_docs:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: check docs (ubuntu-latest / stable)
     runs-on: ubuntu-latest
     steps:
@@ -131,6 +140,9 @@ jobs:
         run: cargo doc --no-deps --all-features
 
   check_features:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: check feature flags (ubuntu-latest / stable)
     runs-on: ubuntu-latest
     steps:
@@ -163,6 +175,9 @@ jobs:
           command-arguments: licenses
 
   check_msrv:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: check minimal supported rust version (ubuntu-latest / msrv)
     runs-on: ubuntu-latest
     steps:
@@ -185,6 +200,9 @@ jobs:
           cargo +${{ steps.install-rust.outputs.name }} check
 
   check_examples:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: check examples (ubuntu-latest / stable)
     runs-on: ubuntu-latest
     steps:
@@ -231,6 +249,9 @@ jobs:
         run: cargo spellcheck --code 1
 
   check_min_versions:
+    defaults:
+      run:
+        working-directory: ./async-nats
     name: check minimal versions of transitive dependencies (ubuntu-latest / stable)
     runs-on: ubuntu-latest
     steps:
