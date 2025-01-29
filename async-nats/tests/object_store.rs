@@ -106,6 +106,63 @@ mod object_store {
     }
 
     #[tokio::test]
+    async fn purge_existing_object_on_put() {
+        async fn at_least_one_message_contains_nuid_in_subject(
+            client: &async_nats::Client,
+            stream: &mut async_nats::jetstream::stream::Stream,
+            nuid: &str,
+        ) -> bool {
+            let message_count = stream.info().await.unwrap().state.messages;
+            stream
+                .create_consumer(async_nats::jetstream::consumer::push::OrderedConfig {
+                    deliver_subject: client.new_inbox(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .messages()
+                .await
+                .unwrap()
+                .take(message_count as usize)
+                .any(|msg| {
+                    let cond = msg.unwrap().message.subject.contains(nuid);
+                    async move { cond }
+                })
+                .await
+        }
+
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client.clone());
+
+        let bucket_name = "bucket";
+        let stream_name = format!("OBJ_{}", bucket_name);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: bucket_name.to_owned(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut stream = jetstream.get_stream(stream_name).await.unwrap();
+
+        let info = bucket.put("file", &mut b"foo".as_slice()).await.unwrap();
+
+        assert!(
+            at_least_one_message_contains_nuid_in_subject(&client, &mut stream, &info.nuid).await
+        );
+
+        bucket.put("file", &mut b"bar".as_slice()).await.unwrap();
+
+        assert!(
+            !at_least_one_message_contains_nuid_in_subject(&client, &mut stream, &info.nuid).await
+        );
+    }
+
+    #[tokio::test]
     async fn watch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
