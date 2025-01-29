@@ -532,7 +532,6 @@ impl Store {
     /// # Ok(())
     /// # }
     /// ```
-
     #[cfg(feature = "server_2_10")]
     pub async fn watch_many<T, K>(&self, keys: K) -> Result<Watch, WatchError>
     where
