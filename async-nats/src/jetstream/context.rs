@@ -2002,42 +2002,12 @@ pub trait Codec {
         key: String,
         payload: bytes::Bytes,
     ) -> Result<(String, Bytes), CodecError>;
+
     async fn decode(
         &self,
         key: String,
         payload: bytes::Bytes,
     ) -> Result<(String, Bytes), CodecError>;
-}
-
-pub struct LowerCaseCodec;
-
-#[async_trait]
-impl Codec for LowerCaseCodec {
-    async fn encode(
-        &self,
-        key: String,
-        payload: bytes::Bytes,
-    ) -> Result<(String, Bytes), CodecError> {
-        let key = key.to_lowercase();
-        let payload = from_utf8(&payload)
-            .map_err(|err| CodecError::with_source(CodecErrorKind::Encode, err))?
-            .to_lowercase()
-            .into();
-        Ok((key, payload))
-    }
-
-    async fn decode(
-        &self,
-        key: String,
-        payload: bytes::Bytes,
-    ) -> Result<(String, Bytes), CodecError> {
-        let key = key.to_uppercase();
-        let payload = from_utf8(&payload)
-            .map_err(|err| CodecError::with_source(CodecErrorKind::Decode, err))?
-            .to_uppercase()
-            .into();
-        Ok((key, payload))
-    }
 }
 
 pub struct SlashCodec;

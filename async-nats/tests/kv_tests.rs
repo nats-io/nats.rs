@@ -16,7 +16,7 @@ mod kv {
 
     use async_nats::{
         jetstream::{
-            context::{LowerCaseCodec, SlashCodec},
+            context::SlashCodec,
             kv::Operation,
             stream::{self, DiscardPolicy, External, Republish, Source, StorageType},
         },
@@ -1151,9 +1151,9 @@ mod kv {
 
     #[tokio::test]
     async fn kv_with_codec() {
-        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        // let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
-            .connect(server.client_url())
+            .connect("localhost:4222")
             .await
             .unwrap();
 
@@ -1178,5 +1178,6 @@ mod kv {
         let value = kv.entry("key/test").await.unwrap().unwrap();
         assert_eq!(value.value, "payload".as_bytes());
         assert_eq!(value.key, "key/test");
+        println!("value: {:?}", value);
     }
 }
