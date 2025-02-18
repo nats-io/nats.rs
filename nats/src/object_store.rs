@@ -12,7 +12,6 @@
 // limitations under the License.
 
 //! Support for Object Store.
-//! This feature is experimental and the API may change.
 
 use crate::header::HeaderMap;
 use crate::jetstream::{

@@ -68,7 +68,7 @@ aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets?/aws-l
 ring = ["dep:ring", "tokio-rustls/ring", "tokio-websockets?/ring"]
 fips = ["aws-lc-rs", "tokio-rustls/fips"]
 # All experimental features are part of this feature flag.
-experimental = ["service"]
+experimental = []
 # Features that require nats-server version 2.10 or higher.
 # It is enabled by default since official 2.10 nats-server release.
 "server_2_10" = []
