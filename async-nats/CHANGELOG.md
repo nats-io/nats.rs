@@ -1,3 +1,30 @@
+ # v0.39.0
+## Overview
+
+This release focuses on improvements and fixes for Object Store and KV.
+
+## Added
+* Add kv::watch_many functions by @Jarema in https://github.com/nats-io/nats.rs/pull/1364
+* Add metadata and headers to Object Store by @Jarema in https://github.com/nats-io/nats.rs/pull/1349
+* Allow updating Object Store metadata headers and metadata by @Jarema in https://github.com/nats-io/nats.rs/pull/1362
+* Add additional methods for getting raw messages from the stream by @Jarema in https://github.com/nats-io/nats.rs/pull/1359
+
+## Fixed
+* Support `sample_freq` values containing a % by @bengsparks in https://github.com/nats-io/nats.rs/pull/1354
+* Improve push consumers in `sample_freq` de/serialisation test by @bengsparks in https://github.com/nats-io/nats.rs/pull/1356
+* Delete old objects when calling `ObjectStore::put` by @thinety in https://github.com/nats-io/nats.rs/pull/1366
+
+## Changed
+* Use jetstream strict for tests by @caspervonb in https://github.com/nats-io/nats.rs/pull/1310
+* Improve transient dependencies by @Jarema in https://github.com/nats-io/nats.rs/pull/1361
+* Change `jetstream::Error`'s `Display` message by @thinety in https://github.com/nats-io/nats.rs/pull/1365
+* Remove stale experimental flags mentions by @Jarema in https://github.com/nats-io/nats.rs/pull/1372
+
+## New Contributors
+* @thinety made their first contribution in https://github.com/nats-io/nats.rs/pull/1365
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.38.0...async-nats/v0.39.0
+
 # v0.38.0
 ## Overview
 
