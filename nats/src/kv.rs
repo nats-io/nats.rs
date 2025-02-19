@@ -12,7 +12,6 @@
 // limitations under the License.
 
 //! Support for Key Value Store.
-//! This feature is experimental and the API may change.
 
 use std::io;
 use std::time::Duration;
