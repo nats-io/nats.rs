@@ -551,8 +551,17 @@ mod kv {
             .await
             .unwrap();
 
+        // Add delayed message.
+        tokio::task::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let kv = context.get_key_value("history").await.unwrap();
+            kv.put("foo", 22.to_string().into()).await.unwrap();
+        });
+
         let mut watcher = kv.watch_with_history("foo").await.unwrap();
-        assert!(watcher.next().await.is_none());
+        let key = watcher.next().await.unwrap().unwrap();
+        // Check if the delayed message has proper value for `seen_current`.
+        assert!(key.seen_current);
     }
 
     #[tokio::test]

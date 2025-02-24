@@ -680,9 +680,9 @@ impl Store {
                 _ => WatchError::with_source(WatchErrorKind::Other, err),
             })?;
 
+        let seen_current = consumer.cached_info().num_pending == 0;
+
         Ok(Watch {
-            no_messages: deliver_policy != DeliverPolicy::New
-                && consumer.cached_info().num_pending == 0,
             subscription: consumer.messages().await.map_err(|err| match err.kind() {
                 crate::jetstream::consumer::StreamErrorKind::TimedOut => {
                     WatchError::new(WatchErrorKind::TimedOut)
@@ -693,7 +693,7 @@ impl Store {
             })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
-            seen_current: false,
+            seen_current,
         })
     }
 
@@ -723,9 +723,9 @@ impl Store {
                 _ => WatchError::with_source(WatchErrorKind::Other, err),
             })?;
 
+        let seen_current = consumer.cached_info().num_pending == 0;
+
         Ok(Watch {
-            no_messages: deliver_policy != DeliverPolicy::New
-                && consumer.cached_info().num_pending == 0,
             subscription: consumer.messages().await.map_err(|err| match err.kind() {
                 crate::jetstream::consumer::StreamErrorKind::TimedOut => {
                     WatchError::new(WatchErrorKind::TimedOut)
@@ -736,7 +736,7 @@ impl Store {
             })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
-            seen_current: false,
+            seen_current,
         })
     }
 
@@ -1197,7 +1197,6 @@ impl Store {
 
 /// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
 pub struct Watch {
-    no_messages: bool,
     seen_current: bool,
     subscription: super::consumer::push::Ordered,
     prefix: String,
@@ -1211,9 +1210,6 @@ impl futures::Stream for Watch {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        if self.no_messages {
-            return Poll::Ready(None);
-        }
         match self.subscription.poll_next_unpin(cx) {
             Poll::Ready(message) => match message {
                 None => Poll::Ready(None),
