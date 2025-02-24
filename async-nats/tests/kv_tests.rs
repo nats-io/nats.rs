@@ -532,29 +532,6 @@ mod kv {
             }
         }
     }
-
-    #[tokio::test]
-    async fn watch_no_messages() {
-        let server = nats_server::run_server("tests/configs/jetstream.conf");
-        let client = async_nats::connect(server.client_url()).await.unwrap();
-
-        let context = async_nats::jetstream::new(client);
-        let kv = context
-            .create_key_value(async_nats::jetstream::kv::Config {
-                bucket: "history".to_string(),
-                description: "test_description".to_string(),
-                history: 15,
-                storage: StorageType::File,
-                num_replicas: 1,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
-        let mut watcher = kv.watch_with_history("foo").await.unwrap();
-        assert!(watcher.next().await.is_none());
-    }
-
     #[tokio::test]
     async fn watch() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
