@@ -77,7 +77,12 @@ impl From<crate::RequestError> for DirectGetError {
     fn from(err: crate::RequestError) -> Self {
         match err.kind() {
             crate::RequestErrorKind::TimedOut => DirectGetError::new(DirectGetErrorKind::TimedOut),
-            crate::RequestErrorKind::NoResponders => DirectGetError::new(DirectGetErrorKind::Other),
+            crate::RequestErrorKind::NoResponders => {
+                DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                    StatusCode::NO_RESPONDERS,
+                    "no responders".to_string(),
+                ))
+            }
             crate::RequestErrorKind::Other => {
                 DirectGetError::with_source(DirectGetErrorKind::Other, err)
             }
