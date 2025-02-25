@@ -47,7 +47,7 @@ mod jetstream {
         DiscardPolicy, StorageType,
     };
     use async_nats::jetstream::AckKind;
-    use async_nats::ConnectOptions;
+    use async_nats::{ConnectOptions, StatusCode};
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tracing::debug;
@@ -875,7 +875,10 @@ mod jetstream {
 
         assert_eq!(
             stream.direct_get(1).await.unwrap_err().kind(),
-            DirectGetErrorKind::TimedOut
+            DirectGetErrorKind::ErrorResponse(
+                StatusCode::NO_RESPONDERS,
+                "no responders".to_string()
+            )
         );
     }
 
