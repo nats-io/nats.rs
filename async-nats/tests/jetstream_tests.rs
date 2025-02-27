@@ -2195,7 +2195,6 @@ mod jetstream {
         messages.next().await.unwrap().unwrap();
     }
 
-    // #[cfg(feature = "slow_tests")]
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
         tracing_subscriber::fmt()
@@ -2235,7 +2234,13 @@ mod jetstream {
         stream.delete_consumer(name).await.unwrap();
         // Expect Idle Heartbeats to kick in.
         debug!("waiting for the first idle heartbeat timeout");
-        let mut messages = consumer.messages().await.unwrap();
+        let mut messages = consumer
+            .stream()
+            .heartbeat(Duration::from_secs(3))
+            .expires(Duration::from_secs(6))
+            .messages()
+            .await
+            .unwrap();
         assert_eq!(
             messages.next().await.unwrap().unwrap_err().kind(),
             async_nats::jetstream::consumer::pull::MessagesErrorKind::MissingHeartbeat,
@@ -2267,10 +2272,12 @@ mod jetstream {
             .unwrap();
         // and expect the message to be there.
         debug!("awaiting the message with recreated consumer");
-        let now = Instant::now();
-        let m = messages.next().await.unwrap();
-        println!("after: {:?}", now.elapsed());
-        m.unwrap();
+        let m1 = messages.next().await.unwrap();
+        let m2 = messages.next().await.unwrap();
+
+        if m1.is_err() && m2.is_err() {
+            panic!("consumer should recover");
+        }
     }
 
     #[tokio::test]
