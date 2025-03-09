@@ -95,7 +95,7 @@ pub(crate) fn is_valid_key(key: &str) -> bool {
 }
 
 /// Configuration values for key value stores.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     /// Name of the bucket
     pub bucket: String,
