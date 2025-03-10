@@ -2220,6 +2220,7 @@ mod jetstream {
             .unwrap();
 
         let stream = context.get_stream("events").await.unwrap();
+        println!("STREAM INFO: {:?}", stream.cached_info());
         stream
             .create_consumer(consumer::pull::Config {
                 durable_name: Some("pull".into()),
@@ -2228,6 +2229,7 @@ mod jetstream {
             .await
             .unwrap();
         let consumer: PullConsumer = stream.get_consumer("pull").await.unwrap();
+        println!("CONSUMER INFO: {:?}", consumer.cached_info());
 
         // Delete the consumer before starting fetching messages.
         let name = &consumer.cached_info().name;
