@@ -50,7 +50,7 @@ mod jetstream {
     use async_nats::{ConnectOptions, StatusCode};
     use futures::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
-    use tracing::{debug, Level};
+    use tracing::debug;
 
     #[tokio::test]
     async fn query_account_requests() {
@@ -2197,10 +2197,6 @@ mod jetstream {
 
     #[tokio::test]
     async fn pull_consumer_stream_with_heartbeat() {
-        tracing_subscriber::fmt()
-            .with_max_level(Level::DEBUG)
-            .init();
-        use tracing::debug;
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
             .event_callback(|err| async move { println!("error: {err:?}") })
