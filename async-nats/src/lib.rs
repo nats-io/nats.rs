@@ -462,11 +462,16 @@ impl ConnectionHandler {
         }
     }
 
-    pub(crate) async fn process<'a>(&'a mut self, receiver: &'a mut mpsc::Receiver<Command>) {
+    pub(crate) async fn process<'a>(
+        &'a mut self,
+        receiver: &'a mut mpsc::Receiver<Command>,
+        reconnector: &'a mut mpsc::Receiver<()>,
+    ) {
         struct ProcessFut<'a> {
             handler: &'a mut ConnectionHandler,
             receiver: &'a mut mpsc::Receiver<Command>,
             recv_buf: &'a mut Vec<Command>,
+            reconnector: &'a mut mpsc::Receiver<()>,
         }
 
         enum ExitReason {
@@ -566,7 +571,14 @@ impl ConnectionHandler {
                             recv_buf,
                             handler,
                             receiver,
+                            reconnector,
                         } = &mut *self;
+
+                        if let Poll::Ready(Some(())) = reconnector.poll_recv(cx) {
+                            debug!("reconnect request received");
+                            handler.should_reconnect = true;
+                        }
+
                         match receiver.poll_recv_many(cx, recv_buf, Self::RECV_CHUNK_SIZE) {
                             Poll::Pending => break,
                             Poll::Ready(1..) => {
@@ -640,6 +652,7 @@ impl ConnectionHandler {
             let process = ProcessFut {
                 handler: self,
                 receiver,
+                reconnector,
                 recv_buf: &mut recv_buf,
             };
             match process.await {
@@ -1024,6 +1037,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info.clone());
     let (sender, mut receiver) = mpsc::channel(options.sender_capacity);
+    let (reconnector_tx, mut reconnector_rx) = mpsc::channel(1);
 
     let client = Client::new(
         info_watcher,
@@ -1034,6 +1048,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.request_timeout,
         max_payload,
         statistics,
+        reconnector_tx,
     );
 
     task::spawn(async move {
@@ -1060,7 +1075,9 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         let connection = connection.unwrap();
         let mut connection_handler =
             ConnectionHandler::new(connection, connector, info_sender, ping_period);
-        connection_handler.process(&mut receiver).await
+        connection_handler
+            .process(&mut receiver, &mut reconnector_rx)
+            .await
     });
 
     Ok(client)
