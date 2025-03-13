@@ -699,7 +699,16 @@ impl Client {
     /// # }
     /// ```
     pub async fn force_reconnect(&self) -> Result<(), ReconnectError> {
-        self.reconnector.send(()).await.map_err(Into::into)
+        tracing::info!(
+            si.investigation.name = "verideath",
+            "sending over reconnector"
+        );
+        let result = self.reconnector.send(()).await.map_err(Into::into);
+        tracing::info!(
+            si.investigation.name = "verideath",
+            "finished sending over reconnector"
+        );
+        result
     }
 
     /// Returns struct representing statistics of the whole lifecycle of the client.

@@ -114,6 +114,7 @@ impl Connector {
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
+        tracing::info!(si.investigation.name = "verideath", "running connect");
         loop {
             match self.try_connect().await {
                 Ok(inner) => {
@@ -138,7 +139,7 @@ impl Connector {
     }
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
-        tracing::debug!("connecting");
+        tracing::info!("running try connect");
         let mut error = None;
 
         let mut servers = self.servers.clone();
@@ -160,7 +161,9 @@ impl Connector {
                 }
             }
 
+            tracing::info!("using reconnect delay callback to get duration");
             let duration = (self.options.reconnect_delay_callback)(self.attempts);
+            tracing::info!("got duration");
 
             sleep(duration).await;
 
@@ -273,6 +276,10 @@ impl Connector {
                             connect_info.nkey = auth.nkey;
                         }
 
+                        tracing::info!(
+                            si.investigation.name = "verideath",
+                            "enqueued connect and ping"
+                        );
                         connection
                             .easy_write_and_flush(
                                 [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),

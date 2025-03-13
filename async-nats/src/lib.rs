@@ -955,6 +955,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_disconnect(&mut self) -> Result<(), ConnectError> {
+        tracing::info!(si.investigation.name = "verideath", "handle disconnect");
         self.pending_pings = 0;
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
@@ -963,6 +964,7 @@ impl ConnectionHandler {
     }
 
     async fn handle_reconnect(&mut self) -> Result<(), ConnectError> {
+        tracing::info!(si.investigation.name = "verideath", "handle reconnect");
         let (info, connection) = self.connector.connect().await?;
         self.connection = connection;
         let _ = self.info_sender.send(info);
