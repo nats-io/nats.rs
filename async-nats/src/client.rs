@@ -84,6 +84,7 @@ pub struct Client {
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
+    reconnector: tokio::sync::mpsc::Sender<()>,
 }
 
 impl Sink<PublishMessage> for Client {
@@ -119,6 +120,7 @@ impl Client {
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
         statistics: Arc<Statistics>,
+        reconnector: mpsc::Sender<()>,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -132,6 +134,7 @@ impl Client {
             request_timeout,
             max_payload,
             connection_stats: statistics,
+            reconnector,
         }
     }
 
@@ -696,10 +699,7 @@ impl Client {
     /// # }
     /// ```
     pub async fn force_reconnect(&self) -> Result<(), ReconnectError> {
-        self.sender
-            .send(Command::Reconnect)
-            .await
-            .map_err(Into::into)
+        self.reconnector.send(()).await.map_err(Into::into)
     }
 
     /// Returns struct representing statistics of the whole lifecycle of the client.
@@ -827,6 +827,12 @@ pub struct ReconnectError(#[source] crate::Error);
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for ReconnectError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
+        ReconnectError(Box::new(err))
+    }
+}
+
+impl From<tokio::sync::mpsc::error::SendError<()>> for ReconnectError {
+    fn from(err: tokio::sync::mpsc::error::SendError<()>) -> Self {
         ReconnectError(Box::new(err))
     }
 }
