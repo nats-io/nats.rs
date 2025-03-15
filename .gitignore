@@ -3,3 +3,6 @@ target/
 Cargo.lock
 .helix
 .DS_Store
+
+# nixago: ignore-linked-files
+/treefmt.toml

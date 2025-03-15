@@ -1597,8 +1597,9 @@ impl ServerAddr {
     }
 
     /// Returns the port.
+    /// Delegates to [`Url::port_or_known_default`](https://docs.rs/url/latest/url/struct.Url.html#method.port_or_known_default) and defaults to 4222 if none was explicitly specified in creating this `ServerAddr`.
     pub fn port(&self) -> u16 {
-        self.0.port().unwrap_or(4222)
+        self.0.port_or_known_default().unwrap_or(4222)
     }
 
     /// Returns the optional username in the url.
@@ -1775,5 +1776,41 @@ mod tests {
         assert_eq!(addrs_iter.next().unwrap().host(), "127.0.0.1");
         assert_eq!(addrs_iter.next().unwrap().host(), "::");
         assert_eq!(addrs_iter.next(), None);
+    }
+
+    #[test]
+    fn to_server_ports_arr_string() {
+        for (arr, expected_port) in [
+            (
+                [
+                    "nats://127.0.0.1".to_string(),
+                    "nats://[::]".to_string(),
+                    "tls://127.0.0.1".to_string(),
+                    "tls://[::]".to_string(),
+                ],
+                4222,
+            ),
+            (
+                [
+                    "ws://127.0.0.1:80".to_string(),
+                    "ws://[::]:80".to_string(),
+                    "ws://127.0.0.1".to_string(),
+                    "ws://[::]".to_string(),
+                ],
+                80,
+            ),
+            (
+                [
+                    "wss://127.0.0.1".to_string(),
+                    "wss://[::]".to_string(),
+                    "wss://127.0.0.1:443".to_string(),
+                    "wss://[::]:443".to_string(),
+                ],
+                443,
+            ),
+        ] {
+            let mut addrs_iter = arr.to_server_addrs().unwrap();
+            assert_eq!(addrs_iter.next().unwrap().port(), expected_port);
+        }
     }
 }
