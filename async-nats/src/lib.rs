@@ -522,6 +522,10 @@ impl ConnectionHandler {
                 // We need to be sure the waker is registered, therefore we need to poll until we
                 // get a `Poll::Pending`. With a sane interval delay, this means that the loop
                 // breaks at the second iteration.
+                if let Poll::Ready(Option::Some(())) = self.reconnector.poll_recv(cx) {
+                    return Poll::Ready(ExitReason::ReconnectRequested);
+                }
+
                 while self.handler.ping_interval.poll_tick(cx).is_ready() {
                     if let Poll::Ready(exit) = self.ping() {
                         return Poll::Ready(exit);
@@ -529,6 +533,9 @@ impl ConnectionHandler {
                 }
 
                 loop {
+                    if let Poll::Ready(Option::Some(())) = self.reconnector.poll_recv(cx) {
+                        return Poll::Ready(ExitReason::ReconnectRequested);
+                    }
                     match self.handler.connection.poll_read_op(cx) {
                         Poll::Pending => break,
                         Poll::Ready(Ok(Some(server_op))) => {
@@ -564,6 +571,11 @@ impl ConnectionHandler {
 
                 let mut made_progress = true;
                 loop {
+                    if let Poll::Ready(Option::Some(())) = self.reconnector.poll_recv(cx) {
+                        if mem::take(&mut self.handler.should_reconnect) {
+                            return Poll::Ready(ExitReason::ReconnectRequested);
+                        }
+                    }
                     while !self.handler.connection.is_write_buf_full() {
                         debug_assert!(self.recv_buf.is_empty());
 
