@@ -331,6 +331,9 @@ pub struct Config {
 pub enum Priority {
     #[serde(rename = "overflow")]
     Overflow,
+    /// This feature is not yet supported by the client.
+    /// It's part of the enum to ensure that the client can desirialize
+    /// Consumer configurations that used [Priority::PinnedClient].
     #[serde(rename = "pinned_client")]
     PinnedClient,
     #[serde(rename = "none")]
