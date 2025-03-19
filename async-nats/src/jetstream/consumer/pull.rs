@@ -1445,7 +1445,7 @@ impl<'a> StreamBuilder<'a> {
 
     /// Sets overflow threshold for minimum pending messages before this stream will start getting
     /// messages for a [Consumer].
-    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [Priority::Overflow] set.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [PriorityPolicy::Overflow] set.
     ///
     /// # Examples
     ///
@@ -1486,7 +1486,7 @@ impl<'a> StreamBuilder<'a> {
 
     /// Sets overflow threshold for minimum pending acknowledgements before this stream will start getting
     /// messages for a [Consumer].
-    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [Priority::Overflow] set.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [PriorityPolicy::Overflow] set.
     ///
     /// # Examples
     ///
@@ -1827,7 +1827,7 @@ impl<'a> FetchBuilder<'a> {
     /// Sets overflow threshold for minimum pending messages before this stream will start getting
     /// messages.
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
-    /// [Priority::Overflow] set.
+    /// [PriorityPolicy::Overflow] set.
     ///
     /// # Examples
     ///
@@ -1870,7 +1870,7 @@ impl<'a> FetchBuilder<'a> {
     /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
     /// messages.
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
-    /// [Priority::Overflow] set.
+    /// [PriorityPolicy::Overflow] set.
     ///
     /// # Examples
     ///
@@ -2171,7 +2171,7 @@ impl<'a> BatchBuilder<'a> {
     /// Sets overflow threshold for minimum pending messages before this stream will start getting
     /// messages.
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
-    /// [Priority::Overflow] set.
+    /// [PriorityPolicy::Overflow] set.
     ///
     /// # Examples
     ///
@@ -2214,7 +2214,7 @@ impl<'a> BatchBuilder<'a> {
     /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
     /// messages.
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
-    /// [Priority::Overflow] set.
+    /// [PriorityPolicy::Overflow] set.
     ///
     /// # Examples
     ///
