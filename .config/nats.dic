@@ -171,3 +171,6 @@ priority_groups
 acknowledgements
 desirialize
 enum
+deserialize
+PinnedClient
+PriorityGroups
