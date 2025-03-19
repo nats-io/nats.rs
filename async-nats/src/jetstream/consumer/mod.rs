@@ -322,13 +322,13 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub priority_policy: Priority,
+    pub priority_policy: PriorityPolicy,
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub enum Priority {
+pub enum PriorityPolicy {
     #[serde(rename = "overflow")]
     Overflow,
     /// This feature is not yet supported by the client.

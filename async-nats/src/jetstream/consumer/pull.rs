@@ -19,7 +19,7 @@ use futures::{
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
-use std::{future, pin::Pin, str::from_utf8, task::Poll, time::Duration};
+use std::{future, pin::Pin, task::Poll, time::Duration};
 use tokio::{task::JoinHandle, time::Sleep};
 
 use serde::{Deserialize, Serialize};
@@ -35,8 +35,8 @@ use crate::{
 use crate::subject::Subject;
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, Priority, ReplayPolicy,
-    StreamError, StreamErrorKind,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, PriorityPolicy,
+    ReplayPolicy, StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
 
@@ -150,8 +150,6 @@ impl Consumer<Config> {
 
         let payload = serde_json::to_vec(&batch.into())
             .map_err(|err| BatchRequestError::with_source(BatchRequestErrorKind::Serialize, err))?;
-
-        println!("payload: {:?}", from_utf8(&payload).unwrap());
 
         self.context
             .client
@@ -673,7 +671,7 @@ impl From<OrderedConfig> for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: Vec::new(),
-            priority_policy: Priority::None,
+            priority_policy: PriorityPolicy::None,
             priority_groups: Vec::new(),
         }
     }
@@ -739,7 +737,7 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
-            priority_policy: Priority::None,
+            priority_policy: PriorityPolicy::None,
             priority_groups: Vec::new(),
         }
     }
@@ -2170,8 +2168,129 @@ impl<'a> BatchBuilder<'a> {
         self
     }
 
-    pub fn min_pending(mut self, min: usize) -> Self {
-        self.min_pending = Some(min);
+    /// Sets overflow threshold for minimum pending messages before this stream will start getting
+    /// messages.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
+    /// [Priority::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .batch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_pending(mut self, min_pending: usize) -> Self {
+        self.min_pending = Some(min_pending);
+        self
+    }
+
+    /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
+    /// messages.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
+    /// [Priority::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .batch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_ack_pending(mut self, min_ack_pending: usize) -> Self {
+        self.min_ack_pending = Some(min_ack_pending);
+        self
+    }
+
+    /// Setting group when using [Consumer] with [Priority].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .batch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn group<T: Into<String>>(mut self, group: T) -> Self {
+        self.group = Some(group.into());
         self
     }
 
@@ -2393,7 +2512,7 @@ pub struct Config {
     pub backoff: Vec<Duration>,
 
     #[serde(default, skip_serializing_if = "is_default")]
-    pub priority_policy: Priority,
+    pub priority_policy: PriorityPolicy,
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
 }

@@ -35,7 +35,7 @@ mod jetstream {
     use async_nats::jetstream::consumer::pull::BatchConfig;
     use async_nats::jetstream::consumer::{
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
-        Priority, PullConsumer, PushConsumer, ReplayPolicy,
+        PriorityPolicy, PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{
         GetStreamByNameErrorKind, Publish, PublishAckFuture, PublishErrorKind,
@@ -3894,7 +3894,7 @@ mod jetstream {
                 durable_name: Some("name".to_string()),
                 ack_policy: AckPolicy::Explicit,
                 filter_subject: "events.>".to_string(),
-                priority_policy: Priority::Overflow,
+                priority_policy: PriorityPolicy::Overflow,
                 priority_groups: vec!["A".to_string()],
                 ..Default::default()
             })
@@ -4025,7 +4025,7 @@ mod jetstream {
                 durable_name: Some("name".to_string()),
                 ack_policy: AckPolicy::Explicit,
                 filter_subject: "events.>".to_string(),
-                priority_policy: Priority::Overflow,
+                priority_policy: PriorityPolicy::Overflow,
                 priority_groups: vec!["A".to_string()],
                 ..Default::default()
             })
