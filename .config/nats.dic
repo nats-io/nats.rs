@@ -166,3 +166,8 @@ direct_get_last_for_subject
 direct_get_first_for_subject
 Priority::Overflow
 Priority::PinnedClient
+PriorityPolicy
+priority_groups
+acknowledgements
+desirialize
+enum
