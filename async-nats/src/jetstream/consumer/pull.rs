@@ -1910,7 +1910,7 @@ impl<'a> FetchBuilder<'a> {
         self
     }
 
-    /// Setting group when using [Consumer] with [Priority].
+    /// Setting group when using [Consumer] with [PriorityPolicy].
     ///
     /// # Examples
     ///
@@ -2254,7 +2254,7 @@ impl<'a> BatchBuilder<'a> {
         self
     }
 
-    /// Setting group when using [Consumer] with [Priority].
+    /// Setting group when using [Consumer] with [PriorityPolicy].
     ///
     /// # Examples
     ///
