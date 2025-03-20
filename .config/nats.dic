@@ -174,3 +174,4 @@ enum
 deserialize
 PinnedClient
 PriorityGroups
+priority_policy
