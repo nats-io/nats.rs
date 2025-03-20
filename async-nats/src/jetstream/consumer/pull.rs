@@ -1525,7 +1525,7 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
-    /// Setting group when using [Consumer] with [PriorityGroups].
+    /// Setting group when using [Consumer] with [Config::priority_groups].
     ///
     /// # Examples
     ///
@@ -2504,8 +2504,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
 
+    /// Priority policy for this consumer. Requires [Config::priority_groups] to be set.
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_policy: PriorityPolicy,
+    /// Priority groups for this consumer. Currently only one group is supported and is used
+    /// in conjunction with [Config::priority_policy].
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
 }
