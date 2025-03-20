@@ -32,9 +32,10 @@ mod jetstream {
     use super::*;
     use async_nats::connection::State;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
+    use async_nats::jetstream::consumer::pull::BatchConfig;
     use async_nats::jetstream::consumer::{
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
-        PullConsumer, PushConsumer, ReplayPolicy,
+        PriorityPolicy, PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{
         GetStreamByNameErrorKind, Publish, PublishAckFuture, PublishErrorKind,
@@ -3870,5 +3871,212 @@ mod jetstream {
             .unwrap();
         assert_eq!(message.sequence, 11);
         assert_eq!(from_utf8(&message.payload).unwrap(), "2");
+    }
+
+    #[tokio::test]
+    async fn consumer_overflow() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client.clone());
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(jetstream::consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ack_policy: AckPolicy::Explicit,
+                filter_subject: "events.>".to_string(),
+                priority_policy: PriorityPolicy::Overflow,
+                priority_groups: vec!["A".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..5 {
+            jetstream
+                .publish("events.1", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut sub = client.subscribe("NOTHING").await.unwrap();
+        consumer
+            .request_batch(
+                BatchConfig {
+                    batch: 10,
+                    idle_heartbeat: Duration::from_secs(10),
+                    max_bytes: 0,
+                    expires: Some(Duration::from_secs(30)),
+                    no_wait: false,
+                    min_pending: Some(10),
+                    min_ack_pending: None,
+                    group: Some("A".to_string()),
+                },
+                "NOTHING".into(),
+            )
+            .await
+            .unwrap();
+
+        // We have < 10 pending messages, so we should not get any messages.
+        tokio::time::timeout(tokio::time::Duration::from_secs(2), sub.next())
+            .await
+            .unwrap_err();
+
+        let mut sub = client.subscribe("NOTHING_ACK").await.unwrap();
+        consumer
+            .request_batch(
+                BatchConfig {
+                    batch: 10,
+                    idle_heartbeat: Duration::from_secs(10),
+                    max_bytes: 0,
+                    expires: Some(Duration::from_secs(30)),
+                    no_wait: false,
+                    min_pending: Some(10),
+                    min_ack_pending: None,
+                    group: Some("A".to_string()),
+                },
+                "NOTHING_ACK".into(),
+            )
+            .await
+            .unwrap();
+
+        // We have < 10 pending acks, so we should not get any messages.
+        tokio::time::timeout(tokio::time::Duration::from_secs(2), sub.next())
+            .await
+            .unwrap_err();
+
+        for i in 0..100 {
+            jetstream
+                .publish("events.1", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let mut sub = client.subscribe("SOMETHING").await.unwrap();
+        consumer
+            .request_batch(
+                BatchConfig {
+                    batch: 10,
+                    idle_heartbeat: Duration::from_secs(10),
+                    max_bytes: 0,
+                    expires: Some(Duration::from_secs(30)),
+                    no_wait: false,
+                    min_pending: Some(10),
+                    min_ack_pending: None,
+                    group: Some("A".to_string()),
+                },
+                "SOMETHING".into(),
+            )
+            .await
+            .unwrap();
+
+        sub.next().await.unwrap();
+
+        let mut sub = client.subscribe("SOMETHING_ACK").await.unwrap();
+        consumer
+            .request_batch(
+                BatchConfig {
+                    batch: 10,
+                    idle_heartbeat: Duration::from_secs(10),
+                    max_bytes: 0,
+                    expires: Some(Duration::from_secs(30)),
+                    no_wait: false,
+                    min_pending: None,
+                    min_ack_pending: Some(5),
+                    group: Some("A".to_string()),
+                },
+                "SOMETHING_ACK".into(),
+            )
+            .await
+            .unwrap();
+        sub.next().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn consumer_overflow_stream() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client.clone());
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(jetstream::consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ack_policy: AckPolicy::Explicit,
+                filter_subject: "events.>".to_string(),
+                priority_policy: PriorityPolicy::Overflow,
+                priority_groups: vec!["A".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..5 {
+            jetstream
+                .publish("events.1", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut messages_pending = consumer
+            .stream()
+            .group("A")
+            .min_pending(10)
+            .messages()
+            .await
+            .unwrap();
+
+        // We have < 10 pending messages, so we should not get any messages.
+        tokio::time::timeout(tokio::time::Duration::from_secs(2), messages_pending.next())
+            .await
+            .unwrap_err();
+
+        let mut messages_acks = consumer
+            .stream()
+            .group("A")
+            .min_ack_pending(10)
+            .messages()
+            .await
+            .unwrap();
+
+        // We have < 10 pending acks, so we should not get any messages.
+        tokio::time::timeout(tokio::time::Duration::from_secs(2), messages_acks.next())
+            .await
+            .unwrap_err();
+
+        for i in 0..100 {
+            jetstream
+                .publish("events.1", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        messages_pending.next().await.unwrap().unwrap();
+        messages_acks.next().await.unwrap().unwrap();
     }
 }

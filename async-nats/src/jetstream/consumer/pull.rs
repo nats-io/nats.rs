@@ -35,8 +35,8 @@ use crate::{
 use crate::subject::Subject;
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
-    StreamError, StreamErrorKind,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, PriorityPolicy,
+    ReplayPolicy, StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
 
@@ -90,6 +90,9 @@ impl Consumer<Config> {
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
+                min_pending: None,
+                min_ack_pending: None,
+                group: None,
             },
             self,
         )
@@ -134,7 +137,7 @@ impl Consumer<Config> {
         StreamBuilder::new(self)
     }
 
-    pub(crate) async fn request_batch<I: Into<BatchConfig>>(
+    pub async fn request_batch<I: Into<BatchConfig>>(
         &self,
         batch: I,
         inbox: Subject,
@@ -334,7 +337,7 @@ impl Batch {
     async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, BatchError> {
         let inbox = Subject::from(consumer.context.client.new_inbox());
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
-        consumer.request_batch(batch, inbox.clone()).await?;
+        consumer.request_batch(batch.clone(), inbox.clone()).await?;
 
         let sleep = batch.expires.map(|expires| {
             Box::pin(tokio::time::sleep(
@@ -556,6 +559,9 @@ impl Consumer<OrderedConfig> {
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
+                min_pending: None,
+                min_ack_pending: None,
+                group: None,
             },
             &config,
         )
@@ -665,6 +671,8 @@ impl From<OrderedConfig> for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: Vec::new(),
+            priority_policy: PriorityPolicy::None,
+            priority_groups: Vec::new(),
         }
     }
 }
@@ -729,6 +737,8 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
+            priority_policy: PriorityPolicy::None,
+            priority_groups: Vec::new(),
         }
     }
 }
@@ -896,7 +906,7 @@ impl Stream {
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let task_handle = tokio::task::spawn({
-            let batch = batch_config;
+            let batch = batch_config.clone();
             let consumer = consumer.clone();
             let mut context = consumer.context.clone();
             let inbox = inbox.clone();
@@ -1252,6 +1262,9 @@ pub struct StreamBuilder<'a> {
     max_bytes: usize,
     heartbeat: Duration,
     expires: Duration,
+    group: Option<String>,
+    min_pending: Option<usize>,
+    min_ack_pending: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1263,6 +1276,9 @@ impl<'a> StreamBuilder<'a> {
             max_bytes: 0,
             expires: Duration::from_secs(30),
             heartbeat: Duration::default(),
+            group: None,
+            min_pending: None,
+            min_ack_pending: None,
         }
     }
 
@@ -1427,6 +1443,127 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
+    /// Sets overflow threshold for minimum pending messages before this stream will start getting
+    /// messages for a [Consumer].
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [PriorityPolicy::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .stream()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_pending(mut self, min_pending: usize) -> Self {
+        self.min_pending = Some(min_pending);
+        self
+    }
+
+    /// Sets overflow threshold for minimum pending acknowledgements before this stream will start getting
+    /// messages for a [Consumer].
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [PriorityPolicy::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .stream()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_ack_pending(mut self, min_ack_pending: usize) -> Self {
+        self.min_ack_pending = Some(min_ack_pending);
+        self
+    }
+
+    /// Setting group when using [Consumer] with [Config::priority_groups].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .stream()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn group<T: Into<String>>(mut self, group: T) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
     /// Creates actual [Stream] with provided configuration.
     ///
     /// # Examples
@@ -1467,6 +1604,9 @@ impl<'a> StreamBuilder<'a> {
                 no_wait: false,
                 max_bytes: self.max_bytes,
                 idle_heartbeat: self.heartbeat,
+                min_pending: self.min_pending,
+                group: self.group,
+                min_ack_pending: self.min_ack_pending,
             },
             self.consumer,
         )
@@ -1512,6 +1652,9 @@ pub struct FetchBuilder<'a> {
     max_bytes: usize,
     heartbeat: Duration,
     expires: Option<Duration>,
+    min_pending: Option<usize>,
+    min_ack_pending: Option<usize>,
+    group: Option<String>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1522,6 +1665,9 @@ impl<'a> FetchBuilder<'a> {
             batch: 200,
             max_bytes: 0,
             expires: None,
+            min_pending: None,
+            min_ack_pending: None,
+            group: None,
             heartbeat: Duration::default(),
         }
     }
@@ -1678,6 +1824,132 @@ impl<'a> FetchBuilder<'a> {
         self
     }
 
+    /// Sets overflow threshold for minimum pending messages before this stream will start getting
+    /// messages.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
+    /// [PriorityPolicy::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .fetch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_pending(mut self, min_pending: usize) -> Self {
+        self.min_pending = Some(min_pending);
+        self
+    }
+
+    /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
+    /// messages.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
+    /// [PriorityPolicy::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .fetch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_ack_pending(mut self, min_ack_pending: usize) -> Self {
+        self.min_ack_pending = Some(min_ack_pending);
+        self
+    }
+
+    /// Setting group when using [Consumer] with [PriorityPolicy].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .fetch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn group<T: Into<String>>(mut self, group: T) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
     /// Creates actual [Stream] with provided configuration.
     ///
     /// # Examples
@@ -1714,6 +1986,9 @@ impl<'a> FetchBuilder<'a> {
                 no_wait: true,
                 max_bytes: self.max_bytes,
                 idle_heartbeat: self.heartbeat,
+                min_pending: self.min_pending,
+                min_ack_pending: self.min_ack_pending,
+                group: self.group,
             },
             self.consumer,
         )
@@ -1759,6 +2034,9 @@ pub struct BatchBuilder<'a> {
     max_bytes: usize,
     heartbeat: Duration,
     expires: Duration,
+    min_pending: Option<usize>,
+    min_ack_pending: Option<usize>,
+    group: Option<String>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1770,6 +2048,9 @@ impl<'a> BatchBuilder<'a> {
             max_bytes: 0,
             expires: Duration::ZERO,
             heartbeat: Duration::default(),
+            min_pending: None,
+            min_ack_pending: None,
+            group: None,
         }
     }
 
@@ -1887,6 +2168,132 @@ impl<'a> BatchBuilder<'a> {
         self
     }
 
+    /// Sets overflow threshold for minimum pending messages before this stream will start getting
+    /// messages.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
+    /// [PriorityPolicy::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .batch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_pending(mut self, min_pending: usize) -> Self {
+        self.min_pending = Some(min_pending);
+        self
+    }
+
+    /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
+    /// messages.
+    /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
+    /// [PriorityPolicy::Overflow] set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .batch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn min_ack_pending(mut self, min_ack_pending: usize) -> Self {
+        self.min_ack_pending = Some(min_ack_pending);
+        self
+    }
+
+    /// Setting group when using [Consumer] with [PriorityPolicy].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error>  {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// use futures::StreamExt;
+    ///
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer
+    ///     .batch()
+    ///     .expires(std::time::Duration::from_secs(30))
+    ///     .group("A")
+    ///     .min_ack_pending(100)
+    ///     .messages()
+    ///     .await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let message = message?;
+    ///     println!("message: {:?}", message);
+    ///     message.ack().await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn group<T: Into<String>>(mut self, group: T) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
     /// Low level API that does not need tweaking for most use cases.
     /// Sets how long each batch request waits for whole batch of messages before timing out.
     /// [Consumer] pending.
@@ -1955,22 +2362,22 @@ impl<'a> BatchBuilder<'a> {
     /// # }
     /// ```
     pub async fn messages(self) -> Result<Batch, BatchError> {
-        Batch::batch(
-            BatchConfig {
-                batch: self.batch,
-                expires: Some(self.expires),
-                no_wait: false,
-                max_bytes: self.max_bytes,
-                idle_heartbeat: self.heartbeat,
-            },
-            self.consumer,
-        )
-        .await
+        let config = BatchConfig {
+            batch: self.batch,
+            expires: Some(self.expires),
+            no_wait: false,
+            max_bytes: self.max_bytes,
+            idle_heartbeat: self.heartbeat,
+            min_pending: self.min_pending,
+            min_ack_pending: self.min_ack_pending,
+            group: self.group,
+        };
+        Batch::batch(config, self.consumer).await
     }
 }
 
 /// Used for next Pull Request for Pull Consumer
-#[derive(Debug, Default, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, Clone, PartialEq, Eq)]
 pub struct BatchConfig {
     /// The number of messages that are being requested to be delivered.
     pub batch: usize,
@@ -1993,6 +2400,10 @@ pub struct BatchConfig {
     /// client
     #[serde(with = "serde_nanos", skip_serializing_if = "is_default")]
     pub idle_heartbeat: Duration,
+
+    pub min_pending: Option<usize>,
+    pub min_ack_pending: Option<usize>,
+    pub group: Option<String>,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -2092,6 +2503,14 @@ pub struct Config {
     /// Custom backoff for missed acknowledgments.
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
+
+    /// Priority policy for this consumer. Requires [Config::priority_groups] to be set.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority_policy: PriorityPolicy,
+    /// Priority groups for this consumer. Currently only one group is supported and is used
+    /// in conjunction with [Config::priority_policy].
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority_groups: Vec<String>,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -2132,6 +2551,8 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: self.backoff,
+            priority_policy: self.priority_policy,
+            priority_groups: self.priority_groups,
         }
     }
 }
@@ -2169,6 +2590,8 @@ impl FromConsumer for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: config.backoff,
+            priority_policy: config.priority_policy,
+            priority_groups: config.priority_groups,
         })
     }
 }
@@ -2309,6 +2732,9 @@ async fn recreate_consumer_stream(
                 no_wait: false,
                 max_bytes: 0,
                 idle_heartbeat: Duration::from_secs(15),
+                min_pending: None,
+                min_ack_pending: None,
+                group: None,
             },
             &config,
         ),
