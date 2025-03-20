@@ -2406,13 +2406,6 @@ pub struct BatchConfig {
     pub group: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct PriorityGroups {
-    min_pending: i64,
-    min_ack_pending: i64,
-    id: String,
-}
-
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
