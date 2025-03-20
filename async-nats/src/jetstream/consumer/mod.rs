@@ -333,7 +333,7 @@ pub enum PriorityPolicy {
     Overflow,
     /// This feature is not yet supported by the client.
     /// It's part of the enum to ensure that the client can deserialize
-    /// Consumer configurations that used [Priority::PinnedClient].
+    /// Consumer configurations that used [PriorityPolicy::PinnedClient].
     #[serde(rename = "pinned_client")]
     PinnedClient,
     #[serde(rename = "none")]
