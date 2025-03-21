@@ -152,7 +152,7 @@ pub struct Info {
     /// The number of messages re-sent after acknowledgment was not received within the configured
     /// time threshold
     pub num_redelivered: usize,
-    /// The number of clients waiting for messages from the consumer
+    /// The number of pull requests waiting for messages
     pub num_waiting: usize,
     /// The number of messages pending delivery
     pub num_pending: u64,
