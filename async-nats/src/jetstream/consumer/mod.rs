@@ -147,14 +147,14 @@ pub struct Info {
     pub delivered: SequenceInfo,
     /// Statistics for acknowledged messages
     pub ack_floor: SequenceInfo,
-    /// The difference between delivered and acknowledged messages
+    /// The number of messages delivered but not yet acknowledged
     pub num_ack_pending: usize,
     /// The number of messages re-sent after acknowledgment was not received within the configured
     /// time threshold
     pub num_redelivered: usize,
-    /// The number of waiting
+    /// The number of pull requests waiting for messages
     pub num_waiting: usize,
-    /// The number of pending
+    /// The number of messages pending delivery
     pub num_pending: u64,
     /// Information about the consumer's cluster
     #[serde(skip_serializing_if = "is_default")]
