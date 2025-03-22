@@ -1370,7 +1370,7 @@ pub struct Config {
     /// Placement configuration for clusters and tags.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<Placement>,
-    // /// For suspending the consumer until the deadline.
+    /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
     #[serde(
         default,
