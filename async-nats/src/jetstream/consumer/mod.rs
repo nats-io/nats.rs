@@ -336,7 +336,7 @@ pub struct Config {
     pub priority_policy: PriorityPolicy,
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
-    // /// For suspending the consumer until the deadline.
+    /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
     #[serde(
         default,
