@@ -27,11 +27,13 @@ mod jetstream {
     #[cfg(feature = "server_2_10")]
     use std::collections::HashMap;
     use std::str::from_utf8;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     use super::*;
     use async_nats::connection::State;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
+    #[cfg(feature = "server_2_11")]
     use async_nats::jetstream::consumer::pull::BatchConfig;
     use async_nats::jetstream::consumer::{
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
@@ -3873,6 +3875,7 @@ mod jetstream {
         assert_eq!(from_utf8(&message.payload).unwrap(), "2");
     }
 
+    #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn consumer_overflow() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -4078,5 +4081,67 @@ mod jetstream {
 
         messages_pending.next().await.unwrap().unwrap();
         messages_acks.next().await.unwrap().unwrap();
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn pause_consumer() {
+        use time::Duration;
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut consumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("name".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert!(!consumer.info().await.unwrap().paused);
+
+        stream
+            .pause_consumer(
+                "name",
+                OffsetDateTime::now_utc().saturating_add(Duration::seconds_f32(10.0)),
+            )
+            .await
+            .unwrap();
+
+        let info = consumer.info().await.unwrap();
+        assert!(info.paused);
+
+        stream.resume_consumer("name").await.unwrap();
+        let info = consumer.info().await.unwrap();
+        assert!(!info.paused);
+
+        // test starting a paused consumer.
+        let mut consumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("blame".to_string()),
+                pause_until: Some(
+                    OffsetDateTime::now_utc().saturating_add(Duration::seconds_f32(3.0)),
+                ),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert!(consumer.info().await.unwrap().paused);
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        assert!(!consumer.info().await.unwrap().paused);
     }
 }
