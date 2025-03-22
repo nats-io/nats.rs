@@ -17,6 +17,9 @@ use futures::{
     FutureExt, StreamExt,
 };
 
+#[cfg(feature = "server_2_11")]
+use time::{serde::rfc3339, OffsetDateTime};
+
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{future, pin::Pin, task::Poll, time::Duration};
@@ -673,6 +676,8 @@ impl From<OrderedConfig> for Config {
             backoff: Vec::new(),
             priority_policy: PriorityPolicy::None,
             priority_groups: Vec::new(),
+            #[cfg(feature = "server_2_11")]
+            pause_until: None,
         }
     }
 }
@@ -739,6 +744,8 @@ impl IntoConsumerConfig for OrderedConfig {
             backoff: Vec::new(),
             priority_policy: PriorityPolicy::None,
             priority_groups: Vec::new(),
+            #[cfg(feature = "server_2_11")]
+            pause_until: None,
         }
     }
 }
@@ -2511,6 +2518,14 @@ pub struct Config {
     /// in conjunction with [Config::priority_policy].
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
+    /// For suspending the consumer until the deadline.
+    #[cfg(feature = "server_2_11")]
+    #[serde(
+        default,
+        with = "rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pause_until: Option<OffsetDateTime>,
 }
 
 impl IntoConsumerConfig for &Config {
@@ -2553,6 +2568,8 @@ impl IntoConsumerConfig for Config {
             backoff: self.backoff,
             priority_policy: self.priority_policy,
             priority_groups: self.priority_groups,
+            #[cfg(feature = "server_2_11")]
+            pause_until: self.pause_until,
         }
     }
 }
@@ -2592,6 +2609,8 @@ impl FromConsumer for Config {
             backoff: config.backoff,
             priority_policy: config.priority_policy,
             priority_groups: config.priority_groups,
+            #[cfg(feature = "server_2_11")]
+            pause_until: config.pause_until,
         })
     }
 }
