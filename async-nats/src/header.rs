@@ -520,6 +520,10 @@ standard_headers! {
     (NatsExpectedLastSequence, NATS_EXPECTED_LAST_SEQUENCE, b"Nats-Expected-Last-Sequence");
     /// The expected stream the message should be part of.
     (NatsExpectedStream, NATS_EXPECTED_STREAM, b"Nats-Expected-Stream");
+    /// Sets the TTL for a single message.
+    (NatsMessageTtl, NATS_MESSAGE_TTL, b"Nats-TTL");
+    /// Reason why the delete marked on a stream with enabled markers was put.
+    (NatsMarkerReason, NATS_MARKER_REASON, b"Nats-Marker-Reason");
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]

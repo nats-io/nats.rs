@@ -1378,6 +1378,17 @@ pub struct Config {
         skip_serializing_if = "Option::is_none"
     )]
     pub pause_until: Option<OffsetDateTime>,
+
+    /// Allows setting a TTL for a message in the stream.
+    #[cfg(feature = "server_2_11")]
+    #[serde(default, skip_serializing_if = "is_default", rename = "allow_msg_ttl")]
+    pub allow_message_ttl: bool,
+
+    /// Enables delete markers for messages deleted from the stream and sets the TTL
+    /// for how long the marker should be kept.
+    #[cfg(feature = "server_2_11")]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_nanos")]
+    pub subject_delete_marker_ttl: Option<Duration>,
 }
 
 impl From<&Config> for Config {
