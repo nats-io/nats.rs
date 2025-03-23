@@ -1597,6 +1597,13 @@ impl Publish {
             HeaderValue::from(stream.as_ref()),
         )
     }
+
+    #[cfg(feature = "server_2_11")]
+    /// Sets TTL for a single message.
+    /// It sets the `Nats-TTL` header with provided value.
+    pub fn ttl(self, ttl: Duration) -> Self {
+        self.header(header::NATS_MESSAGE_TTL, ttl.as_nanos().to_string())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -4144,4 +4144,70 @@ mod jetstream {
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         assert!(!consumer.info().await.unwrap().paused);
     }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn message_with_ttl() {
+        use async_nats::header::{NATS_MARKER_REASON, NATS_MESSAGE_TTL};
+
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let mut stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                allow_message_ttl: true,
+                allow_direct: true,
+                subject_delete_marker_ttl: Some(Duration::from_secs(2)),
+                max_age: Duration::from_secs(2),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        jetstream
+            .send_publish(
+                "events.data",
+                Publish::build()
+                    .ttl(Duration::from_secs(20))
+                    .payload("data".into()),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        jetstream
+            .send_publish("events.data", Publish::build().payload("data".into()))
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let info = stream.info().await.unwrap();
+        assert_eq!(info.state.messages, 2);
+
+        let message = stream.direct_get(1).await.unwrap();
+
+        // Check if the message has ttl.
+        let ttl = message.headers.get(NATS_MESSAGE_TTL).unwrap();
+        assert_eq!(ttl.as_str(), Duration::from_secs(20).as_nanos().to_string());
+
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+
+        // Check if delete markers work fine.
+        let message = stream
+            .direct_get_last_for_subject("events.data")
+            .await
+            .unwrap();
+
+        let ttl = message.headers.get(NATS_MARKER_REASON).unwrap();
+        assert_eq!(ttl.as_str(), "MaxAge");
+    }
 }
