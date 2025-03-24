@@ -2512,10 +2512,12 @@ pub struct Config {
     pub backoff: Vec<Duration>,
 
     /// Priority policy for this consumer. Requires [Config::priority_groups] to be set.
+    #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_policy: PriorityPolicy,
     /// Priority groups for this consumer. Currently only one group is supported and is used
     /// in conjunction with [Config::priority_policy].
+    #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
     /// For suspending the consumer until the deadline.
@@ -2566,7 +2568,9 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: self.backoff,
+            #[cfg(feature = "server_2_11")]
             priority_policy: self.priority_policy,
+            #[cfg(feature = "server_2_11")]
             priority_groups: self.priority_groups,
             #[cfg(feature = "server_2_11")]
             pause_until: self.pause_until,
@@ -2607,7 +2611,9 @@ impl FromConsumer for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: config.backoff,
+            #[cfg(feature = "server_2_11")]
             priority_policy: config.priority_policy,
+            #[cfg(feature = "server_2_11")]
             priority_groups: config.priority_groups,
             #[cfg(feature = "server_2_11")]
             pause_until: config.pause_until,

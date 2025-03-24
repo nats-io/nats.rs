@@ -4007,6 +4007,7 @@ mod jetstream {
         sub.next().await.unwrap();
     }
 
+    #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn consumer_overflow_stream() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");

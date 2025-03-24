@@ -360,7 +360,9 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: self.backoff,
+            #[cfg(feature = "server_2_11")]
             priority_policy: PriorityPolicy::None,
+            #[cfg(feature = "server_2_11")]
             priority_groups: Vec::new(),
             #[cfg(feature = "server_2_11")]
             pause_until: self.pause_until,

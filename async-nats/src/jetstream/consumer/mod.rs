@@ -346,6 +346,7 @@ pub struct Config {
     pub pause_until: Option<OffsetDateTime>,
 }
 
+#[cfg(feature = "server_2_11")]
 #[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum PriorityPolicy {
     #[serde(rename = "overflow")]
