@@ -332,8 +332,10 @@ pub struct Config {
     /// Custom backoff for missed acknowledgments.
     #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
     pub backoff: Vec<Duration>,
+    #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_policy: PriorityPolicy,
+    #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
     /// For suspending the consumer until the deadline.

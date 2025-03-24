@@ -37,9 +37,12 @@ use crate::{
 
 use crate::subject::Subject;
 
+#[cfg(feature = "server_2_11")]
+use super::PriorityPolicy;
+
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, PriorityPolicy,
-    ReplayPolicy, StreamError, StreamErrorKind,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
 
@@ -674,7 +677,9 @@ impl From<OrderedConfig> for Config {
             #[cfg(feature = "server_2_10")]
             metadata: config.metadata,
             backoff: Vec::new(),
+            #[cfg(feature = "server_2_11")]
             priority_policy: PriorityPolicy::None,
+            #[cfg(feature = "server_2_11")]
             priority_groups: Vec::new(),
             #[cfg(feature = "server_2_11")]
             pause_until: None,
@@ -742,7 +747,9 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
+            #[cfg(feature = "server_2_11")]
             priority_policy: PriorityPolicy::None,
+            #[cfg(feature = "server_2_11")]
             priority_groups: Vec::new(),
             #[cfg(feature = "server_2_11")]
             pause_until: None,

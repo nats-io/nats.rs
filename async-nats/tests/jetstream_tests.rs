@@ -30,6 +30,9 @@ mod jetstream {
     use std::time::Duration;
     use std::time::Instant;
 
+    #[cfg(feature = "server_2_11")]
+    use async_nats::jetstream::consumer::PriorityPolicy;
+
     use super::*;
     use async_nats::connection::State;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
@@ -37,7 +40,7 @@ mod jetstream {
     use async_nats::jetstream::consumer::pull::BatchConfig;
     use async_nats::jetstream::consumer::{
         self, push, AckPolicy, DeliverPolicy, Info, OrderedPullConsumer, OrderedPushConsumer,
-        PriorityPolicy, PullConsumer, PushConsumer, ReplayPolicy,
+        PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{
         GetStreamByNameErrorKind, Publish, PublishAckFuture, PublishErrorKind,

@@ -12,9 +12,13 @@
 // limitations under the License.
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, PriorityPolicy,
-    ReplayPolicy, StreamError, StreamErrorKind,
+    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    StreamError, StreamErrorKind,
 };
+
+#[cfg(feature = "server_2_11")]
+use super::PriorityPolicy;
+
 use crate::{
     connection::State,
     error::Error,
@@ -491,7 +495,9 @@ impl IntoConsumerConfig for OrderedConfig {
             #[cfg(feature = "server_2_10")]
             metadata: self.metadata,
             backoff: Vec::new(),
+            #[cfg(feature = "server_2_11")]
             priority_policy: PriorityPolicy::None,
+            #[cfg(feature = "server_2_11")]
             priority_groups: Vec::new(),
             #[cfg(feature = "server_2_11")]
             pause_until: None,
