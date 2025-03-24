@@ -1,4 +1,28 @@
- # v0.39.0
+# v0.40.0
+
+This release focuses on adding support for nats-server v2.11.
+
+## Added
+* Add pause consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/1385
+* Add per message ttl and delete markers support by @Jarema in https://github.com/nats-io/nats.rs/pull/1387
+* Add Consumer Groups and Overflow support by @Jarema in https://github.com/nats-io/nats.rs/pull/1384
+
+## Fixed
+* Revert stopping watcher and set `seen_current` instead by @Jarema in https://github.com/nats-io/nats.rs/pull/1377
+* Fix alignment of port() with `Url::port_or_known_default` by @steveej in https://github.com/nats-io/nats.rs/pull/1383
+
+## Changed
+* Derive Clone for Key/Value store Config by @jephthia in https://github.com/nats-io/nats.rs/pull/1381
+* Change docs for jetstream::consumer::Info by @danyi1212 in https://github.com/nats-io/nats.rs/pull/1386
+
+## New Contributors
+* @jephthia made their first contribution in https://github.com/nats-io/nats.rs/pull/1381
+* @steveej made their first contribution in https://github.com/nats-io/nats.rs/pull/1383
+* @danyi1212 made their first contribution in https://github.com/nats-io/nats.rs/pull/1386
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.39.0...async-nats/v0.40.0
+
+# v0.39.0
 ## Overview
 
 This release focuses on improvements and fixes for Object Store and KV.
