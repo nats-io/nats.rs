@@ -821,6 +821,46 @@ impl Context {
         Ok(store)
     }
 
+    /// Tries to get an existing key-value bucket, if one cannot be found it will create a new key-value bucket.
+    ///
+    /// Note: This does not validate if the key-value on the server is compatible with the configuration passed in.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .get_or_create_key_value("kv".to_string(), async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_or_create_key_value<T: Into<String>>(
+        &self,
+        bucket: T,
+        config: crate::jetstream::kv::Config,
+    ) -> Result<Store, CreateKeyValueError> {
+        match self.get_key_value(bucket).await {
+            Ok(kv) => Ok(kv),
+            Err(e) => match e.kind() {
+                KeyValueErrorKind::GetBucket => self.create_key_value(config).await,
+                KeyValueErrorKind::InvalidStoreName => Err(CreateKeyValueError::new(
+                    CreateKeyValueErrorKind::InvalidStoreName,
+                )),
+                KeyValueErrorKind::JetStream => {
+                    Err(CreateKeyValueError::new(CreateKeyValueErrorKind::JetStream))
+                }
+            },
+        }
+    }
+
     /// Deletes given key-value bucket.
     ///
     /// # Examples
