@@ -128,8 +128,7 @@ impl Connector {
                     }
                     other => {
                         self.events_tx
-                            .send(Event::ClientError(ClientError::Other(other.to_string())))
-                            .await
+                            .try_send(Event::ClientError(ClientError::Other(other.to_string())))
                             .ok();
                     }
                 },
@@ -153,8 +152,7 @@ impl Connector {
             if let Some(max_reconnects) = self.options.max_reconnects {
                 if self.attempts > max_reconnects {
                     self.events_tx
-                        .send(Event::ClientError(ClientError::MaxReconnects))
-                        .await
+                        .try_send(Event::ClientError(ClientError::MaxReconnects))
                         .ok();
                     return Err(ConnectError::new(crate::ConnectErrorKind::MaxReconnects));
                 }
@@ -298,7 +296,7 @@ impl Connector {
                                 tracing::debug!("connected to {}", server_info.port);
                                 self.attempts = 0;
                                 self.connect_stats.connects.add(1, Ordering::Relaxed);
-                                self.events_tx.send(Event::Connected).await.ok();
+                                self.events_tx.try_send(Event::Connected).ok();
                                 self.state_tx.send(State::Connected).ok();
                                 self.max_payload.store(
                                     server_info.max_payload,
