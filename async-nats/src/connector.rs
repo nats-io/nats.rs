@@ -147,7 +147,7 @@ impl Connector {
             servers.sort_by(|a, b| a.1.cmp(&b.1));
         }
 
-        for (server_addr, attempts) in servers {
+        for (server_addr, _) in servers {
             self.attempts += 1;
             if let Some(max_reconnects) = self.options.max_reconnects {
                 if self.attempts > max_reconnects {
