@@ -137,7 +137,7 @@ impl Connector {
     }
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
-        tracing::debug!("connecting");
+        tracing::debug!(attempt = %self.attempts, "connecting to server");
         let mut error = None;
 
         let mut servers = self.servers.clone();
@@ -151,6 +151,11 @@ impl Connector {
             self.attempts += 1;
             if let Some(max_reconnects) = self.options.max_reconnects {
                 if self.attempts > max_reconnects {
+                    tracing::error!(
+                        attempts = %self.attempts,
+                        max_reconnects = %max_reconnects,
+                        "max reconnection attempts reached"
+                    );
                     self.events_tx
                         .try_send(Event::ClientError(ClientError::MaxReconnects))
                         .ok();
@@ -159,6 +164,12 @@ impl Connector {
             }
 
             let duration = (self.options.reconnect_delay_callback)(self.attempts);
+            tracing::debug!(
+                attempt = %self.attempts,
+                server = ?server_addr,
+                delay_ms = %duration.as_millis(),
+                "attempting connection"
+            );
 
             sleep(duration).await;
 
@@ -185,6 +196,10 @@ impl Connector {
                                     )
                                 })?;
                                 if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
+                                    tracing::debug!(
+                                        discovered_url = %url,
+                                        "adding discovered server"
+                                    );
                                     self.servers.push((server_addr, 0));
                                 }
                             }
@@ -221,16 +236,18 @@ impl Connector {
                                                 Some(URL_SAFE_NO_PAD.encode(signed));
                                         }
                                         Err(_) => {
+                                            tracing::error!("failed to sign nonce with nkey");
                                             return Err(ConnectError::new(
                                                 crate::ConnectErrorKind::Authentication,
-                                            ))
+                                            ));
                                         }
                                     };
                                 }
                                 Err(_) => {
+                                    tracing::error!("failed to create key pair from nkey seed");
                                     return Err(ConnectError::new(
                                         crate::ConnectErrorKind::Authentication,
-                                    ))
+                                    ));
                                 }
                             }
                         }
@@ -243,9 +260,10 @@ impl Connector {
                                         connect_info.signature = Some(sig);
                                     }
                                     Err(_) => {
+                                        tracing::error!("failed to sign nonce with JWT callback");
                                         return Err(ConnectError::new(
                                             crate::ConnectErrorKind::Authentication,
-                                        ))
+                                        ));
                                     }
                                 }
                             }
@@ -256,6 +274,7 @@ impl Connector {
                                 .call(server_info.nonce.as_bytes().to_vec())
                                 .await
                                 .map_err(|err| {
+                                tracing::error!(error = %err, "auth callback failed");
                                 ConnectError::with_source(
                                     crate::ConnectErrorKind::Authentication,
                                     err,
@@ -280,12 +299,14 @@ impl Connector {
                         match connection.read_op().await? {
                             Some(ServerOp::Error(err)) => match err {
                                 ServerError::AuthorizationViolation => {
+                                    tracing::error!(error = %err, "authorization violation");
                                     return Err(ConnectError::with_source(
                                         crate::ConnectErrorKind::AuthorizationViolation,
                                         err,
                                     ));
                                 }
                                 err => {
+                                    tracing::error!(error = %err, "server error during connection");
                                     return Err(ConnectError::with_source(
                                         crate::ConnectErrorKind::Io,
                                         err,
@@ -293,7 +314,11 @@ impl Connector {
                                 }
                             },
                             Some(_) => {
-                                tracing::debug!("connected to {}", server_info.port);
+                                tracing::info!(
+                                    server = %server_info.port,
+                                    max_payload = %server_info.max_payload,
+                                    "connected successfully"
+                                );
                                 self.attempts = 0;
                                 self.connect_stats.connects.add(1, Ordering::Relaxed);
                                 self.events_tx.try_send(Event::Connected).ok();
@@ -305,15 +330,23 @@ impl Connector {
                                 return Ok((server_info, connection));
                             }
                             None => {
+                                tracing::error!("connection closed unexpectedly");
                                 return Err(ConnectError::with_source(
                                     crate::ConnectErrorKind::Io,
                                     "broken pipe",
-                                ))
+                                ));
                             }
                         }
                     }
 
-                    Err(inner) => error.replace(inner),
+                    Err(inner) => {
+                        tracing::debug!(
+                            server = ?server_addr,
+                            error = %inner,
+                            "connection attempt failed"
+                        );
+                        error.replace(inner)
+                    }
                 };
             }
         }
@@ -327,6 +360,11 @@ impl Connector {
         tls_required: bool,
         server_addr: ServerAddr,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
+        tracing::debug!(
+            socket_addr = %socket_addr,
+            tls_required = %tls_required,
+            "establishing connection"
+        );
         let mut connection = match server_addr.scheme() {
             #[cfg(feature = "websockets")]
             "ws" => {
@@ -397,6 +435,7 @@ impl Connector {
         };
 
         let tls_connection = |connection: Connection| async {
+            tracing::debug!("upgrading connection to TLS");
             let tls_config = Arc::new(
                 tls::config_tls(&self.options)
                     .await
@@ -427,18 +466,27 @@ impl Connector {
 
         let op = connection.read_op().await?;
         let info = match op {
-            Some(ServerOp::Info(info)) => info,
+            Some(ServerOp::Info(info)) => {
+                tracing::debug!(
+                    server_id = %info.server_id,
+                    version = %info.version,
+                    "received server info"
+                );
+                info
+            }
             Some(op) => {
+                tracing::error!(received_op = ?op, "expected INFO, got different operation");
                 return Err(ConnectError::with_source(
                     crate::ConnectErrorKind::Io,
                     format!("expected INFO, got {:?}", op),
-                ))
+                ));
             }
             None => {
+                tracing::error!("expected INFO, got nothing");
                 return Err(ConnectError::with_source(
                     crate::ConnectErrorKind::Io,
                     "expected INFO, got nothing",
-                ))
+                ));
             }
         };
 
