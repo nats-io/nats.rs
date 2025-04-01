@@ -483,11 +483,11 @@ impl ConnectionHandler {
                 self.handler.pending_pings += 1;
 
                 if self.handler.pending_pings > MAX_PENDING_PINGS {
-                  debug!(
-                      pending_pings = self.handler.pending_pings,
-                      max_pings = MAX_PENDING_PINGS,
-                      "disconnecting due to too many pending pings"
-                  );
+                    debug!(
+                        pending_pings = self.handler.pending_pings,
+                        max_pings = MAX_PENDING_PINGS,
+                        "disconnecting due to too many pending pings"
+                    );
 
                     Poll::Ready(ExitReason::Disconnected(None))
                 } else {
@@ -673,6 +673,7 @@ impl ConnectionHandler {
 
         match server_op {
             ServerOp::Ping => {
+                debug!("received PING");
                 self.connection.enqueue_write_op(&ClientOp::Pong);
             }
             ServerOp::Pong => {
@@ -680,6 +681,7 @@ impl ConnectionHandler {
                 self.pending_pings = self.pending_pings.saturating_sub(1);
             }
             ServerOp::Error(error) => {
+                debug!("received ERROR: {:?}", error);
                 self.connector
                     .events_tx
                     .try_send(Event::ServerError(error))
@@ -695,6 +697,7 @@ impl ConnectionHandler {
                 description,
                 length,
             } => {
+                debug!("received MESSAGE: sid={}, subject={}", sid, subject);
                 self.connector
                     .connect_stats
                     .in_messages
@@ -721,29 +724,34 @@ impl ConnectionHandler {
                             // the result, `drop` the `sender` channel.
                             if let Some(max) = subscription.max {
                                 if subscription.delivered.ge(&max) {
+                                    debug!("max messages reached for subscription {}", sid);
                                     self.subscriptions.remove(&sid);
                                 }
                             }
                         }
                         Err(mpsc::error::TrySendError::Full(_)) => {
+                            debug!("slow consumer detected for subscription {}", sid);
                             self.connector
                                 .events_tx
                                 .try_send(Event::SlowConsumer(sid))
                                 .ok();
                         }
                         Err(mpsc::error::TrySendError::Closed(_)) => {
+                            debug!("subscription {} channel closed", sid);
                             self.subscriptions.remove(&sid);
                             self.connection
                                 .enqueue_write_op(&ClientOp::Unsubscribe { sid, max: None });
                         }
                     }
                 } else if sid == MULTIPLEXER_SID {
+                    debug!("received message for multiplexer");
                     if let Some(multiplexer) = self.multiplexer.as_mut() {
                         let maybe_token =
                             subject.strip_prefix(multiplexer.prefix.as_ref()).to_owned();
 
                         if let Some(token) = maybe_token {
                             if let Some(sender) = multiplexer.senders.remove(token) {
+                                debug!("forwarding message to request with token {}", token);
                                 let message = Message {
                                     subject,
                                     reply,
@@ -762,7 +770,9 @@ impl ConnectionHandler {
             }
             // TODO: we should probably update advertised server list here too.
             ServerOp::Info(info) => {
+                debug!("received INFO: server_id={}", info.server_id);
                 if info.lame_duck_mode {
+                    debug!("server in lame duck mode");
                     self.connector.events_tx.try_send(Event::LameDuckMode).ok();
                 }
             }
