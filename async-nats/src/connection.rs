@@ -33,6 +33,7 @@ use {
 
 use bytes::{Buf, Bytes, BytesMut};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
+use tracing::trace;
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
 use crate::status::StatusCode;
@@ -139,16 +140,19 @@ impl Connection {
 
         if self.read_buf.starts_with(b"+OK") {
             self.read_buf.advance(len + 2);
+            trace!("read operation: OK");
             return Ok(Some(ServerOp::Ok));
         }
 
         if self.read_buf.starts_with(b"PING") {
             self.read_buf.advance(len + 2);
+            trace!("read operation: PING");
             return Ok(Some(ServerOp::Ping));
         }
 
         if self.read_buf.starts_with(b"PONG") {
             self.read_buf.advance(len + 2);
+            trace!("read operation: PONG");
             return Ok(Some(ServerOp::Pong));
         }
 
@@ -159,7 +163,7 @@ impl Connection {
                 .to_owned();
 
             self.read_buf.advance(len + 2);
-
+            trace!(error = %description, "read operation: ERR");
             return Ok(Some(ServerOp::Error(ServerError::new(description))));
         }
 
@@ -168,7 +172,7 @@ impl Connection {
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
             self.read_buf.advance(len + 2);
-
+            trace!(?info, "read operation: INFO");
             return Ok(Some(ServerOp::Info(Box::new(info))));
         }
 
@@ -223,6 +227,14 @@ impl Connection {
             self.read_buf.advance(len + 2);
             let payload = self.read_buf.split_to(payload_len).freeze();
             self.read_buf.advance(2);
+
+            trace!(
+                subject = %subject,
+                sid = %sid,
+                reply = ?reply,
+                payload_len = %payload_len,
+                "read operation: MSG"
+            );
 
             return Ok(Some(ServerOp::Message {
                 sid,
@@ -378,6 +390,17 @@ impl Connection {
                 headers.append(name, value.into_header_value());
             }
 
+            trace!(
+                subject = %subject,
+                sid = %sid,
+                reply = ?reply,
+                header_len = %header_len,
+                total_len = %total_len,
+                status = ?status,
+                description = ?description,
+                "read operation: HMSG"
+            );
+
             return Ok(Some(ServerOp::Message {
                 length: reply.as_ref().map_or(0, |reply| reply.len()) + subject.len() + total_len,
                 sid,
@@ -395,6 +418,7 @@ impl Connection {
             io::Error::new(io::ErrorKind::InvalidInput, "unable to parse unknown input")
         })?;
 
+        trace!(line = %line, "read operation: unknown");
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("invalid server operation: '{line}'"),
@@ -414,20 +438,34 @@ impl Connection {
     ) -> Poll<io::Result<Option<ServerOp>>> {
         loop {
             if let Some(op) = self.try_read_op()? {
+                trace!(?op, "read operation completed");
                 return Poll::Ready(Ok(Some(op)));
             }
 
             let read_buf = self.stream.read_buf(&mut self.read_buf);
             tokio::pin!(read_buf);
             return match read_buf.poll(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Ok(0)) if self.read_buf.is_empty() => Poll::Ready(Ok(None)),
-                Poll::Ready(Ok(0)) => Poll::Ready(Err(io::ErrorKind::ConnectionReset.into())),
+                Poll::Pending => {
+                    trace!("read operation pending");
+                    Poll::Pending
+                }
+                Poll::Ready(Ok(0)) if self.read_buf.is_empty() => {
+                    trace!("read operation: empty buffer");
+                    Poll::Ready(Ok(None))
+                }
+                Poll::Ready(Ok(0)) => {
+                    trace!("read operation: connection reset");
+                    Poll::Ready(Err(io::ErrorKind::ConnectionReset.into()))
+                }
                 Poll::Ready(Ok(n)) => {
                     self.statistics.in_bytes.add(n as u64, Ordering::Relaxed);
+                    trace!(bytes = %n, "read operation: received bytes");
                     continue;
                 }
-                Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+                Poll::Ready(Err(err)) => {
+                    trace!(error = %err, "read operation: error");
+                    Poll::Ready(Err(err))
+                }
             };
         }
     }
@@ -460,6 +498,7 @@ impl Connection {
                 self.write("CONNECT ");
                 self.write(json);
                 self.write("\r\n");
+                trace!(?connect_info, "write operation: CONNECT");
             }
             ClientOp::Publish {
                 subject,
@@ -495,34 +534,62 @@ impl Connection {
 
                 self.write(Bytes::clone(payload));
                 self.write("\r\n");
+
+                trace!(
+                    verb = %verb,
+                    subject = %subject,
+                    reply = ?respond,
+                    headers = ?headers,
+                    payload_len = %payload.len(),
+                    "write operation: PUB"
+                );
             }
 
             ClientOp::Subscribe {
                 sid,
                 subject,
                 queue_group,
-            } => match queue_group {
-                Some(queue_group) => {
-                    small_write!("SUB {subject} {queue_group} {sid}\r\n");
+            } => {
+                match queue_group {
+                    Some(queue_group) => {
+                        small_write!("SUB {subject} {queue_group} {sid}\r\n");
+                    }
+                    None => {
+                        small_write!("SUB {subject} {sid}\r\n");
+                    }
                 }
-                None => {
-                    small_write!("SUB {subject} {sid}\r\n");
-                }
-            },
 
-            ClientOp::Unsubscribe { sid, max } => match max {
-                Some(max) => {
-                    small_write!("UNSUB {sid} {max}\r\n");
+                trace!(
+                    subject = %subject,
+                    sid = %sid,
+                    queue_group = ?queue_group,
+                    "write operation: SUB"
+                );
+            }
+
+            ClientOp::Unsubscribe { sid, max } => {
+                match max {
+                    Some(max) => {
+                        small_write!("UNSUB {sid} {max}\r\n");
+                    }
+                    None => {
+                        small_write!("UNSUB {sid}\r\n");
+                    }
                 }
-                None => {
-                    small_write!("UNSUB {sid}\r\n");
-                }
-            },
+
+                trace!(
+                    sid = %sid,
+                    max = ?max,
+                    "write operation: UNSUB"
+                );
+            }
             ClientOp::Ping => {
                 self.write("PING\r\n");
+                trace!("write operation: PING");
             }
             ClientOp::Pong => {
                 self.write("PONG\r\n");
+                trace!("write operation: PONG");
             }
         }
     }
