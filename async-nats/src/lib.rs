@@ -483,10 +483,11 @@ impl ConnectionHandler {
                 self.handler.pending_pings += 1;
 
                 if self.handler.pending_pings > MAX_PENDING_PINGS {
-                    debug!(
-                        "pending pings {}, max pings {}. disconnecting",
-                        self.handler.pending_pings, MAX_PENDING_PINGS
-                    );
+                  debug!(
+                      pending_pings = self.handler.pending_pings,
+                      max_pings = MAX_PENDING_PINGS,
+                      "disconnecting due to too many pending pings"
+                  );
 
                     Poll::Ready(ExitReason::Disconnected(None))
                 } else {
@@ -644,7 +645,7 @@ impl ConnectionHandler {
             };
             match process.await {
                 ExitReason::Disconnected(err) => {
-                    debug!(?err, "disconnected");
+                    debug!(error = ?err, "disconnected");
                     if self.handle_disconnect().await.is_err() {
                         break;
                     };
