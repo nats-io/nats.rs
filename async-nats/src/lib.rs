@@ -525,6 +525,7 @@ impl ConnectionHandler {
                 }
 
                 loop {
+                    tracing::trace!("polling connection: read loop");
                     match self.handler.connection.poll_read_op(cx) {
                         Poll::Pending => break,
                         Poll::Ready(Ok(Some(server_op))) => {
@@ -537,6 +538,7 @@ impl ConnectionHandler {
                             return Poll::Ready(ExitReason::Disconnected(Some(err)))
                         }
                     }
+                    tracing::trace!("polling connection: read loop done");
                 }
 
                 // Before handling any commands, drop any subscriptions which are draining
@@ -560,6 +562,7 @@ impl ConnectionHandler {
 
                 let mut made_progress = true;
                 loop {
+                    tracing::trace!("polling connection: write loop");
                     while !self.handler.connection.is_write_buf_full() {
                         debug_assert!(self.recv_buf.is_empty());
 
@@ -568,6 +571,7 @@ impl ConnectionHandler {
                             handler,
                             receiver,
                         } = &mut *self;
+                        tracing::trace!("polling connection: write loop: recv many");
                         match receiver.poll_recv_many(cx, recv_buf, Self::RECV_CHUNK_SIZE) {
                             Poll::Pending => break,
                             Poll::Ready(1..) => {
@@ -596,6 +600,7 @@ impl ConnectionHandler {
                         break;
                     }
 
+                    tracing::trace!("polling connection: write loop: write");
                     match self.handler.connection.poll_write(cx) {
                         Poll::Pending => {
                             // Write buffer couldn't be fully emptied
@@ -611,6 +616,7 @@ impl ConnectionHandler {
                     }
                 }
 
+                tracing::trace!("polling connection: write loop flush");
                 if let (ShouldFlush::Yes, _) | (ShouldFlush::No, false) = (
                     self.handler.connection.should_flush(),
                     self.handler.flush_observers.is_empty(),
@@ -628,10 +634,11 @@ impl ConnectionHandler {
                     }
                 }
 
+                tracing::trace!("polling connection: check reconnect");
                 if mem::take(&mut self.handler.should_reconnect) {
+                    debug!("reconnect requested");
                     return Poll::Ready(ExitReason::ReconnectRequested);
                 }
-
                 Poll::Pending
             }
         }
@@ -643,6 +650,7 @@ impl ConnectionHandler {
                 receiver,
                 recv_buf: &mut recv_buf,
             };
+            tracing::trace!("polling connection: await process");
             match process.await {
                 ExitReason::Disconnected(err) => {
                     debug!(error = ?err, "disconnected");
@@ -652,6 +660,7 @@ impl ConnectionHandler {
                     debug!("reconnected");
                 }
                 ExitReason::Closed => {
+                    debug!("connection closed");
                     // Safe to ignore result as we're shutting down anyway
                     self.connector.events_tx.try_send(Event::Closed).ok();
                     break;
