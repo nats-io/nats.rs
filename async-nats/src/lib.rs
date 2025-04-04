@@ -199,7 +199,7 @@ use thiserror::Error;
 use futures::stream::Stream;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use core::fmt;
 use std::collections::HashMap;
@@ -475,6 +475,16 @@ impl ConnectionHandler {
             Closed,
         }
 
+        impl std::fmt::Debug for ExitReason {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    ExitReason::Disconnected(err) => write!(f, "Disconnected({:?})", err),
+                    ExitReason::ReconnectRequested => write!(f, "ReconnectRequested"),
+                    ExitReason::Closed => write!(f, "Closed"),
+                }
+            }
+        }
+
         impl ProcessFut<'_> {
             const RECV_CHUNK_SIZE: usize = 16;
 
@@ -518,22 +528,32 @@ impl ConnectionHandler {
                 // We need to be sure the waker is registered, therefore we need to poll until we
                 // get a `Poll::Pending`. With a sane interval delay, this means that the loop
                 // breaks at the second iteration.
+                trace!("checking ping interval");
                 while self.handler.ping_interval.poll_tick(cx).is_ready() {
+                    trace!(pending_pings = self.handler.pending_pings, "ping interval ready, sending ping");
                     if let Poll::Ready(exit) = self.ping() {
+                        trace!(?exit, "ping check returned exit reason");
                         return Poll::Ready(exit);
                     }
                 }
 
+                trace!("starting read loop");
                 loop {
                     match self.handler.connection.poll_read_op(cx) {
-                        Poll::Pending => break,
+                        Poll::Pending => {
+                            trace!("read operation pending, breaking read loop");
+                            break;
+                        }
                         Poll::Ready(Ok(Some(server_op))) => {
+                            trace!(?server_op, "read operation completed with server op");
                             self.handler.handle_server_op(server_op);
                         }
                         Poll::Ready(Ok(None)) => {
+                            trace!("read operation returned None, disconnecting");
                             return Poll::Ready(ExitReason::Disconnected(None))
                         }
                         Poll::Ready(Err(err)) => {
+                            trace!(error = ?err, "read operation error, disconnecting");
                             return Poll::Ready(ExitReason::Disconnected(Some(err)))
                         }
                     }
@@ -543,9 +563,11 @@ impl ConnectionHandler {
                 // Note: safe to assume subscription drain has completed at this point, as we would have flushed
                 // all outgoing UNSUB messages in the previous call to this fn, and we would have processed and
                 // delivered any remaining messages to the subscription in the loop above.
+                trace!(draining_count = self.handler.subscriptions.values().filter(|s| s.is_draining).count(), "checking draining subscriptions");
                 self.handler.subscriptions.retain(|_, s| !s.is_draining);
 
                 if self.handler.is_draining {
+                    trace!("connection is draining, exiting");
                     // The entire connection is draining. This means we flushed outgoing messages in the previous
                     // call to this fn, we handled any remaining messages from the server in the loop above, and
                     // all subs were drained, so drain is complete and we should exit instead of processing any
@@ -558,6 +580,7 @@ impl ConnectionHandler {
                 // cannot be called anymore. Runtime wakeups won't
                 // trigger a call to `poll_write`
 
+                trace!("starting write loop");
                 let mut made_progress = true;
                 loop {
                     while !self.handler.connection.is_write_buf_full() {
@@ -568,17 +591,26 @@ impl ConnectionHandler {
                             handler,
                             receiver,
                         } = &mut *self;
+                        trace!("polling receiver for commands");
                         match receiver.poll_recv_many(cx, recv_buf, Self::RECV_CHUNK_SIZE) {
-                            Poll::Pending => break,
+                            Poll::Pending => {
+                                trace!("receiver pending, breaking command loop");
+                                break;
+                            }
                             Poll::Ready(1..) => {
+                                trace!(command_count = recv_buf.len(), "received commands");
                                 made_progress = true;
 
                                 for cmd in recv_buf.drain(..) {
+                                    trace!(?cmd, "handling command");
                                     handler.handle_command(cmd);
                                 }
                             }
                             // TODO: replace `_` with `0` after bumping MSRV to 1.75
-                            Poll::Ready(_) => return Poll::Ready(ExitReason::Closed),
+                            Poll::Ready(_) => {
+                                trace!("receiver closed, exiting");
+                                return Poll::Ready(ExitReason::Closed)
+                            }
                         }
                     }
 
@@ -593,45 +625,62 @@ impl ConnectionHandler {
                     // cycle as long as the `receiver` doesn't end-up
                     // `Poll::Pending` immediately.
                     if !mem::take(&mut made_progress) {
+                        trace!("no progress made in write loop, breaking");
                         break;
                     }
 
+                    trace!("polling write operation");
                     match self.handler.connection.poll_write(cx) {
                         Poll::Pending => {
+                            trace!("write operation pending, breaking write loop");
                             // Write buffer couldn't be fully emptied
                             break;
                         }
                         Poll::Ready(Ok(())) => {
+                            trace!("write operation completed");
                             // Write buffer is empty
                             continue;
                         }
                         Poll::Ready(Err(err)) => {
+                            trace!(error = ?err, "write operation error, disconnecting");
                             return Poll::Ready(ExitReason::Disconnected(Some(err)))
                         }
                     }
                 }
 
+                trace!(
+                    should_flush = ?self.handler.connection.should_flush(),
+                    flush_observers_empty = self.handler.flush_observers.is_empty(),
+                    "checking flush conditions"
+                );
                 if let (ShouldFlush::Yes, _) | (ShouldFlush::No, false) = (
                     self.handler.connection.should_flush(),
                     self.handler.flush_observers.is_empty(),
                 ) {
+                    trace!("polling flush operation");
                     match self.handler.connection.poll_flush(cx) {
-                        Poll::Pending => {}
+                        Poll::Pending => {
+                            trace!("flush operation pending");
+                        }
                         Poll::Ready(Ok(())) => {
+                            trace!(observer_count = self.handler.flush_observers.len(), "flush operation completed, notifying observers");
                             for observer in self.handler.flush_observers.drain(..) {
                                 let _ = observer.send(());
                             }
                         }
                         Poll::Ready(Err(err)) => {
+                            trace!(error = ?err, "flush operation error, disconnecting");
                             return Poll::Ready(ExitReason::Disconnected(Some(err)))
                         }
                     }
                 }
 
                 if mem::take(&mut self.handler.should_reconnect) {
+                    trace!("reconnect requested");
                     return Poll::Ready(ExitReason::ReconnectRequested);
                 }
 
+                trace!("all operations pending, returning pending");
                 Poll::Pending
             }
         }
