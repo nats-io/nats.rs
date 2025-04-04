@@ -534,6 +534,11 @@ impl ConnectionHandler {
                             return Poll::Ready(ExitReason::Disconnected(None))
                         }
                         Poll::Ready(Err(err)) => {
+                            if err.kind() == io::ErrorKind::TimedOut {
+                                debug!("read operation timed out, requesting reconnect");
+                                self.handler.should_reconnect = true;
+                                return Poll::Ready(ExitReason::ReconnectRequested);
+                            }
                             return Poll::Ready(ExitReason::Disconnected(Some(err)))
                         }
                     }

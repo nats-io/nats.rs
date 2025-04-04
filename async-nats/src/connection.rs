@@ -22,6 +22,7 @@ use std::str::{self, FromStr};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "websockets")]
 use {
@@ -92,6 +93,7 @@ pub(crate) struct Connection {
     flattened_writes: BytesMut,
     can_flush: bool,
     statistics: Arc<Statistics>,
+    last_read_time: Instant,
 }
 
 /// Internal representation of the connection.
@@ -110,6 +112,7 @@ impl Connection {
             flattened_writes: BytesMut::new(),
             can_flush: false,
             statistics,
+            last_read_time: Instant::now(),
         }
     }
 
@@ -438,8 +441,15 @@ impl Connection {
     ) -> Poll<io::Result<Option<ServerOp>>> {
         loop {
             if let Some(op) = self.try_read_op()? {
+                self.last_read_time = Instant::now();
                 trace!(?op, "read operation completed");
                 return Poll::Ready(Ok(Some(op)));
+            }
+
+            // Check if we've been waiting too long for data
+            if self.last_read_time.elapsed() > Duration::from_secs(10) {
+                trace!("read operation timed out");
+                return Poll::Ready(Err(io::ErrorKind::TimedOut.into()));
             }
 
             let read_buf = self.stream.read_buf(&mut self.read_buf);
@@ -459,6 +469,7 @@ impl Connection {
                 }
                 Poll::Ready(Ok(n)) => {
                     self.statistics.in_bytes.add(n as u64, Ordering::Relaxed);
+                    self.last_read_time = Instant::now();
                     trace!(bytes = %n, "read operation: received bytes");
                     continue;
                 }
