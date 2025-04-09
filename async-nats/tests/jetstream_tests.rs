@@ -2245,7 +2245,7 @@ mod jetstream {
             .unwrap();
         assert_eq!(
             messages.next().await.unwrap().unwrap_err().kind(),
-            async_nats::jetstream::consumer::pull::MessagesErrorKind::Other,
+            async_nats::jetstream::consumer::pull::MessagesErrorKind::NoResponders,
         );
         // But the consumer iterator should still be there.
         // We should get timeout again.
