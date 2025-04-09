@@ -41,7 +41,7 @@ use crate::subject::Subject;
 use super::PriorityPolicy;
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    backoff, AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
@@ -2788,12 +2788,4 @@ async fn recreate_consumer_stream(
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err));
     trace!("recreated consumer");
     stream
-}
-
-fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
-    if attempt < 3 {
-        Duration::from_millis(500)
-    } else {
-        Duration::from_secs(5)
-    }
 }

@@ -519,3 +519,11 @@ impl std::fmt::Display for StreamErrorKind {
 }
 
 pub type StreamError = Error<StreamErrorKind>;
+
+fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
+    if attempt < 5 {
+        Duration::from_millis(500 * attempt as u64)
+    } else {
+        Duration::from_secs(10)
+    }
+}
