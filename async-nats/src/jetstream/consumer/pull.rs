@@ -853,7 +853,7 @@ impl futures::Stream for Ordered {
                         )
                     })
                     .retries(u32::MAX)
-                    .exponential_backoff(Duration::from_millis(500))
+                    .custom_backoff(backoff)
                     .await
                 }
             }))
@@ -954,7 +954,7 @@ impl Stream {
                                 }
                             debug!("detected !Connected -> Connected state change");
 
-                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(u32::MAX).exponential_backoff(Duration::from_millis(500)).await {
+                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(u32::MAX).custom_backoff(backoff).await {
                                 Ok(info) => {
                                     if info.num_waiting == 0 {
                                         pending_reset = true;
@@ -2788,4 +2788,12 @@ async fn recreate_consumer_stream(
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err));
     trace!("recreated consumer");
     stream
+}
+
+fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
+    if attempt < 3 {
+        Duration::from_millis(500)
+    } else {
+        Duration::from_secs(5)
+    }
 }
