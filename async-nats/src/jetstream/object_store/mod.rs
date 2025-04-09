@@ -289,10 +289,7 @@ impl ObjectStore {
         let object_meta: ObjectMetadata = meta.into();
 
         // Fetch any existing object info, if there is any for later use.
-        let maybe_existing_object_info = match self.info(&object_meta.name).await {
-            Ok(object_info) => Some(object_info),
-            Err(_) => None,
-        };
+        let maybe_existing_object_info = (self.info(&object_meta.name).await).ok();
 
         let object_nuid = nuid::next();
         let chunk_subject = Subject::from(format!("$O.{}.C.{}", &self.name, &object_nuid));
