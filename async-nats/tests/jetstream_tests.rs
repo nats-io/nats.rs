@@ -3539,6 +3539,63 @@ mod jetstream {
         }
     }
 
+    #[tokio::test]
+    async fn ordered_removed_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "origin".to_string(),
+                subjects: vec!["test".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        debug!("start publishing");
+        // We need to publish more to allow the consumer to catch up.
+        for i in 0..51_000 {
+            if i == 1000 {
+                context.delete_stream("origin").await.unwrap();
+                context
+                    .create_stream(async_nats::jetstream::stream::Config {
+                        name: "origin".to_string(),
+                        subjects: vec!["test".to_string()],
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+            }
+            context.publish("test", "data".into()).await.unwrap();
+        }
+        debug!("finished publishing");
+
+        let mut messages = stream
+            .create_consumer(push::OrderedConfig {
+                deliver_subject: "deliver".to_string(),
+                deliver_policy: DeliverPolicy::All,
+                replay_policy: ReplayPolicy::Instant,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap()
+            .take(50_000);
+
+        tokio::time::timeout(Duration::from_secs(30), async move {
+            while let Some(message) = messages.next().await {
+                message.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    }
+
     // This test was added to make sure that in case of slow consumers client can properly recreate
     // ordered consumer.
     #[tokio::test]
