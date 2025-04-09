@@ -852,7 +852,7 @@ impl futures::Stream for Ordered {
                             sequence,
                         )
                     })
-                    .retries(5)
+                    .retries(u32::MAX)
                     .exponential_backoff(Duration::from_millis(500))
                     .await
                 }
@@ -954,7 +954,7 @@ impl Stream {
                                 }
                             debug!("detected !Connected -> Connected state change");
 
-                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(5).exponential_backoff(Duration::from_millis(500)).await {
+                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(u32::MAX).exponential_backoff(Duration::from_millis(500)).await {
                                 Ok(info) => {
                                     if info.num_waiting == 0 {
                                         pending_reset = true;
@@ -1055,6 +1055,7 @@ impl From<MessagesError> for OrderedError {
                 kind: OrderedErrorKind::Other,
                 source: err.source,
             },
+            MessagesErrorKind::NoResponders => OrderedError::new(OrderedErrorKind::NoResponders),
         }
     }
 }
