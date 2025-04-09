@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use super::{
-    AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
+    backoff, AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
     StreamError, StreamErrorKind,
 };
 
@@ -549,8 +549,8 @@ impl Consumer<OrderedConfig> {
                             last_sequence.load(Ordering::Relaxed),
                         )
                     })
-                    .retries(5)
-                    .exponential_backoff(Duration::from_millis(500))
+                    .retries(u32::MAX)
+                    .custom_backoff(backoff)
                     .await;
                     if let Err(err) = consumer {
                         shutdown_tx.send(err).unwrap();
@@ -881,11 +881,9 @@ async fn recreate_ephemeral_consumer(
     stream_name: String,
     sequence: u64,
 ) -> Result<(), ConsumerRecreateError> {
-    let strategy =
-        tryhard::RetryFutureConfig::new(5).exponential_backoff(Duration::from_millis(500));
-
     let stream = tryhard::retry_fn(|| context.get_stream(stream_name.clone()))
-        .with_config(strategy)
+        .retries(u32::MAX)
+        .custom_backoff(backoff)
         .await
         .map_err(|err| {
             ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::GetStream, err)
@@ -911,7 +909,8 @@ async fn recreate_ephemeral_consumer(
             }),
         )
     })
-    .with_config(strategy)
+    .retries(u32::MAX)
+    .custom_backoff(backoff)
     .await
     .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
     .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
