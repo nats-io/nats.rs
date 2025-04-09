@@ -816,7 +816,8 @@ impl futures::Stream for Ordered {
                                     self.missed_heartbeats = true;
                                 }
                             }
-                            MessagesErrorKind::ConsumerDeleted => {
+                            MessagesErrorKind::ConsumerDeleted
+                            | MessagesErrorKind::NoResponders => {
                                 recreate = true;
                                 self.consumer_sequence = 0;
                             }
@@ -1014,6 +1015,7 @@ pub enum OrderedErrorKind {
     Pull,
     PushBasedConsumer,
     Recreate,
+    NoResponders,
     Other,
 }
 
@@ -1026,6 +1028,7 @@ impl std::fmt::Display for OrderedErrorKind {
             Self::Other => write!(f, "error"),
             Self::PushBasedConsumer => write!(f, "cannot use with push consumer"),
             Self::Recreate => write!(f, "consumer recreation failed"),
+            Self::NoResponders => write!(f, "no responders"),
         }
     }
 }
@@ -1062,6 +1065,7 @@ pub enum MessagesErrorKind {
     ConsumerDeleted,
     Pull,
     PushBasedConsumer,
+    NoResponders,
     Other,
 }
 
@@ -1072,6 +1076,7 @@ impl std::fmt::Display for MessagesErrorKind {
             Self::ConsumerDeleted => write!(f, "consumer deleted"),
             Self::Pull => write!(f, "pull request failed"),
             Self::Other => write!(f, "error"),
+            Self::NoResponders => write!(f, "no responders"),
             Self::PushBasedConsumer => write!(f, "cannot use with push consumer"),
         }
     }
@@ -1219,6 +1224,12 @@ impl futures::Stream for Stream {
                                     context: self.context.clone(),
                                     message,
                                 })));
+                            }
+                            StatusCode::NO_RESPONDERS => {
+                                debug!("received no responders");
+                                return Poll::Ready(Some(Err(MessagesError::new(
+                                    MessagesErrorKind::NoResponders,
+                                ))));
                             }
                             status => {
                                 debug!("received unknown message: {:?}", message);
