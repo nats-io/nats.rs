@@ -954,7 +954,7 @@ impl Stream {
                                 }
                             debug!("detected !Connected -> Connected state change");
 
-                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(u32::MAX).custom_backoff(backoff).await {
+                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(5).custom_backoff(backoff).await {
                                 Ok(info) => {
                                     if info.num_waiting == 0 {
                                         pending_reset = true;
