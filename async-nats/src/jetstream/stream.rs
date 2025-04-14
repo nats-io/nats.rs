@@ -37,8 +37,12 @@ use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
-    context::{RequestError, RequestErrorKind, StreamsError, StreamsErrorKind},
+    context::{
+        ConsumerInfoError, ConsumerInfoErrorKind, RequestError, RequestErrorKind, StreamsError,
+        StreamsErrorKind,
+    },
     errors::ErrorCode,
+    is_valid_name,
     message::{StreamMessage, StreamMessageError},
     response::Response,
     Context, Message,
@@ -958,17 +962,20 @@ impl<I> Stream<I> {
     pub async fn consumer_info<T: AsRef<str>>(
         &self,
         name: T,
-    ) -> Result<consumer::Info, crate::Error> {
+    ) -> Result<consumer::Info, ConsumerInfoError> {
         let name = name.as_ref();
+
+        if !is_valid_name(name) {
+            return Err(ConsumerInfoError::new(
+                ConsumerInfoErrorKind::InvalidConsumerName,
+            ));
+        }
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.name, name);
 
         match self.context.request(subject, &json!({})).await? {
             Response::Ok(info) => Ok(info),
-            Response::Err { error } => Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                format!("nats: error while getting consumer info: {}", error),
-            ))),
+            Response::Err { error } => Err(error.into()),
         }
     }
 

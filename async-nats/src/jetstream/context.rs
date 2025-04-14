@@ -1647,6 +1647,59 @@ impl From<super::errors::Error> for RequestError {
     }
 }
 
+pub type ConsumerInfoError = Error<ConsumerInfoErrorKind>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerInfoErrorKind {
+    InvalidName,
+    Offline,
+    NotFound,
+    StreamNotFound,
+    Request,
+    JetStream(super::errors::Error),
+    TimedOut,
+}
+
+impl Display for ConsumerInfoErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidName => write!(f, "invalid consumer name"),
+            Self::Offline => write!(f, "consumer is offline"),
+            Self::NotFound => write!(f, "consumer not found"),
+            Self::StreamNotFound => write!(f, "stream not found"),
+            Self::Request => write!(f, "request error"),
+            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::TimedOut => write!(f, "timed out"),
+        }
+    }
+}
+
+impl From<super::errors::Error> for ConsumerInfoError {
+    fn from(error: super::errors::Error) -> Self {
+        match error.error_code() {
+            ErrorCode::CONSUMER_NOT_FOUND => {
+                ConsumerInfoError::new(ConsumerInfoErrorKind::NotFound)
+            }
+            ErrorCode::STREAM_NOT_FOUND => {
+                ConsumerInfoError::new(ConsumerInfoErrorKind::StreamNotFound)
+            }
+            ErrorCode::CONSUMER_OFFLINE => ConsumerInfoError::new(ConsumerInfoErrorKind::Offline),
+            _ => ConsumerInfoError::new(ConsumerInfoErrorKind::JetStream(error)),
+        }
+    }
+}
+
+impl From<RequestError> for ConsumerInfoError {
+    fn from(error: RequestError) -> Self {
+        match error.kind() {
+            RequestErrorKind::TimedOut => ConsumerInfoError::new(ConsumerInfoErrorKind::TimedOut),
+            RequestErrorKind::Other | RequestErrorKind::NoResponders => {
+                ConsumerInfoError::with_source(ConsumerInfoErrorKind::Request, error)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum CreateStreamErrorKind {
     EmptyStreamName,
