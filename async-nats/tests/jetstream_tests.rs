@@ -32,6 +32,7 @@ mod jetstream {
 
     #[cfg(feature = "server_2_11")]
     use async_nats::jetstream::consumer::PriorityPolicy;
+    use async_nats::jetstream::context::ConsumerInfoErrorKind;
 
     use super::*;
     use async_nats::connection::State;
@@ -4270,5 +4271,28 @@ mod jetstream {
 
         let ttl = message.headers.get(NATS_MARKER_REASON).unwrap();
         assert_eq!(ttl.as_str(), "MaxAge");
+    }
+
+    #[tokio::test]
+    async fn consumer_info_errors() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "events".into(),
+                subjects: vec!["test".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream.consumer_info("non-existing").await;
+
+        assert_eq!(
+            consumer.unwrap_err().kind(),
+            ConsumerInfoErrorKind::NotFound
+        );
     }
 }

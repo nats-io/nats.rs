@@ -966,9 +966,7 @@ impl<I> Stream<I> {
         let name = name.as_ref();
 
         if !is_valid_name(name) {
-            return Err(ConsumerInfoError::new(
-                ConsumerInfoErrorKind::InvalidConsumerName,
-            ));
+            return Err(ConsumerInfoError::new(ConsumerInfoErrorKind::InvalidName));
         }
 
         let subject = format!("CONSUMER.INFO.{}.{}", self.name, name);

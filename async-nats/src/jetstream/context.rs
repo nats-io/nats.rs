@@ -1658,6 +1658,7 @@ pub enum ConsumerInfoErrorKind {
     Request,
     JetStream(super::errors::Error),
     TimedOut,
+    NoResponders,
 }
 
 impl Display for ConsumerInfoErrorKind {
@@ -1670,6 +1671,7 @@ impl Display for ConsumerInfoErrorKind {
             Self::Request => write!(f, "request error"),
             Self::JetStream(err) => write!(f, "jetstream error: {}", err),
             Self::TimedOut => write!(f, "timed out"),
+            Self::NoResponders => write!(f, "no responders"),
         }
     }
 }
@@ -1693,8 +1695,11 @@ impl From<RequestError> for ConsumerInfoError {
     fn from(error: RequestError) -> Self {
         match error.kind() {
             RequestErrorKind::TimedOut => ConsumerInfoError::new(ConsumerInfoErrorKind::TimedOut),
-            RequestErrorKind::Other | RequestErrorKind::NoResponders => {
+            RequestErrorKind::Other => {
                 ConsumerInfoError::with_source(ConsumerInfoErrorKind::Request, error)
+            }
+            RequestErrorKind::NoResponders => {
+                ConsumerInfoError::new(ConsumerInfoErrorKind::NoResponders)
             }
         }
     }
