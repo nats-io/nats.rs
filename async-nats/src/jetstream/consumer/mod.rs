@@ -26,7 +26,8 @@ use time::serde::rfc3339;
 #[cfg(feature = "server_2_11")]
 use time::OffsetDateTime;
 
-use super::context::RequestError;
+use super::context::{ConsumerInfoError, RequestError};
+use super::response::Response;
 use super::stream::ClusterInfo;
 use super::Context;
 use crate::error::Error;
@@ -76,17 +77,18 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn info(&mut self) -> Result<&consumer::Info, RequestError> {
-        let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
-
-        let info = self.context.request(subject, &json!({})).await?;
+    pub async fn info(&mut self) -> Result<&consumer::Info, ConsumerInfoError> {
+        let info = self.fetch_info().await?;
         self.info = info;
         Ok(&self.info)
     }
 
-    async fn fetch_info(&self) -> Result<consumer::Info, RequestError> {
+    async fn fetch_info(&self) -> Result<consumer::Info, ConsumerInfoError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
-        self.context.request(subject, &json!({})).await
+        match self.context.request(subject, &json!({})).await? {
+            Response::Err { error } => Err(error.into()),
+            Response::Ok(info) => Ok(info),
+        }
     }
 
     /// Returns cached [Info] for the [Consumer].

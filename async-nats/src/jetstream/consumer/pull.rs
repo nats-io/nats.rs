@@ -954,17 +954,19 @@ impl Stream {
                                 }
                             debug!("detected !Connected -> Connected state change");
 
-                            match tryhard::retry_fn(|| consumer.fetch_info()).retries(5).custom_backoff(backoff).await {
-                                Ok(info) => {
-                                    if info.num_waiting == 0 {
-                                        pending_reset = true;
+                            match tryhard::retry_fn(|| consumer.fetch_info())
+                                .retries(5).custom_backoff(backoff).await
+                                .map_err(|err| crate::RequestError::with_source(crate::RequestErrorKind::Other, err).into()) {
+                                    Ok(info) => {
+                                        if info.num_waiting == 0 {
+                                            pending_reset = true;
+                                        }
                                     }
-                                }
-                                Err(err) => {
-                                     if let Err(err) = request_result_tx.send(Err(err)).await {
-                                        debug!("failed to sent request result: {}", err);
-                                    }
-                                },
+                                    Err(err) => {
+                                         if let Err(err) = request_result_tx.send(Err(err)).await {
+                                            debug!("failed to sent request result: {}", err);
+                                        }
+                                    },
                             }
                         },
                         _ = request_rx.changed() => debug!("task received request request"),
