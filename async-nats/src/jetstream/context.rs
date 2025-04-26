@@ -195,6 +195,14 @@ impl Context {
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
         let subject = subject.to_subject();
+
+        if subject.is_empty() {
+            return Err(PublishError::with_source(
+                PublishErrorKind::Other,
+                "empty subject is not allowed",
+            ));
+        }
+
         let (sender, receiver) = oneshot::channel();
 
         let respond = self.client.new_inbox().into();
