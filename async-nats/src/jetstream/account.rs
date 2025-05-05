@@ -57,6 +57,11 @@ pub struct Requests {
     pub total: u64,
     /// Total number of requests that resulted in an error response.
     pub errors: u64,
+    /// API level for this account.
+    pub level: usize,
+    /// Number of API calls currently in-flight.
+    #[serde(default)]
+    pub inflight: u64,
 }
 
 #[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +70,12 @@ pub struct Tier {
     pub memory: u64,
     /// File Storage being used for Stream Message storage
     pub storage: u64,
+    // Number of bytes reserved for memory usage by
+    // this account on the server
+    pub reserved_memory: u64,
+    // Number of bytes reserved for disk usage by this
+    // account on the server
+    pub reserved_storage: u64,
     /// Number of active Streams
     pub streams: usize,
     /// Number of active Consumers
@@ -82,6 +93,12 @@ pub struct Account {
     pub memory: u64,
     /// File Storage being used for Stream Message storage
     pub storage: u64,
+    // Number of bytes reserved for memory usage by
+    // this account on the server
+    pub reserved_memory: u64,
+    // Number of bytes reserved for disk usage by this
+    // account on the server
+    pub reserved_storage: u64,
     /// Number of active Streams
     pub streams: usize,
     /// Number of active Consumers
