@@ -19,6 +19,7 @@ use std::{
     fmt::{self, Display},
     str::FromStr,
     task::Poll,
+    time::Duration,
 };
 
 use crate::HeaderValue;
@@ -126,6 +127,8 @@ pub struct Config {
     pub compression: bool,
     /// Cluster and tag placement for the bucket.
     pub placement: Option<stream::Placement>,
+    /// Enables per-message TTL and delete markers TTLs for a bucket.
+    pub limit_markers: Option<Duration>,
 }
 
 /// Describes what kind of operation and entry represents
@@ -243,7 +246,53 @@ impl Store {
         key: T,
         value: bytes::Bytes,
     ) -> Result<u64, CreateError> {
-        let update_err = match self.update(key.as_ref(), value.clone(), 0).await {
+        self.create_maybe_ttl(key, value, None).await
+    }
+
+    /// Create will add the key/value pair if it does not exist. If it does exist, it will return an error.
+    /// It will set a TTL specific for that key.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use std::time::Duration;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    ///
+    /// let status = kv.create_with_ttl("key", "value".into(), Duration::from_secs(10)).await;
+    /// assert!(status.is_ok());
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_with_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        value: bytes::Bytes,
+        ttl: Duration,
+    ) -> Result<u64, CreateError> {
+        self.create_maybe_ttl(key, value, Some(ttl)).await
+    }
+
+    async fn create_maybe_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        value: bytes::Bytes,
+        ttl: Option<Duration>,
+    ) -> Result<u64, CreateError> {
+        let update_err = match self
+            .update_maybe_ttl(key.as_ref(), value.clone(), 0, ttl)
+            .await
+        {
             Ok(revision) => return Ok(revision),
             Err(err) => err,
         };
@@ -868,6 +917,16 @@ impl Store {
         value: Bytes,
         revision: u64,
     ) -> Result<u64, UpdateError> {
+        self.update_maybe_ttl(key, value, revision, None).await
+    }
+
+    async fn update_maybe_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        value: Bytes,
+        revision: u64,
+        ttl: Option<Duration>,
+    ) -> Result<u64, UpdateError> {
         if !is_valid_key(key.as_ref()) {
             return Err(UpdateError::new(UpdateErrorKind::InvalidKey));
         }
@@ -884,6 +943,13 @@ impl Store {
             header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
             HeaderValue::from(revision),
         );
+
+        if let Some(ttl) = ttl {
+            headers.insert(
+                header::NATS_MESSAGE_TTL,
+                HeaderValue::from(ttl.as_secs() as u64),
+            );
+        }
 
         self.stream
             .context
@@ -1010,6 +1076,38 @@ impl Store {
         self.purge_expect_revision(key, None).await
     }
 
+    /// Purges all the revisions of a entry destructively, leaving behind a single purge entry in-place.
+    /// The purge entry will remain valid for the given `ttl`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// kv.put("key", "value".into()).await?;
+    /// kv.put("key", "another".into()).await?;
+    /// kv.purge_with_ttl("key", Duration::from_secs(10)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn purge_with_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        ttl: Duration,
+    ) -> Result<(), PurgeError> {
+        self.purge_expect_revision_maybe_ttl(key, None, ttl).await
+    }
+
     /// Purges all the revisions of a entry destructively if the revision matches, leaving behind a single
     /// purge entry in-place.
     ///
@@ -1056,6 +1154,81 @@ impl Store {
         headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
 
         if let Some(revision) = revison {
+            headers.insert(
+                header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+                HeaderValue::from(revision),
+            );
+        }
+
+        self.stream
+            .context
+            .publish_with_headers(subject, headers, "".into())
+            .await?
+            .await?;
+        Ok(())
+    }
+
+    /// Purges all the revisions of a entry destructively if the revision matches, leaving behind a single
+    /// purge entry in-place. The purge entry will remain valid for the given `ttl`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use futures::StreamExt;
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 10,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// kv.put("key", "value".into()).await?;
+    /// let revision = kv.put("key", "another".into()).await?;
+    /// kv.purge_expect_revision_with_ttl("key", Some(revision)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn purge_expect_revision_with_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        revision: u64,
+        ttl: Duration,
+    ) -> Result<(), PurgeError> {
+        self.purge_expect_revision_maybe_ttl(key, Some(revision), ttl)
+            .await
+    }
+
+    async fn purge_expect_revision_maybe_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        revision: Option<u64>,
+        ttl: Duration,
+    ) -> Result<(), PurgeError> {
+        if !is_valid_key(key.as_ref()) {
+            return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
+        }
+
+        let mut subject = String::new();
+        if self.use_jetstream_prefix {
+            subject.push_str(&self.stream.context.prefix);
+            subject.push('.');
+        }
+        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
+        subject.push_str(key.as_ref());
+
+        let mut headers = crate::HeaderMap::default();
+        headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
+        headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
+        headers.insert(
+            header::NATS_MESSAGE_TTL,
+            HeaderValue::from(ttl.as_secs() as u64),
+        );
+
+        if let Some(revision) = revision {
             headers.insert(
                 header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
                 HeaderValue::from(revision),
