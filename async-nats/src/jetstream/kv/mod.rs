@@ -128,6 +128,7 @@ pub struct Config {
     /// Cluster and tag placement for the bucket.
     pub placement: Option<stream::Placement>,
     /// Enables per-message TTL and delete marker TTL for a bucket.
+    #[cfg(feature = "server_2_11")]
     pub limit_markers: Option<Duration>,
 }
 

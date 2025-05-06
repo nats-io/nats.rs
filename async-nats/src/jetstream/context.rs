@@ -799,7 +799,9 @@ impl Context {
                     None
                 },
                 placement: config.placement,
+                #[cfg(feature = "server_2_11")]
                 allow_message_ttl,
+                #[cfg(feature = "server_2_11")]
                 subject_delete_marker_ttl,
                 ..Default::default()
             })
