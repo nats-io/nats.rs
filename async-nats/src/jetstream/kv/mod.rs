@@ -268,7 +268,9 @@ impl Store {
     ///     })
     ///     .await?;
     ///
-    /// let status = kv.create_with_ttl("key", "value".into(), Duration::from_secs(10)).await;
+    /// let status = kv
+    ///     .create_with_ttl("key", "value".into(), Duration::from_secs(10))
+    ///     .await;
     /// assert!(status.is_ok());
     ///
     /// # Ok(())
@@ -1188,7 +1190,8 @@ impl Store {
     ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// let revision = kv.put("key", "another".into()).await?;
-    /// kv.purge_expect_revision_with_ttl("key", Some(revision)).await?;
+    /// kv.purge_expect_revision_with_ttl("key", Some(revision))
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
