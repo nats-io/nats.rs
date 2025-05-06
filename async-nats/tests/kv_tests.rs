@@ -1318,6 +1318,7 @@ mod kv {
         assert_eq!(2, kv.entry("tomato").await.unwrap().unwrap().revision);
     }
 
+    #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn limit_markers() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -1366,6 +1367,7 @@ mod kv {
         assert!(info.cached_info().config.allow_message_ttl);
     }
 
+    #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn create_with_ttl() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -1400,6 +1402,7 @@ mod kv {
         assert!(result.is_none(), "key should be expired");
     }
 
+    #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn purge_with_ttl() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
