@@ -29,6 +29,7 @@ This file lists the dependencies used in this repository.
 | tokio-rustls 0.24.1       | Apache-2.0 OR MIT        |
 | tracing 0.1.37            | MIT                      |
 | url 2.4.1                 | Apache-2.0 OR MIT        |
+| webpki-roots (optional)   | CDLA-Permissive-2.0      |
 
 ## Dev dependencies (tests, examples, benchmarks)
 
