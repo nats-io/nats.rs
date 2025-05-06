@@ -127,7 +127,7 @@ pub struct Config {
     pub compression: bool,
     /// Cluster and tag placement for the bucket.
     pub placement: Option<stream::Placement>,
-    /// Enables per-message TTL and delete markers TTLs for a bucket.
+    /// Enables per-message TTL and delete marker TTL for a bucket.
     pub limit_markers: Option<Duration>,
 }
 
@@ -947,10 +947,7 @@ impl Store {
         );
 
         if let Some(ttl) = ttl {
-            headers.insert(
-                header::NATS_MESSAGE_TTL,
-                HeaderValue::from(ttl.as_secs() as u64),
-            );
+            headers.insert(header::NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
         }
 
         self.stream
@@ -1226,10 +1223,7 @@ impl Store {
         let mut headers = crate::HeaderMap::default();
         headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
         headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
-        headers.insert(
-            header::NATS_MESSAGE_TTL,
-            HeaderValue::from(ttl.as_secs() as u64),
-        );
+        headers.insert(header::NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
 
         if let Some(revision) = revision {
             headers.insert(
