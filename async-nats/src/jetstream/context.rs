@@ -743,8 +743,10 @@ impl Context {
             config.num_replicas
         };
 
-        let mut allow_message_ttl = false;
-        let mut subject_delete_marker_ttl = None;
+        #[cfg(feature = "server_2_11")]
+        let (mut allow_message_ttl, mut subject_delete_marker_ttl) = (false, None);
+
+        #[cfg(feature = "server_2_11")]
         if let Some(duration) = config.limit_markers {
             let info = self.query_account().await.unwrap();
             if info.requests.level < 1 {
