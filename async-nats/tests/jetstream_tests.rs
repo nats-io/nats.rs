@@ -4259,7 +4259,7 @@ mod jetstream {
 
         // Check if the message has ttl.
         let ttl = message.headers.get(NATS_MESSAGE_TTL).unwrap();
-        assert_eq!(ttl.as_str(), Duration::from_secs(20).as_nanos().to_string());
+        assert_eq!(ttl.as_str(), Duration::from_secs(20).as_secs().to_string());
 
         tokio::time::sleep(Duration::from_millis(2500)).await;
 
