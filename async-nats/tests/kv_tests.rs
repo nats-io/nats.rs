@@ -1424,9 +1424,9 @@ mod kv {
             .unwrap();
 
         for _ in 0..10 {
-            kv.put(format!("key1"), "value".into()).await.unwrap();
+            kv.put("key1", "value".into()).await.unwrap();
 
-            kv.put(format!("key2"), "value".into()).await.unwrap();
+            kv.put("key2", "value".into()).await.unwrap();
         }
 
         let mut stream = context.get_stream("KV_ttl").await.unwrap();

@@ -1084,6 +1084,7 @@ impl Store {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use futures::StreamExt;
+    /// use std::time::Duration;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let kv = jetstream
@@ -1187,7 +1188,7 @@ impl Store {
     ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// let revision = kv.put("key", "another".into()).await?;
-    /// kv.purge_expect_revision_with_ttl("key", Some(revision))
+    /// kv.purge_expect_revision_with_ttl("key", revision)
     ///     .await?;
     /// # Ok(())
     /// # }
