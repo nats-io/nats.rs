@@ -1189,7 +1189,7 @@ impl Store {
     ///     .await?;
     /// kv.put("key", "value".into()).await?;
     /// let revision = kv.put("key", "another".into()).await?;
-    /// kv.purge_expect_revision_with_ttl("key", revision)
+    /// kv.purge_expect_revision_with_ttl("key", revision, Duration::from_secs(10))
     ///     .await?;
     /// # Ok(())
     /// # }
