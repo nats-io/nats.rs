@@ -49,6 +49,15 @@ fn kv_operation_from_stream_message(message: &StreamMessage) -> Result<Operation
     if let Some(op) = message.headers.get(KV_OPERATION) {
         Operation::from_str(op.as_str())
             .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
+    } else if let Some(reason) = message.headers.get(header::NATS_MARKER_REASON) {
+        match reason.as_str() {
+            "MaxAge" | "Purge" => Ok(Operation::Purge),
+            "Remove" => Ok(Operation::Delete),
+            _ => Err(EntryError::with_source(
+                EntryErrorKind::Other,
+                "invalid marker reason",
+            )),
+        }
     } else {
         Err(EntryError::with_source(
             EntryErrorKind::Other,

@@ -1442,4 +1442,44 @@ mod kv {
         tokio::time::sleep(Duration::from_millis(2500)).await;
         assert_eq!(stream.info().await.unwrap().state.messages, 10);
     }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn watch_with_markers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(1)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            kv.put("key1", "value".into()).await.unwrap();
+
+            kv.put("key2", "value".into()).await.unwrap();
+        }
+
+        let mut watcher = kv.watch_all().await.unwrap();
+
+        kv.purge("key1").await.unwrap();
+
+        let entry = watcher.next().await.unwrap().unwrap();
+        assert_eq!(entry.key, "key1");
+        assert_eq!(entry.value.as_ref(), b"");
+        assert_eq!(Operation::Purge, entry.operation);
+    }
 }
