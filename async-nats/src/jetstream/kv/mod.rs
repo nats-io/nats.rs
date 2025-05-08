@@ -1115,7 +1115,8 @@ impl Store {
         key: T,
         ttl: Duration,
     ) -> Result<(), PurgeError> {
-        self.purge_expect_revision_maybe_ttl(key, None, ttl).await
+        self.purge_expect_revision_maybe_ttl(key, None, Some(ttl))
+            .await
     }
 
     /// Purges all the revisions of a entry destructively if the revision matches, leaving behind a single
@@ -1145,37 +1146,10 @@ impl Store {
     pub async fn purge_expect_revision<T: AsRef<str>>(
         &self,
         key: T,
-        revison: Option<u64>,
+        revision: Option<u64>,
     ) -> Result<(), PurgeError> {
-        if !is_valid_key(key.as_ref()) {
-            return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
-        }
-
-        let mut subject = String::new();
-        if self.use_jetstream_prefix {
-            subject.push_str(&self.stream.context.prefix);
-            subject.push('.');
-        }
-        subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
-        subject.push_str(key.as_ref());
-
-        let mut headers = crate::HeaderMap::default();
-        headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
-        headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
-
-        if let Some(revision) = revison {
-            headers.insert(
-                header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
-                HeaderValue::from(revision),
-            );
-        }
-
-        self.stream
-            .context
-            .publish_with_headers(subject, headers, "".into())
-            .await?
-            .await?;
-        Ok(())
+        self.purge_expect_revision_maybe_ttl(key, revision, None)
+            .await
     }
 
     /// Purges all the revisions of a entry destructively if the revision matches, leaving behind a single
@@ -1210,7 +1184,7 @@ impl Store {
         revision: u64,
         ttl: Duration,
     ) -> Result<(), PurgeError> {
-        self.purge_expect_revision_maybe_ttl(key, Some(revision), ttl)
+        self.purge_expect_revision_maybe_ttl(key, Some(revision), Some(ttl))
             .await
     }
 
@@ -1218,7 +1192,7 @@ impl Store {
         &self,
         key: T,
         revision: Option<u64>,
-        ttl: Duration,
+        ttl: Option<Duration>,
     ) -> Result<(), PurgeError> {
         if !is_valid_key(key.as_ref()) {
             return Err(PurgeError::new(PurgeErrorKind::InvalidKey));
@@ -1235,7 +1209,9 @@ impl Store {
         let mut headers = crate::HeaderMap::default();
         headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
         headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
-        headers.insert(header::NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
+        if let Some(ttl) = ttl {
+            headers.insert(header::NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
+        }
 
         if let Some(revision) = revision {
             headers.insert(
