@@ -1317,4 +1317,169 @@ mod kv {
         assert_eq!(1, kv.entry("orange").await.unwrap().unwrap().revision);
         assert_eq!(2, kv.entry("tomato").await.unwrap().unwrap().revision);
     }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn limit_markers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+        context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "no_ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                max_age: Duration::from_millis(100),
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = context.get_stream("KV_no_ttl").await.unwrap();
+
+        assert_eq!(info.cached_info().config.subject_delete_marker_ttl, None);
+        assert!(!info.cached_info().config.allow_message_ttl);
+
+        context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(10)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let info = context.get_stream("KV_ttl").await.unwrap();
+        assert_eq!(
+            info.cached_info().config.subject_delete_marker_ttl,
+            Some(Duration::from_secs(10))
+        );
+        assert!(info.cached_info().config.allow_message_ttl);
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn create_with_ttl() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(1)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        kv.create_with_ttl("key", "value".into(), Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        kv.get("key").await.unwrap().unwrap();
+
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let result = kv.get("key").await.unwrap();
+        assert!(result.is_none(), "key should be expired");
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn purge_with_ttl() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(1)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            kv.put("key1", "value".into()).await.unwrap();
+
+            kv.put("key2", "value".into()).await.unwrap();
+        }
+
+        let mut stream = context.get_stream("KV_ttl").await.unwrap();
+        assert_eq!(stream.cached_info().state.messages, 20);
+        kv.purge_with_ttl("key1", Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        assert_eq!(stream.info().await.unwrap().state.messages, 11);
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(stream.info().await.unwrap().state.messages, 10);
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn watch_with_markers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(1)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            kv.put("key1", "value".into()).await.unwrap();
+
+            kv.put("key2", "value".into()).await.unwrap();
+        }
+
+        let mut watcher = kv.watch_all().await.unwrap();
+
+        kv.purge("key1").await.unwrap();
+
+        let entry = watcher.next().await.unwrap().unwrap();
+        assert_eq!(entry.key, "key1");
+        assert_eq!(entry.value.as_ref(), b"");
+        assert_eq!(Operation::Purge, entry.operation);
+    }
 }

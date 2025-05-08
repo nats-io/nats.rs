@@ -743,6 +743,21 @@ impl Context {
             config.num_replicas
         };
 
+        #[cfg(feature = "server_2_11")]
+        let (mut allow_message_ttl, mut subject_delete_marker_ttl) = (false, None);
+
+        #[cfg(feature = "server_2_11")]
+        if let Some(duration) = config.limit_markers {
+            let info = self.query_account().await.unwrap();
+            if info.requests.level < 1 {
+                return Err(CreateKeyValueError::new(
+                    CreateKeyValueErrorKind::LimitMarkersNotSupported,
+                ));
+            }
+            allow_message_ttl = true;
+            subject_delete_marker_ttl = Some(duration);
+        }
+
         let mut subjects = Vec::new();
         if let Some(ref mut mirror) = config.mirror {
             if !mirror.name.starts_with("KV_") {
@@ -786,6 +801,10 @@ impl Context {
                     None
                 },
                 placement: config.placement,
+                #[cfg(feature = "server_2_11")]
+                allow_message_ttl,
+                #[cfg(feature = "server_2_11")]
+                subject_delete_marker_ttl,
                 ..Default::default()
             })
             .await
@@ -1602,7 +1621,7 @@ impl Publish {
     /// Sets TTL for a single message.
     /// It sets the `Nats-TTL` header with provided value.
     pub fn ttl(self, ttl: Duration) -> Self {
-        self.header(header::NATS_MESSAGE_TTL, ttl.as_nanos().to_string())
+        self.header(header::NATS_MESSAGE_TTL, ttl.as_secs().to_string())
     }
 }
 
@@ -1826,6 +1845,7 @@ pub enum CreateKeyValueErrorKind {
     JetStream,
     BucketCreate,
     TimedOut,
+    LimitMarkersNotSupported,
 }
 
 impl Display for CreateKeyValueErrorKind {
@@ -1836,6 +1856,9 @@ impl Display for CreateKeyValueErrorKind {
             Self::JetStream => write!(f, "JetStream error"),
             Self::BucketCreate => write!(f, "bucket creation failed"),
             Self::TimedOut => write!(f, "timed out"),
+            Self::LimitMarkersNotSupported => {
+                write!(f, "limit markers not supported")
+            }
         }
     }
 }
