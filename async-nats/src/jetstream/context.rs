@@ -2041,6 +2041,7 @@ fn map_to_kv(stream: super::stream::Stream, prefix: String, bucket: String) -> S
 
 enum KvToStreamConfigError {
     TooLongHistory,
+    #[allow(dead_code)]
     LimitMarkersNotSupported,
 }
 
@@ -2073,7 +2074,7 @@ impl From<KvToStreamConfigError> for UpdateKeyValueError {
 // Maps the KV config to Stream config.
 fn kv_to_stream_config(
     config: kv::Config,
-    account: Account,
+    _account: Account,
 ) -> Result<super::stream::Config, KvToStreamConfigError> {
     let history = if config.history > 0 {
         if config.history > MAX_HISTORY {
@@ -2095,7 +2096,7 @@ fn kv_to_stream_config(
 
     #[cfg(feature = "server_2_11")]
     if let Some(duration) = config.limit_markers {
-        if account.requests.level < 1 {
+        if _account.requests.level < 1 {
             return Err(KvToStreamConfigError::LimitMarkersNotSupported);
         }
         allow_message_ttl = true;
