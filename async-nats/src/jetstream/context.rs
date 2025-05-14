@@ -40,7 +40,6 @@ use tracing::debug;
 
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
-use super::is_valid_name;
 use super::kv::{Store, MAX_HISTORY};
 use super::object_store::{is_valid_bucket_name, ObjectStore};
 use super::stream::{
@@ -49,6 +48,7 @@ use super::stream::{
 };
 #[cfg(feature = "server_2_10")]
 use super::stream::{Compression, ConsumerCreateStrictError, ConsumerUpdateError};
+use super::{is_valid_name, kv};
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -545,6 +545,45 @@ impl Context {
         }
     }
 
+    /// Tries to update a [Stream] with a given config, and if it does not exist, create it.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::stream::Config;
+    /// use async_nats::jetstream::stream::DiscardPolicy;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream
+    ///     .create_or_update_stream(&Config {
+    ///         name: "events".to_string(),
+    ///         discard: DiscardPolicy::New,
+    ///         max_messages: 50_000,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_or_update_stream(&self, config: Config) -> Result<Info, CreateStreamError> {
+        match self.update_stream(config.clone()).await {
+            Ok(stream) => Ok(stream),
+            Err(err) => match err.kind() {
+                CreateStreamErrorKind::NotFound => {
+                    let stream = self
+                        .create_stream(config)
+                        .await
+                        .map_err(|err| CreateStreamError::with_source(err.kind(), err))?;
+                    Ok(stream.info)
+                }
+                _ => Err(err),
+            },
+        }
+    }
+
     /// Looks up Stream that contains provided subject.
     ///
     /// # Examples
@@ -718,7 +757,107 @@ impl Context {
     /// ```
     pub async fn create_key_value(
         &self,
-        mut config: crate::jetstream::kv::Config,
+        config: crate::jetstream::kv::Config,
+    ) -> Result<Store, CreateKeyValueError> {
+        if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
+            return Err(CreateKeyValueError::new(
+                CreateKeyValueErrorKind::InvalidStoreName,
+            ));
+        }
+        let info = self.query_account().await.map_err(|err| {
+            CreateKeyValueError::with_source(CreateKeyValueErrorKind::JetStream, err)
+        })?;
+
+        let bucket_name = config.bucket.clone();
+        let stream_config = kv_to_stream_config(config, info)?;
+
+        let stream = self.create_stream(stream_config).await.map_err(|err| {
+            if err.kind() == CreateStreamErrorKind::TimedOut {
+                CreateKeyValueError::with_source(CreateKeyValueErrorKind::TimedOut, err)
+            } else {
+                CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
+            }
+        })?;
+
+        Ok(map_to_kv(stream, self.prefix.clone(), bucket_name))
+    }
+
+    /// Updates an existing key-value bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .update_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 60,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn update_key_value(
+        &self,
+        config: crate::jetstream::kv::Config,
+    ) -> Result<Store, UpdateKeyValueError> {
+        if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
+            return Err(UpdateKeyValueError::new(
+                UpdateKeyValueErrorKind::InvalidStoreName,
+            ));
+        }
+
+        let stream_name = format!("KV_{}", config.bucket);
+        let bucket_name = config.bucket.clone();
+
+        let account = self.query_account().await.map_err(|err| {
+            UpdateKeyValueError::with_source(UpdateKeyValueErrorKind::JetStream, err)
+        })?;
+        let stream = self
+            .update_stream(kv_to_stream_config(config, account)?)
+            .await
+            .map_err(|err| match err.kind() {
+                UpdateStreamErrorKind::NotFound => {
+                    UpdateKeyValueError::with_source(UpdateKeyValueErrorKind::NotFound, err)
+                }
+                _ => UpdateKeyValueError::with_source(UpdateKeyValueErrorKind::JetStream, err),
+            })?;
+
+        let stream = Stream {
+            context: self.clone(),
+            info: stream,
+            name: stream_name,
+        };
+
+        Ok(map_to_kv(stream, self.prefix.clone(), bucket_name))
+    }
+
+    /// Tries to update an existing Key-Value bucket. If it does not exist, creates it.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .update_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 60,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_or_update_key_value(
+        &self,
+        config: crate::jetstream::kv::Config,
     ) -> Result<Store, CreateKeyValueError> {
         if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
             return Err(CreateKeyValueError::new(
@@ -726,118 +865,26 @@ impl Context {
             ));
         }
 
-        let history = if config.history > 0 {
-            if config.history > MAX_HISTORY {
-                return Err(CreateKeyValueError::new(
-                    CreateKeyValueErrorKind::TooLongHistory,
-                ));
-            }
-            config.history
-        } else {
-            1
-        };
+        let bucket_name = config.bucket.clone();
+        let stream_name = format!("KV_{}", config.bucket);
 
-        let num_replicas = if config.num_replicas == 0 {
-            1
-        } else {
-            config.num_replicas
-        };
-
-        #[cfg(feature = "server_2_11")]
-        let (mut allow_message_ttl, mut subject_delete_marker_ttl) = (false, None);
-
-        #[cfg(feature = "server_2_11")]
-        if let Some(duration) = config.limit_markers {
-            let info = self.query_account().await.unwrap();
-            if info.requests.level < 1 {
-                return Err(CreateKeyValueError::new(
-                    CreateKeyValueErrorKind::LimitMarkersNotSupported,
-                ));
-            }
-            allow_message_ttl = true;
-            subject_delete_marker_ttl = Some(duration);
-        }
-
-        let mut subjects = Vec::new();
-        if let Some(ref mut mirror) = config.mirror {
-            if !mirror.name.starts_with("KV_") {
-                mirror.name = format!("KV_{}", mirror.name);
-            }
-            config.mirror_direct = true;
-        } else if let Some(ref mut sources) = config.sources {
-            for source in sources {
-                if !source.name.starts_with("KV_") {
-                    source.name = format!("KV_{}", source.name);
-                }
-            }
-        } else {
-            subjects = vec![format!("$KV.{}.>", config.bucket)];
-        }
-
+        let account = self.query_account().await.map_err(|err| {
+            CreateKeyValueError::with_source(CreateKeyValueErrorKind::JetStream, err)
+        })?;
         let stream = self
-            .create_stream(stream::Config {
-                name: format!("KV_{}", config.bucket),
-                description: Some(config.description),
-                subjects,
-                max_messages_per_subject: history,
-                max_bytes: config.max_bytes,
-                max_age: config.max_age,
-                max_message_size: config.max_value_size,
-                storage: config.storage,
-                republish: config.republish,
-                allow_rollup: true,
-                deny_delete: true,
-                deny_purge: false,
-                allow_direct: true,
-                sources: config.sources,
-                mirror: config.mirror,
-                num_replicas,
-                discard: stream::DiscardPolicy::New,
-                mirror_direct: config.mirror_direct,
-                #[cfg(feature = "server_2_10")]
-                compression: if config.compression {
-                    Some(stream::Compression::S2)
-                } else {
-                    None
-                },
-                placement: config.placement,
-                #[cfg(feature = "server_2_11")]
-                allow_message_ttl,
-                #[cfg(feature = "server_2_11")]
-                subject_delete_marker_ttl,
-                ..Default::default()
-            })
+            .create_or_update_stream(kv_to_stream_config(config, account)?)
             .await
             .map_err(|err| {
-                if err.kind() == CreateStreamErrorKind::TimedOut {
-                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::TimedOut, err)
-                } else {
-                    CreateKeyValueError::with_source(CreateKeyValueErrorKind::BucketCreate, err)
-                }
+                CreateKeyValueError::with_source(CreateKeyValueErrorKind::JetStream, err)
             })?;
 
-        let mut store = Store {
-            prefix: format!("$KV.{}.", &config.bucket),
-            name: config.bucket,
-            stream: stream.clone(),
-            stream_name: stream.info.config.name,
-            put_prefix: None,
-            use_jetstream_prefix: self.prefix != "$JS.API",
-        };
-        if let Some(ref mirror) = stream.info.config.mirror {
-            let bucket = mirror.name.trim_start_matches("KV_");
-            if let Some(ref external) = mirror.external {
-                if !external.api_prefix.is_empty() {
-                    store.use_jetstream_prefix = false;
-                    store.prefix = format!("$KV.{bucket}.");
-                    store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
-                } else {
-                    store.put_prefix = Some(format!("$KV.{bucket}."));
-                }
-            }
+        let stream = Stream {
+            context: self.clone(),
+            info: stream,
+            name: stream_name,
         };
 
-        Ok(store)
+        Ok(map_to_kv(stream, self.prefix.clone(), bucket_name))
     }
 
     /// Deletes given key-value bucket.
@@ -1733,6 +1780,7 @@ pub enum CreateStreamErrorKind {
     JetStream(super::errors::Error),
     TimedOut,
     Response,
+    NotFound,
     ResponseParse,
 }
 
@@ -1742,6 +1790,7 @@ impl Display for CreateStreamErrorKind {
             Self::EmptyStreamName => write!(f, "stream name cannot be empty"),
             Self::InvalidStreamName => write!(f, "stream name cannot contain `.`, `_`"),
             Self::DomainAndExternalSet => write!(f, "domain and external are both set"),
+            Self::NotFound => write!(f, "stream not found"),
             Self::JetStream(err) => write!(f, "jetstream error: {}", err),
             Self::TimedOut => write!(f, "jetstream request timed out"),
             Self::JetStreamUnavailable => write!(f, "jetstream unavailable"),
@@ -1755,7 +1804,12 @@ pub type CreateStreamError = Error<CreateStreamErrorKind>;
 
 impl From<super::errors::Error> for CreateStreamError {
     fn from(error: super::errors::Error) -> Self {
-        CreateStreamError::new(CreateStreamErrorKind::JetStream(error))
+        match error.kind() {
+            super::errors::ErrorCode::STREAM_NOT_FOUND => {
+                CreateStreamError::new(CreateStreamErrorKind::NotFound)
+            }
+            _ => CreateStreamError::new(CreateStreamErrorKind::JetStream(error)),
+        }
     }
 }
 
@@ -1863,7 +1917,34 @@ impl Display for CreateKeyValueErrorKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UpdateKeyValueErrorKind {
+    InvalidStoreName,
+    TooLongHistory,
+    JetStream,
+    BucketUpdate,
+    TimedOut,
+    LimitMarkersNotSupported,
+    NotFound,
+}
+
+impl Display for UpdateKeyValueErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidStoreName => write!(f, "invalid Key Value Store name"),
+            Self::TooLongHistory => write!(f, "too long history"),
+            Self::JetStream => write!(f, "JetStream error"),
+            Self::BucketUpdate => write!(f, "bucket creation failed"),
+            Self::TimedOut => write!(f, "timed out"),
+            Self::LimitMarkersNotSupported => {
+                write!(f, "limit markers not supported")
+            }
+            Self::NotFound => write!(f, "bucket does not exist"),
+        }
+    }
+}
 pub type CreateKeyValueError = Error<CreateKeyValueErrorKind>;
+pub type UpdateKeyValueError = Error<UpdateKeyValueErrorKind>;
 
 pub type CreateObjectStoreError = CreateKeyValueError;
 pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
@@ -1931,4 +2012,146 @@ enum ConsumerAction {
     #[serde(rename = "update")]
     #[cfg(feature = "server_2_10")]
     Update,
+}
+
+// Maps a Stream config to KV Store.
+fn map_to_kv(stream: super::stream::Stream, prefix: String, bucket: String) -> Store {
+    let mut store = Store {
+        prefix: format!("$KV.{}.", bucket.as_str()),
+        name: bucket,
+        stream: stream.clone(),
+        stream_name: stream.info.config.name.clone(),
+        put_prefix: None,
+        use_jetstream_prefix: prefix != "$JS.API",
+    };
+    if let Some(ref mirror) = stream.info.config.mirror {
+        let bucket = mirror.name.trim_start_matches("KV_");
+        if let Some(ref external) = mirror.external {
+            if !external.api_prefix.is_empty() {
+                store.use_jetstream_prefix = false;
+                store.prefix = format!("$KV.{bucket}.");
+                store.put_prefix = Some(format!("{}.$KV.{}.", external.api_prefix, bucket));
+            } else {
+                store.put_prefix = Some(format!("$KV.{bucket}."));
+            }
+        }
+    };
+    store
+}
+
+enum KvToStreamConfigError {
+    TooLongHistory,
+    LimitMarkersNotSupported,
+}
+
+impl From<KvToStreamConfigError> for CreateKeyValueError {
+    fn from(err: KvToStreamConfigError) -> Self {
+        match err {
+            KvToStreamConfigError::TooLongHistory => {
+                CreateKeyValueError::new(CreateKeyValueErrorKind::TooLongHistory)
+            }
+            KvToStreamConfigError::LimitMarkersNotSupported => {
+                CreateKeyValueError::new(CreateKeyValueErrorKind::LimitMarkersNotSupported)
+            }
+        }
+    }
+}
+
+impl From<KvToStreamConfigError> for UpdateKeyValueError {
+    fn from(err: KvToStreamConfigError) -> Self {
+        match err {
+            KvToStreamConfigError::TooLongHistory => {
+                UpdateKeyValueError::new(UpdateKeyValueErrorKind::TooLongHistory)
+            }
+            KvToStreamConfigError::LimitMarkersNotSupported => {
+                UpdateKeyValueError::new(UpdateKeyValueErrorKind::LimitMarkersNotSupported)
+            }
+        }
+    }
+}
+
+// Maps the KV config to Stream config.
+fn kv_to_stream_config(
+    config: kv::Config,
+    account: Account,
+) -> Result<super::stream::Config, KvToStreamConfigError> {
+    let history = if config.history > 0 {
+        if config.history > MAX_HISTORY {
+            return Err(KvToStreamConfigError::TooLongHistory);
+        }
+        config.history
+    } else {
+        1
+    };
+
+    let num_replicas = if config.num_replicas == 0 {
+        1
+    } else {
+        config.num_replicas
+    };
+
+    #[cfg(feature = "server_2_11")]
+    let (mut allow_message_ttl, mut subject_delete_marker_ttl) = (false, None);
+
+    #[cfg(feature = "server_2_11")]
+    if let Some(duration) = config.limit_markers {
+        if account.requests.level < 1 {
+            return Err(KvToStreamConfigError::LimitMarkersNotSupported);
+        }
+        allow_message_ttl = true;
+        subject_delete_marker_ttl = Some(duration);
+    }
+
+    let mut mirror = config.mirror.clone();
+    let mut sources = config.sources.clone();
+    let mut mirror_direct = config.mirror_direct;
+
+    let mut subjects = Vec::new();
+    if let Some(ref mut mirror) = mirror {
+        if !mirror.name.starts_with("KV_") {
+            mirror.name = format!("KV_{}", mirror.name);
+        }
+        mirror_direct = true;
+    } else if let Some(ref mut sources) = sources {
+        for source in sources {
+            if !source.name.starts_with("KV_") {
+                source.name = format!("KV_{}", source.name);
+            }
+        }
+    } else {
+        subjects = vec![format!("$KV.{}.>", config.bucket)];
+    }
+
+    Ok(stream::Config {
+        name: format!("KV_{}", config.bucket),
+        description: Some(config.description),
+        subjects,
+        max_messages_per_subject: history,
+        max_bytes: config.max_bytes,
+        max_age: config.max_age,
+        max_message_size: config.max_value_size,
+        storage: config.storage,
+        republish: config.republish,
+        allow_rollup: true,
+        deny_delete: true,
+        deny_purge: false,
+        allow_direct: true,
+        sources,
+        mirror,
+        num_replicas,
+        discard: stream::DiscardPolicy::New,
+        mirror_direct,
+        #[cfg(feature = "server_2_10")]
+        compression: if config.compression {
+            Some(stream::Compression::S2)
+        } else {
+            None
+        },
+        placement: config.placement,
+        #[cfg(feature = "server_2_11")]
+        allow_message_ttl,
+        #[cfg(feature = "server_2_11")]
+        subject_delete_marker_ttl,
+        ..Default::default()
+    })
 }

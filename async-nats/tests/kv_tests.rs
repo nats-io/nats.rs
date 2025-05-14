@@ -16,7 +16,8 @@ mod kv {
 
     use async_nats::{
         jetstream::{
-            kv::Operation,
+            context::UpdateKeyValueErrorKind,
+            kv::{self, Operation},
             stream::{self, DiscardPolicy, External, Republish, Source, StorageType},
         },
         ConnectOptions,
@@ -1481,5 +1482,69 @@ mod kv {
         assert_eq!(entry.key, "key1");
         assert_eq!(entry.value.as_ref(), b"");
         assert_eq!(Operation::Purge, entry.operation);
+    }
+
+    #[tokio::test]
+    async fn create_or_update_key_value() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let err = context
+            .update_key_value(kv::Config {
+                bucket: "new".to_string(),
+                history: 10,
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), UpdateKeyValueErrorKind::NotFound);
+
+        let bucket = context
+            .create_or_update_key_value(kv::Config {
+                bucket: "new".to_string(),
+                history: 15,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(bucket.name, "new");
+        assert_eq!(
+            bucket.stream.cached_info().config.max_messages_per_subject,
+            15
+        );
+
+        let bucket = context
+            .create_or_update_key_value(kv::Config {
+                bucket: "new".to_string(),
+                history: 20,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(bucket.name, "new");
+        assert_eq!(
+            bucket.stream.cached_info().config.max_messages_per_subject,
+            20
+        );
+
+        let bucket = context
+            .update_key_value(kv::Config {
+                bucket: "new".to_string(),
+                history: 50,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            bucket.stream.cached_info().config.max_messages_per_subject,
+            50
+        );
     }
 }
