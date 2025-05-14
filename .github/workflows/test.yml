@@ -187,7 +187,7 @@ jobs:
 
       - name: Install msrv Rust on ubuntu-latest
         id:   install-rust
-        uses: dtolnay/rust-toolchain@1.81.0
+        uses: dtolnay/rust-toolchain@1.82.0
       - name: Cache the build artifacts
         uses: Swatinem/rust-cache@v2
         with:

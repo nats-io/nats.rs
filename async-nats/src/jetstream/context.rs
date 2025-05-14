@@ -510,7 +510,7 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream
-    ///     .update_stream(&Config {
+    ///     .update_stream(Config {
     ///         name: "events".to_string(),
     ///         discard: DiscardPolicy::New,
     ///         max_messages: 50_000,
@@ -558,7 +558,7 @@ impl Context {
     /// let jetstream = async_nats::jetstream::new(client);
     ///
     /// let stream = jetstream
-    ///     .create_or_update_stream(&Config {
+    ///     .create_or_update_stream(Config {
     ///         name: "events".to_string(),
     ///         discard: DiscardPolicy::New,
     ///         max_messages: 50_000,
