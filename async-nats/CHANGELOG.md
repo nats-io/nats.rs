@@ -1,3 +1,27 @@
+# v0.41.0
+
+This release focuses on adding limit markers support to KV.
+
+## Added
+* Add more detailed tracing by @caspervonb in https://github.com/nats-io/nats.rs/pull/1393
+* Add kv limit markers by @Jarema in https://github.com/nats-io/nats.rs/pull/1404
+* Add create_or_update and update methods to KV by @Jarema in https://github.com/nats-io/nats.rs/pull/1407
+
+## Fixed
+* Always use try_send on events channels to avoid potential blocks by @Jarema in https://github.com/nats-io/nats.rs/pull/1391
+* Revert endless retry on consumer info by @Jarema in https://github.com/nats-io/nats.rs/pull/1399
+* Fix consumer info error handling by @Jarema in https://github.com/nats-io/nats.rs/pull/1400
+* Handle no responders in Consumers and never giving up by @Jarema in https://github.com/nats-io/nats.rs/pull/1398
+* Fix typo in documentation of stream.rs by @RasmusRendal in https://github.com/nats-io/nats.rs/pull/1395
+
+## Changed
+* Add note about webpki-roots license by @Jarema in https://github.com/nats-io/nats.rs/pull/1405
+
+## New Contributors
+* @RasmusRendal made their first contribution in https://github.com/nats-io/nats.rs/pull/1395
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.40.0...async-nats/v0.41.0
+
 # v0.40.0
 
 This release focuses on adding support for nats-server v2.11.

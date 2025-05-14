@@ -1,7 +1,7 @@
 [package]
 name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
-version = "0.40.0"
+version = "0.41.0"
 edition = "2021"
 rust = "1.79.0"
 description = "A async Rust NATS client"
