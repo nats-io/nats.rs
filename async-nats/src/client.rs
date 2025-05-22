@@ -89,31 +89,42 @@ pub struct Client {
     connection_stats: Arc<Statistics>,
 }
 
-pub trait Publish {
-    fn publish_with_reply<S: ToSubject, R: ToSubject>(
-        &self,
-        subject: S,
-        reply: R,
-        payload: Bytes,
-    ) -> impl Future<Output = Result<(), PublishError>>;
+pub mod traits {
+    use std::{future::Future, time::Duration};
+
+    use bytes::Bytes;
+
+    use crate::{subject::ToSubject, Message};
+
+    use super::{PublishError, Request, RequestError, SubscribeError};
+
+    pub trait Publisher {
+        fn publish_with_reply<S: ToSubject, R: ToSubject>(
+            &self,
+            subject: S,
+            reply: R,
+            payload: Bytes,
+        ) -> impl Future<Output = Result<(), PublishError>>;
+    }
+    pub trait Subscriber {
+        fn subscribe<S: ToSubject>(
+            &self,
+            subject: S,
+        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>;
+    }
+    pub trait Requester {
+        fn send_request<S: ToSubject>(
+            &self,
+            subject: S,
+            request: Request,
+        ) -> impl Future<Output = Result<Message, RequestError>>;
+    }
+    pub trait TimeoutProvider {
+        fn timeout(&self) -> Option<Duration>;
+    }
 }
 
-pub trait Subscribe {
-    fn subscribe<S: ToSubject>(
-        &self,
-        subject: S,
-    ) -> impl Future<Output = Result<Subscriber, SubscribeError>>;
-}
-
-pub trait Requester {
-    fn send_request<S: ToSubject>(
-        &self,
-        subject: S,
-        request: Request,
-    ) -> impl Future<Output = Result<Message, RequestError>>;
-}
-
-impl Requester for Client {
+impl traits::Requester for Client {
     fn send_request<S: ToSubject>(
         &self,
         subject: S,
@@ -123,17 +134,13 @@ impl Requester for Client {
     }
 }
 
-pub trait TimeoutTrait {
-    fn timeout(&self) -> Option<Duration>;
-}
-
-impl TimeoutTrait for Client {
+impl traits::TimeoutProvider for Client {
     fn timeout(&self) -> Option<Duration> {
         self.timeout()
     }
 }
 
-impl Publish for Client {
+impl traits::Publisher for Client {
     fn publish_with_reply<S: ToSubject, R: ToSubject>(
         &self,
         subject: S,
@@ -144,7 +151,7 @@ impl Publish for Client {
     }
 }
 
-impl Subscribe for Client {
+impl traits::Subscriber for Client {
     fn subscribe<S: ToSubject>(
         &self,
         subject: S,
