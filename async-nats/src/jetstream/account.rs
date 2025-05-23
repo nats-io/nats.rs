@@ -58,8 +58,11 @@ pub struct Requests {
     /// Total number of requests that resulted in an error response.
     pub errors: u64,
     /// API level for this account.
+    #[cfg(feature = "server_2_11")]
+    #[serde(default)]
     pub level: usize,
     /// Number of API calls currently in-flight.
+    #[cfg(feature = "server_2_11")]
     #[serde(default)]
     pub inflight: u64,
 }
