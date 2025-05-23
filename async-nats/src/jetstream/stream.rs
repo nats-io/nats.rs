@@ -17,7 +17,7 @@ use std::{
     collections::{self, HashMap},
     fmt::{self, Debug, Display},
     future::IntoFuture,
-    io::{self, ErrorKind},
+    io::{self},
     pin::Pin,
     str::FromStr,
     task::Poll,
@@ -1758,7 +1758,7 @@ impl TryFrom<RawMessage> for StreamMessage {
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
         let decoded_payload = STANDARD
             .decode(value.payload)
-            .map_err(|err| Box::new(std::io::Error::new(ErrorKind::Other, err)))?;
+            .map_err(|err| Box::new(std::io::Error::other(err)))?;
         let decoded_headers = value
             .headers
             .map(|header| STANDARD.decode(header))
@@ -1792,18 +1792,14 @@ fn parse_headers(
     let mut lines = if let Ok(line) = std::str::from_utf8(buf) {
         line.lines().peekable()
     } else {
-        return Err(Box::new(std::io::Error::new(
-            ErrorKind::Other,
-            "invalid header",
-        )));
+        return Err(Box::new(std::io::Error::other("invalid header")));
     };
 
     if let Some(line) = lines.next() {
         let line = line
             .strip_prefix(HEADER_LINE)
             .ok_or_else(|| {
-                Box::new(std::io::Error::new(
-                    ErrorKind::Other,
+                Box::new(std::io::Error::other(
                     "version line does not start with NATS/1.0",
                 ))
             })?
@@ -1826,8 +1822,7 @@ fn parse_headers(
             }
         }
     } else {
-        return Err(Box::new(std::io::Error::new(
-            ErrorKind::Other,
+        return Err(Box::new(std::io::Error::other(
             "expected header information not found",
         )));
     };
@@ -1846,14 +1841,10 @@ fn parse_headers(
 
             headers.insert(
                 HeaderName::from_str(k)?,
-                HeaderValue::from_str(&s)
-                    .map_err(|err| Box::new(io::Error::new(ErrorKind::Other, err)))?,
+                HeaderValue::from_str(&s).map_err(|err| Box::new(io::Error::other(err)))?,
             );
         } else {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::Other,
-                "malformed header line",
-            )));
+            return Err(Box::new(std::io::Error::other("malformed header line")));
         }
     }
 
