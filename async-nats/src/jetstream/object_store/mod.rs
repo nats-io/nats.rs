@@ -1001,10 +1001,9 @@ impl tokio::io::AsyncRead for Object {
                     Poll::Ready(message) => match message {
                         Some(message) => {
                             let message = message.map_err(|err| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    format!("error from JetStream subscription: {err}"),
-                                )
+                                std::io::Error::other(format!(
+                                    "error from JetStream subscription: {err}"
+                                ))
                             })?;
                             let len = cmp::min(buf.remaining(), message.payload.len());
                             buf.put_slice(&message.payload[..len]);
@@ -1014,10 +1013,9 @@ impl tokio::io::AsyncRead for Object {
                             self.remaining_bytes.extend(&message.payload[len..]);
 
                             let info = message.info().map_err(|err| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    format!("error from JetStream subscription: {err}"),
-                                )
+                                std::io::Error::other(format!(
+                                    "error from JetStream subscription: {err}"
+                                ))
                             })?;
                             if info.pending == 0 {
                                 let digest = self.digest.take().map(Sha256::finish);
@@ -1048,8 +1046,7 @@ impl tokio::io::AsyncRead for Object {
                             }
                             Poll::Ready(Ok(()))
                         }
-                        None => Poll::Ready(Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
+                        None => Poll::Ready(Err(std::io::Error::other(
                             "subscription ended before reading whole object",
                         ))),
                     },

@@ -20,10 +20,7 @@ use std::{io, path::Path};
 /// Uses tokio non-blocking io
 pub(crate) async fn load_creds(path: &Path) -> io::Result<String> {
     tokio::fs::read_to_string(path).await.map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("loading creds file '{}': {}", path.display(), err),
-        )
+        io::Error::other(format!("loading creds file '{}': {}", path.display(), err))
     })
 }
 
