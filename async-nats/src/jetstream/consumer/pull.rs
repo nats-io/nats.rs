@@ -421,13 +421,10 @@ impl futures::Stream for Batch {
                     status => {
                         debug!("received error");
                         self.terminated = true;
-                        Poll::Ready(Some(Err(Box::new(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "error while processing messages from the stream: {}, {:?}",
-                                status, message.description
-                            ),
-                        )))))
+                        Poll::Ready(Some(Err(Box::new(std::io::Error::other(format!(
+                            "error while processing messages from the stream: {}, {:?}",
+                            status, message.description
+                        ))))))
                     }
                 },
                 None => Poll::Ready(None),
@@ -2601,8 +2598,7 @@ impl IntoConsumerConfig for Config {
 impl FromConsumer for Config {
     fn try_from_consumer_config(config: consumer::Config) -> Result<Self, crate::Error> {
         if config.deliver_subject.is_some() {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(std::io::Error::other(
                 "pull consumer cannot have delivery subject",
             )));
         }

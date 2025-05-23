@@ -12,10 +12,11 @@
 // limitations under the License.
 
 mod client {
+    use async_nats::client::Request;
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
     use async_nats::{
-        ConnectErrorKind, ConnectOptions, Event, Request, RequestErrorKind, ServerAddr, Subject,
+        ConnectErrorKind, ConnectOptions, Event, RequestErrorKind, ServerAddr, Subject,
     };
     use bytes::Bytes;
     use futures::future::join_all;

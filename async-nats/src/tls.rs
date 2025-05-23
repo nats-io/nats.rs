@@ -37,9 +37,8 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKeyDer<'static>
     tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(path)?;
         let mut reader = BufReader::new(file);
-        rustls_pemfile::private_key(&mut reader)?.ok_or_else(|| {
-            io::Error::new(ErrorKind::NotFound, "could not find client key in the path")
-        })
+        rustls_pemfile::private_key(&mut reader)?
+            .ok_or_else(|| io::Error::other("could not find client key in the path"))
     })
     .await?
 }
@@ -48,12 +47,8 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<ClientC
     let mut root_store = RootCertStore::empty();
     // load native system certs only if user did not specify them.
     if options.tls_client_config.is_some() || options.certificates.is_empty() {
-        let certs_iter = rustls_native_certs::load_native_certs().map_err(|err| {
-            io::Error::new(
-                ErrorKind::Other,
-                format!("could not load platform certs: {err}"),
-            )
-        })?;
+        let certs_iter = rustls_native_certs::load_native_certs()
+            .map_err(|err| io::Error::other(format!("could not load platform certs: {err}")))?;
         root_store.add_parsable_certificates(certs_iter);
     }
 
@@ -84,14 +79,11 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<ClientC
                 if let Some(key) = options.client_key.clone() {
                     let key = tls::load_key(key).await?;
                     let cert = tls::load_certs(cert).await?;
-                    builder.with_client_auth_cert(cert, key).map_err(|_| {
-                        io::Error::new(ErrorKind::Other, "could not add certificate or key")
-                    })
+                    builder
+                        .with_client_auth_cert(cert, key)
+                        .map_err(|_| io::Error::other("could not add certificate or key"))
                 } else {
-                    Err(io::Error::new(
-                        ErrorKind::Other,
-                        "found certificate, but no key",
-                    ))
+                    Err(io::Error::other("found certificate, but no key"))
                 }
             } else {
                 // if there are no client certs provided, connect with just TLS.

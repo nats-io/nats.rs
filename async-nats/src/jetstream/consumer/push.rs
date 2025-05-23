@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::task::{self, Poll};
 use std::{
-    io::{self, ErrorKind},
+    io::{self},
     pin::Pin,
     sync::Arc,
 };
@@ -293,8 +293,7 @@ pub struct Config {
 impl FromConsumer for Config {
     fn try_from_consumer_config(config: super::Config) -> Result<Self, crate::Error> {
         if config.deliver_subject.is_none() {
-            return Err(Box::new(io::Error::new(
-                ErrorKind::Other,
+            return Err(Box::new(io::Error::other(
                 "push consumer must have delivery subject",
             )));
         }
@@ -439,8 +438,7 @@ impl FromConsumer for OrderedConfig {
         Self: Sized,
     {
         if config.deliver_subject.is_none() {
-            return Err(Box::new(io::Error::new(
-                ErrorKind::Other,
+            return Err(Box::new(io::Error::other(
                 "push consumer must have delivery subject",
             )));
         }

@@ -176,8 +176,7 @@ impl Message {
                 .map_err(Error::from)
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
             )))
         }
@@ -218,8 +217,7 @@ impl Message {
                 .map_err(Error::from)
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
             )))
         }
@@ -272,14 +270,10 @@ impl Message {
                     )
                 })? {
                 Some(_) => Ok(()),
-                None => Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "subscription dropped",
-                ))),
+                None => Err(Box::new(std::io::Error::other("subscription dropped"))),
             }
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
             )))
         }
@@ -297,8 +291,7 @@ impl Message {
         })?;
 
         if !reply.starts_with(PREFIX) {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Box::new(std::io::Error::other(
                 "did not found proper prefix",
             )));
         }
@@ -340,10 +333,7 @@ impl Message {
                     }
                     next
                 } else {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "too few tokens",
-                    )));
+                    return Err(Box::new(std::io::Error::other("too few tokens")));
                 }
             };
         }
@@ -402,10 +392,7 @@ impl Message {
                 token: None,
             })
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "bad token number",
-            )))
+            Err(Box::new(std::io::Error::other("bad token number")))
         }
     }
 }
@@ -466,8 +453,7 @@ impl Acker {
                 .map_err(Error::from)
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
             )))
         }
@@ -514,8 +500,7 @@ impl Acker {
                 .map_err(Error::from)
                 .await
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
             )))
         }
@@ -574,14 +559,10 @@ impl Acker {
                     )
                 })? {
                 Some(_) => Ok(()),
-                None => Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "subscription dropped",
-                ))),
+                None => Err(Box::new(std::io::Error::other("subscription dropped"))),
             }
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
             )))
         }

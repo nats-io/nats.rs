@@ -115,7 +115,7 @@ mod test {
 
     #[test]
     fn with_source() {
-        let source = std::io::Error::new(std::io::ErrorKind::Other, "foo");
+        let source = std::io::Error::other("foo");
         let error = FooError::with_source(FooErrorKind::Bar, source);
         assert_eq!(error.kind, FooErrorKind::Bar);
         assert_eq!(error.source.unwrap().to_string(), "foo");
