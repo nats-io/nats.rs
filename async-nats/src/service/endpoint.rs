@@ -103,7 +103,7 @@ impl Endpoint {
         self.requests
             .unsubscribe()
             .await
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "failed to unsubscribe"))
+            .map_err(|_| std::io::Error::other("failed to unsubscribe"))
     }
 }
 

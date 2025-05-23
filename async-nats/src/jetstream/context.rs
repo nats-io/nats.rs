@@ -923,8 +923,7 @@ impl Context {
     // pub async fn update_key_value<C: Borrow<kv::Config>>(&self, config: C) -> Result<(), crate::Error> {
     //     let config = config.borrow();
     //     if !crate::jetstream::kv::is_valid_bucket_name(&config.bucket) {
-    //         return Err(Box::new(std::io::Error::new(
-    //             ErrorKind::Other,
+    //         return Err(Box::new(std::io::Error::other(
     //             "invalid bucket name",
     //         )));
     //     }
