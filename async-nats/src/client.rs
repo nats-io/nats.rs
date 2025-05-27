@@ -13,6 +13,7 @@
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::future::Future;
 
 use crate::connection::State;
 use crate::subject::ToSubject;
@@ -57,6 +58,7 @@ impl From<tokio_util::sync::PollSendError<Command>> for PublishError {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum PublishErrorKind {
     MaxPayloadExceeded,
+    BadSubject,
     Send,
 }
 
@@ -65,6 +67,7 @@ impl Display for PublishErrorKind {
         match self {
             PublishErrorKind::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
             PublishErrorKind::Send => write!(f, "failed to send message"),
+            PublishErrorKind::BadSubject => write!(f, "bad subject"),
         }
     }
 }
@@ -84,6 +87,77 @@ pub struct Client {
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
+}
+
+pub mod traits {
+    use std::{future::Future, time::Duration};
+
+    use bytes::Bytes;
+
+    use crate::{subject::ToSubject, Message};
+
+    use super::{PublishError, Request, RequestError, SubscribeError};
+
+    pub trait Publisher {
+        fn publish_with_reply<S: ToSubject, R: ToSubject>(
+            &self,
+            subject: S,
+            reply: R,
+            payload: Bytes,
+        ) -> impl Future<Output = Result<(), PublishError>>;
+    }
+    pub trait Subscriber {
+        fn subscribe<S: ToSubject>(
+            &self,
+            subject: S,
+        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>;
+    }
+    pub trait Requester {
+        fn send_request<S: ToSubject>(
+            &self,
+            subject: S,
+            request: Request,
+        ) -> impl Future<Output = Result<Message, RequestError>>;
+    }
+    pub trait TimeoutProvider {
+        fn timeout(&self) -> Option<Duration>;
+    }
+}
+
+impl traits::Requester for Client {
+    fn send_request<S: ToSubject>(
+        &self,
+        subject: S,
+        request: Request,
+    ) -> impl Future<Output = Result<Message, RequestError>> {
+        self.send_request(subject, request)
+    }
+}
+
+impl traits::TimeoutProvider for Client {
+    fn timeout(&self) -> Option<Duration> {
+        self.timeout()
+    }
+}
+
+impl traits::Publisher for Client {
+    fn publish_with_reply<S: ToSubject, R: ToSubject>(
+        &self,
+        subject: S,
+        reply: R,
+        payload: Bytes,
+    ) -> impl Future<Output = Result<(), PublishError>> {
+        self.publish_with_reply(subject, reply, payload)
+    }
+}
+
+impl traits::Subscriber for Client {
+    fn subscribe<S: ToSubject>(
+        &self,
+        subject: S,
+    ) -> impl Future<Output = Result<Subscriber, SubscribeError>> {
+        self.subscribe(subject)
+    }
 }
 
 impl Sink<PublishMessage> for Client {
