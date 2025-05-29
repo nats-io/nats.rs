@@ -690,4 +690,27 @@ mod object_store {
             "another"
         );
     }
+
+    #[tokio::test]
+    async fn get_empty_object() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket.put("FOO", &mut Vec::new().as_slice()).await.unwrap();
+
+        let mut object = bucket.get("FOO").await.unwrap();
+        let mut buffer = Vec::new();
+        let result = object.read(&mut buffer).await.unwrap();
+        assert_eq!(result, 0);
+    }
 }
