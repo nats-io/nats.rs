@@ -347,6 +347,12 @@ mod object_store {
         let info = bucket.info("FOO").await.unwrap();
         assert!(info.deleted);
         assert!(info.size == 0);
+
+        let result = bucket.get("FOO").await.unwrap_err();
+        assert_eq!(
+            result.kind(),
+            async_nats::jetstream::object_store::GetErrorKind::NotFound
+        );
     }
 
     #[tokio::test]
