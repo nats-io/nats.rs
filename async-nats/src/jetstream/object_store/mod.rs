@@ -129,6 +129,9 @@ impl ObjectStore {
     {
         Box::pin(async move {
             let object_info = self.info(object_name).await?;
+            if object_info.deleted {
+                return Err(GetError::new(GetErrorKind::NotFound));
+            }
             if let Some(ref options) = object_info.options {
                 if let Some(link) = options.link.as_ref() {
                     if let Some(link_name) = link.name.as_ref() {
@@ -932,6 +935,16 @@ pub struct Object {
     subscription: Option<crate::jetstream::consumer::push::Ordered>,
     subscription_future: Option<BoxFuture<'static, Result<Ordered, StreamError>>>,
     stream: crate::jetstream::stream::Stream,
+}
+
+impl std::fmt::Debug for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Object")
+            .field("info", &self.info)
+            .field("remaining_bytes", &self.remaining_bytes)
+            .field("has_pending_messages", &self.has_pending_messages)
+            .finish()
+    }
 }
 
 impl Object {
