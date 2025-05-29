@@ -949,11 +949,12 @@ impl std::fmt::Debug for Object {
 
 impl Object {
     pub(crate) fn new(info: ObjectInfo, stream: stream::Stream) -> Self {
+        let has_pending_messages = info.chunks > 0;
         Object {
             subscription: None,
             info,
             remaining_bytes: VecDeque::new(),
-            has_pending_messages: true,
+            has_pending_messages,
             digest: Some(Sha256::new()),
             subscription_future: None,
             stream,
