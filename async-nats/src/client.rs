@@ -312,8 +312,8 @@ impl Client {
                 PublishErrorKind::MaxPayloadExceeded,
                 format!(
                     "Payload size limit of {} exceeded by message size of {}",
+                    max_payload,
                     payload.len(),
-                    max_payload
                 ),
             ));
         }
