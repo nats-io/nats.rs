@@ -30,6 +30,7 @@ mod jetstream {
     use std::time::Duration;
     use std::time::Instant;
 
+    use async_nats::jetstream::consumer::pull;
     #[cfg(feature = "server_2_11")]
     use async_nats::jetstream::consumer::PriorityPolicy;
     use async_nats::jetstream::context::ConsumerInfoErrorKind;
@@ -4294,5 +4295,62 @@ mod jetstream {
             consumer.unwrap_err().kind(),
             ConsumerInfoErrorKind::NotFound
         );
+    }
+
+    #[tokio::test]
+    async fn pull_messages_before_first_poll() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let context = async_nats::jetstream::new(client.clone());
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                subjects: vec!["test".into()],
+                name: "test".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..50 {
+            context
+                .publish("test", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut consumer = stream
+            .create_consumer(pull::Config {
+                durable_name: Some("test".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut messages = consumer
+            .stream()
+            .expires(tokio::time::Duration::from_secs(1))
+            .max_messages_per_batch(200)
+            .messages()
+            .await
+            .unwrap();
+
+        // Make sure that no acks are pending, meaning that we didn't send
+        // a pull request before first poll for messages by the user.
+        for _ in 0..2 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let info = consumer.info().await.unwrap();
+            assert_eq!(info.num_ack_pending, 0);
+        }
+
+        // Now we can start pulling messages.
+        messages.next().await.unwrap().unwrap();
+
+        // After pulling messages, we should have some acks pending.
+        let info = consumer.info().await.unwrap();
+        assert_eq!(info.num_ack_pending, 50);
     }
 }
