@@ -11,8 +11,6 @@ allow = [
     "CDLA-Permissive-2.0"
 ]
 
-default = "deny"
-
 [[licenses.clarify]]
 name = "ring"
 expression = "MIT AND ISC AND OpenSSL"
