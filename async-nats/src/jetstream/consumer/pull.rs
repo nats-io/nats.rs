@@ -890,6 +890,7 @@ pub struct Stream {
     task_handle: JoinHandle<()>,
     terminated: bool,
     heartbeat_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
+    started: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl Drop for Stream {
@@ -917,12 +918,14 @@ impl Stream {
 
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let task_handle = tokio::task::spawn({
             let batch = batch_config.clone();
             let consumer = consumer.clone();
             let mut context = consumer.context.clone();
             let inbox = inbox.clone();
             async move {
+                started_rx.await.ok();
                 loop {
                     // this is just in edge case of missing response for some reason.
                     let expires = batch_config
@@ -1003,6 +1006,7 @@ impl Stream {
             pending_request: false,
             terminated: false,
             heartbeat_timeout: None,
+            started: Some(started_tx),
         })
     }
 }
@@ -1091,6 +1095,12 @@ impl futures::Stream for Stream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        if let Some(started) = self.started.take() {
+            trace!("stream started, sending started signal");
+            if started.send(()).is_err() {
+                debug!("failed to send started signal");
+            }
+        }
         if self.terminated {
             return Poll::Ready(None);
         }
