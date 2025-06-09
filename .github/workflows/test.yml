@@ -170,7 +170,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v3
       - name: Run cargo deny
-        uses: EmbarkStudios/cargo-deny-action@v1
+        uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
           command-arguments: licenses
