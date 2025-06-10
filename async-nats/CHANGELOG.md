@@ -1,3 +1,16 @@
+# v0.42.0
+
+This releases focuses on some fixes and addition of Client traits that allow for easier extension of the client.
+
+## What's Changed
+* Fix getting account info on server < 2.11 by @Jarema in https://github.com/nats-io/nats.rs/pull/1413
+* Add client traits by @Jarema in https://github.com/nats-io/nats.rs/pull/1411
+* Fix object store getting empty or deleted object by @Jarema in https://github.com/nats-io/nats.rs/pull/1415
+* Fix the order of the max payload exceeded message numbers by @fnichol in https://github.com/nats-io/nats.rs/pull/1416
+* Fix fetching messages before polling for them by @Jarema in https://github.com/nats-io/nats.rs/pull/1418
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.41.0...async-nats/v0.41.1
+
 # v0.41.0
 
 This release focuses on adding limit markers support to KV.
