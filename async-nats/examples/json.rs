@@ -1,4 +1,4 @@
-use futures::stream::StreamExt;
+use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::env;

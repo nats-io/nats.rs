@@ -14,7 +14,7 @@
 mod client {
     use std::{path::PathBuf, time::Duration};
 
-    use futures::StreamExt;
+    use futures_util::StreamExt;
 
     #[tokio::test]
     async fn basic_tls() {

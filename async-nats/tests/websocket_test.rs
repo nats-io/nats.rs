@@ -15,7 +15,7 @@
 mod websockets {
     use std::path::PathBuf;
 
-    use futures::StreamExt;
+    use futures_util::StreamExt;
 
     #[tokio::test]
     async fn core() {

@@ -1,4 +1,4 @@
-use futures::stream::StreamExt;
+use futures_util::stream::StreamExt;
 use tokio::time::Instant;
 
 #[tokio::main]
@@ -61,7 +61,7 @@ async fn main() -> Result<(), async_nats::Error> {
     });
 
     // run both publishing tasks in parallel and gather the results.
-    match futures::try_join!(foo_pub_handle, bar_pub_handle) {
+    match futures_util::try_join!(foo_pub_handle, bar_pub_handle) {
         Ok((foo_duration, bar_duration)) => println!(
             "finished publishing foo in {:?} and bar in {:?}",
             foo_duration?, bar_duration?

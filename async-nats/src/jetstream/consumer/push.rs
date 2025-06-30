@@ -27,7 +27,7 @@ use crate::{
 };
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt};
+use futures_util::{future::BoxFuture, FutureExt};
 use portable_atomic::AtomicU64;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server_2_10")]
@@ -55,8 +55,8 @@ impl Consumer<Config> {
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
     /// use async_nats::jetstream::consumer::PushConsumer;
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -122,7 +122,7 @@ pub struct Messages {
     heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
-impl futures::Stream for Messages {
+impl futures_util::Stream for Messages {
     type Item = Result<Message, MessagesError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
@@ -593,7 +593,7 @@ impl Drop for Ordered {
     }
 }
 
-impl futures::Stream for Ordered {
+impl futures_util::Stream for Ordered {
     type Item = Result<Message, OrderedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {

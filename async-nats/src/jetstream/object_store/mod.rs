@@ -22,11 +22,11 @@ use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::URL_SAFE;
 use base64::engine::Engine;
 use bytes::BytesMut;
-use futures::future::BoxFuture;
+use futures_util::future::BoxFuture;
 use once_cell::sync::Lazy;
 use tokio::io::AsyncReadExt;
 
-use futures::{Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -421,7 +421,7 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -471,7 +471,7 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -509,7 +509,7 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
