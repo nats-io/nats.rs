@@ -16,7 +16,7 @@ use crate::connector;
 use crate::{Client, ConnectError, Event, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
-use futures::Future;
+use futures_util::Future;
 use std::fmt::Formatter;
 use std::{
     fmt,

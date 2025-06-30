@@ -23,7 +23,7 @@ mod kv {
         ConnectOptions,
     };
     use bytes::Bytes;
-    use futures::{StreamExt, TryStreamExt};
+    use futures_util::{StreamExt, TryStreamExt};
 
     #[tokio::test]
     async fn create_bucket() {

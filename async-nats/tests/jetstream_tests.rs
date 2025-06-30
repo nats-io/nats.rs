@@ -56,7 +56,7 @@ mod jetstream {
     };
     use async_nats::jetstream::AckKind;
     use async_nats::{ConnectOptions, StatusCode};
-    use futures::stream::{StreamExt, TryStreamExt};
+    use futures_util::stream::{StreamExt, TryStreamExt};
     use time::OffsetDateTime;
     use tracing::debug;
 

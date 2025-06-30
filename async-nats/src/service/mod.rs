@@ -23,7 +23,7 @@ use std::{
 
 use bytes::Bytes;
 pub mod endpoint;
-use futures::{
+use futures_util::{
     stream::{self, SelectAll},
     Future, StreamExt,
 };
@@ -228,7 +228,7 @@ pub trait ServiceExt {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use async_nats::service::ServiceExt;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut service = client
     ///     .add_service(async_nats::service::Config {
@@ -260,7 +260,7 @@ pub trait ServiceExt {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use async_nats::service::ServiceExt;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let mut service = client
     ///     .service_builder()
@@ -301,7 +301,7 @@ impl ServiceExt for crate::Client {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error> {
 /// use async_nats::service::ServiceExt;
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// let client = async_nats::connect("demo.nats.io").await?;
 /// let mut service = client.service_builder().start("generator", "1.0.0").await?;
 /// let mut endpoint = service.endpoint("get").await?;
@@ -710,7 +710,7 @@ async fn verb_subscription(
     verb: Verb,
     name: String,
     id: String,
-) -> Result<futures::stream::Fuse<SelectAll<Subscriber>>, Error> {
+) -> Result<futures_util::stream::Fuse<SelectAll<Subscriber>>, Error> {
     let verb_all = client
         .subscribe(format!("{SERVICE_API_PREFIX}.{verb}"))
         .await?;
@@ -727,7 +727,7 @@ type ShutdownReceiverFuture = Pin<
     Box<dyn Future<Output = Result<(), tokio::sync::broadcast::error::RecvError>> + Send + Sync>,
 >;
 
-/// Request returned by [Service] [Stream][futures::Stream].
+/// Request returned by [Service] [Stream][futures_util::Stream].
 #[derive(Debug)]
 pub struct Request {
     issued: Instant,
@@ -746,7 +746,7 @@ impl Request {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// use async_nats::service::ServiceExt;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// # let client = async_nats::connect("demo.nats.io").await?;
     /// # let mut service = client
     /// #    .service_builder().start("serviceA", "1.0.0.1").await?;

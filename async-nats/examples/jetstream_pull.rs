@@ -1,7 +1,7 @@
 use std::{env, str::from_utf8};
 
 use async_nats::jetstream::{self, consumer::PullConsumer};
-use futures::StreamExt;
+use futures_util::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
