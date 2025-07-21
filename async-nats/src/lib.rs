@@ -1613,6 +1613,11 @@ impl ServerAddr {
         self.0.port_or_known_default().unwrap_or(4222)
     }
 
+    /// Returns the URL path.
+    pub fn path(&self) -> &str {
+        self.0.path()
+    }
+
     /// Returns the optional username in the url.
     pub fn username(&self) -> Option<&str> {
         let user = self.0.username();

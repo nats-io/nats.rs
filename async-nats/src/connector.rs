@@ -371,7 +371,16 @@ impl Connector {
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
                     tokio_websockets::client::Builder::new()
-                        .uri(format!("{}://{}", server_addr.scheme(), socket_addr).as_str())
+                        .uri(
+                            format!(
+                                "{}://{}:{}{}", 
+                                server_addr.scheme(), 
+                                server_addr.host(), 
+                                server_addr.port(), 
+                                server_addr.path()
+                            )
+                            .as_str(),
+                        )
                         .map_err(|err| {
                             ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
                         })?
@@ -399,10 +408,11 @@ impl Connector {
                         .connector(&tokio_websockets::Connector::Rustls(tls_connector))
                         .uri(
                             format!(
-                                "{}://{}:{}",
+                                "{}://{}:{}{}",
                                 server_addr.scheme(),
                                 domain.to_str(),
-                                server_addr.port()
+                                server_addr.port(),
+                                server_addr.path()
                             )
                             .as_str(),
                         )
