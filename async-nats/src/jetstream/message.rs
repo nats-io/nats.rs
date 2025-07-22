@@ -56,7 +56,7 @@ impl TryFrom<crate::Message> for StreamMessage {
                 seq.as_str().parse().map_err(|err| {
                     StreamMessageError::with_source(
                         StreamMessageErrorKind::ParseError,
-                        format!("could not parse sequence header: {}", err),
+                        format!("could not parse sequence header: {err}"),
                     )
                 })
             })?;
@@ -70,7 +70,7 @@ impl TryFrom<crate::Message> for StreamMessage {
                 OffsetDateTime::parse(time.as_str(), &Rfc3339).map_err(|err| {
                     StreamMessageError::with_source(
                         StreamMessageErrorKind::ParseError,
-                        format!("could not parse timestamp header: {}", err),
+                        format!("could not parse timestamp header: {err}"),
                     )
                 })
             })?;

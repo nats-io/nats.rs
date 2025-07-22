@@ -66,7 +66,7 @@ impl Display for DirectGetErrorKind {
             Self::InvalidSubject => write!(f, "invalid subject"),
             Self::NotFound => write!(f, "message not found"),
             Self::ErrorResponse(status, description) => {
-                write!(f, "unable to get message: {} {}", status, description)
+                write!(f, "unable to get message: {status} {description}")
             }
             Self::Other => write!(f, "error getting message"),
             Self::TimedOut => write!(f, "timed out"),
@@ -118,7 +118,7 @@ impl Display for DeleteMessageErrorKind {
         match self {
             Self::Request => write!(f, "request failed"),
             Self::TimedOut => write!(f, "timed out"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
         }
     }
 }
@@ -1533,7 +1533,7 @@ async fn stream_info_with_details(
     deleted_details: bool,
     subjects_filter: String,
 ) -> Result<Info, InfoError> {
-    let subject = format!("STREAM.INFO.{}", stream);
+    let subject = format!("STREAM.INFO.{stream}");
 
     let payload = StreamInfoRequest {
         offset,
@@ -2090,7 +2090,7 @@ impl Display for PurgeErrorKind {
         match self {
             Self::Request => write!(f, "request failed"),
             Self::TimedOut => write!(f, "timed out"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
         }
     }
 }
@@ -2307,7 +2307,7 @@ impl Display for LastRawMessageErrorKind {
             Self::NoMessageFound => write!(f, "no message found"),
             Self::InvalidSubject => write!(f, "invalid subject"),
             Self::Other => write!(f, "failed to get last raw message"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
         }
     }
 }
@@ -2332,7 +2332,7 @@ impl Display for ConsumerErrorKind {
         match self {
             Self::TimedOut => write!(f, "timed out"),
             Self::Request => write!(f, "request failed"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
             Self::Other => write!(f, "consumer error"),
             Self::InvalidConsumerType => write!(f, "invalid consumer type"),
             Self::InvalidName => write!(f, "invalid consumer name"),
@@ -2359,7 +2359,7 @@ impl Display for ConsumerCreateStrictErrorKind {
         match self {
             Self::TimedOut => write!(f, "timed out"),
             Self::Request => write!(f, "request failed"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
             Self::Other => write!(f, "consumer error"),
             Self::InvalidConsumerType => write!(f, "invalid consumer type"),
             Self::InvalidName => write!(f, "invalid consumer name"),
@@ -2387,7 +2387,7 @@ impl Display for ConsumerUpdateErrorKind {
         match self {
             Self::TimedOut => write!(f, "timed out"),
             Self::Request => write!(f, "request failed"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
             Self::Other => write!(f, "consumer error"),
             Self::InvalidConsumerType => write!(f, "invalid consumer type"),
             Self::InvalidName => write!(f, "invalid consumer name"),

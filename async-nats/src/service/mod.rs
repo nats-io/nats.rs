@@ -846,7 +846,7 @@ impl EndpointBuilder {
     pub async fn add<S: ToString>(self, subject: S) -> Result<Endpoint, Error> {
         let mut subject = subject.to_string();
         if let Some(prefix) = self.prefix {
-            subject = format!("{}.{}", prefix, subject);
+            subject = format!("{prefix}.{subject}");
         }
         let endpoint_name = self.name.clone().unwrap_or_else(|| subject.clone());
         let name = self

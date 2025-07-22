@@ -2651,7 +2651,7 @@ mod jetstream {
             });
 
             let response: Response<Info> = js
-                .request(format!("CONSUMER.CREATE.{}", stream), &consumer)
+                .request(format!("CONSUMER.CREATE.{stream}"), &consumer)
                 .await
                 .unwrap();
 
@@ -2659,7 +2659,7 @@ mod jetstream {
                 Response::Ok(info) => {
                     assert_eq!(info.config.sample_frequency, 10);
                 }
-                Response::Err { error } => panic!("expected ok response, got: {:?}", error),
+                Response::Err { error } => panic!("expected ok response, got: {error:?}"),
             }
         }
     }

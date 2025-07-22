@@ -478,7 +478,7 @@ impl Connector {
                 tracing::error!(received_op = ?op, "expected INFO, got different operation");
                 return Err(ConnectError::with_source(
                     crate::ConnectErrorKind::Io,
-                    format!("expected INFO, got {:?}", op),
+                    format!("expected INFO, got {op:?}"),
                 ));
             }
             None => {

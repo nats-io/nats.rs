@@ -187,7 +187,7 @@ impl ObjectStore {
         let data = serde_json::to_vec(&object_info).map_err(|err| {
             DeleteError::with_source(
                 DeleteErrorKind::Other,
-                format!("failed deserializing object info: {}", err),
+                format!("failed deserializing object info: {err}"),
             )
         })?;
 
@@ -197,7 +197,7 @@ impl ObjectStore {
             HeaderValue::from_str(ROLLUP_SUBJECT).map_err(|err| {
                 DeleteError::with_source(
                     DeleteErrorKind::Other,
-                    format!("failed parsing header: {}", err),
+                    format!("failed parsing header: {err}"),
                 )
             })?,
         );
@@ -257,7 +257,7 @@ impl ObjectStore {
             serde_json::from_slice::<ObjectInfo>(&message.payload).map_err(|err| {
                 InfoError::with_source(
                     InfoErrorKind::Other,
-                    format!("failed to decode info payload: {}", err),
+                    format!("failed to decode info payload: {err}"),
                 )
             })?;
 
@@ -327,14 +327,14 @@ impl ObjectStore {
                 .map_err(|err| {
                     PutError::with_source(
                         PutErrorKind::PublishChunks,
-                        format!("failed chunk publish: {}", err),
+                        format!("failed chunk publish: {err}"),
                     )
                 })?
                 .await
                 .map_err(|err| {
                     PutError::with_source(
                         PutErrorKind::PublishChunks,
-                        format!("failed getting chunk ack: {}", err),
+                        format!("failed getting chunk ack: {err}"),
                     )
                 })?;
         }
@@ -368,16 +368,13 @@ impl ObjectStore {
         headers.insert(
             NATS_ROLLUP,
             ROLLUP_SUBJECT.parse::<HeaderValue>().map_err(|err| {
-                PutError::with_source(
-                    PutErrorKind::Other,
-                    format!("failed parsing header: {}", err),
-                )
+                PutError::with_source(PutErrorKind::Other, format!("failed parsing header: {err}"))
             })?,
         );
         let data = serde_json::to_vec(&object_info).map_err(|err| {
             PutError::with_source(
                 PutErrorKind::Other,
-                format!("failed serializing object info: {}", err),
+                format!("failed serializing object info: {err}"),
             )
         })?;
 
@@ -389,14 +386,14 @@ impl ObjectStore {
             .map_err(|err| {
                 PutError::with_source(
                     PutErrorKind::PublishMetadata,
-                    format!("failed publishing metadata: {}", err),
+                    format!("failed publishing metadata: {err}"),
                 )
             })?
             .await
             .map_err(|err| {
                 PutError::with_source(
                     PutErrorKind::PublishMetadata,
-                    format!("failed ack from metadata publish: {}", err),
+                    format!("failed ack from metadata publish: {err}"),
                 )
             })?;
 
@@ -621,14 +618,14 @@ impl ObjectStore {
             ROLLUP_SUBJECT.parse::<HeaderValue>().map_err(|err| {
                 UpdateMetadataError::with_source(
                     UpdateMetadataErrorKind::Other,
-                    format!("failed parsing header: {}", err),
+                    format!("failed parsing header: {err}"),
                 )
             })?,
         );
         let data = serde_json::to_vec(&info).map_err(|err| {
             UpdateMetadataError::with_source(
                 UpdateMetadataErrorKind::Other,
-                format!("failed serializing object info: {}", err),
+                format!("failed serializing object info: {err}"),
             )
         })?;
 
@@ -640,14 +637,14 @@ impl ObjectStore {
             .map_err(|err| {
                 UpdateMetadataError::with_source(
                     UpdateMetadataErrorKind::PublishMetadata,
-                    format!("failed publishing metadata: {}", err),
+                    format!("failed publishing metadata: {err}"),
                 )
             })?
             .await
             .map_err(|err| {
                 UpdateMetadataError::with_source(
                     UpdateMetadataErrorKind::PublishMetadata,
-                    format!("failed ack from metadata publish: {}", err),
+                    format!("failed ack from metadata publish: {err}"),
                 )
             })?;
 
@@ -810,14 +807,14 @@ async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), Publ
         ROLLUP_SUBJECT.parse::<HeaderValue>().map_err(|err| {
             PublishMetadataError::with_source(
                 PublishMetadataErrorKind::Other,
-                format!("failed parsing header: {}", err),
+                format!("failed parsing header: {err}"),
             )
         })?,
     );
     let data = serde_json::to_vec(&info).map_err(|err| {
         PublishMetadataError::with_source(
             PublishMetadataErrorKind::Other,
-            format!("failed serializing object info: {}", err),
+            format!("failed serializing object info: {err}"),
         )
     })?;
 
@@ -829,14 +826,14 @@ async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), Publ
         .map_err(|err| {
             PublishMetadataError::with_source(
                 PublishMetadataErrorKind::PublishMetadata,
-                format!("failed publishing metadata: {}", err),
+                format!("failed publishing metadata: {err}"),
             )
         })?
         .await
         .map_err(|err| {
             PublishMetadataError::with_source(
                 PublishMetadataErrorKind::PublishMetadata,
-                format!("failed ack from metadata publish: {}", err),
+                format!("failed ack from metadata publish: {err}"),
             )
         })?;
     Ok(())
@@ -860,7 +857,7 @@ impl Stream for Watch {
                         .map_err(|err| {
                             WatcherError::with_source(
                                 WatcherErrorKind::Other,
-                                format!("failed to deserialize object info: {}", err),
+                                format!("failed to deserialize object info: {err}"),
                             )
                         })
                         .map_or_else(|err| Some(Err(err)), |result| Some(Ok(result))),
@@ -908,7 +905,7 @@ impl Stream for List {
                                 .map_err(|err| {
                                     ListerError::with_source(
                                         ListerErrorKind::Other,
-                                        format!("failed deserializing object info: {}", err),
+                                        format!("failed deserializing object info: {err}"),
                                     )
                                 })?;
                             if response.deleted {
@@ -993,7 +990,7 @@ impl tokio::io::AsyncRead for Object {
                             stream
                                 .create_consumer(OrderedConfig {
                                     deliver_subject: stream.context.client.new_inbox(),
-                                    filter_subject: format!("$O.{}.C.{}", bucket, nuid),
+                                    filter_subject: format!("$O.{bucket}.C.{nuid}"),
                                     ..Default::default()
                                 })
                                 .await

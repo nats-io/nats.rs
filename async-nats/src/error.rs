@@ -133,7 +133,7 @@ mod test {
     #[test]
     fn display_without_source() {
         let error: FooError = FooErrorKind::Bar.into();
-        assert_eq!(format!("{}", error), "bar error");
+        assert_eq!(format!("{error}"), "bar error");
     }
 
     #[test]
