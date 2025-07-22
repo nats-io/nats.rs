@@ -328,7 +328,7 @@ mod client {
         match result {
             Ok(()) => println!("ok"),
             Err(err) => {
-                println!("error: {}", err);
+                println!("error: {err}");
                 println!("source: {:?}", err.source())
             }
         }
@@ -930,7 +930,7 @@ mod client {
         for _ in 0..5 {
             match rx.recv().await.unwrap() {
                 Event::ClientError(async_nats::ClientError::Other(_)) => (),
-                other => panic!("unexpected event: {:?}", other),
+                other => panic!("unexpected event: {other:?}"),
             };
         }
         assert_eq!(
@@ -1064,7 +1064,7 @@ mod client {
         match result {
             Ok(()) => println!("ok"),
             Err(err) => {
-                println!("error: {}", err);
+                println!("error: {err}");
                 println!("source: {:?}", err.source())
             }
         }

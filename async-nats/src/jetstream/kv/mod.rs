@@ -1376,7 +1376,7 @@ impl futures::Stream for Watch {
                     let info = message.info().map_err(|err| {
                         WatcherError::with_source(
                             WatcherErrorKind::Other,
-                            format!("failed to parse message metadata: {}", err),
+                            format!("failed to parse message metadata: {err}"),
                         )
                     })?;
 
@@ -1440,7 +1440,7 @@ impl futures::Stream for History {
                     let info = message.info().map_err(|err| {
                         WatcherError::with_source(
                             WatcherErrorKind::Other,
-                            format!("failed to parse message metadata: {}", err),
+                            format!("failed to parse message metadata: {err}"),
                         )
                     })?;
                     if info.pending == 0 {
@@ -1539,7 +1539,7 @@ pub enum StatusErrorKind {
 impl Display for StatusErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::JetStream(err) => write!(f, "jetstream request failed: {}", err),
+            Self::JetStream(err) => write!(f, "jetstream request failed: {err}"),
             Self::TimedOut => write!(f, "timed out"),
         }
     }

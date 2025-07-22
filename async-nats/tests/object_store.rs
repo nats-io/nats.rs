@@ -137,7 +137,7 @@ mod object_store {
         let jetstream = async_nats::jetstream::new(client.clone());
 
         let bucket_name = "bucket";
-        let stream_name = format!("OBJ_{}", bucket_name);
+        let stream_name = format!("OBJ_{bucket_name}");
 
         let bucket = jetstream
             .create_object_store(async_nats::jetstream::object_store::Config {

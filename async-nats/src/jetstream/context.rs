@@ -1734,7 +1734,7 @@ impl Display for ConsumerInfoErrorKind {
             Self::NotFound => write!(f, "consumer not found"),
             Self::StreamNotFound => write!(f, "stream not found"),
             Self::Request => write!(f, "request error"),
-            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::JetStream(err) => write!(f, "jetstream error: {err}"),
             Self::TimedOut => write!(f, "timed out"),
             Self::NoResponders => write!(f, "no responders"),
         }
@@ -1790,7 +1790,7 @@ impl Display for CreateStreamErrorKind {
             Self::InvalidStreamName => write!(f, "stream name cannot contain `.`, `_`"),
             Self::DomainAndExternalSet => write!(f, "domain and external are both set"),
             Self::NotFound => write!(f, "stream not found"),
-            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::JetStream(err) => write!(f, "jetstream error: {err}"),
             Self::TimedOut => write!(f, "jetstream request timed out"),
             Self::JetStreamUnavailable => write!(f, "jetstream unavailable"),
             Self::ResponseParse => write!(f, "failed to parse server response"),
@@ -1840,7 +1840,7 @@ impl Display for GetStreamErrorKind {
             Self::EmptyName => write!(f, "empty name cannot be empty"),
             Self::Request => write!(f, "request error"),
             Self::InvalidStreamName => write!(f, "invalid stream name"),
-            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::JetStream(err) => write!(f, "jetstream error: {err}"),
         }
     }
 }
@@ -1859,7 +1859,7 @@ impl Display for GetStreamByNameErrorKind {
             Self::Request => write!(f, "request error"),
             Self::NotFound => write!(f, "stream not found"),
             Self::InvalidSubject => write!(f, "invalid subject"),
-            Self::JetStream(err) => write!(f, "jetstream error: {}", err),
+            Self::JetStream(err) => write!(f, "jetstream error: {err}"),
         }
     }
 }
@@ -1980,7 +1980,7 @@ impl Display for AccountErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TimedOut => write!(f, "timed out"),
-            Self::JetStream(err) => write!(f, "JetStream error: {}", err),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
             Self::Other => write!(f, "error"),
             Self::JetStreamUnavailable => write!(f, "JetStream unavailable"),
         }

@@ -864,7 +864,7 @@ impl ConnectionHandler {
                     multiplexer
                 } else {
                     let prefix = Subject::from(format!("{}.{}.", prefix, nuid::next()));
-                    let subject = Subject::from(format!("{}*", prefix));
+                    let subject = Subject::from(format!("{prefix}*"));
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
                         sid: MULTIPLEXER_SID,

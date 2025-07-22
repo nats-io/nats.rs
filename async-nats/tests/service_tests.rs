@@ -541,14 +541,14 @@ mod service {
                 Ok(_) => (),
                 Err(mut errs) => {
                     if let Some(err) = errs.next() {
-                        panic!("schema {} validation error: {}", endpoint, err)
+                        panic!("schema {endpoint} validation error: {err}")
                     }
                 }
             };
         }
 
         fn schema_url(url: &str) -> String {
-            format!("https://raw.githubusercontent.com/nats-io/jsm.go/main/schemas/micro/v1/{}_response.json",  url)
+            format!("https://raw.githubusercontent.com/nats-io/jsm.go/main/schemas/micro/v1/{url}_response.json")
         }
     }
 
