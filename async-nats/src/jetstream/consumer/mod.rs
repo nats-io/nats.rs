@@ -78,12 +78,33 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// # }
     /// ```
     pub async fn info(&mut self) -> Result<&consumer::Info, ConsumerInfoError> {
-        let info = self.fetch_info().await?;
+        let info = self.get_info().await?;
         self.info = info;
         Ok(&self.info)
     }
 
-    async fn fetch_info(&self) -> Result<consumer::Info, ConsumerInfoError> {
+    /// Retrieves `info` about [Consumer] from the server. Does not update the cache.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let info = consumer.get_info().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_info(&self) -> Result<consumer::Info, ConsumerInfoError> {
         let subject = format!("CONSUMER.INFO.{}.{}", self.info.stream_name, self.info.name);
         match self.context.request(subject, &json!({})).await? {
             Response::Err { error } => Err(error.into()),
