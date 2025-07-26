@@ -954,7 +954,7 @@ impl Stream {
                                 }
                             debug!("detected !Connected -> Connected state change");
 
-                            match tryhard::retry_fn(|| consumer.fetch_info())
+                            match tryhard::retry_fn(|| consumer.get_info())
                                 .retries(5).custom_backoff(backoff).await
                                 .map_err(|err| crate::RequestError::with_source(crate::RequestErrorKind::Other, err).into()) {
                                     Ok(info) => {
