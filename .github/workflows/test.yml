@@ -145,7 +145,7 @@ jobs:
       run:
         working-directory: ./async-nats
     name: check feature flags (ubuntu-latest / stable)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-cores
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
