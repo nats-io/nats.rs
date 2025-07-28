@@ -386,8 +386,6 @@ impl Connector {
             }
             #[cfg(feature = "websockets")]
             "wss" => {
-                let domain = rustls_webpki::types::ServerName::try_from(server_addr.host())
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
                 let tls_config =
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
