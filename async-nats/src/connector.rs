@@ -371,7 +371,7 @@ impl Connector {
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
                     tokio_websockets::client::Builder::new()
-                        .uri(format!("{}://{}", server_addr.scheme(), socket_addr).as_str())
+                        .uri(server_addr.as_url_str())
                         .map_err(|err| {
                             ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
                         })?
@@ -386,8 +386,6 @@ impl Connector {
             }
             #[cfg(feature = "websockets")]
             "wss" => {
-                let domain = rustls_webpki::types::ServerName::try_from(server_addr.host())
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
                 let tls_config =
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
@@ -397,15 +395,7 @@ impl Connector {
                     self.options.connection_timeout,
                     tokio_websockets::client::Builder::new()
                         .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                        .uri(
-                            format!(
-                                "{}://{}:{}",
-                                server_addr.scheme(),
-                                domain.to_str(),
-                                server_addr.port()
-                            )
-                            .as_str(),
-                        )
+                        .uri(server_addr.as_url_str())
                         .map_err(|err| {
                             ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
                         })?
