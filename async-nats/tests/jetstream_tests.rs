@@ -558,7 +558,7 @@ mod jetstream {
         let context = async_nats::jetstream::new(client);
 
         let _stream = context.create_stream("events").await.unwrap();
-        let info = context
+        let stream = context
             .update_stream(stream::Config {
                 name: "events".into(),
                 max_messages: 1000,
@@ -567,6 +567,7 @@ mod jetstream {
             })
             .await
             .unwrap();
+        let info = &stream.cached_info();
         context.update_stream(&info.config).await.unwrap();
         assert_eq!(info.config.max_messages, 1000);
         assert_eq!(info.config.max_messages_per_subject, 100);
