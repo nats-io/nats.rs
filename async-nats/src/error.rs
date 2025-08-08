@@ -27,11 +27,11 @@ impl<Kind> Error<Kind>
 where
     Kind: Clone + Debug + Display + PartialEq,
 {
-    pub(crate) fn new(kind: Kind) -> Self {
+    pub fn new(kind: Kind) -> Self {
         Self { kind, source: None }
     }
 
-    pub(crate) fn with_source<S>(kind: Kind, source: S) -> Self
+    pub fn with_source<S>(kind: Kind, source: S) -> Self
     where
         S: Into<crate::Error>,
     {
