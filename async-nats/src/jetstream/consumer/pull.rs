@@ -214,7 +214,7 @@ impl Consumer<Config> {
     /// Ok(())
     /// # }
     /// ```
-    pub fn fetch(&self) -> FetchBuilder {
+    pub fn fetch(&self) -> FetchBuilder<'_> {
         FetchBuilder::new(self)
     }
 
@@ -259,7 +259,7 @@ impl Consumer<Config> {
     /// Ok(())
     /// # }
     /// ```
-    pub fn batch(&self) -> BatchBuilder {
+    pub fn batch(&self) -> BatchBuilder<'_> {
         BatchBuilder::new(self)
     }
 

@@ -204,7 +204,7 @@ impl HeaderMap {
     /// let value1 = values.next();
     /// let value2 = values.next();
     /// ```
-    pub fn get_all<K: IntoHeaderName>(&self, key: K) -> GetAll<HeaderValue> {
+    pub fn get_all<K: IntoHeaderName>(&self, key: K) -> GetAll<'_, HeaderValue> {
         let inner = self
             .inner
             .get(&key.into_header_name())
