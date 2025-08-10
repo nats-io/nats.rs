@@ -58,6 +58,7 @@ jsonschema = "0.17.1"
 
 # for -Z minimal-versions
 num = "0.4.1"
+clap = "4.5.43"
 
 [features]
 default = ["server_2_10", "server_2_11", "ring"]

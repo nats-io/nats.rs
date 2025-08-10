@@ -1,5 +1,5 @@
 use async_nats::jetstream::{self, stream};
-use clap::Parser;
+use clap::{Parser, ArgAction};
 use futures::future::join_all;
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ struct Args {
 
     /// Subject to publish to
     #[arg(short, long, default_value = "bench.test")]
-    subject: String,
+    subjects: Vec<String>,
 
     /// Stream name
     #[arg(long, default_value = "BENCH_STREAM")]
@@ -32,6 +32,10 @@ struct Args {
     /// Max outstanding acks
     #[arg(long, default_value_t = 10000)]
     outstanding_acks: usize,
+
+    /// Whether to create the stream or assert its existence
+    #[arg(long, default_value_t = true, action = ArgAction::Set, value_parser = clap::value_parser!(bool))]
+    create_stream: bool,
 }
 
 #[tokio::main]
@@ -45,14 +49,18 @@ async fn main() -> Result<(), async_nats::Error> {
     let jetstream = jetstream::new(client);
 
     // Create or get the stream
-    let _stream = jetstream
-        .get_or_create_stream(stream::Config {
-            name: args.stream.clone(),
-            subjects: vec![args.subject.clone()],
-            ..Default::default()
-        })
-        .await?;
-
+    if args.create_stream {
+        println!("Creating stream '{}'", args.stream);
+        jetstream
+            .get_or_create_stream(stream::Config {
+                name: args.stream.clone(),
+                subjects: args.subjects.clone(),
+                ..Default::default()
+            })
+            .await?;
+    } else {
+        println!("Ensuring stream '{}' exists", args.stream);
+    }
     println!(
         "Publishing {} messages of {} bytes each to stream '{}'",
         args.count, args.size, args.stream
@@ -60,7 +68,8 @@ async fn main() -> Result<(), async_nats::Error> {
 
     // Prepare the message payload
     let payload = vec![b'X'; args.size];
-    let subject = args.subject;
+    let subjects = args.subjects;
+    let subjects_len = subjects.len();
 
     // Start timing
     let start = Instant::now();
@@ -68,11 +77,11 @@ async fn main() -> Result<(), async_nats::Error> {
 
     // Publish all messages without awaiting acks
     let mut ack_futures = Vec::with_capacity(args.count);
-    for _ in 0..args.count {
+    for i in 0..args.count {
         let permit = semaphore.clone().acquire_owned().await.unwrap();
 
         let ack_future = jetstream
-            .publish(subject.clone(), payload.clone().into())
+            .publish(subjects[i % subjects_len].clone(), payload.clone().into())
             .await?;
 
         // Spawn a task to release the permit when ack completes
