@@ -1,5 +1,5 @@
 use async_nats::jetstream::{self, stream};
-use clap::{Parser, ArgAction};
+use clap::{ArgAction, Parser};
 use futures::future::join_all;
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ struct Args {
     size: usize,
 
     /// Subject to publish to
-    #[arg(short, long, default_value = "bench.test")]
+    #[arg(short, long, default_value = "bench.test", value_delimiter = ',')]
     subjects: Vec<String>,
 
     /// Stream name
