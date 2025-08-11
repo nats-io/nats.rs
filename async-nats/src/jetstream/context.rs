@@ -19,7 +19,9 @@ use crate::jetstream::account::Account;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
-use crate::{header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode};
+use crate::{
+    header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode,
+};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, StreamExt, TryFutureExt};
@@ -61,6 +63,7 @@ pub struct Context {
     pub(crate) acker_task: Arc<tokio::task::JoinHandle<()>>,
     pub(crate) ack_sender:
         tokio::sync::mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    pub(crate) backpressure_on_inflight: bool,
 }
 
 fn spawn_acker(
@@ -107,19 +110,19 @@ impl ToAssign for No {}
 /// # async fn main() -> Result<(), async_nats::Error> {
 /// let client = async_nats::connect("demo.nats.io").await?;
 /// let context = ContextBuilder::new()
-///    .timeout(Duration::from_secs(5))
-///    .api_prefix("MY.JS.API")
-///    .max_ack_inflight(1000)
-///    .build(client);
+///     .timeout(Duration::from_secs(5))
+///     .api_prefix("MY.JS.API")
+///     .max_ack_inflight(1000)
+///     .build(client);
 /// # Ok(())
 /// # }
 /// ```
-///
 pub struct ContextBuilder<PREFIX: ToAssign> {
     prefix: String,
     timeout: Duration,
     semaphore_capacity: usize,
     ack_timeout: Duration,
+    backpressure_on_inflight: bool,
     _phantom: PhantomData<PREFIX>,
 }
 
@@ -130,6 +133,7 @@ impl Default for ContextBuilder<Yes> {
             timeout: Duration::from_secs(5),
             semaphore_capacity: 50_000,
             ack_timeout: Duration::from_secs(30),
+            backpressure_on_inflight: false,
             _phantom: PhantomData {},
         }
     }
@@ -150,6 +154,7 @@ impl ContextBuilder<Yes> {
             timeout: self.timeout,
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
+            backpressure_on_inflight: self.backpressure_on_inflight,
             _phantom: PhantomData,
         }
     }
@@ -162,6 +167,7 @@ impl ContextBuilder<Yes> {
             timeout: self.timeout,
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
+            backpressure_on_inflight: self.backpressure_on_inflight,
             _phantom: PhantomData,
         }
     }
@@ -181,6 +187,7 @@ where
             timeout,
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
+            backpressure_on_inflight: self.backpressure_on_inflight,
             _phantom: PhantomData,
         }
     }
@@ -196,12 +203,13 @@ where
             timeout: self.timeout,
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout,
+            backpressure_on_inflight: self.backpressure_on_inflight,
             _phantom: PhantomData,
         }
     }
 
     /// Sets the maximum number of pending acks that can be in flight at any given time.
-    /// If limit is reached, `publish` throws an error.
+    /// If limit is reached, `publish` throws an error by default, or waits if backpressure is enabled.
     pub fn max_ack_inflight(self, capacity: usize) -> ContextBuilder<Yes>
     where
         Yes: ToAssign,
@@ -211,16 +219,38 @@ where
             timeout: self.timeout,
             semaphore_capacity: capacity,
             ack_timeout: self.ack_timeout,
+            backpressure_on_inflight: self.backpressure_on_inflight,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Enable or disable backpressure when max inflight acks is reached.
+    /// When enabled, publish will wait for permits to become available instead of erroring.
+    /// Default is false (errors on max inflight).
+    pub fn backpressure_on_inflight(self, enabled: bool) -> ContextBuilder<Yes>
+    where
+        Yes: ToAssign,
+    {
+        ContextBuilder {
+            prefix: self.prefix,
+            timeout: self.timeout,
+            semaphore_capacity: self.semaphore_capacity,
+            ack_timeout: self.ack_timeout,
+            backpressure_on_inflight: enabled,
             _phantom: PhantomData,
         }
     }
 
     /// Build the [Context] with the given settings.
     pub fn build(self, client: Client) -> Context {
+        // Channel buffer must be larger than semaphore capacity to handle bursts
+        // when many PublishAckFutures are dropped at once. We use 2x capacity
+        // to ensure the channel never fills up under normal operation.
+        let acker_channel_capacity = self.semaphore_capacity * 2;
         let (tx, rx) = tokio::sync::mpsc::channel::<(
             oneshot::Receiver<Message>,
             OwnedSemaphorePermit,
-        )>(self.semaphore_capacity);
+        )>(acker_channel_capacity);
         let acker_task = Arc::new(spawn_acker(rx, self.ack_timeout));
         Context {
             client,
@@ -229,6 +259,7 @@ where
             max_ack_semaphore: Arc::new(tokio::sync::Semaphore::new(self.semaphore_capacity)),
             acker_task,
             ack_sender: tx,
+            backpressure_on_inflight: self.backpressure_on_inflight,
         }
     }
 }
@@ -359,7 +390,15 @@ impl Context {
         subject: S,
         publish: Publish,
     ) -> Result<PublishAckFuture, PublishError> {
-        let permit =
+        let permit = if self.backpressure_on_inflight {
+            // When backpressure is enabled, wait for a permit to become available
+            self.max_ack_semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err))?
+        } else {
+            // When backpressure is disabled, error immediately if no permits available
             self.max_ack_semaphore
                 .clone()
                 .try_acquire_owned()
@@ -368,7 +407,8 @@ impl Context {
                         PublishError::new(PublishErrorKind::MaxAckPending)
                     }
                     _ => PublishError::with_source(PublishErrorKind::Other, err),
-                })?;
+                })?
+        };
         let subject = subject.to_subject();
         let (sender, receiver) = oneshot::channel();
 
