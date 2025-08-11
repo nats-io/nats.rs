@@ -25,7 +25,7 @@ serde = { version = "1.0.184", features = ["derive"] }
 serde_json = "1.0.104"
 serde_repr = "0.1.16"
 tokio = { version = "1.36", features = ["macros", "rt", "fs", "net", "sync", "time", "io-util"] }
-tokio-stream = "0.1"
+tokio-stream = "0.1.17"
 url = { version = "2"}
 tokio-rustls = { version = "0.26", default-features = false }
 tokio-util = "0.7"
