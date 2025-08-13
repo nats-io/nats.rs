@@ -136,7 +136,7 @@ async fn run() -> Result<(), async_nats::Error> {
     let results_tx_clone = results_tx.clone();
     let ack_processor = tokio::spawn(async move {
         tokio_stream::wrappers::ReceiverStream::new(rx)
-            .for_each_concurrent(200, |ack_future| {
+            .for_each_concurrent(20000, |ack_future| {
                 let tx = results_tx_clone.clone();
                 async move {
                     let result = ack_future.await;
