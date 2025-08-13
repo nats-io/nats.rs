@@ -95,7 +95,7 @@ async fn run() -> Result<(), async_nats::Error> {
             println!("Creating stream '{}'", subject);
             setup_jetstream
                 .get_or_create_stream(stream::Config {
-                    name: subject.clone(),
+                    num_replicas: 2,
                     subjects: vec![subject.clone()],
                     ..Default::default()
                 })
