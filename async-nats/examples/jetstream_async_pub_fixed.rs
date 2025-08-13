@@ -1,6 +1,3 @@
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use async_nats::jetstream::{self, stream};
 use clap::{ArgAction, Parser};
 use futures::StreamExt;
