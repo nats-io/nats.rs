@@ -331,9 +331,10 @@ fn main() -> Result<(), async_nats::Error> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("jetstream_async_pub_fixed")
-        .worker_threads(num_threads)
+        .worker_threads(num_threads * 2)
+        .thread_stack_size(4 * 1024 * 1024) // Larger stacks
+        .max_blocking_threads(512)
         .build()
         .expect("Failed to create Tokio runtime");
-
     rt.block_on(run())
 }
