@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use async_nats::jetstream::{self, stream};
 use clap::{ArgAction, Parser};
 use futures::StreamExt;
@@ -15,16 +18,24 @@ struct Args {
     size: usize,
 
     /// Subject to publish to
-    #[arg(short, long, default_value = "bench.test", value_delimiter = ',')]
+    #[arg(short, long, default_value = "bench", value_delimiter = ',')]
     subjects: Vec<String>,
 
     /// Stream name
-    #[arg(long, default_value = "BENCH_STREAM")]
+    #[arg(long, default_value = "BENCH")]
     stream: String,
 
     /// NATS server URL
     #[arg(short, long, default_value = "nats://localhost:4222")]
     url: String,
+
+    /// Optional username for authentication
+    #[arg(long)]
+    username: Option<String>,
+
+    /// Optional password for authentication
+    #[arg(long)]
+    password: Option<String>,
 
     /// Max outstanding acks
     #[arg(long, default_value_t = 10000)]
@@ -47,15 +58,21 @@ struct Args {
     delete_streams: bool,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), async_nats::Error> {
+async fn run() -> Result<(), async_nats::Error> {
     let args = Args::parse();
 
     println!("Connecting to {}...", args.url);
 
     if args.delete_streams {
         // Delete existing streams if requested
-        let client = async_nats::connect(&args.url).await?;
+        let mut options = async_nats::ConnectOptions::new();
+
+        if let Some(username) = &args.username {
+            options =
+                options.user_and_password(username.to_string(), args.password.clone().unwrap());
+        }
+
+        let client = options.connect(args.url.as_str()).await?;
         let jetstream = jetstream::new(client);
         for subject in &args.subjects {
             println!("Deleting stream '{}'", subject);
@@ -68,8 +85,16 @@ async fn main() -> Result<(), async_nats::Error> {
     // Create the stream first using a single connection
     if args.create_stream {
         for subject in &args.subjects {
-            let setup_client = async_nats::connect(&args.url).await?;
-            let setup_jetstream = jetstream::new(setup_client);
+            let mut setup_client = async_nats::ConnectOptions::new()
+                .client_capacity(args.outstanding_acks * 2)
+                .subscription_capacity(args.outstanding_acks * 2);
+
+            if let Some(username) = &args.username {
+                setup_client = setup_client
+                    .user_and_password(username.to_string(), args.password.clone().unwrap());
+            }
+            let client = setup_client.connect(args.url.as_str()).await?;
+            let setup_jetstream = jetstream::new(client);
             println!("Creating stream '{}'", subject);
             setup_jetstream
                 .get_or_create_stream(stream::Config {
@@ -104,9 +129,6 @@ async fn main() -> Result<(), async_nats::Error> {
     let subjects = args.subjects;
     let subjects_len = subjects.len();
 
-    // Start timing
-    let start = Instant::now();
-
     // Channel for collecting ack futures
     let (tx, rx) = tokio::sync::mpsc::channel(args.count);
 
@@ -126,15 +148,48 @@ async fn main() -> Result<(), async_nats::Error> {
             .await;
     });
 
-    let publish_start = Instant::now();
-
     // Calculate messages per client
     let base_count = args.count / args.clients;
     let remainder = args.count % args.clients;
 
-    // Spawn multiple client tasks
-    let mut tasks = Vec::new();
+    // Create all client connections sequentially (with natural spacing)
+    println!(
+        "Creating {} client connections sequentially...",
+        args.clients
+    );
+    let mut jetstream_contexts = Vec::new();
     for client_id in 0..args.clients {
+        let mut options = async_nats::ConnectOptions::new()
+            .client_capacity(args.outstanding_acks * 2)
+            .subscription_capacity(args.outstanding_acks * 2);
+
+        if let Some(username) = &args.username {
+            options = options.user_and_password(
+                username.to_string(),
+                args.password.clone().unwrap_or_default(),
+            )
+        };
+
+        let client = options.connect(&args.url).await?;
+
+        let jetstream = jetstream::context::ContextBuilder::new()
+            .max_ack_inflight(args.outstanding_acks)
+            .backpressure_on_inflight(args.backpressure)
+            .ack_timeout(tokio::time::Duration::from_secs(5))
+            .build(client.clone());
+
+        jetstream_contexts.push((client, jetstream));
+        println!("Client {} connected", client_id);
+    }
+
+    println!("All clients connected. Starting coordinated publishing...");
+
+    // Create a barrier to synchronize all tasks
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(args.clients));
+
+    // Spawn multiple client tasks with pre-established connections
+    let mut tasks = Vec::new();
+    for (client_id, (client, jetstream)) in jetstream_contexts.into_iter().enumerate() {
         // Distribute messages evenly, with remainder going to first clients
         let messages_for_client = if client_id < remainder {
             base_count + 1
@@ -148,27 +203,14 @@ async fn main() -> Result<(), async_nats::Error> {
             remainder * (base_count + 1) + (client_id - remainder) * base_count
         };
 
-        let url = args.url.clone();
-        let outstanding_acks = args.outstanding_acks;
-        let backpressure = args.backpressure;
         let tx = tx.clone();
         let payload = payload.clone();
         let subjects = subjects.clone();
+        let barrier_clone = barrier.clone();
 
         let task = tokio::spawn(async move {
-            // Each client gets its own connection
-            let client = async_nats::ConnectOptions::new()
-                .client_capacity(outstanding_acks * 2)
-                .subscription_capacity(outstanding_acks * 2)
-                .connect(&url)
-                .await
-                .unwrap();
-
-            let jetstream = jetstream::context::ContextBuilder::new()
-                .max_ack_inflight(outstanding_acks)
-                .backpressure_on_inflight(backpressure)
-                .ack_timeout(tokio::time::Duration::from_secs(5))
-                .build(client.clone());
+            // Wait at the barrier until all tasks are ready
+            barrier_clone.wait().await;
 
             // Publish this client's share of messages
             for i in 0..messages_for_client {
@@ -199,6 +241,10 @@ async fn main() -> Result<(), async_nats::Error> {
 
         tasks.push(task);
     }
+
+    // Start timing immediately after spawning all tasks (they'll be released from barrier)
+    let start = Instant::now();
+    let publish_start = Instant::now();
 
     // Collect clients to keep them alive until acks complete
     let mut clients = Vec::new();
@@ -277,4 +323,19 @@ async fn main() -> Result<(), async_nats::Error> {
     drop(clients);
 
     Ok(())
+}
+
+fn main() -> Result<(), async_nats::Error> {
+    // console_subscriber::init();
+    let num_threads = num_cpus::get();
+    println!("Using {} threads for Tokio runtime", num_threads);
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("jetstream_async_pub_fixed")
+        .worker_threads(num_threads)
+        .build()
+        .expect("Failed to create Tokio runtime");
+
+    rt.block_on(run())
 }
