@@ -11,6 +11,26 @@ pub struct Subject {
 }
 
 impl Subject {
+    /// Creates a new `Subject` from Bytes.
+    ///
+    /// # Safety
+    /// Function is unsafe because it does not check if the bytes are valid UTF-8.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_nats::Subject;
+    /// use bytes::Bytes;
+    ///
+    /// let bytes = Bytes::from_static(b"Static string");
+    ///
+    /// let subject = unsafe { Subject::from_bytes_unchecked(bytes) };
+    /// assert_eq!(subject.as_str(), "Static string");
+    /// ```
+    pub const unsafe fn from_bytes_unchecked(bytes: Bytes) -> Self {
+        Subject { bytes }
+    }
+
     /// Creates a new `Subject` from a static string.
     ///
     /// # Examples
@@ -102,6 +122,15 @@ impl From<String> for Subject {
         // safely transmute the internal Vec<u8> to a Bytes value.
         let bytes = Bytes::from(s.into_bytes());
         Subject { bytes }
+    }
+}
+
+impl TryFrom<Bytes> for Subject {
+    type Error = Utf8Error;
+
+    fn try_from(bytes: Bytes) -> Result<Self, Self::Error> {
+        from_utf8(bytes.as_ref())?;
+        Ok(Subject { bytes })
     }
 }
 
