@@ -152,6 +152,12 @@ impl ToSubject for String {
     }
 }
 
+impl ToSubject for &str {
+    fn to_subject(&self) -> Subject {
+        Subject::from(self.as_str())
+    }
+}
+
 impl Serialize for Subject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
