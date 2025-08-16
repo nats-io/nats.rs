@@ -73,6 +73,15 @@ fn kv_operation_from_message(message: &crate::message::Message) -> Result<Operat
     if let Some(op) = headers.get(KV_OPERATION) {
         Operation::from_str(op.as_str())
             .map_err(|err| EntryError::with_source(EntryErrorKind::Other, err))
+    } else if let Some(reason) = headers.get(header::NATS_MARKER_REASON) {
+        match reason.as_str() {
+            "MaxAge" | "Purge" => Ok(Operation::Purge),
+            "Remove" => Ok(Operation::Delete),
+            _ => Err(EntryError::with_source(
+                EntryErrorKind::Other,
+                "invalid marker reason",
+            )),
+        }
     } else {
         Ok(Operation::Put)
     }
