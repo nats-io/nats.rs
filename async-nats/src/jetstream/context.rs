@@ -28,7 +28,6 @@ use futures::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
-use std::borrow::Borrow;
 use std::fmt::Display;
 use std::future::IntoFuture;
 use std::pin::Pin;
@@ -520,11 +519,11 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn update_stream<S>(&self, config: S) -> Result<Info, UpdateStreamError>
+    pub async fn update_stream<S>(&self, config: S) -> Result<Stream, UpdateStreamError>
     where
-        S: Borrow<Config>,
+        S: Into<Config>,
     {
-        let config = config.borrow();
+        let config: Config = config.into();
 
         if config.name.is_empty() {
             return Err(CreateStreamError::new(
@@ -539,9 +538,13 @@ impl Context {
         }
 
         let subject = format!("STREAM.UPDATE.{}", config.name);
-        match self.request(subject, config).await? {
+        match self.request(subject, &config).await? {
             Response::Err { error } => Err(error.into()),
-            Response::Ok(info) => Ok(info),
+            Response::Ok(info) => Ok(Stream {
+                context: self.clone(),
+                info,
+                name: config.name,
+            }),
         }
     }
 
