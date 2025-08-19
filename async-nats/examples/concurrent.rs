@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::stream::StreamExt;
+use futures_util::stream::StreamExt;
 use rand::Rng;
 use std::{env, str::from_utf8, time::Duration};
 
