@@ -243,7 +243,7 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
-pub use subject::Subject;
+pub use subject::{Subject, SubjectError, ToSubject};
 
 mod auth;
 pub(crate) mod auth_utils;
@@ -1065,6 +1065,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.request_timeout,
         max_payload,
         statistics,
+        options.skip_subject_validation,
     );
 
     task::spawn(async move {
@@ -1734,12 +1735,48 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-#[allow(dead_code)]
+/// Checks if a subject contains only protocol-safe characters.
+/// Rejects empty subjects and subjects containing whitespace characters
+/// (space, tab, CR, LF) which would break protocol framing.
+/// Used for publish paths — matches nats.go `validateSubject`.
+pub(crate) fn is_valid_publish_subject<T: AsRef<str>>(subject: T) -> bool {
+    let bytes = subject.as_ref().as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none() && memchr::memchr(b'\t', bytes).is_none()
+}
+
+/// Checks if a subject is structurally valid for subscribing.
+/// In addition to protocol-framing checks, also rejects invalid dot structure
+/// (leading/trailing dots, consecutive dots). Matches nats.go `badSubject`.
 pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
-    let subject_str = subject.as_ref();
-    !subject_str.starts_with('.')
-        && !subject_str.ends_with('.')
-        && subject_str.bytes().all(|c| !c.is_ascii_whitespace())
+    let bytes = subject.as_ref().as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    bytes[0] != b'.'
+        && bytes[bytes.len() - 1] != b'.'
+        && memchr::memmem::find(bytes, b"..").is_none()
+        && memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none()
+        && memchr::memchr(b'\t', bytes).is_none()
+}
+
+/// Checks if a queue group name is valid for the NATS protocol.
+/// Queue groups must not be empty and must not contain whitespace characters
+/// (space, tab, CR, LF) which would break protocol framing.
+pub(crate) fn is_valid_queue_group(queue_group: &str) -> bool {
+    let bytes = queue_group.as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none() && memchr::memchr(b'\t', bytes).is_none()
 }
 #[allow(unused_macros)]
 macro_rules! from_with_timeout {
