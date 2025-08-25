@@ -4,5 +4,6 @@ use criterion::criterion_main;
 mod core_nats;
 mod jetstream;
 mod subject_validation;
+mod publish_validation;
 
-criterion_main!(core_nats::core_nats, jetstream::jetstream, subject_validation::benches);
+criterion_main!(core_nats::core_nats, jetstream::jetstream, subject_validation::benches, publish_validation::benches);
