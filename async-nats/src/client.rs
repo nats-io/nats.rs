@@ -35,7 +35,6 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
-use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
@@ -88,6 +87,7 @@ pub struct Client {
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
+    skip_subject_validation: bool,
 }
 
 pub mod traits {
@@ -100,12 +100,15 @@ pub mod traits {
     use super::{PublishError, Request, RequestError, SubscribeError};
 
     pub trait Publisher {
-        fn publish_with_reply<S: ToSubject, R: ToSubject>(
+        fn publish_with_reply<S, R>(
             &self,
             subject: S,
             reply: R,
             payload: Bytes,
-        ) -> impl Future<Output = Result<(), PublishError>>;
+        ) -> impl Future<Output = Result<(), PublishError>>
+        where
+            S: ToSubject,
+            R: ToSubject;
 
         fn publish_message(
             &self,
@@ -113,17 +116,21 @@ pub mod traits {
         ) -> impl Future<Output = Result<(), PublishError>>;
     }
     pub trait Subscriber {
-        fn subscribe<S: ToSubject>(
+        fn subscribe<S>(
             &self,
             subject: S,
-        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>;
+        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>
+        where
+            S: ToSubject;
     }
     pub trait Requester {
-        fn send_request<S: ToSubject>(
+        fn send_request<S>(
             &self,
             subject: S,
             request: Request,
-        ) -> impl Future<Output = Result<Message, RequestError>>;
+        ) -> impl Future<Output = Result<Message, RequestError>>
+        where
+            S: ToSubject;
     }
     pub trait TimeoutProvider {
         fn timeout(&self) -> Option<Duration>;
@@ -147,12 +154,16 @@ impl traits::TimeoutProvider for Client {
 }
 
 impl traits::Publisher for Client {
-    fn publish_with_reply<S: ToSubject, R: ToSubject>(
+    fn publish_with_reply<S, R>(
         &self,
         subject: S,
         reply: R,
         payload: Bytes,
-    ) -> impl Future<Output = Result<(), PublishError>> {
+    ) -> impl Future<Output = Result<(), PublishError>>
+    where
+        S: ToSubject,
+        R: ToSubject,
+    {
         self.publish_with_reply(subject, reply, payload)
     }
 
@@ -165,10 +176,10 @@ impl traits::Publisher for Client {
 }
 
 impl traits::Subscriber for Client {
-    fn subscribe<S: ToSubject>(
-        &self,
-        subject: S,
-    ) -> impl Future<Output = Result<Subscriber, SubscribeError>> {
+    fn subscribe<S>(&self, subject: S) -> impl Future<Output = Result<Subscriber, SubscribeError>>
+    where
+        S: ToSubject,
+    {
         self.subscribe(subject)
     }
 }
@@ -206,6 +217,7 @@ impl Client {
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
         statistics: Arc<Statistics>,
+        skip_subject_validation: bool,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -219,7 +231,25 @@ impl Client {
             request_timeout,
             max_payload,
             connection_stats: statistics,
+            skip_subject_validation,
         }
+    }
+
+    /// Converts a subject to a [`Subject`], optionally validating it.
+    ///
+    /// If subject validation is enabled (the default), the subject is validated
+    /// before conversion. If validation is disabled via
+    /// [`ConnectOptions::skip_subject_validation`], the subject is converted
+    /// without validation.
+    fn maybe_validate_subject<S: ToSubject>(
+        &self,
+        subject: S,
+    ) -> Result<crate::Subject, crate::subject::SubjectError> {
+        let subject = subject.to_subject();
+        if !self.skip_subject_validation && !subject.is_valid() {
+            return Err(crate::subject::SubjectError::InvalidFormat);
+        }
+        Ok(subject)
     }
 
     /// Returns the default timeout for requests set when creating the client.
@@ -318,7 +348,10 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
             return Err(PublishError::with_source(
@@ -367,7 +400,9 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -402,8 +437,12 @@ impl Client {
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
-        let reply = reply.to_subject();
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+        let reply = self
+            .maybe_validate_subject(reply)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -441,8 +480,12 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
-        let reply = reply.to_subject();
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+        let reply = self
+            .maybe_validate_subject(reply)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -471,13 +514,6 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
-
-        trace!(
-            "request sent to subject: {} ({})",
-            subject.as_ref(),
-            payload.len()
-        );
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
@@ -503,8 +539,6 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
-
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
@@ -527,7 +561,9 @@ impl Client {
         subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| RequestError::with_source(RequestErrorKind::Other, e))?;
 
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
@@ -640,7 +676,13 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let subject = subject.to_subject();
+        let subject = self.maybe_validate_subject(subject).map_err(|e| {
+            SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e,
+            )))
+        })?;
+
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -677,7 +719,12 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = subject.to_subject();
+        let subject = self.maybe_validate_subject(subject).map_err(|e| {
+            SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e,
+            )))
+        })?;
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);

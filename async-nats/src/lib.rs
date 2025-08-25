@@ -243,7 +243,7 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
-pub use subject::Subject;
+pub use subject::{Subject, SubjectError, ToSubject};
 
 mod auth;
 pub(crate) mod auth_utils;
@@ -1064,6 +1064,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.request_timeout,
         max_payload,
         statistics,
+        options.skip_subject_validation,
     );
 
     task::spawn(async move {
@@ -1733,12 +1734,19 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
     let subject_str = subject.as_ref();
-    !subject_str.starts_with('.')
-        && !subject_str.ends_with('.')
-        && subject_str.bytes().all(|c| !c.is_ascii_whitespace())
+    let bytes = subject_str.as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    bytes[0] != b'.'
+        && bytes[bytes.len() - 1] != b'.'
+        && memchr::memmem::find(bytes, b"..").is_none()
+        && memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none()
+        && memchr::memchr(b'\t', bytes).is_none()
 }
 #[allow(unused_macros)]
 macro_rules! from_with_timeout {

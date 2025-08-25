@@ -85,11 +85,13 @@ pub mod traits {
     }
 
     pub trait Publisher {
-        fn publish<S: ToSubject>(
+        fn publish<S>(
             &self,
             subject: S,
             payload: Bytes,
-        ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
+        ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>
+        where
+            S: ToSubject;
 
         fn publish_message(
             &self,
@@ -1732,12 +1734,16 @@ impl crate::client::traits::Requester for Context {
 }
 
 impl crate::client::traits::Publisher for Context {
-    fn publish_with_reply<S: ToSubject, R: ToSubject>(
+    fn publish_with_reply<S, R>(
         &self,
         subject: S,
         reply: R,
         payload: Bytes,
-    ) -> impl Future<Output = Result<(), crate::PublishError>> {
+    ) -> impl Future<Output = Result<(), crate::PublishError>>
+    where
+        S: ToSubject,
+        R: ToSubject,
+    {
         self.client.publish_with_reply(subject, reply, payload)
     }
 
