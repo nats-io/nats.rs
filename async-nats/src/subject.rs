@@ -109,10 +109,6 @@ impl Subject {
 
 impl<'a> From<&'a str> for Subject {
     fn from(s: &'a str) -> Self {
-        // Validate subject format
-        if !crate::is_valid_subject(s) {
-            panic!("Invalid subject: contains spaces, control characters, or starts/ends with '.'")
-        }
         // Since &str is guaranteed to be valid UTF-8, we can create the Subject instance by copying the contents of the &str
         Subject {
             bytes: Bytes::copy_from_slice(s.as_bytes()),
@@ -122,10 +118,6 @@ impl<'a> From<&'a str> for Subject {
 
 impl From<String> for Subject {
     fn from(s: String) -> Self {
-        // Validate subject format
-        if !crate::is_valid_subject(&s) {
-            panic!("Invalid subject: contains spaces, control characters, or starts/ends with '.'")
-        }
         // Since the input `String` is guaranteed to be valid UTF-8, we can
         // safely transmute the internal Vec<u8> to a Bytes value.
         let bytes = Bytes::from(s.into_bytes());
@@ -133,40 +125,11 @@ impl From<String> for Subject {
     }
 }
 
-/// Error type for invalid subjects
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SubjectError {
-    /// The bytes are not valid UTF-8
-    InvalidUtf8(Utf8Error),
-    /// The subject contains invalid characters or format
-    InvalidFormat,
-}
-
-impl fmt::Display for SubjectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SubjectError::InvalidUtf8(e) => write!(f, "Invalid UTF-8 in subject: {}", e),
-            SubjectError::InvalidFormat => write!(f, "Invalid subject: contains spaces, control characters, or starts/ends with '.'"),
-        }
-    }
-}
-
-impl std::error::Error for SubjectError {}
-
-impl From<Utf8Error> for SubjectError {
-    fn from(e: Utf8Error) -> Self {
-        SubjectError::InvalidUtf8(e)
-    }
-}
-
 impl TryFrom<Bytes> for Subject {
-    type Error = SubjectError;
+    type Error = Utf8Error;
 
     fn try_from(bytes: Bytes) -> Result<Self, Self::Error> {
-        let str_ref = from_utf8(bytes.as_ref())?;
-        if !crate::is_valid_subject(str_ref) {
-            return Err(SubjectError::InvalidFormat);
-        }
+        from_utf8(bytes.as_ref())?;
         Ok(Subject { bytes })
     }
 }

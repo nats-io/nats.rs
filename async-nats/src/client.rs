@@ -306,6 +306,15 @@ impl Client {
         payload: Bytes,
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
+        
+        // Validate subject format
+        if !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+        
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
             return Err(PublishError::with_source(
@@ -391,6 +400,14 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
         let reply = reply.to_subject();
+        
+        // Validate subject format
+        if !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'"  ,
+            ));
+        }
 
         self.sender
             .send(Command::Publish(PublishMessage {
@@ -430,6 +447,14 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
         let reply = reply.to_subject();
+        
+        // Validate subject format
+        if !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'"  ,
+            ));
+        }
 
         self.sender
             .send(Command::Publish(PublishMessage {
