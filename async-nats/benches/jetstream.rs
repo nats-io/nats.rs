@@ -111,9 +111,9 @@ pub fn jetstream_publish_async(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let context = rt.block_on(async {
-                    let context = async_nats::jetstream::new(
-                        async_nats::connect(server.client_url()).await.unwrap(),
-                    );
+                    let context = async_nats::jetstream::context::ContextBuilder::new()
+                        .backpressure_on_inflight(true)
+                        .build(async_nats::connect(server.client_url()).await.unwrap());
 
                     let stream = context
                         .create_stream(stream::Config {
@@ -152,9 +152,10 @@ pub fn jetstream_publish_async(c: &mut Criterion) {
             |b, _| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let context = rt.block_on(async {
-                    let context = async_nats::jetstream::new(
-                        async_nats::connect(server.client_url()).await.unwrap(),
-                    );
+                    let context = async_nats::jetstream::context::ContextBuilder::new()
+                        .backpressure_on_inflight(true)
+                        .max_ack_inflight(5000)
+                        .build(async_nats::connect(server.client_url()).await.unwrap());
 
                     let stream = context
                         .create_stream(stream::Config {

@@ -67,17 +67,15 @@ pub struct Context {
 }
 
 fn spawn_acker(
-    rx: tokio::sync::mpsc::Receiver<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    rx: ReceiverStream<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
     ack_timeout: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let stream = ReceiverStream::new(rx);
-        stream
-            .for_each_concurrent(None, |(subscription, permit)| async move {
-                tokio::time::timeout(ack_timeout, subscription).await.ok();
-                drop(permit);
-            })
-            .await;
+        rx.for_each_concurrent(20, |(subscription, permit)| async move {
+            tokio::time::timeout(ack_timeout, subscription).await.ok();
+            drop(permit);
+        })
+        .await;
     })
 }
 
@@ -131,7 +129,7 @@ impl Default for ContextBuilder<Yes> {
         ContextBuilder {
             prefix: "$JS.API".to_string(),
             timeout: Duration::from_secs(5),
-            semaphore_capacity: 50_000,
+            semaphore_capacity: 2_000,
             ack_timeout: Duration::from_secs(30),
             backpressure_on_inflight: false,
             _phantom: PhantomData {},
@@ -251,7 +249,8 @@ where
             oneshot::Receiver<Message>,
             OwnedSemaphorePermit,
         )>(acker_channel_capacity);
-        let acker_task = Arc::new(spawn_acker(rx, self.ack_timeout));
+        let stream = ReceiverStream::new(rx);
+        let acker_task = Arc::new(spawn_acker(stream, self.ack_timeout));
         Context {
             client,
             prefix: self.prefix,
