@@ -161,6 +161,12 @@ impl fmt::Display for Subject {
 
 pub trait ToSubject {
     fn to_subject(&self) -> Subject;
+    
+    /// Returns true if this subject needs validation before use.
+    /// Default implementation returns true for safety.
+    fn needs_validation(&self) -> bool {
+        true
+    }
 }
 
 impl ToSubject for Subject {
@@ -181,6 +187,26 @@ impl ToSubject for String {
     }
 }
 
+impl ToSubject for ValidatedSubject {
+    fn to_subject(&self) -> Subject {
+        self.inner.clone()
+    }
+    
+    fn needs_validation(&self) -> bool {
+        false // Already validated!
+    }
+}
+
+impl ToSubject for &ValidatedSubject {
+    fn to_subject(&self) -> Subject {
+        self.inner.clone()
+    }
+    
+    fn needs_validation(&self) -> bool {
+        false // Already validated!
+    }
+}
+
 impl Serialize for Subject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -196,5 +222,155 @@ impl<'de> Deserialize<'de> for Subject {
         D: serde::Deserializer<'de>,
     {
         Ok(String::deserialize(deserializer)?.into())
+    }
+}
+
+/// A `ValidatedSubject` is a subject that has been pre-validated to ensure it conforms to NATS subject rules.
+/// This type guarantees at the type level that the subject is valid, allowing publish operations to skip validation.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ValidatedSubject {
+    inner: Subject,
+}
+
+/// Error returned when validating a subject
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubjectError {
+    /// The subject contains invalid characters or format
+    InvalidFormat,
+}
+
+impl fmt::Display for SubjectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SubjectError::InvalidFormat => {
+                write!(f, "Invalid subject: contains spaces, control characters, or starts/ends with '.'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SubjectError {}
+
+impl ValidatedSubject {
+    /// Creates a new `ValidatedSubject` from a string, validating it first.
+    ///
+    /// # Examples
+    /// ```
+    /// use async_nats::subject::{ValidatedSubject, SubjectError};
+    /// 
+    /// let subject = ValidatedSubject::new("events.data").unwrap();
+    /// assert!(ValidatedSubject::new("events data").is_err());
+    /// ```
+    pub fn new<S: Into<Subject>>(s: S) -> Result<Self, SubjectError> {
+        let subject = s.into();
+        if !crate::is_valid_subject(&subject) {
+            return Err(SubjectError::InvalidFormat);
+        }
+        Ok(Self { inner: subject })
+    }
+
+    /// Creates a new `ValidatedSubject` from a static string.
+    /// This should only be used with compile-time constants that are known to be valid.
+    ///
+    /// # Safety
+    /// The caller must ensure the subject is valid according to NATS rules.
+    ///
+    /// # Examples
+    /// ```
+    /// use async_nats::subject::ValidatedSubject;
+    /// 
+    /// const EVENTS_TOPIC: ValidatedSubject = ValidatedSubject::from_static("events.data");
+    /// ```
+    pub const fn from_static(s: &'static str) -> Self {
+        // Note: We can't validate at compile time in stable Rust, 
+        // so this is marked as a const fn that should only be used with known-valid strings
+        Self {
+            inner: Subject::from_static(s),
+        }
+    }
+
+    /// Converts the `ValidatedSubject` into the inner `Subject`.
+    pub fn into_inner(self) -> Subject {
+        self.inner
+    }
+
+    /// Returns a reference to the inner `Subject`.
+    pub fn as_subject(&self) -> &Subject {
+        &self.inner
+    }
+
+    /// Extracts a string slice containing the entire subject.
+    pub fn as_str(&self) -> &str {
+        self.inner.as_str()
+    }
+}
+
+impl TryFrom<String> for ValidatedSubject {
+    type Error = SubjectError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        ValidatedSubject::new(s)
+    }
+}
+
+impl TryFrom<&str> for ValidatedSubject {
+    type Error = SubjectError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        ValidatedSubject::new(s)
+    }
+}
+
+impl TryFrom<Subject> for ValidatedSubject {
+    type Error = SubjectError;
+
+    fn try_from(subject: Subject) -> Result<Self, Self::Error> {
+        if !crate::is_valid_subject(&subject) {
+            return Err(SubjectError::InvalidFormat);
+        }
+        Ok(Self { inner: subject })
+    }
+}
+
+impl From<ValidatedSubject> for Subject {
+    fn from(validated: ValidatedSubject) -> Self {
+        validated.inner
+    }
+}
+
+impl AsRef<str> for ValidatedSubject {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<Subject> for ValidatedSubject {
+    fn as_ref(&self) -> &Subject {
+        &self.inner
+    }
+}
+
+impl fmt::Display for ValidatedSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl Serialize for ValidatedSubject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ValidatedSubject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        ValidatedSubject::try_from(s).map_err(serde::de::Error::custom)
     }
 }
