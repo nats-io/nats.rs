@@ -17,7 +17,7 @@ categories = ["network-programming", "api-bindings"]
 aws-lc-rs = { version = "1.6", optional = true }
 memchr = "2.4"
 bytes = { version = "1.4.0", features = ["serde"] }
-futures-util = { version = "0.3.28", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.28", default-features = false, features = ["std", "sink"] }
 nkeys = "0.4"
 once_cell = "1.18.0"
 regex = "1.9.1"
