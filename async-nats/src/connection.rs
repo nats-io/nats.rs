@@ -923,6 +923,22 @@ mod read_op {
                 ..Default::default()
             })))
         );
+
+        server
+            .write_all(b"INFO { \"version\": \"1.0.0\", \"cluster\": \"test-cluster\" }\r\n")
+            .await
+            .unwrap();
+        server.flush().await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Info(Box::new(ServerInfo {
+                version: "1.0.0".into(),
+                cluster: Some("test-cluster".into()),
+                ..Default::default()
+            })))
+        );
     }
 
     #[tokio::test]

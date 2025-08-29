@@ -324,6 +324,15 @@ pub struct ServerInfo {
     /// Whether server goes into lame duck mode.
     #[serde(default, rename = "ldm")]
     pub lame_duck_mode: bool,
+    /// Name of the cluster if the server is in cluster-mode
+    #[serde(default)]
+    pub cluster: Option<String>,
+    /// The configured NATS domain of the server.
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// Whether the server supports JetStream.
+    #[serde(default)]
+    pub jetstream: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
