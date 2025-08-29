@@ -232,7 +232,8 @@ where
     }
 
     /// Enable or disable backpressure when max inflight acks is reached.
-    /// When enabled, publish will wait for permits to become available instead of erroring.
+    /// When enabled, publish will wait for permits to become available instead of returning an
+    /// error.
     /// Default is false (errors on max inflight).
     pub fn backpressure_on_inflight(self, enabled: bool) -> ContextBuilder<Yes>
     where
