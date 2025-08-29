@@ -64,14 +64,16 @@ pub struct Context {
     pub(crate) ack_sender:
         tokio::sync::mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
     pub(crate) backpressure_on_inflight: bool,
+    pub(crate) semaphore_capacity: usize,
 }
 
 fn spawn_acker(
     rx: ReceiverStream<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
     ack_timeout: Duration,
+    concurrency: Option<usize>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        rx.for_each_concurrent(20, |(subscription, permit)| async move {
+        rx.for_each_concurrent(concurrency, |(subscription, permit)| async move {
             tokio::time::timeout(ack_timeout, subscription).await.ok();
             drop(permit);
         })
@@ -121,6 +123,7 @@ pub struct ContextBuilder<PREFIX: ToAssign> {
     semaphore_capacity: usize,
     ack_timeout: Duration,
     backpressure_on_inflight: bool,
+    concurrency_limit: Option<usize>,
     _phantom: PhantomData<PREFIX>,
 }
 
@@ -129,9 +132,10 @@ impl Default for ContextBuilder<Yes> {
         ContextBuilder {
             prefix: "$JS.API".to_string(),
             timeout: Duration::from_secs(5),
-            semaphore_capacity: 2_000,
+            semaphore_capacity: 5_000,
             ack_timeout: Duration::from_secs(30),
-            backpressure_on_inflight: false,
+            backpressure_on_inflight: true,
+            concurrency_limit: None,
             _phantom: PhantomData {},
         }
     }
@@ -153,6 +157,7 @@ impl ContextBuilder<Yes> {
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
             backpressure_on_inflight: self.backpressure_on_inflight,
+            concurrency_limit: self.concurrency_limit,
             _phantom: PhantomData,
         }
     }
@@ -166,6 +171,7 @@ impl ContextBuilder<Yes> {
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
             backpressure_on_inflight: self.backpressure_on_inflight,
+            concurrency_limit: self.concurrency_limit,
             _phantom: PhantomData,
         }
     }
@@ -186,6 +192,7 @@ where
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
             backpressure_on_inflight: self.backpressure_on_inflight,
+            concurrency_limit: self.concurrency_limit,
             _phantom: PhantomData,
         }
     }
@@ -202,6 +209,7 @@ where
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout,
             backpressure_on_inflight: self.backpressure_on_inflight,
+            concurrency_limit: self.concurrency_limit,
             _phantom: PhantomData,
         }
     }
@@ -218,6 +226,7 @@ where
             semaphore_capacity: capacity,
             ack_timeout: self.ack_timeout,
             backpressure_on_inflight: self.backpressure_on_inflight,
+            concurrency_limit: self.concurrency_limit,
             _phantom: PhantomData,
         }
     }
@@ -235,22 +244,41 @@ where
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
             backpressure_on_inflight: enabled,
+            concurrency_limit: self.concurrency_limit,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Sets the concurrency limit for the ack handler task. This might be useful
+    /// in scenarios where Tokio runtime is under heavy load.
+    pub fn concurrency_limit(self, limit: Option<usize>) -> ContextBuilder<Yes>
+    where
+        Yes: ToAssign,
+    {
+        ContextBuilder {
+            prefix: self.prefix,
+            timeout: self.timeout,
+            semaphore_capacity: self.semaphore_capacity,
+            ack_timeout: self.ack_timeout,
+            backpressure_on_inflight: self.backpressure_on_inflight,
+            concurrency_limit: limit,
             _phantom: PhantomData,
         }
     }
 
     /// Build the [Context] with the given settings.
     pub fn build(self, client: Client) -> Context {
-        // Channel buffer must be larger than semaphore capacity to handle bursts
-        // when many PublishAckFutures are dropped at once. We use 2x capacity
-        // to ensure the channel never fills up under normal operation.
-        let acker_channel_capacity = self.semaphore_capacity * 2;
+        let acker_channel_capacity = self.semaphore_capacity;
         let (tx, rx) = tokio::sync::mpsc::channel::<(
             oneshot::Receiver<Message>,
             OwnedSemaphorePermit,
         )>(acker_channel_capacity);
         let stream = ReceiverStream::new(rx);
-        let acker_task = Arc::new(spawn_acker(stream, self.ack_timeout));
+        let acker_task = Arc::new(spawn_acker(
+            stream,
+            self.ack_timeout,
+            self.concurrency_limit,
+        ));
         Context {
             client,
             prefix: self.prefix,
@@ -259,6 +287,7 @@ where
             acker_task,
             ack_sender: tx,
             backpressure_on_inflight: self.backpressure_on_inflight,
+            semaphore_capacity: self.semaphore_capacity,
         }
     }
 }
@@ -270,6 +299,13 @@ impl Context {
 
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout
+    }
+
+    pub async fn wait_for_acks(&self) {
+        self.max_ack_semaphore
+            .acquire_many(self.semaphore_capacity as u32)
+            .await
+            .ok();
     }
 
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
@@ -1617,11 +1653,10 @@ pub struct PublishAckFuture {
 
 impl Drop for PublishAckFuture {
     fn drop(&mut self) {
-        match (self.subscription.take(), self.permit.take()) {
-            (Some(sub), Some(permit)) => {
-                self.tx.try_send((sub, permit)).ok();
+        if let (Some(sub), Some(permit)) = (self.subscription.take(), self.permit.take()) {
+            if let Err(err) = self.tx.try_send((sub, permit)) {
+                tracing::warn!("failed to pass future permit to the acker: {}", err);
             }
-            _ => {}
         }
     }
 }
