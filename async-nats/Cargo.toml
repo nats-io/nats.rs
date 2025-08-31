@@ -44,8 +44,6 @@ rustls-webpki = { package = "rustls-webpki", default-features = false, version =
 portable-atomic = "1"
 tokio-websockets = { version = "0.10", default-features = false, features = ["client", "rand", "rustls-webpki-roots"], optional = true }
 pin-project = "1.0"
-clap = "4.5.43"
-num_cpus = "1.17.0"
 
 [dev-dependencies]
 ring = "0.17"
