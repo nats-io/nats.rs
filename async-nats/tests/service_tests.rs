@@ -16,7 +16,7 @@ mod service {
     use std::{collections::HashMap, str::from_utf8};
 
     use async_nats::service::{self, Info, ServiceExt, Stats};
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use jsonschema::JSONSchema;
     use tracing::debug;
 

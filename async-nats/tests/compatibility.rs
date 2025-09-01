@@ -13,7 +13,7 @@
 
 #[cfg(feature = "compatibility_tests")]
 mod compatibility {
-    use futures::{pin_mut, stream::Peekable, StreamExt};
+    use futures_util::{pin_mut, stream::Peekable, StreamExt};
     use ring::digest::{self, SHA256};
 
     use core::panic;

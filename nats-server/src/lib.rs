@@ -385,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn cluster_without_js() {
         use crate::run_cluster;
-        use futures::StreamExt;
+        use futures_util::StreamExt;
         let cluster = run_cluster("");
 
         let client = async_nats::connect(cluster.servers[0].client_url())

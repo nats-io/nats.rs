@@ -23,8 +23,8 @@ use crate::{
     header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode,
 };
 use bytes::Bytes;
-use futures::future::BoxFuture;
-use futures::{Future, StreamExt, TryFutureExt};
+use futures_util::future::BoxFuture;
+use futures_util::{Future, StreamExt, TryFutureExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
@@ -591,7 +591,7 @@ impl Context {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::TryStreamExt;
+    /// use futures_util::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let stream_name = jetstream.stream_by_subject("foo.>");
@@ -637,7 +637,7 @@ impl Context {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::TryStreamExt;
+    /// use futures_util::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let mut names = jetstream.stream_names();
@@ -665,7 +665,7 @@ impl Context {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::TryStreamExt;
+    /// use futures_util::TryStreamExt;
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let mut streams = jetstream.streams();
@@ -1461,7 +1461,7 @@ pub struct StreamNames {
     done: bool,
 }
 
-impl futures::Stream for StreamNames {
+impl futures_util::Stream for StreamNames {
     type Item = Result<String, StreamsError>;
 
     fn poll_next(
@@ -1537,7 +1537,7 @@ pub struct Streams {
     done: bool,
 }
 
-impl futures::Stream for Streams {
+impl futures_util::Stream for Streams {
     type Item = Result<super::stream::Info, StreamsError>;
 
     fn poll_next(

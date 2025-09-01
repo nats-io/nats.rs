@@ -25,7 +25,7 @@ use std::task::{Context, Poll};
 
 #[cfg(feature = "websockets")]
 use {
-    futures::{SinkExt, StreamExt},
+    futures_util::{SinkExt, StreamExt},
     pin_project::pin_project,
     tokio::io::ReadBuf,
     tokio_websockets::WebSocketStream,

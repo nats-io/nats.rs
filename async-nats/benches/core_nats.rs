@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use criterion::{criterion_group, Criterion};
-use futures::stream::StreamExt;
+use futures_util::stream::StreamExt;
 
 static MSG: &[u8] = &[22; 32768];
 

@@ -22,7 +22,7 @@ mod object_store {
         HeaderMap,
     };
     use base64::Engine;
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use rand::RngCore;
     use tokio::io::AsyncReadExt;
 

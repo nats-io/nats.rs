@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::{
+use futures_util::{
     future::{BoxFuture, Either},
     FutureExt, StreamExt,
 };
@@ -54,8 +54,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -114,7 +114,7 @@ impl Consumer<Config> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -174,8 +174,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -225,8 +225,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -271,8 +271,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -361,7 +361,7 @@ impl Batch {
     }
 }
 
-impl futures::Stream for Batch {
+impl futures_util::Stream for Batch {
     type Item = Result<jetstream::Message, crate::Error>;
 
     fn poll_next(
@@ -442,7 +442,7 @@ pub struct Sequence {
     next: Option<BoxFuture<'static, Result<Batch, MessagesError>>>,
 }
 
-impl futures::Stream for Sequence {
+impl futures_util::Stream for Sequence {
     type Item = Result<Batch, MessagesError>;
 
     fn poll_next(
@@ -516,8 +516,8 @@ impl Consumer<OrderedConfig> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -766,7 +766,7 @@ pub struct Ordered {
     missed_heartbeats: bool,
 }
 
-impl futures::Stream for Ordered {
+impl futures_util::Stream for Ordered {
     type Item = Result<jetstream::Message, OrderedError>;
 
     fn poll_next(
@@ -1088,7 +1088,7 @@ impl std::fmt::Display for MessagesErrorKind {
 
 pub type MessagesError = Error<MessagesErrorKind>;
 
-impl futures::Stream for Stream {
+impl futures_util::Stream for Stream {
     type Item = Result<jetstream::Message, MessagesError>;
 
     fn poll_next(
@@ -1271,7 +1271,7 @@ impl futures::Stream for Stream {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// use async_nats::jetstream::consumer::PullConsumer;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
@@ -1330,7 +1330,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1372,7 +1372,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1410,7 +1410,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1449,7 +1449,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1488,7 +1488,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1529,7 +1529,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1568,7 +1568,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1607,7 +1607,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1657,7 +1657,7 @@ impl<'a> StreamBuilder<'a> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
 /// use async_nats::jetstream::consumer::PullConsumer;
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
@@ -1719,7 +1719,7 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1756,7 +1756,7 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1790,7 +1790,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1829,7 +1829,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1870,7 +1870,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1913,7 +1913,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1953,7 +1953,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1993,7 +1993,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2039,7 +2039,7 @@ impl<'a> FetchBuilder<'a> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
 /// use async_nats::jetstream::consumer::PullConsumer;
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
@@ -2102,7 +2102,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2140,7 +2140,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2174,7 +2174,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2214,7 +2214,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -2257,7 +2257,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -2297,7 +2297,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -2339,7 +2339,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2376,7 +2376,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
