@@ -1547,4 +1547,39 @@ mod kv {
             50
         );
     }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn put_with_ttl() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(1)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        kv.put_with_ttl("key", "value".into(), Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        kv.get("key").await.unwrap().unwrap();
+
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let result = kv.get("key").await.unwrap();
+        assert!(result.is_none(), "key should be expired");
+    }
 }
