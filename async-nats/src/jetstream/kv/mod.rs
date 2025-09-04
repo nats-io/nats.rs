@@ -351,6 +351,49 @@ impl Store {
     /// # }
     /// ```
     pub async fn put<T: AsRef<str>>(&self, key: T, value: bytes::Bytes) -> Result<u64, PutError> {
+        self.put_maybe_ttl(key, value, None).await
+    }
+
+    /// Puts new key value pair into the bucket.
+    /// If key didn't exist, it is created. If it did exist, a new value with a new version is
+    /// added.
+    /// It will set a TTL specific for that key.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    /// let kv = jetstream
+    ///     .create_key_value(async_nats::jetstream::kv::Config {
+    ///         bucket: "kv".to_string(),
+    ///         history: 1,
+    ///         ..Default::default()
+    ///     })
+    ///     .await?;
+    /// let status = kv
+    ///     .put_with_ttl("key", "value".into(), Duration::from_secs(10))
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn put_with_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        value: bytes::Bytes,
+        ttl: Duration,
+    ) -> Result<u64, PutError> {
+        self.put_maybe_ttl(key, value, Some(ttl)).await
+    }
+
+    async fn put_maybe_ttl<T: AsRef<str>>(
+        &self,
+        key: T,
+        value: bytes::Bytes,
+        ttl: Option<Duration>,
+    ) -> Result<u64, PutError> {
         if !is_valid_key(key.as_ref()) {
             return Err(PutError::new(PutErrorKind::InvalidKey));
         }
@@ -362,10 +405,15 @@ impl Store {
         subject.push_str(self.put_prefix.as_ref().unwrap_or(&self.prefix));
         subject.push_str(key.as_ref());
 
+        let mut headers = crate::HeaderMap::default();
+        if let Some(ttl) = ttl {
+            headers.insert(header::NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
+        }
+
         let publish_ack = self
             .stream
             .context
-            .publish(subject, value)
+            .publish_with_headers(subject, headers, value)
             .await
             .map_err(|err| PutError::with_source(PutErrorKind::Publish, err))?;
         let ack = publish_ack
