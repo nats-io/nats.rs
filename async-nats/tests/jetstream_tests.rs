@@ -390,6 +390,13 @@ mod jetstream {
         let cluster = consumer.cached_info().cluster.as_ref().unwrap();
 
         assert_eq!(cluster.replicas.len(), 2);
+        assert!(cluster.leader.is_some());
+        #[cfg(feature = "server_2_12")]
+        {
+            assert!(cluster.leader_since.is_some());
+            assert!(cluster.traffic_account.is_some());
+            assert!(cluster.system_account);
+        }
 
         context.delete_stream("events2").await.unwrap();
     }
