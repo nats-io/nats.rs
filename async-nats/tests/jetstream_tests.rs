@@ -3993,6 +3993,8 @@ mod jetstream {
                     no_wait: false,
                     min_pending: Some(10),
                     min_ack_pending: None,
+                    #[cfg(feature = "server_2_12")]
+                    priority: None,
                     group: Some("A".to_string()),
                 },
                 "NOTHING".into(),
@@ -4016,6 +4018,8 @@ mod jetstream {
                     no_wait: false,
                     min_pending: Some(10),
                     min_ack_pending: None,
+                    #[cfg(feature = "server_2_12")]
+                    priority: None,
                     group: Some("A".to_string()),
                 },
                 "NOTHING_ACK".into(),
@@ -4047,6 +4051,8 @@ mod jetstream {
                     no_wait: false,
                     min_pending: Some(10),
                     min_ack_pending: None,
+                    #[cfg(feature = "server_2_12")]
+                    priority: None,
                     group: Some("A".to_string()),
                 },
                 "SOMETHING".into(),
@@ -4068,6 +4074,8 @@ mod jetstream {
                     min_pending: None,
                     min_ack_pending: Some(5),
                     group: Some("A".to_string()),
+                    #[cfg(feature = "server_2_12")]
+                    priority: None,
                 },
                 "SOMETHING_ACK".into(),
             )
@@ -4422,6 +4430,82 @@ mod jetstream {
             .publish("test", "data".into())
             .await
             .unwrap()
+            .await
+            .unwrap();
+    }
+
+    #[cfg(feature = "server_2_12")]
+    #[tokio::test]
+    async fn prioritized_pull_consumer() {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "source".into(),
+                subjects: vec!["test".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("consumer".into()),
+                priority_policy: PriorityPolicy::Prioritized,
+                priority_groups: vec!["A".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut high = consumer
+            .stream()
+            .group("A")
+            .max_messages_per_batch(50)
+            .expires(tokio::time::Duration::from_secs(30))
+            .priority(1)
+            .messages()
+            .await
+            .unwrap()
+            .take(10);
+
+        let mut low = consumer
+            .stream()
+            .group("A")
+            .expires(tokio::time::Duration::from_secs(30))
+            .max_messages_per_batch(50)
+            .priority(5)
+            .messages()
+            .await
+            .unwrap()
+            .take(10);
+
+        tokio::time::timeout(Duration::from_millis(100), low.next())
+            .await
+            .unwrap_err();
+
+        tokio::time::timeout(Duration::from_millis(100), high.next())
+            .await
+            .unwrap_err();
+
+        for i in 0..10 {
+            context
+                .publish("test", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        tokio::time::timeout(Duration::from_millis(500), low.next())
+            .await
+            .unwrap_err();
+        tokio::time::timeout(Duration::from_secs(1), high.next())
             .await
             .unwrap();
     }
