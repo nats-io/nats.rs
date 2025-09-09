@@ -4353,4 +4353,69 @@ mod jetstream {
         let info = consumer.info().await.unwrap();
         assert_eq!(info.num_ack_pending, 50);
     }
+
+    #[tokio::test]
+    async fn mirrors_remove() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "source".into(),
+                subjects: vec!["test".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "mirror".into(),
+                mirror: Some(async_nats::jetstream::stream::Source {
+                    name: "source".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("test", "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        context.delete_stream("source").await.unwrap();
+
+        let err = context
+            .publish("test", "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            err.kind(),
+            async_nats::jetstream::context::PublishErrorKind::StreamNotFound
+        );
+
+        context
+            .update_stream(async_nats::jetstream::stream::Config {
+                name: "mirror".into(),
+                subjects: vec!["test".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("test", "data".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+    }
 }
