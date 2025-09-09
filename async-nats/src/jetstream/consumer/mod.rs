@@ -381,6 +381,9 @@ pub enum PriorityPolicy {
     /// Consumer configurations that used [PriorityPolicy::PinnedClient].
     #[serde(rename = "pinned_client")]
     PinnedClient,
+    #[cfg(feature = "server_2_12")]
+    #[serde(rename = "prioritized")]
+    Prioritized,
     #[serde(rename = "none")]
     #[default]
     None,

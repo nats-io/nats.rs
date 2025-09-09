@@ -60,7 +60,7 @@ jsonschema = "0.17.1"
 num = "0.4.1"
 
 [features]
-default = ["server_2_10", "server_2_11", "ring"]
+default = ["server_2_10", "server_2_11", "server_2_12", "ring"]
 # Enables Service API for the client.
 service = []
 websockets = ["dep:tokio-websockets"]

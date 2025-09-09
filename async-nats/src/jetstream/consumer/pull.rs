@@ -99,6 +99,8 @@ impl Consumer<Config> {
                 min_pending: None,
                 min_ack_pending: None,
                 group: None,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             self,
         )
@@ -565,6 +567,8 @@ impl Consumer<OrderedConfig> {
                 min_pending: None,
                 min_ack_pending: None,
                 group: None,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             &config,
         )
@@ -1300,6 +1304,8 @@ pub struct StreamBuilder<'a> {
     group: Option<String>,
     min_pending: Option<usize>,
     min_ack_pending: Option<usize>,
+    #[cfg(feature = "server_2_12")]
+    priority: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1314,6 +1320,8 @@ impl<'a> StreamBuilder<'a> {
             group: None,
             min_pending: None,
             min_ack_pending: None,
+            #[cfg(feature = "server_2_12")]
+            priority: None,
         }
     }
 
@@ -1519,6 +1527,14 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
+    /// Sets the priority at which this stream will get messages. If there are any requests with
+    /// lower priority number, this stream will not get messages until those are satisfied.
+    #[cfg(feature = "server_2_12")]
+    pub fn priority(mut self, priority: usize) -> Self {
+        self.priority = Some(priority);
+        self
+    }
+
     /// Sets overflow threshold for minimum pending acknowledgements before this stream will start getting
     /// messages for a [Consumer].
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [PriorityPolicy::Overflow] set.
@@ -1642,6 +1658,8 @@ impl<'a> StreamBuilder<'a> {
                 min_pending: self.min_pending,
                 group: self.group,
                 min_ack_pending: self.min_ack_pending,
+                #[cfg(feature = "server_2_12")]
+                priority: self.priority,
             },
             self.consumer,
         )
@@ -1902,6 +1920,14 @@ impl<'a> FetchBuilder<'a> {
         self
     }
 
+    /// Sets the priority at which this stream will get messages. If there are any requests with
+    /// lower priority number, this stream will not get messages until those are satisfied.
+    #[cfg(feature = "server_2_12")]
+    pub fn priority(mut self, priority: usize) -> Self {
+        self.batch = priority;
+        self
+    }
+
     /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
     /// messages.
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
@@ -2024,6 +2050,8 @@ impl<'a> FetchBuilder<'a> {
                 min_pending: self.min_pending,
                 min_ack_pending: self.min_ack_pending,
                 group: self.group,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             self.consumer,
         )
@@ -2406,6 +2434,8 @@ impl<'a> BatchBuilder<'a> {
             min_pending: self.min_pending,
             min_ack_pending: self.min_ack_pending,
             group: self.group,
+            #[cfg(feature = "server_2_12")]
+            priority: None,
         };
         Batch::batch(config, self.consumer).await
     }
@@ -2439,6 +2469,8 @@ pub struct BatchConfig {
     pub min_pending: Option<usize>,
     pub min_ack_pending: Option<usize>,
     pub group: Option<String>,
+    #[cfg(feature = "server_2_12")]
+    pub priority: Option<usize>,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -2787,6 +2819,8 @@ async fn recreate_consumer_stream(
                 min_pending: None,
                 min_ack_pending: None,
                 group: None,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             &config,
         ),
