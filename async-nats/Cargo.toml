@@ -70,9 +70,10 @@ fips = ["aws-lc-rs", "tokio-rustls/fips"]
 # All experimental features are part of this feature flag.
 experimental = []
 # Features that require nats-server version 2.10 or higher.
-# It is enabled by default since official 2.10 nats-server release.
+# It is enabled by default since given official nats-server release.
 "server_2_10" = []
 "server_2_11" = []
+"server_2_12" = []
 # Used for enabling/disabling tests that by design take a lot of time to  complete.
 # Those tests are usually used for time-sensitive checks, like consumer heartbeats, longer timeouts, etc.
 slow_tests = []
