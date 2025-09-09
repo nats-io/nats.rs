@@ -1879,9 +1879,12 @@ pub struct ClusterInfo {
     #[serde(default, with = "rfc3339::option")]
     pub leader_since: Option<OffsetDateTime>,
     /// Indicates if this account is a system account.
+    #[cfg(feature = "server_2_12")]
     #[serde(default)]
+    /// Indicates if `traffic_account` is set a system account.
     pub system_account: bool,
-    /// Indicates if this account is a traffic account.
+    #[cfg(feature = "server_2_12")]
+    /// Name of the traffic (replication) account.
     #[serde(default)]
     pub traffic_account: Option<String>,
     /// The members of the RAFT cluster.
