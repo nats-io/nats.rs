@@ -45,7 +45,7 @@ use super::{
     is_valid_name,
     message::{StreamMessage, StreamMessageError},
     response::Response,
-    Context, Message,
+    Context,
 };
 
 pub type InfoError = RequestError;
@@ -273,6 +273,37 @@ impl<I> Stream<I> {
         StreamInfoBuilder::new(self.context.clone(), self.name.clone())
     }
 
+    /// Creates a builder for direct get operations.
+    ///
+    /// Allows for more control over direct get requests, including the ability
+    /// to set no_headers option for optimized payload-only retrieval.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream
+    ///     .get_stream("events")
+    ///     .await?;
+    ///
+    /// // Get message without headers
+    /// let message = stream
+    ///     .direct_get_builder()
+    ///     .sequence(100)
+    ///     .no_headers()
+    ///     .send()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn direct_get_builder(&self) -> DirectGetBuilder {
+        DirectGetBuilder::new(self.context.clone(), self.name.clone())
+    }
+
     /// Gets next message for a [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
@@ -307,60 +338,22 @@ impl<I> Stream<I> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn direct_get_next_for_subject<T: AsRef<str>>(
+    pub async fn direct_get_next_for_subject<T: Into<String>>(
         &self,
         subject: T,
         sequence: Option<u64>,
-    ) -> Result<Message, DirectGetError> {
-        if !is_valid_subject(&subject) {
+    ) -> Result<StreamMessage, DirectGetError> {
+        let subject_str = subject.into();
+        if !is_valid_subject(&subject_str) {
             return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
         }
-        let request_subject = format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.name);
-        let payload;
-        if let Some(sequence) = sequence {
-            payload = json!({
-                "seq": sequence,
-                "next_by_subj": subject.as_ref(),
-            });
-        } else {
-            payload = json!({
-                 "next_by_subj": subject.as_ref(),
-            });
+
+        let mut builder = self.direct_get_builder().next_by_subject(subject_str);
+        if let Some(seq) = sequence {
+            builder = builder.sequence(seq);
         }
 
-        let response = self
-            .context
-            .client
-            .request(
-                request_subject,
-                serde_json::to_vec(&payload).map(Bytes::from)?,
-            )
-            .await
-            .map(|message| Message {
-                message,
-                context: self.context.clone(),
-            })?;
-
-        if let Some(status) = response.status {
-            if let Some(ref description) = response.description {
-                match status {
-                    StatusCode::NOT_FOUND => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
-                    }
-                    // 408 is used in Direct Message for bad/empty payload.
-                    StatusCode::TIMEOUT => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
-                    }
-                    _ => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
-                            status,
-                            description.to_string(),
-                        )));
-                    }
-                }
-            }
-        }
-        Ok(response)
+        builder.send().await
     }
 
     /// Gets first message from [Stream].
@@ -394,50 +387,19 @@ impl<I> Stream<I> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn direct_get_first_for_subject<T: AsRef<str>>(
+    pub async fn direct_get_first_for_subject<T: Into<String>>(
         &self,
         subject: T,
-    ) -> Result<Message, DirectGetError> {
-        if !is_valid_subject(&subject) {
+    ) -> Result<StreamMessage, DirectGetError> {
+        let subject_str = subject.into();
+        if !is_valid_subject(&subject_str) {
             return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject));
         }
-        let request_subject = format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.name);
-        let payload = json!({
-            "next_by_subj": subject.as_ref(),
-        });
 
-        let response = self
-            .context
-            .client
-            .request(
-                request_subject,
-                serde_json::to_vec(&payload).map(Bytes::from)?,
-            )
+        self.direct_get_builder()
+            .next_by_subject(subject_str)
+            .send()
             .await
-            .map(|message| Message {
-                message,
-                context: self.context.clone(),
-            })?;
-        if let Some(status) = response.status {
-            if let Some(ref description) = response.description {
-                match status {
-                    StatusCode::NOT_FOUND => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
-                    }
-                    // 408 is used in Direct Message for bad/empty payload.
-                    StatusCode::TIMEOUT => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
-                    }
-                    _ => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
-                            status,
-                            description.to_string(),
-                        )));
-                    }
-                }
-            }
-        }
-        Ok(response)
     }
 
     /// Gets message from [Stream] with given `sequence id`.
@@ -472,37 +434,7 @@ impl<I> Stream<I> {
     /// # }
     /// ```
     pub async fn direct_get(&self, sequence: u64) -> Result<StreamMessage, DirectGetError> {
-        let subject = format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.name);
-        let payload = json!({
-            "seq": sequence,
-        });
-
-        let response = self
-            .context
-            .client
-            .request(subject, serde_json::to_vec(&payload).map(Bytes::from)?)
-            .await?;
-
-        if let Some(status) = response.status {
-            if let Some(ref description) = response.description {
-                match status {
-                    StatusCode::NOT_FOUND => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
-                    }
-                    // 408 is used in Direct Message for bad/empty payload.
-                    StatusCode::TIMEOUT => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
-                    }
-                    _ => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
-                            status,
-                            description.to_string(),
-                        )));
-                    }
-                }
-            }
-        }
-        StreamMessage::try_from(response).map_err(Into::into)
+        self.direct_get_builder().sequence(sequence).send().await
     }
 
     /// Gets last message for a given `subject`.
@@ -536,38 +468,14 @@ impl<I> Stream<I> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn direct_get_last_for_subject<T: AsRef<str>>(
+    pub async fn direct_get_last_for_subject<T: Into<String>>(
         &self,
         subject: T,
     ) -> Result<StreamMessage, DirectGetError> {
-        let subject = format!(
-            "{}.DIRECT.GET.{}.{}",
-            &self.context.prefix,
-            &self.name,
-            subject.as_ref()
-        );
-
-        let response = self.context.client.request(subject, "".into()).await?;
-        if let Some(status) = response.status {
-            if let Some(ref description) = response.description {
-                match status {
-                    StatusCode::NOT_FOUND => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
-                    }
-                    // 408 is used in Direct Message for bad/empty payload.
-                    StatusCode::TIMEOUT => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
-                    }
-                    _ => {
-                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
-                            status,
-                            description.to_string(),
-                        )));
-                    }
-                }
-            }
-        }
-        StreamMessage::try_from(response).map_err(Into::into)
+        self.direct_get_builder()
+            .last_by_subject(subject)
+            .send()
+            .await
     }
     /// Get a raw message from the stream for a given stream sequence.
     /// This low-level API always reaches stream leader.
@@ -2522,6 +2430,108 @@ impl From<super::context::RequestError> for ConsumerCreateStrictError {
                 ConsumerCreateStrictError::with_source(ConsumerCreateStrictErrorKind::Request, err)
             }
         }
+    }
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct DirectGetRequest {
+    #[serde(rename = "seq", skip_serializing_if = "Option::is_none")]
+    sequence: Option<u64>,
+    #[serde(rename = "last_by_subj", skip_serializing)]
+    last_by_subject: Option<String>,
+    #[serde(rename = "next_by_subj", skip_serializing_if = "Option::is_none")]
+    next_by_subject: Option<String>,
+    #[serde(skip_serializing_if = "is_default", rename = "no_hdr")]
+    no_headers: bool,
+}
+
+pub struct DirectGetBuilder {
+    context: Context,
+    stream_name: String,
+    request: DirectGetRequest,
+}
+
+impl DirectGetBuilder {
+    fn new(context: Context, stream_name: String) -> Self {
+        Self {
+            context,
+            stream_name,
+            request: DirectGetRequest::default(),
+        }
+    }
+
+    /// Sets the sequence for the direct get request.
+    pub fn sequence(mut self, seq: u64) -> Self {
+        self.request.sequence = Some(seq);
+        self
+    }
+
+    /// Sets the last_by_subject for the direct get request.
+    pub fn last_by_subject<T: Into<String>>(mut self, subject: T) -> Self {
+        self.request.last_by_subject = Some(subject.into());
+        self
+    }
+
+    /// Sets the next_by_subject for the direct get request.
+    pub fn next_by_subject<T: Into<String>>(mut self, subject: T) -> Self {
+        self.request.next_by_subject = Some(subject.into());
+        self
+    }
+
+    /// Sets no_headers to true, indicating headers should be excluded from the response.
+    pub fn no_headers(mut self) -> Self {
+        self.request.no_headers = true;
+        self
+    }
+
+    /// Sets no_headers to false, indicating headers should be included in the response (default).
+    pub fn with_headers(mut self) -> Self {
+        self.request.no_headers = false;
+        self
+    }
+
+    /// Sends the get request.
+    pub async fn send(self) -> Result<StreamMessage, DirectGetError> {
+        let payload = serde_json::to_vec(&self.request).map(Bytes::from)?;
+
+        let request_subject = if let Some(subject) = self.request.last_by_subject {
+            format!(
+                "{}.DIRECT.GET.{}.{}",
+                &self.context.prefix, &self.stream_name, subject
+            )
+        } else {
+            format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.stream_name)
+        };
+
+        let response = self
+            .context
+            .client
+            .request(request_subject, payload)
+            .await?;
+
+        // Check for error status
+        if let Some(status) = response.status {
+            if let Some(ref description) = response.description {
+                match status {
+                    StatusCode::NOT_FOUND => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::NotFound))
+                    }
+                    // 408 is used in Direct Message for bad/empty payload.
+                    StatusCode::TIMEOUT => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::InvalidSubject))
+                    }
+                    _ => {
+                        return Err(DirectGetError::new(DirectGetErrorKind::ErrorResponse(
+                            status,
+                            description.to_string(),
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Always return StreamMessage
+        Ok(StreamMessage::try_from(response)?)
     }
 }
 
