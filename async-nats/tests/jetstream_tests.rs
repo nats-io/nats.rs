@@ -731,13 +731,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        let sequence = message
-            .headers
-            .as_ref()
-            .unwrap()
-            .get(header::NATS_SEQUENCE)
-            .unwrap()
-            .as_str();
+        let sequence = message.headers.get(header::NATS_SEQUENCE).unwrap().as_str();
 
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
@@ -746,6 +740,18 @@ mod jetstream {
             .direct_get_next_for_subject("wrong", None)
             .await
             .expect_err("should error");
+
+        // no headers variant
+        let message = stream
+            .direct_get_builder()
+            .no_headers()
+            .next_by_subject("events")
+            .send()
+            .await
+            .unwrap();
+
+        println!("message: {:#?}", message);
+        assert!(message.headers.is_empty());
     }
 
     #[tokio::test]
@@ -804,13 +810,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        let sequence = message
-            .headers
-            .as_ref()
-            .unwrap()
-            .get(header::NATS_SEQUENCE)
-            .unwrap()
-            .as_str();
+        let sequence = message.headers.get(header::NATS_SEQUENCE).unwrap().as_str();
 
         assert_eq!(sequence.parse::<u64>().unwrap(), publish_ack.sequence);
         assert_eq!(payload, message.payload.as_ref());
@@ -4437,9 +4437,6 @@ mod jetstream {
     #[cfg(feature = "server_2_12")]
     #[tokio::test]
     async fn prioritized_pull_consumer() {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .init();
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let context = async_nats::jetstream::new(client);
