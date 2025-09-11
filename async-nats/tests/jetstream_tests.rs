@@ -742,7 +742,7 @@ mod jetstream {
             .expect_err("should error");
 
         // no headers variant
-        let message = stream
+        let payload = stream
             .direct_get_builder()
             .no_headers()
             .next_by_subject("events")
@@ -750,8 +750,8 @@ mod jetstream {
             .await
             .unwrap();
 
-        println!("message: {:#?}", message);
-        assert!(message.headers.is_empty());
+        println!("payload length: {}", payload.len());
+        assert!(!payload.is_empty());
     }
 
     #[tokio::test]

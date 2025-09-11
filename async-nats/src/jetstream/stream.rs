@@ -300,7 +300,7 @@ impl<I> Stream<I> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn direct_get_builder(&self) -> DirectGetBuilder {
+    pub fn direct_get_builder(&self) -> DirectGetBuilder<WithHeaders> {
         DirectGetBuilder::new(self.context.clone(), self.name.clone())
     }
 
@@ -2445,56 +2445,53 @@ pub struct DirectGetRequest {
     no_headers: bool,
 }
 
-pub struct DirectGetBuilder {
+/// Marker type indicating that headers should be included in the response.
+pub struct WithHeaders;
+
+/// Marker type indicating that headers should be excluded from the response.
+pub struct WithoutHeaders;
+
+/// Trait for converting a Message response into the appropriate return type.
+trait DirectGetResponse: Sized {
+    fn from_message(message: crate::Message) -> Result<Self, DirectGetError>;
+}
+
+impl DirectGetResponse for StreamMessage {
+    fn from_message(message: crate::Message) -> Result<Self, DirectGetError> {
+        StreamMessage::try_from(message).map_err(Into::into)
+    }
+}
+
+impl DirectGetResponse for Bytes {
+    fn from_message(message: crate::Message) -> Result<Self, DirectGetError> {
+        Ok(message.payload)
+    }
+}
+
+pub struct DirectGetBuilder<T = WithHeaders> {
     context: Context,
     stream_name: String,
     request: DirectGetRequest,
+    _phantom: std::marker::PhantomData<T>,
 }
 
-impl DirectGetBuilder {
-    fn new(context: Context, stream_name: String) -> Self {
-        Self {
+impl DirectGetBuilder<WithHeaders> {
+    fn new(context: Context, stream_name: String) -> DirectGetBuilder<WithHeaders> {
+        DirectGetBuilder {
             context,
             stream_name,
             request: DirectGetRequest::default(),
+            _phantom: std::marker::PhantomData,
         }
     }
+}
 
-    /// Sets the sequence for the direct get request.
-    pub fn sequence(mut self, seq: u64) -> Self {
-        self.request.sequence = Some(seq);
-        self
-    }
-
-    /// Sets the last_by_subject for the direct get request.
-    pub fn last_by_subject<T: Into<String>>(mut self, subject: T) -> Self {
-        self.request.last_by_subject = Some(subject.into());
-        self
-    }
-
-    /// Sets the next_by_subject for the direct get request.
-    pub fn next_by_subject<T: Into<String>>(mut self, subject: T) -> Self {
-        self.request.next_by_subject = Some(subject.into());
-        self
-    }
-
-    /// Sets no_headers to true, indicating headers should be excluded from the response.
-    pub fn no_headers(mut self) -> Self {
-        self.request.no_headers = true;
-        self
-    }
-
-    /// Sets no_headers to false, indicating headers should be included in the response (default).
-    pub fn with_headers(mut self) -> Self {
-        self.request.no_headers = false;
-        self
-    }
-
-    /// Sends the get request.
-    pub async fn send(self) -> Result<StreamMessage, DirectGetError> {
+impl<T> DirectGetBuilder<T> {
+    /// Internal method to send the direct get request and convert to the appropriate type.
+    async fn send_internal<R: DirectGetResponse>(&self) -> Result<R, DirectGetError> {
         let payload = serde_json::to_vec(&self.request).map(Bytes::from)?;
 
-        let request_subject = if let Some(subject) = self.request.last_by_subject {
+        let request_subject = if let Some(ref subject) = self.request.last_by_subject {
             format!(
                 "{}.DIRECT.GET.{}.{}",
                 &self.context.prefix, &self.stream_name, subject
@@ -2530,8 +2527,61 @@ impl DirectGetBuilder {
             }
         }
 
-        // Always return StreamMessage
-        Ok(StreamMessage::try_from(response)?)
+        R::from_message(response)
+    }
+
+    /// Sets the sequence for the direct get request.
+    pub fn sequence(mut self, seq: u64) -> Self {
+        self.request.sequence = Some(seq);
+        self
+    }
+
+    /// Sets the last_by_subject for the direct get request.
+    pub fn last_by_subject<S: Into<String>>(mut self, subject: S) -> Self {
+        self.request.last_by_subject = Some(subject.into());
+        self
+    }
+
+    /// Sets the next_by_subject for the direct get request.
+    pub fn next_by_subject<S: Into<String>>(mut self, subject: S) -> Self {
+        self.request.next_by_subject = Some(subject.into());
+        self
+    }
+
+    /// Sets no_headers to true, indicating headers should be excluded from the response.
+    pub fn no_headers(mut self) -> DirectGetBuilder<WithoutHeaders> {
+        self.request.no_headers = true;
+        DirectGetBuilder {
+            context: self.context,
+            stream_name: self.stream_name,
+            request: self.request,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Sets no_headers to false, indicating headers should be included in the response (default).
+    pub fn with_headers(mut self) -> DirectGetBuilder<WithHeaders> {
+        self.request.no_headers = false;
+        DirectGetBuilder {
+            context: self.context,
+            stream_name: self.stream_name,
+            request: self.request,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl DirectGetBuilder<WithHeaders> {
+    /// Sends the get request and returns a StreamMessage with headers.
+    pub async fn send(self) -> Result<StreamMessage, DirectGetError> {
+        self.send_internal::<StreamMessage>().await
+    }
+}
+
+impl DirectGetBuilder<WithoutHeaders> {
+    /// Sends the get request and returns only the payload bytes without headers.
+    pub async fn send(self) -> Result<Bytes, DirectGetError> {
+        self.send_internal::<Bytes>().await
     }
 }
 
