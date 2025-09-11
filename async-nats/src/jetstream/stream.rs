@@ -477,6 +477,31 @@ impl<I> Stream<I> {
             .send()
             .await
     }
+    /// Creates a builder for retrieving raw messages with flexible options.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let context = async_nats::jetstream::new(client);
+    /// let stream = context.get_stream("events").await?;
+    ///
+    /// // Get message without headers
+    /// let value = stream
+    ///     .raw_message_builder()
+    ///     .sequence(100)
+    ///     .no_headers()
+    ///     .send()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn raw_message_builder(&self) -> RawMessageBuilder<WithHeaders> {
+        RawMessageBuilder::new(self.context.clone(), self.name.clone())
+    }
+
     /// Get a raw message from the stream for a given stream sequence.
     /// This low-level API always reaches stream leader.
     /// This should be discouraged in favor of using [Stream::direct_get].
@@ -507,12 +532,7 @@ impl<I> Stream<I> {
     /// # }
     /// ```
     pub async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, RawMessageError> {
-        self.raw_message(StreamGetMessage {
-            sequence: Some(sequence),
-            last_by_subject: None,
-            next_by_subject: None,
-        })
-        .await
+        self.raw_message_builder().sequence(sequence).send().await
     }
 
     /// Get a first message from the stream for a given subject starting from provided sequence.
@@ -543,12 +563,11 @@ impl<I> Stream<I> {
         subject: T,
         sequence: u64,
     ) -> Result<StreamMessage, RawMessageError> {
-        self.raw_message(StreamGetMessage {
-            sequence: Some(sequence),
-            last_by_subject: None,
-            next_by_subject: Some(subject.as_ref().to_string()),
-        })
-        .await
+        self.raw_message_builder()
+            .sequence(sequence)
+            .next_by_subject(subject.as_ref().to_string())
+            .send()
+            .await
     }
 
     /// Get a next message from the stream for a given subject.
@@ -578,50 +597,12 @@ impl<I> Stream<I> {
         &self,
         subject: T,
     ) -> Result<StreamMessage, RawMessageError> {
-        self.raw_message(StreamGetMessage {
-            sequence: None,
-            last_by_subject: None,
-            next_by_subject: Some(subject.as_ref().to_string()),
-        })
-        .await
+        self.raw_message_builder()
+            .next_by_subject(subject.as_ref().to_string())
+            .send()
+            .await
     }
 
-    async fn raw_message(
-        &self,
-        request: StreamGetMessage,
-    ) -> Result<StreamMessage, RawMessageError> {
-        for subject in [&request.last_by_subject, &request.next_by_subject]
-            .into_iter()
-            .flatten()
-        {
-            if !is_valid_subject(subject) {
-                return Err(RawMessageError::new(RawMessageErrorKind::InvalidSubject));
-            }
-        }
-        let subject = format!("STREAM.MSG.GET.{}", &self.name);
-
-        let response: Response<GetRawMessage> = self
-            .context
-            .request(subject, &request)
-            .map_err(|err| LastRawMessageError::with_source(LastRawMessageErrorKind::Other, err))
-            .await?;
-
-        match response {
-            Response::Err { error } => {
-                if error.error_code() == ErrorCode::NO_MESSAGE_FOUND {
-                    Err(LastRawMessageError::new(
-                        LastRawMessageErrorKind::NoMessageFound,
-                    ))
-                } else {
-                    Err(LastRawMessageError::new(
-                        LastRawMessageErrorKind::JetStream(error),
-                    ))
-                }
-            }
-            Response::Ok(value) => StreamMessage::try_from(value.message)
-                .map_err(|err| RawMessageError::with_source(RawMessageErrorKind::Other, err)),
-        }
-    }
 
     /// Get a last message from the stream for a given subject.
     /// This low-level API always reaches stream leader.
@@ -650,12 +631,10 @@ impl<I> Stream<I> {
         &self,
         stream_subject: &str,
     ) -> Result<StreamMessage, LastRawMessageError> {
-        self.raw_message(StreamGetMessage {
-            sequence: None,
-            last_by_subject: Some(stream_subject.to_string()),
-            next_by_subject: None,
-        })
-        .await
+        self.raw_message_builder()
+            .last_by_subject(stream_subject.to_string())
+            .send()
+            .await
     }
 
     /// Delete a message from the stream.
@@ -2580,15 +2559,144 @@ pub struct StreamValue {
     pub data: Bytes,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct StreamGetMessage {
-    #[serde(rename = "seq", skip_serializing_if = "is_default")]
+#[derive(Debug, Serialize, Default)]
+pub struct RawMessageRequest {
+    #[serde(rename = "seq", skip_serializing_if = "Option::is_none")]
     sequence: Option<u64>,
-    #[serde(rename = "next_by_subj", skip_serializing_if = "is_default")]
-    next_by_subject: Option<String>,
-    #[serde(rename = "last_by_subj", skip_serializing_if = "is_default")]
+    #[serde(rename = "last_by_subj", skip_serializing_if = "Option::is_none")]
     last_by_subject: Option<String>,
+    #[serde(rename = "next_by_subj", skip_serializing_if = "Option::is_none")]
+    next_by_subject: Option<String>,
+    #[serde(skip_serializing_if = "is_default", rename = "no_hdr")]
+    no_headers: bool,
 }
+
+/// Trait for converting a RawMessage response into the appropriate return type.
+trait RawMessageResponse: Sized {
+    fn from_raw_message(message: RawMessage) -> Result<Self, RawMessageError>;
+}
+
+impl RawMessageResponse for StreamMessage {
+    fn from_raw_message(message: RawMessage) -> Result<Self, RawMessageError> {
+        StreamMessage::try_from(message)
+            .map_err(|err| RawMessageError::with_source(RawMessageErrorKind::Other, err))
+    }
+}
+
+impl RawMessageResponse for StreamValue {
+    fn from_raw_message(message: RawMessage) -> Result<Self, RawMessageError> {
+        Ok(StreamValue {
+            data: message.payload.into(),
+        })
+    }
+}
+
+pub struct RawMessageBuilder<T = WithHeaders> {
+    context: Context,
+    stream_name: String,
+    request: RawMessageRequest,
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl RawMessageBuilder<WithHeaders> {
+    fn new(context: Context, stream_name: String) -> Self {
+        RawMessageBuilder {
+            context,
+            stream_name,
+            request: RawMessageRequest::default(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T> RawMessageBuilder<T> {
+    /// Internal method to send the raw message request and convert to the appropriate type.
+    async fn send_internal<R: RawMessageResponse>(&self) -> Result<R, RawMessageError> {
+        // Validate subjects
+        for subject in [&self.request.last_by_subject, &self.request.next_by_subject]
+            .into_iter()
+            .flatten()
+        {
+            if !is_valid_subject(subject) {
+                return Err(RawMessageError::new(RawMessageErrorKind::InvalidSubject));
+            }
+        }
+
+        let subject = format!("STREAM.MSG.GET.{}", &self.stream_name);
+
+        let response: Response<GetRawMessage> = self
+            .context
+            .request(subject, &self.request)
+            .map_err(|err| RawMessageError::with_source(RawMessageErrorKind::Other, err))
+            .await?;
+
+        match response {
+            Response::Err { error } => {
+                if error.error_code() == ErrorCode::NO_MESSAGE_FOUND {
+                    Err(RawMessageError::new(RawMessageErrorKind::NoMessageFound))
+                } else {
+                    Err(RawMessageError::new(RawMessageErrorKind::JetStream(error)))
+                }
+            }
+            Response::Ok(value) => R::from_raw_message(value.message),
+        }
+    }
+
+    /// Sets the sequence for the raw message request.
+    pub fn sequence(mut self, seq: u64) -> Self {
+        self.request.sequence = Some(seq);
+        self
+    }
+
+    /// Sets the last_by_subject for the raw message request.
+    pub fn last_by_subject<S: Into<String>>(mut self, subject: S) -> Self {
+        self.request.last_by_subject = Some(subject.into());
+        self
+    }
+
+    /// Sets the next_by_subject for the raw message request.
+    pub fn next_by_subject<S: Into<String>>(mut self, subject: S) -> Self {
+        self.request.next_by_subject = Some(subject.into());
+        self
+    }
+
+    /// Sets no_headers to true, indicating headers should be excluded from the response.
+    pub fn no_headers(mut self) -> RawMessageBuilder<WithoutHeaders> {
+        self.request.no_headers = true;
+        RawMessageBuilder {
+            context: self.context,
+            stream_name: self.stream_name,
+            request: self.request,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Sets no_headers to false, indicating headers should be included in the response (default).
+    pub fn with_headers(mut self) -> RawMessageBuilder<WithHeaders> {
+        self.request.no_headers = false;
+        RawMessageBuilder {
+            context: self.context,
+            stream_name: self.stream_name,
+            request: self.request,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl RawMessageBuilder<WithHeaders> {
+    /// Sends the raw message request and returns a StreamMessage with headers.
+    pub async fn send(self) -> Result<StreamMessage, RawMessageError> {
+        self.send_internal::<StreamMessage>().await
+    }
+}
+
+impl RawMessageBuilder<WithoutHeaders> {
+    /// Sends the raw message request and returns only the payload as StreamValue.
+    pub async fn send(self) -> Result<StreamValue, RawMessageError> {
+        self.send_internal::<StreamValue>().await
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
