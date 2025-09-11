@@ -2462,9 +2462,11 @@ impl DirectGetResponse for StreamMessage {
     }
 }
 
-impl DirectGetResponse for Bytes {
+impl DirectGetResponse for StreamValue {
     fn from_message(message: crate::Message) -> Result<Self, DirectGetError> {
-        Ok(message.payload)
+        Ok(StreamValue {
+            data: message.payload,
+        })
     }
 }
 
@@ -2558,17 +2560,6 @@ impl<T> DirectGetBuilder<T> {
             _phantom: std::marker::PhantomData,
         }
     }
-
-    /// Sets no_headers to false, indicating headers should be included in the response (default).
-    pub fn with_headers(mut self) -> DirectGetBuilder<WithHeaders> {
-        self.request.no_headers = false;
-        DirectGetBuilder {
-            context: self.context,
-            stream_name: self.stream_name,
-            request: self.request,
-            _phantom: std::marker::PhantomData,
-        }
-    }
 }
 
 impl DirectGetBuilder<WithHeaders> {
@@ -2580,9 +2571,13 @@ impl DirectGetBuilder<WithHeaders> {
 
 impl DirectGetBuilder<WithoutHeaders> {
     /// Sends the get request and returns only the payload bytes without headers.
-    pub async fn send(self) -> Result<Bytes, DirectGetError> {
-        self.send_internal::<Bytes>().await
+    pub async fn send(self) -> Result<StreamValue, DirectGetError> {
+        self.send_internal::<StreamValue>().await
     }
+}
+
+pub struct StreamValue {
+    pub data: Bytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
