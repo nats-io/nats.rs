@@ -750,8 +750,8 @@ mod jetstream {
             .await
             .unwrap();
 
-        println!("payload length: {}", payload.len());
-        assert!(!payload.is_empty());
+        println!("payload length: {}", payload.data.len());
+        assert!(!payload.data.is_empty());
     }
 
     #[tokio::test]
