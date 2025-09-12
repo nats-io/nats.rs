@@ -475,7 +475,10 @@ impl<I> Stream<I> {
             .send()
             .await
     }
-    /// Creates a builder for retrieving raw messages with flexible options.
+    /// Creates a builder for retrieving messages from the stream with flexible options.
+    /// Raw message methods retrieve messages directly from the stream leader instead
+    /// of a replica. This should be used with care, as it can put additional load on the
+    /// stream leader.
     ///
     /// # Examples
     ///
@@ -2670,17 +2673,6 @@ impl<T> RawMessageBuilder<T> {
     /// Sets no_headers to true, indicating headers should be excluded from the response.
     pub fn no_headers(mut self) -> RawMessageBuilder<WithoutHeaders> {
         self.request.no_headers = true;
-        RawMessageBuilder {
-            context: self.context,
-            stream_name: self.stream_name,
-            request: self.request,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    /// Sets no_headers to false, indicating headers should be included in the response (default).
-    pub fn with_headers(mut self) -> RawMessageBuilder<WithHeaders> {
-        self.request.no_headers = false;
         RawMessageBuilder {
             context: self.context,
             stream_name: self.stream_name,
