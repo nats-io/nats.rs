@@ -596,6 +596,17 @@ mod jetstream {
 
         let raw_message = stream.get_raw_message(publish_ack.sequence).await.unwrap();
         assert_eq!(raw_message.sequence, publish_ack.sequence);
+
+        // no headers variant
+        let value = stream
+            .raw_message_builder()
+            .sequence(publish_ack.sequence)
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!value.data.is_empty());
     }
 
     #[tokio::test]
@@ -636,6 +647,17 @@ mod jetstream {
             .unwrap();
 
         assert_eq!(raw_message.sequence, publish_ack.sequence);
+
+        // no headers variant
+        let value = stream
+            .raw_message_builder()
+            .last_by_subject("events")
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!value.data.is_empty());
     }
 
     #[tokio::test]
@@ -688,6 +710,17 @@ mod jetstream {
             .direct_get_last_for_subject("wrong")
             .await
             .expect_err("should error");
+
+        // no headers variant
+        let payload = stream
+            .direct_get_builder()
+            .last_by_subject("events")
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!payload.data.is_empty());
     }
     #[tokio::test]
     async fn direct_get_next_for_subject() {
@@ -750,7 +783,6 @@ mod jetstream {
             .await
             .unwrap();
 
-        println!("payload length: {}", payload.data.len());
         assert!(!payload.data.is_empty());
     }
 
@@ -823,6 +855,18 @@ mod jetstream {
             .direct_get_next_for_subject("entries", Some(1))
             .await
             .expect_err("should error");
+
+        // no headers variant
+        let payload = stream
+            .direct_get_builder()
+            .sequence(3)
+            .next_by_subject("events")
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!payload.data.is_empty());
     }
 
     #[tokio::test]
@@ -878,6 +922,17 @@ mod jetstream {
         assert_eq!(payload, message.payload.as_ref());
 
         stream.direct_get(22).await.expect_err("should error");
+
+        // no headers variant
+        let payload = stream
+            .direct_get_builder()
+            .sequence(2)
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!payload.data.is_empty());
     }
 
     #[tokio::test]
@@ -3942,6 +3997,53 @@ mod jetstream {
             .unwrap();
         assert_eq!(message.sequence, 11);
         assert_eq!(from_utf8(&message.payload).unwrap(), "2");
+
+        // no headers variants
+
+        // by sequence
+        let value = stream
+            .raw_message_builder()
+            .sequence(5)
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+        assert!(!value.data.is_empty());
+        assert_eq!(from_utf8(&value.data).unwrap(), "5");
+
+        // next by subject
+        let value = stream
+            .raw_message_builder()
+            .next_by_subject("events.2")
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+        assert!(!value.data.is_empty());
+        assert_eq!(from_utf8(&value.data).unwrap(), "2");
+
+        // last by subject
+        let value = stream
+            .raw_message_builder()
+            .last_by_subject("events.2")
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+        assert!(!value.data.is_empty());
+        assert_eq!(from_utf8(&value.data).unwrap(), "2");
+
+        // first by subject starting from sequence
+        let value = stream
+            .raw_message_builder()
+            .sequence(5)
+            .next_by_subject("events.2")
+            .no_headers()
+            .send()
+            .await
+            .unwrap();
+        assert!(!value.data.is_empty());
+        assert_eq!(from_utf8(&value.data).unwrap(), "2");
     }
 
     #[cfg(feature = "server_2_11")]

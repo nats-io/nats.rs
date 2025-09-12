@@ -286,9 +286,7 @@ impl<I> Stream<I> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
-    /// let stream = jetstream
-    ///     .get_stream("events")
-    ///     .await?;
+    /// let stream = jetstream.get_stream("events").await?;
     ///
     /// // Get message without headers
     /// let message = stream
@@ -307,7 +305,7 @@ impl<I> Stream<I> {
     /// Gets next message for a [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [super::message::StreamMessage]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -359,7 +357,7 @@ impl<I> Stream<I> {
     /// Gets first message from [Stream].
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [super::message::StreamMessage]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -405,7 +403,7 @@ impl<I> Stream<I> {
     /// Gets message from [Stream] with given `sequence id`.
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [super::message::StreamMessage]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -440,7 +438,7 @@ impl<I> Stream<I> {
     /// Gets last message for a given `subject`.
     ///
     /// Requires a [Stream] with `allow_direct` set to `true`.
-    /// This is different from [Stream::get_raw_message], as it can fetch [Message]
+    /// This is different from [Stream::get_raw_message], as it can fetch [super::message::StreamMessage]
     /// from any replica member. This means read after write is possible,
     /// as that given replica might not yet catch up with the leader.
     ///
@@ -602,7 +600,6 @@ impl<I> Stream<I> {
             .send()
             .await
     }
-
 
     /// Get a last message from the stream for a given subject.
     /// This low-level API always reaches stream leader.
@@ -2585,8 +2582,18 @@ impl RawMessageResponse for StreamMessage {
 
 impl RawMessageResponse for StreamValue {
     fn from_raw_message(message: RawMessage) -> Result<Self, RawMessageError> {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+
+        let decoded_payload = STANDARD.decode(message.payload).map_err(|err| {
+            RawMessageError::with_source(
+                RawMessageErrorKind::Other,
+                Box::new(std::io::Error::other(err)),
+            )
+        })?;
+
         Ok(StreamValue {
-            data: message.payload.into(),
+            data: decoded_payload.into(),
         })
     }
 }
@@ -2696,7 +2703,6 @@ impl RawMessageBuilder<WithoutHeaders> {
         self.send_internal::<StreamValue>().await
     }
 }
-
 
 #[cfg(test)]
 mod tests {
