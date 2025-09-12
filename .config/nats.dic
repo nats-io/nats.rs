@@ -177,3 +177,9 @@ PriorityGroups
 priority_policy
 TTL
 futures_util
+StreamMessage
+StreamValue
+next_by_subject
+no_headers
+RawMessage
+last_by_subject
