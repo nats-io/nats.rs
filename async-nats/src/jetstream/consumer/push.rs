@@ -540,9 +540,9 @@ pub struct Ordered {
     heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
     state: tokio::sync::watch::Receiver<State>,
     last_known_state: State,
-    state_change_future: Option<BoxFuture<'static, Result<(), tokio::sync::watch::error::RecvError>>>,
+    state_change_future:
+        Option<BoxFuture<'static, Result<(), tokio::sync::watch::error::RecvError>>>,
 }
-
 
 impl futures_util::Stream for Ordered {
     type Item = Result<Message, OrderedError>;
@@ -551,223 +551,197 @@ impl futures_util::Stream for Ordered {
         loop {
             // Check heartbeat timer, but only if we have an active subscriber
             // Don't check during recreation
-            if self.subscriber.is_some() && self.subscriber_future.is_none() {
-                match self
+            if self.subscriber.is_some()
+                && self.subscriber_future.is_none()
+                && self
                     .heartbeat_sleep
                     .get_or_insert_with(|| {
                         Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
                     })
                     .poll_unpin(cx)
-                {
-                    Poll::Ready(_) => {
-                        self.heartbeat_sleep = None;
-                        return Poll::Ready(Some(Err(OrderedError::new(
-                            OrderedErrorKind::MissingHeartbeat,
-                        ))));
-                    }
-                    Poll::Pending => (),
-                }
+                    .is_ready()
+            {
+                self.heartbeat_sleep = None;
+                return Poll::Ready(Some(Err(OrderedError::new(
+                    OrderedErrorKind::MissingHeartbeat,
+                ))));
             }
-            // First poll for connection state changes
-            // This ensures the waker is registered even if no messages are coming
-            if self.state_change_future.is_none() {
-                // Check if state has already changed
-                if self.state.has_changed().unwrap_or(false) {
-                    let current_state = self.state.borrow_and_update().clone();
-                    
-                    // Handle state transitions
-                    match (&self.last_known_state, &current_state) {
-                        (State::Connected, State::Disconnected) | (State::Connected, State::Pending) => {
-                            debug!("Connection lost, marking subscriber as invalid");
-                            self.subscriber = None;
-                            self.heartbeat_sleep = None;
+            // Poll for connection state changes
+            match &mut self.state_change_future {
+                None => {
+                    // Check if state has already changed
+                    if self.state.has_changed().unwrap_or(false) {
+                        let current_state = self.state.borrow_and_update().clone();
+
+                        // Handle state transitions
+                        use State::*;
+                        match (&self.last_known_state, &current_state) {
+                            (Connected, Disconnected | Pending) => {
+                                debug!("Connection lost, marking subscriber as invalid");
+                                self.subscriber = None;
+                                self.heartbeat_sleep = None;
+                            }
+                            (Disconnected | Pending, Connected) => {
+                                debug!("Connection restored, triggering consumer recreation");
+                                self.subscriber = None;
+                                self.consumer_sequence.store(0, Ordering::Relaxed);
+                                self.heartbeat_sleep = None;
+                            }
+                            _ => {}
                         }
-                        (State::Disconnected, State::Connected) | (State::Pending, State::Connected) => {
-                            debug!("Connection restored, triggering consumer recreation");
-                            self.subscriber = None;
-                            self.consumer_sequence.store(0, Ordering::Relaxed);
-                            self.heartbeat_sleep = None;
-                        }
-                        _ => {}
+
+                        self.last_known_state = current_state;
+                    } else {
+                        // Create a future to wait for state changes
+                        let mut state = self.state.clone();
+                        self.state_change_future =
+                            Some(Box::pin(async move { state.changed().await }));
                     }
-                    
-                    self.last_known_state = current_state;
-                } else {
-                    // Create a future to wait for state changes
-                    let mut state = self.state.clone();
-                    self.state_change_future = Some(Box::pin(async move { state.changed().await }));
                 }
-            }
-            
-            // Poll the state change future if it exists
-            if let Some(fut) = self.state_change_future.as_mut() {
-                match fut.poll_unpin(cx) {
+                Some(fut) => match fut.poll_unpin(cx) {
                     Poll::Ready(Ok(())) => {
-                        // State changed, clear the future and check the state on next iteration
                         self.state_change_future = None;
-                        continue;
+                        continue; // State changed, restart loop to check it
                     }
                     Poll::Ready(Err(_)) => {
-                        // Sender dropped, this shouldn't happen
                         return Poll::Ready(Some(Err(OrderedError::with_source(
                             OrderedErrorKind::Other,
                             "Connection state watcher dropped",
                         ))));
                     }
-                    Poll::Pending => {
-                        // Waker registered for state changes, continue to check messages
-                    }
-                }
+                    Poll::Pending => {}
+                },
             }
 
             // Handle messages after checking connection state
 
-            // Now handle subscriber recreation if needed
+            // Handle subscriber recreation if needed
             if self.subscriber.is_none() {
-                match self.subscriber_future.as_mut() {
-                    None => {
-                        trace!(
-                            "subscriber and subscriber future are None. Recreating the consumer"
-                        );
-                        let context = self.context.clone();
-                        let sequence = self.stream_sequence.clone();
-                        let config = self.consumer.config.clone();
-                        let stream_name = self.consumer.info.stream_name.clone();
-                        let subscriber_future =
-                            self.subscriber_future.insert(Box::pin(async move {
-                                tryhard::retry_fn(|| {
-                                    recreate_consumer_and_subscription(
-                                        context.clone(),
-                                        config.clone(),
-                                        stream_name.clone(),
-                                        sequence.load(Ordering::Relaxed),
-                                    )
-                                })
-                                .retries(10)
-                                .custom_backoff(backoff)
-                                .await
-                                .map_err(|err| {
-                                    ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
-                                })
-                            }));
-                        match subscriber_future.as_mut().poll(cx) {
-                            Poll::Ready(subscriber) => {
-                                self.subscriber_future = None;
-                                self.consumer_sequence.store(0, Ordering::Relaxed);
-                                self.subscriber = Some(subscriber.map_err(|err| {
-                                    OrderedError::with_source(OrderedErrorKind::Recreate, err)
-                                })?);
-                            }
-                            Poll::Pending => {
-                                return Poll::Pending;
-                            }
-                        }
-                    }
-                    Some(subscriber) => match subscriber.as_mut().poll(cx) {
-                        Poll::Ready(subscriber) => {
+                // Ensure we have a recreation future
+                if self.subscriber_future.is_none() {
+                    trace!("Creating subscriber recreation future");
+                    let context = self.context.clone();
+                    let sequence = self.stream_sequence.clone();
+                    let config = self.consumer.config.clone();
+                    let stream_name = self.consumer.info.stream_name.clone();
+
+                    self.subscriber_future = Some(Box::pin(async move {
+                        tryhard::retry_fn(|| {
+                            recreate_consumer_and_subscription(
+                                context.clone(),
+                                config.clone(),
+                                stream_name.clone(),
+                                sequence.load(Ordering::Relaxed),
+                            )
+                        })
+                        .retries(u32::MAX)
+                        .custom_backoff(backoff)
+                        .await
+                        .map_err(|err| {
+                            ConsumerRecreateError::with_source(
+                                ConsumerRecreateErrorKind::Recreate,
+                                err,
+                            )
+                        })
+                    }));
+                }
+
+                // Poll the recreation future
+                if let Some(fut) = &mut self.subscriber_future {
+                    match fut.poll_unpin(cx) {
+                        Poll::Ready(result) => {
                             self.subscriber_future = None;
                             self.consumer_sequence.store(0, Ordering::Relaxed);
-                            self.subscriber = Some(subscriber.map_err(|err| {
+                            self.subscriber = Some(result.map_err(|err| {
                                 OrderedError::with_source(OrderedErrorKind::Recreate, err)
                             })?);
                         }
-                        Poll::Pending => {
-                            return Poll::Pending;
-                        }
-                    },
+                        Poll::Pending => return Poll::Pending,
+                    }
                 }
             }
+            // Poll for messages
             if let Some(subscriber) = self.subscriber.as_mut() {
                 match subscriber.receiver.poll_recv(cx) {
-                    Poll::Ready(maybe_message) => match maybe_message {
-                        Some(message) => {
-                            self.heartbeat_sleep = None;
-                            match message.status {
-                                Some(StatusCode::IDLE_HEARTBEAT) => {
-                                    debug!("received idle heartbeats");
-                                    if let Some(headers) = message.headers.as_ref() {
-                                        if let Some(sequence) =
-                                            headers.get_last(crate::header::NATS_LAST_CONSUMER)
-                                        {
-                                            let sequence: u64 =
-                                                sequence.as_str().parse().map_err(|err| {
-                                                    OrderedError::with_source(
-                                                        OrderedErrorKind::Other,
-                                                        err,
-                                                    )
-                                                })?;
+                    Poll::Ready(None) => return Poll::Ready(None),
+                    Poll::Ready(Some(message)) => {
+                        self.heartbeat_sleep = None;
+                        match message.status {
+                            Some(StatusCode::IDLE_HEARTBEAT) => {
+                                debug!("received idle heartbeats");
+                                if let Some(headers) = message.headers.as_ref() {
+                                    if let Some(sequence) =
+                                        headers.get_last(crate::header::NATS_LAST_CONSUMER)
+                                    {
+                                        let sequence: u64 =
+                                            sequence.as_str().parse().map_err(|err| {
+                                                OrderedError::with_source(
+                                                    OrderedErrorKind::Other,
+                                                    err,
+                                                )
+                                            })?;
 
-                                            let last_sequence =
-                                                self.consumer_sequence.load(Ordering::Relaxed);
+                                        let last_sequence =
+                                            self.consumer_sequence.load(Ordering::Relaxed);
 
-                                            if sequence != last_sequence {
-                                                debug!("hearbeats sequence mismatch. got {}, expected {}, resetting consumer", sequence, last_sequence);
-                                                self.subscriber = None;
-                                                self.heartbeat_sleep = None;
-                                            }
+                                        if sequence != last_sequence {
+                                            debug!("hearbeats sequence mismatch. got {}, expected {}, resetting consumer", sequence, last_sequence);
+                                            self.subscriber = None;
+                                            self.heartbeat_sleep = None;
                                         }
                                     }
-                                    // flow control.
-                                    if let Some(subject) = message.reply.clone() {
-                                        trace!("received flow control message");
-                                        let client = self.context.client.clone();
-                                        tokio::task::spawn(async move {
-                                            client
-                                                .publish(subject, Bytes::from_static(b""))
-                                                .await
-                                                .ok();
-                                        });
-                                    }
-                                    continue;
                                 }
-                                Some(status) => {
-                                    debug!("received status message: {}", status);
-                                    continue;
+                                // flow control.
+                                if let Some(subject) = message.reply.clone() {
+                                    trace!("received flow control message");
+                                    let client = self.context.client.clone();
+                                    tokio::task::spawn(async move {
+                                        client.publish(subject, Bytes::from_static(b"")).await.ok();
+                                    });
                                 }
-                                None => {
-                                    trace!("received a message");
-                                    let jetstream_message = jetstream::message::Message {
-                                        message,
-                                        context: self.context.clone(),
-                                    };
+                                continue;
+                            }
+                            Some(status) => {
+                                debug!("received status message: {}", status);
+                                continue;
+                            }
+                            None => {
+                                trace!("received a message");
+                                let jetstream_message = jetstream::message::Message {
+                                    message,
+                                    context: self.context.clone(),
+                                };
 
-                                    let info = jetstream_message.info().map_err(|err| {
-                                        OrderedError::with_source(OrderedErrorKind::Other, err)
-                                    })?;
-                                    trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
+                                let info = jetstream_message.info().map_err(|err| {
+                                    OrderedError::with_source(OrderedErrorKind::Other, err)
+                                })?;
+                                trace!("consumer sequence: {:?}, stream sequence {:?}, consumer sequence in message: {:?} stream sequence in message: {:?}",
                                                self.consumer_sequence,
                                                self.stream_sequence,
                                                info.consumer_sequence,
                                                info.stream_sequence);
-                                    if info.consumer_sequence
-                                        != self.consumer_sequence.load(Ordering::Relaxed) + 1
-                                    {
-                                        debug!(
-                                            "ordered consumer mismatch. current {}, info: {}",
-                                            self.consumer_sequence.load(Ordering::Relaxed),
-                                            info.consumer_sequence
-                                        );
-                                        self.subscriber = None;
-                                        self.consumer_sequence.store(0, Ordering::Relaxed);
-                                        self.heartbeat_sleep = None;
-                                        continue;
-                                    }
-                                    self.stream_sequence
-                                        .store(info.stream_sequence, Ordering::Relaxed);
-                                    self.consumer_sequence
-                                        .store(info.consumer_sequence, Ordering::Relaxed);
-                                    return Poll::Ready(Some(Ok(jetstream_message)));
+                                if info.consumer_sequence
+                                    != self.consumer_sequence.load(Ordering::Relaxed) + 1
+                                {
+                                    debug!(
+                                        "ordered consumer mismatch. current {}, info: {}",
+                                        self.consumer_sequence.load(Ordering::Relaxed),
+                                        info.consumer_sequence
+                                    );
+                                    self.subscriber = None;
+                                    self.consumer_sequence.store(0, Ordering::Relaxed);
+                                    self.heartbeat_sleep = None;
+                                    continue;
                                 }
+                                self.stream_sequence
+                                    .store(info.stream_sequence, Ordering::Relaxed);
+                                self.consumer_sequence
+                                    .store(info.consumer_sequence, Ordering::Relaxed);
+                                return Poll::Ready(Some(Ok(jetstream_message)));
                             }
                         }
-                        None => {
-                            return Poll::Ready(None);
-                        }
-                    },
-                    Poll::Pending => {
-                        // Both connection state and messages are pending
-                        return Poll::Pending;
                     }
+                    Poll::Pending => return Poll::Pending,
                 }
             }
         }
