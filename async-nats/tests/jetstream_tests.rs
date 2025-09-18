@@ -4614,7 +4614,10 @@ mod jetstream {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
-        let jetstream = async_nats::jetstream::new(client);
+        let jetstream = async_nats::jetstream::ContextBuilder::new()
+            .max_ack_inflight(10)
+            .backpressure_on_inflight(false)
+            .build(client);
 
         jetstream
             .create_stream(stream::Config {
@@ -4625,11 +4628,55 @@ mod jetstream {
             .await
             .unwrap();
 
-        for i in 0..100_000 {
+        let mut err_count = 0;
+        for i in 0..50_000 {
+            let ack_future = jetstream.publish("events", format!("{i}").into()).await;
+
+            if let Err(e) = ack_future {
+                if e.kind() != async_nats::jetstream::context::PublishErrorKind::MaxAckPending {
+                    panic!("unexpected publish error: {e}");
+                }
+                err_count += 1;
+            }
+        }
+        assert!(
+            err_count > 0,
+            "should have some errors for too many in-flight ack"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_async_publish_backpressure() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let jetstream = async_nats::jetstream::ContextBuilder::new()
+            .max_ack_inflight(10)
+            .backpressure_on_inflight(true)
+            .build(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Do not expect any errors, as backpressure is on.
+        for i in 0..50_000 {
             jetstream
                 .publish("events", format!("{i}").into())
                 .await
                 .unwrap();
         }
+        // Make sure all acks are processed.
+        tokio::time::timeout(Duration::from_secs(5), jetstream.wait_for_acks())
+            .await
+            .unwrap();
+        // Check if stream contains all 5000 messages.
+        let info = stream.get_info().await.unwrap();
+        assert_eq!(info.state.messages, 50_000);
     }
 }
