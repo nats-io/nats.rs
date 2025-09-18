@@ -136,7 +136,7 @@ pub mod publish;
 pub mod response;
 pub mod stream;
 
-pub use context::Context;
+pub use context::{Context, ContextBuilder};
 pub use errors::Error;
 pub use errors::ErrorCode;
 pub use message::{AckKind, Message};
