@@ -298,10 +298,16 @@ impl Context {
         ContextBuilder::default().build(client)
     }
 
+    /// Sets the timeout for all JetStream API requests.
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout
     }
 
+    /// Waits until all pending `acks` are received from the server.
+    /// Be aware that this is probably not the way you want to await `acks`,
+    /// as it will wait for every `ack` that is pending, including those that might
+    /// be published after you call this method.
+    /// Useful in testing, or maybe batching.
     pub async fn wait_for_acks(&self) {
         self.max_ack_semaphore
             .acquire_many(self.semaphore_capacity as u32)
@@ -309,12 +315,14 @@ impl Context {
             .ok();
     }
 
+    /// Create a new [Context] with given API prefix.
     pub(crate) fn with_prefix<T: ToString>(client: Client, prefix: T) -> Context {
         ContextBuilder::new()
             .api_prefix(prefix.to_string())
             .build(client)
     }
 
+    /// Create a new [Context] with given domain.
     pub(crate) fn with_domain<T: AsRef<str>>(client: Client, domain: T) -> Context {
         ContextBuilder::new().domain(domain.as_ref()).build(client)
     }
