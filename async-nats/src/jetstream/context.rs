@@ -53,6 +53,37 @@ use super::stream::{
 use super::stream::{Compression, ConsumerCreateStrictError, ConsumerUpdateError};
 use super::{is_valid_name, kv};
 
+pub mod traits {
+    use std::future::Future;
+
+    use bytes::Bytes;
+    use serde::{de::DeserializeOwned, Serialize};
+
+    use crate::subject::ToSubject;
+
+    use super::RequestError;
+
+    pub trait Requester {
+        fn request<S, T, V>(
+            &self,
+            subject: S,
+            payload: &T,
+        ) -> impl Future<Output = Result<V, RequestError>>
+        where
+            S: ToSubject,
+            T: ?Sized + Serialize,
+            V: DeserializeOwned;
+    }
+
+    pub trait Publisher {
+        fn publish<S: ToSubject>(
+            &self,
+            subject: S,
+            payload: Bytes,
+        ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
+    }
+}
+
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
 pub struct Context {
@@ -1610,6 +1641,31 @@ impl Context {
             .await
             .map_err(|err| ObjectStoreError::with_source(ObjectStoreErrorKind::GetStore, err))?;
         Ok(())
+    }
+}
+
+impl traits::Requester for Context {
+    fn request<S, T, V>(
+        &self,
+        subject: S,
+        payload: &T,
+    ) -> impl Future<Output = Result<V, RequestError>>
+    where
+        S: ToSubject,
+        T: ?Sized + Serialize,
+        V: DeserializeOwned,
+    {
+        self.request(subject, payload)
+    }
+}
+
+impl traits::Publisher for Context {
+    fn publish<S: ToSubject>(
+        &self,
+        subject: S,
+        payload: Bytes,
+    ) -> impl Future<Output = Result<PublishAckFuture, PublishError>> {
+        self.publish(subject, payload)
     }
 }
 
