@@ -1281,6 +1281,11 @@ pub struct Config {
     #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_nanos")]
     pub subject_delete_marker_ttl: Option<Duration>,
+
+    /// Allows atomic publish operations.
+    #[cfg(feature = "server_2_12")]
+    #[serde(default, skip_serializing_if = "is_default", rename = "allow_atomic")]
+    pub allow_atomic_publish: bool,
 }
 
 impl From<&Config> for Config {
