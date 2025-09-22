@@ -1,4 +1,6 @@
-name: cd
+name: Push to main
+permissions:
+  contents: read
 
 on:
   push:
