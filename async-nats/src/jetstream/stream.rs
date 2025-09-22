@@ -1262,6 +1262,11 @@ pub struct Config {
     /// Placement configuration for clusters and tags.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<Placement>,
+
+    /// Persistence mode for the stream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persist_mode: Option<PersistenceMode>,
+
     /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
     #[serde(
@@ -1416,6 +1421,19 @@ pub enum StorageType {
     /// Stream data is kept only in memory.
     #[serde(rename = "memory")]
     Memory = 1,
+}
+
+/// Determines the persistence mode for stream data.
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PersistenceMode {
+    /// Writes are immediately flushed, acknowledgement sent after message is stored.
+    #[default]
+    #[serde(rename = "default")]
+    Default = 0,
+    /// Writes are flushed asynchronously, acknowledgement may be sent before message is stored.
+    #[serde(rename = "async")]
+    Async = 1,
 }
 
 async fn stream_info_with_details(
