@@ -50,3 +50,25 @@ jobs:
         with:
           name: benchmarks-report
           path: target/criterion
+
+  check_features:
+    defaults:
+      run:
+        working-directory: ./async-nats
+    name: check feature flags (ubuntu-latest / stable)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Install stable Rust on ubuntu-latest
+        id:   install-rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Restore cached build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
+          save-if: false # we only build docs, so we don't have the full build to be cached.
+      - name: Install cargo hack
+        run: cargo install cargo-hack
+      - name: Check lint
+        run: cargo hack check --feature-powerset --at-least-one-of aws-lc-rs,ring --no-dev-deps -p async-nats
