@@ -1157,7 +1157,12 @@ mod jetstream {
             .unwrap();
 
         for _ in 0..20 {
-            context.publish("events", "data".into()).await.unwrap();
+            context
+                .publish("events", "data".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
         }
 
         let consumer = stream
