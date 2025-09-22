@@ -1291,6 +1291,15 @@ pub struct Config {
     #[cfg(feature = "server_2_12")]
     #[serde(default, skip_serializing_if = "is_default", rename = "allow_atomic")]
     pub allow_atomic_publish: bool,
+
+    /// Enables the scheduling of messages
+    #[cfg(feature = "server_2_12")]
+    #[serde(
+        default,
+        skip_serializing_if = "is_default",
+        rename = "allow_msg_schedules"
+    )]
+    pub allow_message_schedules: bool,
 }
 
 impl From<&Config> for Config {
