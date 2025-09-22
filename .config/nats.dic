@@ -169,6 +169,7 @@ Priority::PinnedClient
 PriorityPolicy
 priority_groups
 acknowledgements
+acknowledgement
 desirialize
 enum
 deserialize
