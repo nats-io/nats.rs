@@ -1300,6 +1300,15 @@ pub struct Config {
         rename = "allow_msg_schedules"
     )]
     pub allow_message_schedules: bool,
+
+    /// Enables counters for the stream
+    #[cfg(feature = "server_2_12")]
+    #[serde(
+        default,
+        skip_serializing_if = "is_default",
+        rename = "allow_msg_counter"
+    )]
+    pub allow_message_counter: bool,
 }
 
 impl From<&Config> for Config {
