@@ -1,3 +1,43 @@
+# v0.43.0
+
+## Overview
+
+This release adds support for 2.12 server features and adds JetStream backpressure control to publishing.
+
+## Added
+* Add `allow_atomic_publish` by @Jarema in https://github.com/nats-io/nats.rs/pull/1448
+* Add prioritized PriorityPolicy by @Jarema in https://github.com/nats-io/nats.rs/pull/1440
+* Add messages counters stream config by @Jarema in https://github.com/nats-io/nats.rs/pull/1453
+* Add messages schedules stream config field by @Jarema in https://github.com/nats-io/nats.rs/pull/1452
+* Add peristence mode to the stream config by @Jarema in https://github.com/nats-io/nats.rs/pull/1449
+* Add new fields to `ClusterInfo` by @Jarema in https://github.com/nats-io/nats.rs/pull/1439
+* Add more fields to ServerInfo by @OtaK in https://github.com/nats-io/nats.rs/pull/1434
+* Add backpressure to publish by @Jarema in https://github.com/nats-io/nats.rs/pull/1286
+* Add port/path support for WebSockets by @AleTopp in https://github.com/nats-io/nats.rs/pull/1426
+* Add test to confirm user can promote mirror to a stream by @Jarema in https://github.com/nats-io/nats.rs/pull/1438
+* Add Direct get builder by @Jarema in https://github.com/nats-io/nats.rs/pull/1442
+* Add TryFrom<Bytes> support for subject by @Sibz in https://github.com/nats-io/nats.rs/pull/1390
+
+## Fixed
+* Fix linter issues by @Jarema in https://github.com/nats-io/nats.rs/pull/1427
+* Improve push ordered consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/1445
+
+## Changed
+
+## Changed
+* Expose get_info for consumer by @nitsky in https://github.com/nats-io/nats.rs/pull/1428
+* Make errors methods public by @Jarema in https://github.com/nats-io/nats.rs/pull/1431
+* Replace futures by futures-util by @Totodore in https://github.com/nats-io/nats.rs/pull/1424
+
+## New Contributors
+* @nitsky made their first contribution in https://github.com/nats-io/nats.rs/pull/1428
+* @AleTopp made their first contribution in https://github.com/nats-io/nats.rs/pull/1426
+* @Sibz made their first contribution in https://github.com/nats-io/nats.rs/pull/1390
+* @OtaK made their first contribution in https://github.com/nats-io/nats.rs/pull/1434
+* @Totodore made their first contribution in https://github.com/nats-io/nats.rs/pull/1424
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.42.0...async-nats/v0.43.0
+
 # v0.42.0
 
 This releases focuses on some fixes and addition of Client traits that allow for easier extension of the client.
