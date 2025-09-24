@@ -20,7 +20,8 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
 use crate::{
-    header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode,
+    header, is_valid_subject, jetstream, Client, Command, HeaderMap, HeaderValue, Message,
+    StatusCode,
 };
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
@@ -59,7 +60,7 @@ pub mod traits {
     use bytes::Bytes;
     use serde::{de::DeserializeOwned, Serialize};
 
-    use crate::subject::ToSubject;
+    use crate::{jetstream::message, subject::ToSubject};
 
     use super::RequestError;
 
@@ -80,6 +81,11 @@ pub mod traits {
             &self,
             subject: S,
             payload: Bytes,
+        ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
+
+        fn publish_message(
+            &self,
+            message: message::OutboundMessage,
         ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
     }
 }
@@ -1666,6 +1672,19 @@ impl traits::Publisher for Context {
         payload: Bytes,
     ) -> impl Future<Output = Result<PublishAckFuture, PublishError>> {
         self.publish(subject, payload)
+    }
+
+    fn publish_message(
+        &self,
+        message: jetstream::message::OutboundMessage,
+    ) -> impl Future<Output = Result<PublishAckFuture, PublishError>> {
+        self.send_publish(
+            message.subject,
+            Publish {
+                payload: message.payload,
+                headers: message.headers,
+            },
+        )
     }
 }
 

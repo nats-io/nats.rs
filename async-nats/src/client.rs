@@ -156,16 +156,11 @@ impl traits::Publisher for Client {
         self.publish_with_reply(subject, reply, payload)
     }
 
-    fn publish_message(
-        &self,
-        msg: OutboundMessage,
-    ) -> impl Future<Output = Result<(), PublishError>> {
-        async move {
-            self.sender
-                .send(Command::Publish(msg))
-                .await
-                .map_err(Into::into)
-        }
+    async fn publish_message(&self, msg: OutboundMessage) -> Result<(), PublishError> {
+        self.sender
+            .send(Command::Publish(msg))
+            .await
+            .map_err(Into::into)
     }
 }
 

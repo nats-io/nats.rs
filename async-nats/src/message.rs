@@ -39,6 +39,8 @@ pub struct Message {
     pub length: usize,
 }
 
+/// An outbound message to be published.
+/// Does not contain status or description which are valid only for inbound messages.
 #[derive(Clone, Debug)]
 pub struct OutboundMessage {
     pub subject: Subject,
