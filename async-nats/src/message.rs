@@ -38,3 +38,11 @@ pub struct Message {
 
     pub length: usize,
 }
+
+#[derive(Clone, Debug)]
+pub struct OutboundMessage {
+    pub subject: Subject,
+    pub reply: Option<Subject>,
+    pub payload: Bytes,
+    pub headers: Option<HeaderMap>,
+}
