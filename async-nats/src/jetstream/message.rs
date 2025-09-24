@@ -33,6 +33,24 @@ pub struct StreamMessage {
     pub time: OffsetDateTime,
 }
 
+/// An outbound message to be published.
+/// Does not contain status or description which are valid only for inbound messages.
+pub struct OutboundMessage {
+    pub subject: Subject,
+    pub payload: Bytes,
+    pub headers: Option<HeaderMap>,
+}
+
+impl OutboundMessage {
+    pub fn new(subject: Subject, payload: Bytes, headers: Option<HeaderMap>) -> Self {
+        Self {
+            subject,
+            payload,
+            headers,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Message {
     pub message: crate::Message,
