@@ -354,14 +354,7 @@ pub(crate) enum ServerOp {
     },
 }
 
-/// `PublishMessage` represents a message being published
-#[derive(Debug)]
-pub struct PublishMessage {
-    pub subject: Subject,
-    pub payload: Bytes,
-    pub reply: Option<Subject>,
-    pub headers: Option<HeaderMap>,
-}
+pub type PublishMessage = crate::message::OutboundMessage;
 
 /// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]

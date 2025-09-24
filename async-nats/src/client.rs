@@ -16,6 +16,7 @@ use core::task::{Context, Poll};
 use std::future::Future;
 
 use crate::connection::State;
+use crate::message::OutboundMessage;
 use crate::subject::ToSubject;
 use crate::{PublishMessage, ServerInfo};
 
@@ -94,7 +95,7 @@ pub mod traits {
 
     use bytes::Bytes;
 
-    use crate::{subject::ToSubject, Message};
+    use crate::{message, subject::ToSubject, Message};
 
     use super::{PublishError, Request, RequestError, SubscribeError};
 
@@ -104,6 +105,11 @@ pub mod traits {
             subject: S,
             reply: R,
             payload: Bytes,
+        ) -> impl Future<Output = Result<(), PublishError>>;
+
+        fn publish_message(
+            &self,
+            msg: message::OutboundMessage,
         ) -> impl Future<Output = Result<(), PublishError>>;
     }
     pub trait Subscriber {
@@ -148,6 +154,18 @@ impl traits::Publisher for Client {
         payload: Bytes,
     ) -> impl Future<Output = Result<(), PublishError>> {
         self.publish_with_reply(subject, reply, payload)
+    }
+
+    fn publish_message(
+        &self,
+        msg: OutboundMessage,
+    ) -> impl Future<Output = Result<(), PublishError>> {
+        async move {
+            self.sender
+                .send(Command::Publish(msg))
+                .await
+                .map_err(Into::into)
+        }
     }
 }
 
