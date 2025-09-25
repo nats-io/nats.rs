@@ -39,14 +39,13 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
-
       - name: Generate go.sum # go.sum is required by caching on the next step
         run: touch go.sum
       - name: Set up Go
         id:   setup-go
         uses: actions/setup-go@v4 # v4 uses caching out of the box
         with:
-          go-version: '1.22'
+          go-version: '1.25'
       - name: Install nats-server
         run:  go install github.com/nats-io/nats-server/v2@main
       - name: Install stable Rust on ${{ matrix.os }}
@@ -62,7 +61,6 @@ jobs:
         id:   build-packages
         run:  |
           cargo build --all-targets
-
       - name: Setup deno for service tests
         if: ${{ matrix.os }} != windows-latest
         uses: denoland/setup-deno@v1
@@ -73,18 +71,78 @@ jobs:
           RUST_BACKTRACE: 1
         run: |
           cargo test --features slow_tests,websockets -- --nocapture
-      - name: TLS tests (ring, aws-lc-rs, fips)
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+      # TLS and version-specific tests are now run in parallel in a separate job
+
+  tls_tests:
+    defaults:
+      run:
+        working-directory: ./async-nats
+    name: TLS tests (${{ matrix.tls_feature }} / ubuntu-latest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tls_feature: [ring, aws-lc-rs, fips]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Generate go.sum # go.sum is required by caching on the next step
+        run: touch go.sum
+      - name: Set up Go
+        id:   setup-go
+        uses: actions/setup-go@v4 # v4 uses caching out of the box
+        with:
+          go-version: '1.25'
+      - name: Install nats-server
+        run:  go install github.com/nats-io/nats-server/v2@main
+      - name: Install stable Rust
+        id: install-rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache the build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
+          cache-on-failure: true
+      - name: Run TLS test with ${{ matrix.tls_feature }}
+        env:
+          RUST_BACKTRACE: 1
         run: |
-          # we do not want to create more matrices just for tls test.
-          # It's easier to test it manually here.
-          cargo test tls --features=ring --no-default-features -- --nocapture
-          cargo test tls --features=aws-lc-rs --no-default-features -- --nocapture
-          cargo test tls --features=fips --no-default-features -- --nocapture
-      - name: test against nats-server v2.11.9
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+          cargo test tls --features=${{ matrix.tls_feature }} --no-default-features -- --nocapture
+
+  server_2_11_tests:
+    defaults:
+      run:
+        working-directory: ./async-nats
+    name: Test against nats-server v2.11.9 (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Generate go.sum
+        run: touch go.sum
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+      - name: Install nats-server v2.11.9
+        run: go install github.com/nats-io/nats-server/v2@v2.11.9
+      - name: Install stable Rust
+        id: install-rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache the build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
+          cache-on-failure: true
+      - name: Setup deno for service tests
+        if: ${{ matrix.os }} != windows-latest
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: Run tests against v2.11.9
+        env:
+          RUST_BACKTRACE: 1
         run: |
-          go install github.com/nats-io/nats-server/v2@v2.11.9
           cargo test --no-default-features --features ring,server_2_10,server_2_11
 
   check_format:
