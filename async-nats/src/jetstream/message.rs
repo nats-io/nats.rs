@@ -13,6 +13,7 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
+use crate::jetstream::context::Publish;
 use crate::{error, header, Error};
 use crate::{subject::Subject, HeaderMap};
 use bytes::Bytes;
