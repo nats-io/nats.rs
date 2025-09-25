@@ -38,7 +38,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, TryAcquireError};
 use tokio::time::Duration;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
 
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
@@ -62,13 +62,13 @@ pub struct Context {
     pub(crate) max_ack_semaphore: Arc<tokio::sync::Semaphore>,
     pub(crate) acker_task: Arc<tokio::task::JoinHandle<()>>,
     pub(crate) ack_sender:
-        tokio::sync::mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+        tokio::sync::mpsc::UnboundedSender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
     pub(crate) backpressure_on_inflight: bool,
     pub(crate) semaphore_capacity: usize,
 }
 
 fn spawn_acker(
-    rx: ReceiverStream<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    rx: UnboundedReceiverStream<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
     ack_timeout: Duration,
     concurrency: Option<usize>,
 ) -> tokio::task::JoinHandle<()> {
@@ -269,12 +269,11 @@ where
 
     /// Build the [Context] with the given settings.
     pub fn build(self, client: Client) -> Context {
-        let acker_channel_capacity = self.semaphore_capacity;
-        let (tx, rx) = tokio::sync::mpsc::channel::<(
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(
             oneshot::Receiver<Message>,
             OwnedSemaphorePermit,
-        )>(acker_channel_capacity);
-        let stream = ReceiverStream::new(rx);
+        )>();
+        let stream = UnboundedReceiverStream::new(rx);
         let acker_task = Arc::new(spawn_acker(
             stream,
             self.ack_timeout,
@@ -1657,14 +1656,15 @@ pub struct PublishAckFuture {
     timeout: Duration,
     subscription: Option<oneshot::Receiver<Message>>,
     permit: Option<OwnedSemaphorePermit>,
-    tx: mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    tx: mpsc::UnboundedSender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
 }
 
 impl Drop for PublishAckFuture {
     fn drop(&mut self) {
         if let (Some(sub), Some(permit)) = (self.subscription.take(), self.permit.take()) {
-            if let Err(err) = self.tx.try_send((sub, permit)) {
-                tracing::warn!("failed to pass future permit to the acker: {}", err);
+            // Unbounded send should never fail unless receiver is dropped (Context dropped)
+            if self.tx.send((sub, permit)).is_err() {
+                // Context was dropped, permit will be released when it goes out of scope
             }
         }
     }
