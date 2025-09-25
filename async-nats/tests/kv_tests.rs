@@ -1547,4 +1547,55 @@ mod kv {
             50
         );
     }
+
+    #[tokio::test]
+    async fn test_direct_get_with_long_bucket_names() {
+        // Regression test for issue #1457
+        // Tests that KV get operations work correctly with long bucket names containing hyphens
+        // The issue was that direct_get_last_for_subject was sending a JSON payload when the subject
+        // was embedded in the URL, causing InvalidSubject errors
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        // Create KV bucket with a long name containing hyphens (as in the issue)
+        let bucket_name = "local-test-stream-rust-jetstream-bucket-local-test-cluster";
+        let store = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: bucket_name.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Use a key with hyphens as in the issue
+        let key = "local-test-stream-rust-key";
+        let value = "test_value_12345";
+
+        // PUT operation
+        store.put(key, value.into()).await.unwrap();
+
+        // Small delay to ensure write is propagated
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // GET operation - this would fail with InvalidSubject before the fix
+        let get_result = store.get(key).await;
+
+        match get_result {
+            Ok(Some(entry)) => {
+                let retrieved_value = String::from_utf8_lossy(&entry);
+                assert_eq!(retrieved_value, value, "Retrieved value doesn't match");
+            }
+            Ok(None) => {
+                panic!("Key not found, but we just put it!");
+            }
+            Err(e) => {
+                panic!("KV get failed with error: {:?}", e);
+            }
+        }
+    }
 }
