@@ -81,6 +81,11 @@ jobs:
           cargo test tls --features=ring --no-default-features -- --nocapture
           cargo test tls --features=aws-lc-rs --no-default-features -- --nocapture
           cargo test tls --features=fips --no-default-features -- --nocapture
+      - name: test against nats-server v2.11.9
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          go install github.com/nats-io/nats-server/v2@v2.11.9
+          cargo test --no-default-features --features ring,server_2_10,server_2_11
 
   check_format:
     name: check format (ubuntu-latest / nightly)
