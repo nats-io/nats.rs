@@ -1,4 +1,16 @@
-# v0.43.0
+
+# v0.43.1
+
+## Overview
+
+A hotfix for bugs and regressions introduced with recent release.
+
+## Fixed
+* Fix direct get with nats-server 2.11 & improve testing against older servers by @Jarema in https://github.com/nats-io/nats.rs/pull/1458
+* Properly handle acker cleanup by @Jarema in https://github.com/nats-io/nats.rs/pull/1460
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.43.0...async-nats/v0.43.13.0
 
 ## Overview
 
