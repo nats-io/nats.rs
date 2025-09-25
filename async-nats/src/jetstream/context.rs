@@ -2007,6 +2007,16 @@ impl Publish {
     pub fn ttl(self, ttl: Duration) -> Self {
         self.header(header::NATS_MESSAGE_TTL, ttl.as_secs().to_string())
     }
+
+    /// Creates an [jetstream::message::OutboundMessage] that can be sent using
+    /// [traits::Publisher::publish_message].
+    pub fn outbound_message<S: ToSubject>(self, subject: S) -> jetstream::message::OutboundMessage {
+        jetstream::message::OutboundMessage {
+            subject: subject.to_subject(),
+            payload: self.payload,
+            headers: self.headers,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
