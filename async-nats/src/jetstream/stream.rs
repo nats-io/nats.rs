@@ -275,8 +275,7 @@ impl<I> Stream<I> {
 
     /// Creates a builder for direct get operations.
     ///
-    /// Allows for more control over direct get requests, including the ability
-    /// to set no_headers option for optimized payload-only retrieval.
+    /// Allows for more control over direct get requests.
     ///
     /// # Examples
     ///
@@ -289,12 +288,7 @@ impl<I> Stream<I> {
     /// let stream = jetstream.get_stream("events").await?;
     ///
     /// // Get message without headers
-    /// let message = stream
-    ///     .direct_get_builder()
-    ///     .sequence(100)
-    ///     .no_headers()
-    ///     .send()
-    ///     .await?;
+    /// let message = stream.direct_get_builder().sequence(100).send().await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -490,12 +484,7 @@ impl<I> Stream<I> {
     /// let stream = context.get_stream("events").await?;
     ///
     /// // Get message without headers
-    /// let value = stream
-    ///     .raw_message_builder()
-    ///     .sequence(100)
-    ///     .no_headers()
-    ///     .send()
-    ///     .await?;
+    /// let value = stream.raw_message_builder().sequence(100).send().await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -2461,8 +2450,6 @@ pub struct DirectGetRequest {
     last_by_subject: Option<String>,
     #[serde(rename = "next_by_subj", skip_serializing_if = "Option::is_none")]
     next_by_subject: Option<String>,
-    #[serde(skip_serializing_if = "is_default", rename = "no_hdr")]
-    no_headers: bool,
 }
 
 /// Marker type indicating that headers should be included in the response.
@@ -2575,17 +2562,6 @@ impl<T> DirectGetBuilder<T> {
         self.request.next_by_subject = Some(subject.into());
         self
     }
-
-    /// Sets no_headers to true, indicating headers should be excluded from the response.
-    pub fn no_headers(mut self) -> DirectGetBuilder<WithoutHeaders> {
-        self.request.no_headers = true;
-        DirectGetBuilder {
-            context: self.context,
-            stream_name: self.stream_name,
-            request: self.request,
-            _phantom: std::marker::PhantomData,
-        }
-    }
 }
 
 impl DirectGetBuilder<WithHeaders> {
@@ -2614,8 +2590,6 @@ pub struct RawMessageRequest {
     last_by_subject: Option<String>,
     #[serde(rename = "next_by_subj", skip_serializing_if = "Option::is_none")]
     next_by_subject: Option<String>,
-    #[serde(skip_serializing_if = "is_default", rename = "no_hdr")]
-    no_headers: bool,
 }
 
 /// Trait for converting a RawMessage response into the appropriate return type.
@@ -2715,17 +2689,6 @@ impl<T> RawMessageBuilder<T> {
     pub fn next_by_subject<S: Into<String>>(mut self, subject: S) -> Self {
         self.request.next_by_subject = Some(subject.into());
         self
-    }
-
-    /// Sets no_headers to true, indicating headers should be excluded from the response.
-    pub fn no_headers(mut self) -> RawMessageBuilder<WithoutHeaders> {
-        self.request.no_headers = true;
-        RawMessageBuilder {
-            context: self.context,
-            stream_name: self.stream_name,
-            request: self.request,
-            _phantom: std::marker::PhantomData,
-        }
     }
 }
 
