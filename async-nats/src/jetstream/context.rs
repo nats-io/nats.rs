@@ -20,7 +20,8 @@ use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
 use crate::{
-    header, is_valid_subject, Client, Command, HeaderMap, HeaderValue, Message, StatusCode,
+    header, is_valid_subject, jetstream, Client, Command, HeaderMap, HeaderValue, Message,
+    StatusCode,
 };
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
@@ -52,6 +53,42 @@ use super::stream::{
 #[cfg(feature = "server_2_10")]
 use super::stream::{Compression, ConsumerCreateStrictError, ConsumerUpdateError};
 use super::{is_valid_name, kv};
+
+pub mod traits {
+    use std::future::Future;
+
+    use bytes::Bytes;
+    use serde::{de::DeserializeOwned, Serialize};
+
+    use crate::{jetstream::message, subject::ToSubject};
+
+    use super::RequestError;
+
+    pub trait Requester {
+        fn request<S, T, V>(
+            &self,
+            subject: S,
+            payload: &T,
+        ) -> impl Future<Output = Result<V, RequestError>>
+        where
+            S: ToSubject,
+            T: ?Sized + Serialize,
+            V: DeserializeOwned;
+    }
+
+    pub trait Publisher {
+        fn publish<S: ToSubject>(
+            &self,
+            subject: S,
+            payload: Bytes,
+        ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
+
+        fn publish_message(
+            &self,
+            message: message::OutboundMessage,
+        ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
+    }
+}
 
 /// A context which can perform jetstream scoped requests.
 #[derive(Debug, Clone)]
@@ -1613,6 +1650,44 @@ impl Context {
     }
 }
 
+impl traits::Requester for Context {
+    fn request<S, T, V>(
+        &self,
+        subject: S,
+        payload: &T,
+    ) -> impl Future<Output = Result<V, RequestError>>
+    where
+        S: ToSubject,
+        T: ?Sized + Serialize,
+        V: DeserializeOwned,
+    {
+        self.request(subject, payload)
+    }
+}
+
+impl traits::Publisher for Context {
+    fn publish<S: ToSubject>(
+        &self,
+        subject: S,
+        payload: Bytes,
+    ) -> impl Future<Output = Result<PublishAckFuture, PublishError>> {
+        self.publish(subject, payload)
+    }
+
+    fn publish_message(
+        &self,
+        message: jetstream::message::OutboundMessage,
+    ) -> impl Future<Output = Result<PublishAckFuture, PublishError>> {
+        self.send_publish(
+            message.subject,
+            Publish {
+                payload: message.payload,
+                headers: message.headers,
+            },
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PublishErrorKind {
     StreamNotFound,
@@ -1931,6 +2006,16 @@ impl Publish {
     /// It sets the `Nats-TTL` header with provided value.
     pub fn ttl(self, ttl: Duration) -> Self {
         self.header(header::NATS_MESSAGE_TTL, ttl.as_secs().to_string())
+    }
+
+    /// Creates an [jetstream::message::OutboundMessage] that can be sent using
+    /// [traits::Publisher::publish_message].
+    pub fn outbound_message<S: ToSubject>(self, subject: S) -> jetstream::message::OutboundMessage {
+        jetstream::message::OutboundMessage {
+            subject: subject.to_subject(),
+            payload: self.payload,
+            headers: self.headers,
+        }
     }
 }
 

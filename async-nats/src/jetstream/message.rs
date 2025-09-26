@@ -13,6 +13,7 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
+use crate::jetstream::context::Publish;
 use crate::{error, header, Error};
 use crate::{subject::Subject, HeaderMap};
 use bytes::Bytes;
@@ -31,6 +32,24 @@ pub struct StreamMessage {
     pub headers: HeaderMap,
     pub payload: Bytes,
     pub time: OffsetDateTime,
+}
+
+/// An outbound message to be published.
+/// Does not contain status or description which are valid only for inbound messages.
+pub struct OutboundMessage {
+    pub subject: Subject,
+    pub payload: Bytes,
+    pub headers: Option<HeaderMap>,
+}
+
+impl OutboundMessage {
+    pub fn new(subject: Subject, payload: Bytes, headers: Option<HeaderMap>) -> Self {
+        Self {
+            subject,
+            payload,
+            headers,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
