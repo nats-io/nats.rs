@@ -813,10 +813,10 @@ impl Client {
 /// Used for building customized requests.
 #[derive(Default)]
 pub struct Request {
-    payload: Option<Bytes>,
-    headers: Option<HeaderMap>,
-    timeout: Option<Option<Duration>>,
-    inbox: Option<String>,
+    pub payload: Option<Bytes>,
+    pub headers: Option<HeaderMap>,
+    pub timeout: Option<Option<Duration>>,
+    pub inbox: Option<String>,
 }
 
 impl Request {
