@@ -13,8 +13,7 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
-use crate::jetstream::context::Publish;
-use crate::{error, header, Error};
+use crate::{error, header, message, Error};
 use crate::{subject::Subject, HeaderMap};
 use bytes::Bytes;
 use futures_util::future::TryFutureExt;
@@ -48,6 +47,17 @@ impl OutboundMessage {
             subject,
             payload,
             headers,
+        }
+    }
+}
+
+impl From<OutboundMessage> for message::OutboundMessage {
+    fn from(message: OutboundMessage) -> Self {
+        message::OutboundMessage {
+            subject: message.subject,
+            payload: message.payload,
+            headers: message.headers,
+            reply: None,
         }
     }
 }
