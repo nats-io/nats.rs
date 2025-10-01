@@ -55,7 +55,7 @@ use super::stream::{Compression, ConsumerCreateStrictError, ConsumerUpdateError}
 use super::{is_valid_name, kv};
 
 pub mod traits {
-    use std::future::Future;
+    use std::{future::Future, time::Duration};
 
     use bytes::Bytes;
     use serde::{de::DeserializeOwned, Serialize};
@@ -87,6 +87,14 @@ pub mod traits {
             &self,
             message: message::OutboundMessage,
         ) -> impl Future<Output = Result<super::PublishAckFuture, super::PublishError>>;
+    }
+
+    pub trait ClientProvider {
+        fn client(&self) -> crate::Client;
+    }
+
+    pub trait TimeoutProvider {
+        fn timeout(&self) -> Duration;
     }
 }
 
@@ -326,6 +334,11 @@ impl Context {
     /// Sets the timeout for all JetStream API requests.
     pub fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout
+    }
+
+    /// Return a clone of the underlying NATS client.
+    pub fn client(&self) -> Client {
+        self.client.clone()
     }
 
     /// Waits until all pending `acks` are received from the server.
@@ -1650,6 +1663,40 @@ impl Context {
     }
 }
 
+impl crate::client::traits::Requester for Context {
+    fn send_request<S: ToSubject>(
+        &self,
+        subject: S,
+        request: crate::Request,
+    ) -> impl Future<Output = Result<Message, crate::RequestError>> {
+        self.client.send_request(subject, request)
+    }
+}
+
+impl crate::client::traits::Publisher for Context {
+    fn publish_with_reply<S: ToSubject, R: ToSubject>(
+        &self,
+        subject: S,
+        reply: R,
+        payload: Bytes,
+    ) -> impl Future<Output = Result<(), crate::PublishError>> {
+        self.client.publish_with_reply(subject, reply, payload)
+    }
+
+    fn publish_message(
+        &self,
+        msg: crate::message::OutboundMessage,
+    ) -> impl Future<Output = Result<(), crate::PublishError>> {
+        self.client.publish_message(msg)
+    }
+}
+
+impl traits::ClientProvider for Context {
+    fn client(&self) -> crate::Client {
+        self.client()
+    }
+}
+
 impl traits::Requester for Context {
     fn request<S, T, V>(
         &self,
@@ -1662,6 +1709,12 @@ impl traits::Requester for Context {
         V: DeserializeOwned,
     {
         self.request(subject, payload)
+    }
+}
+
+impl traits::TimeoutProvider for Context {
+    fn timeout(&self) -> Duration {
+        self.timeout
     }
 }
 
