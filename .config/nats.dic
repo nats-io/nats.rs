@@ -191,3 +191,5 @@ next_by_subject
 no_headers
 RawMessage
 last_by_subject
+OutboundMessage
+publish_message
