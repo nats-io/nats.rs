@@ -45,7 +45,7 @@ mod jetstream {
         PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{
-        GetStreamByNameErrorKind, Publish, PublishAckFuture, PublishErrorKind,
+        GetStreamByNameErrorKind, PublishAckFuture, PublishErrorKind, PublishMessage,
     };
     use async_nats::jetstream::response::Response;
     #[cfg(feature = "server_2_10")]
@@ -147,7 +147,7 @@ mod jetstream {
         context
             .send_publish(
                 "foo",
-                Publish::build()
+                PublishMessage::build()
                     .message_id(id.clone())
                     .payload("data".into()),
             )
@@ -157,7 +157,7 @@ mod jetstream {
             .unwrap();
         // Publish second message, a duplicate.
         context
-            .send_publish("foo", Publish::build().message_id(id.clone()))
+            .send_publish("foo", PublishMessage::build().message_id(id.clone()))
             .await
             .unwrap()
             .await
@@ -173,7 +173,10 @@ mod jetstream {
 
         // Publish message with different ID and expect error.
         let err = context
-            .send_publish("foo", Publish::build().expected_last_message_id("BAD_ID"))
+            .send_publish(
+                "foo",
+                PublishMessage::build().expected_last_message_id("BAD_ID"),
+            )
             .await
             .unwrap()
             .await
@@ -182,7 +185,10 @@ mod jetstream {
         assert_eq!(err, PublishErrorKind::WrongLastMessageId);
         // Publish a new message with expected ID.
         context
-            .send_publish("foo", Publish::build().expected_last_message_id(id.clone()))
+            .send_publish(
+                "foo",
+                PublishMessage::build().expected_last_message_id(id.clone()),
+            )
             .await
             .unwrap()
             .await
@@ -190,7 +196,7 @@ mod jetstream {
 
         // We should have now two messages. Check it.
         context
-            .send_publish("foo", Publish::build().expected_last_sequence(2))
+            .send_publish("foo", PublishMessage::build().expected_last_sequence(2))
             .await
             .unwrap()
             .await
@@ -198,7 +204,7 @@ mod jetstream {
         // 3 messages should be there, so this should error.
         assert_eq!(
             context
-                .send_publish("foo", Publish::build().expected_last_sequence(2),)
+                .send_publish("foo", PublishMessage::build().expected_last_sequence(2),)
                 .await
                 .unwrap()
                 .await
@@ -208,7 +214,10 @@ mod jetstream {
         );
         // 3 messages there, should be ok for this subject too.
         context
-            .send_publish("foo", Publish::build().expected_last_subject_sequence(3))
+            .send_publish(
+                "foo",
+                PublishMessage::build().expected_last_subject_sequence(3),
+            )
             .await
             .unwrap()
             .await
@@ -216,7 +225,10 @@ mod jetstream {
         // 4 messages there, should error.
         assert_eq!(
             context
-                .send_publish("foo", Publish::build().expected_last_subject_sequence(3),)
+                .send_publish(
+                    "foo",
+                    PublishMessage::build().expected_last_subject_sequence(3),
+                )
                 .await
                 .unwrap()
                 .await
@@ -227,14 +239,20 @@ mod jetstream {
 
         // Check if it works for the other subjects in the stream.
         context
-            .send_publish("bar", Publish::build().expected_last_subject_sequence(0))
+            .send_publish(
+                "bar",
+                PublishMessage::build().expected_last_subject_sequence(0),
+            )
             .await
             .unwrap()
             .await
             .unwrap();
         // Sequence is now 1, so this should fail.
         context
-            .send_publish("bar", Publish::build().expected_last_subject_sequence(0))
+            .send_publish(
+                "bar",
+                PublishMessage::build().expected_last_subject_sequence(0),
+            )
             .await
             .unwrap()
             .await
@@ -242,7 +260,10 @@ mod jetstream {
         // test header shorthand
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
-            .send_publish("foo", Publish::build().header(NATS_MESSAGE_ID, id.as_str()))
+            .send_publish(
+                "foo",
+                PublishMessage::build().header(NATS_MESSAGE_ID, id.as_str()),
+            )
             .await
             .unwrap()
             .await
@@ -250,7 +271,7 @@ mod jetstream {
         // above message should be ignored.
         assert_eq!(stream.info().await.unwrap().state.messages, 5);
         context
-            .send_publish("bar", Publish::build().expected_stream("TEST"))
+            .send_publish("bar", PublishMessage::build().expected_stream("TEST"))
             .await
             .unwrap()
             .await
@@ -4245,7 +4266,7 @@ mod jetstream {
         jetstream
             .send_publish(
                 "events.data",
-                Publish::build()
+                PublishMessage::build()
                     .ttl(Duration::from_secs(20))
                     .payload("data".into()),
             )
@@ -4255,7 +4276,10 @@ mod jetstream {
             .unwrap();
 
         jetstream
-            .send_publish("events.data", Publish::build().payload("data".into()))
+            .send_publish(
+                "events.data",
+                PublishMessage::build().payload("data".into()),
+            )
             .await
             .unwrap()
             .await

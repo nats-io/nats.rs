@@ -13,7 +13,9 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
-use crate::{error, header, message, Error};
+use crate::header::{IntoHeaderName, IntoHeaderValue};
+use crate::subject::ToSubject;
+use crate::{error, header, message, Error, HeaderValue};
 use crate::{subject::Subject, HeaderMap};
 use bytes::Bytes;
 use futures_util::future::TryFutureExt;
@@ -58,6 +60,90 @@ impl From<OutboundMessage> for message::OutboundMessage {
             payload: message.payload,
             headers: message.headers,
             reply: None,
+        }
+    }
+}
+
+/// Used for building customized `publish` message.
+#[derive(Default, Clone, Debug)]
+pub struct PublishMessage {
+    pub(crate) payload: Bytes,
+    pub(crate) headers: Option<header::HeaderMap>,
+}
+impl PublishMessage {
+    /// Creates a new custom Publish struct to be used with.
+    pub fn build() -> Self {
+        Default::default()
+    }
+
+    /// Sets the payload for the message.
+    pub fn payload(mut self, payload: Bytes) -> Self {
+        self.payload = payload;
+        self
+    }
+    /// Adds headers to the message.
+    pub fn headers(mut self, headers: HeaderMap) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+    /// A shorthand to add a single header.
+    pub fn header<N: IntoHeaderName, V: IntoHeaderValue>(mut self, name: N, value: V) -> Self {
+        self.headers
+            .get_or_insert(header::HeaderMap::new())
+            .insert(name, value);
+        self
+    }
+    /// Sets the `Nats-Msg-Id` header, that is used by stream deduplicate window.
+    pub fn message_id<T: AsRef<str>>(self, id: T) -> Self {
+        self.header(header::NATS_MESSAGE_ID, id.as_ref())
+    }
+    /// Sets expected last message ID.
+    /// It sets the `Nats-Expected-Last-Msg-Id` header with provided value.
+    pub fn expected_last_message_id<T: AsRef<str>>(self, last_message_id: T) -> Self {
+        self.header(
+            header::NATS_EXPECTED_LAST_MESSAGE_ID,
+            last_message_id.as_ref(),
+        )
+    }
+    /// Sets the last expected stream sequence.
+    /// It sets the `Nats-Expected-Last-Sequence` header with provided value.
+    pub fn expected_last_sequence(self, last_sequence: u64) -> Self {
+        self.header(
+            header::NATS_EXPECTED_LAST_SEQUENCE,
+            HeaderValue::from(last_sequence),
+        )
+    }
+    /// Sets the last expected stream sequence for a subject this message will be published to.
+    /// It sets the `Nats-Expected-Last-Subject-Sequence` header with provided value.
+    pub fn expected_last_subject_sequence(self, subject_sequence: u64) -> Self {
+        self.header(
+            header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+            HeaderValue::from(subject_sequence),
+        )
+    }
+    /// Sets the expected stream name.
+    /// It sets the `Nats-Expected-Stream` header with provided value.
+    pub fn expected_stream<T: AsRef<str>>(self, stream: T) -> Self {
+        self.header(
+            header::NATS_EXPECTED_STREAM,
+            HeaderValue::from(stream.as_ref()),
+        )
+    }
+
+    #[cfg(feature = "server_2_11")]
+    /// Sets TTL for a single message.
+    /// It sets the `Nats-TTL` header with provided value.
+    pub fn ttl(self, ttl: Duration) -> Self {
+        self.header(header::NATS_MESSAGE_TTL, ttl.as_secs().to_string())
+    }
+
+    /// Creates an [jetstream::message::OutboundMessage] that can be sent using
+    /// [traits::Publisher::publish_message].
+    pub fn outbound_message<S: ToSubject>(self, subject: S) -> OutboundMessage {
+        OutboundMessage {
+            subject: subject.to_subject(),
+            payload: self.payload,
+            headers: self.headers,
         }
     }
 }
