@@ -1,3 +1,9 @@
+# v0.44.1
+## What's Changed
+* Add missing errors types by @Jarema in https://github.com/nats-io/nats.rs/pull/1464
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.44.0...async-nats/v0.44.1
+
 # v0.44.0
 ## Overview
 A release that focuses on reorganization of types and improvement of extension traits for [orbit](https://github.com/synadia-io/orbit.rs)
