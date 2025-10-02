@@ -137,8 +137,8 @@ impl PublishMessage {
         self.header(header::NATS_MESSAGE_TTL, ttl.as_secs().to_string())
     }
 
-    /// Creates an [jetstream::message::OutboundMessage] that can be sent using
-    /// [traits::Publisher::publish_message].
+    /// Creates an [crate::jetstream::message::OutboundMessage] that can be sent using
+    /// [crate::jetstream::context::traits::Publisher::publish_message].
     pub fn outbound_message<S: ToSubject>(self, subject: S) -> OutboundMessage {
         OutboundMessage {
             subject: subject.to_subject(),
