@@ -16,7 +16,7 @@ use std::{error, fmt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize)]
-pub struct ErrorCode(u64);
+pub struct ErrorCode(pub u64);
 
 impl ErrorCode {
     /// Peer not a member
