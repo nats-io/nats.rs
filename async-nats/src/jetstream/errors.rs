@@ -442,6 +442,9 @@ impl ErrorCode {
     /// Mirrored stream name is invalid
     pub const MIRROR_INVALID_STREAM_NAME: ErrorCode = ErrorCode(10142);
 
+    /// Stream mirrors cannot have first sequence configured
+    pub const MIRROR_WITH_FIRST_SEQ: ErrorCode = ErrorCode(10143);
+
     /// Source with multiple subject transforms cannot also have a single subject filter
     pub const SOURCE_MULTIPLE_FILTERS_NOT_ALLOWED: ErrorCode = ErrorCode(10144);
 
@@ -471,6 +474,147 @@ impl ErrorCode {
 
     /// Consumer inactive threshold exceeds system limit
     pub const CONSUMER_INACTIVE_THRESHOLD_EXCESS: ErrorCode = ErrorCode(10153);
+
+    /// Mirror invalid transform destination
+    pub const MIRROR_INVALID_TRANSFORM_DESTINATION: ErrorCode = ErrorCode(10154);
+
+    /// Stream transform invalid source
+    pub const STREAM_TRANSFORM_INVALID_SOURCE: ErrorCode = ErrorCode(10155);
+
+    /// Stream transform invalid destination
+    pub const STREAM_TRANSFORM_INVALID_DESTINATION: ErrorCode = ErrorCode(10156);
+
+    /// Pedantic error
+    pub const PEDANTIC: ErrorCode = ErrorCode(10157);
+
+    /// Stream duplicate message conflict
+    pub const STREAM_DUPLICATE_MESSAGE_CONFLICT: ErrorCode = ErrorCode(10158);
+
+    /// Consumer priority policy without group
+    pub const CONSUMER_PRIORITY_POLICY_WITHOUT_GROUP: ErrorCode = ErrorCode(10159);
+
+    /// Consumer invalid priority group
+    pub const CONSUMER_INVALID_PRIORITY_GROUP: ErrorCode = ErrorCode(10160);
+
+    /// Consumer empty group name
+    pub const CONSUMER_EMPTY_GROUP_NAME: ErrorCode = ErrorCode(10161);
+
+    /// Consumer invalid group name
+    pub const CONSUMER_INVALID_GROUP_NAME: ErrorCode = ErrorCode(10162);
+
+    /// Stream expected last seq per subject not ready
+    pub const STREAM_EXPECTED_LAST_SEQ_PER_SUBJECT_NOT_READY: ErrorCode = ErrorCode(10163);
+
+    /// Stream wrong last sequence constant
+    pub const STREAM_WRONG_LAST_SEQUENCE_CONSTANT: ErrorCode = ErrorCode(10164);
+
+    /// Message TTL invalid
+    pub const MESSAGE_TTL_INVALID: ErrorCode = ErrorCode(10165);
+
+    /// Message TTL disabled
+    pub const MESSAGE_TTL_DISABLED: ErrorCode = ErrorCode(10166);
+
+    /// Stream too many requests
+    pub const STREAM_TOO_MANY_REQUESTS: ErrorCode = ErrorCode(10167);
+
+    /// Message increment disabled
+    pub const MESSAGE_INCR_DISABLED: ErrorCode = ErrorCode(10168);
+
+    /// Message increment missing
+    pub const MESSAGE_INCR_MISSING: ErrorCode = ErrorCode(10169);
+
+    /// Message increment payload error
+    pub const MESSAGE_INCR_PAYLOAD: ErrorCode = ErrorCode(10170);
+
+    /// Message increment invalid
+    pub const MESSAGE_INCR_INVALID: ErrorCode = ErrorCode(10171);
+
+    /// Message counter broken
+    pub const MESSAGE_COUNTER_BROKEN: ErrorCode = ErrorCode(10172);
+
+    /// Mirror with counters
+    pub const MIRROR_WITH_COUNTERS: ErrorCode = ErrorCode(10173);
+
+    /// Atomic publish disabled
+    pub const ATOMIC_PUBLISH_DISABLED: ErrorCode = ErrorCode(10174);
+
+    /// Atomic publish sequence missing
+    pub const ATOMIC_PUBLISH_MISSING_SEQ: ErrorCode = ErrorCode(10175);
+
+    /// Atomic publish batch incomplete
+    pub const ATOMIC_PUBLISH_INCOMPLETE_BATCH: ErrorCode = ErrorCode(10176);
+
+    /// Atomic publish unsupported header
+    pub const ATOMIC_PUBLISH_UNSUPPORTED_HEADER: ErrorCode = ErrorCode(10177);
+
+    /// Consumer push with priority group
+    pub const CONSUMER_PUSH_WITH_PRIORITY_GROUP: ErrorCode = ErrorCode(10178);
+
+    /// Atomic publish batch ID invalid
+    pub const ATOMIC_PUBLISH_INVALID_BATCH_ID: ErrorCode = ErrorCode(10179);
+
+    /// Stream min last sequence error
+    pub const STREAM_MIN_LAST_SEQ: ErrorCode = ErrorCode(10180);
+
+    /// Consumer ack policy invalid
+    pub const CONSUMER_ACK_POLICY_INVALID: ErrorCode = ErrorCode(10181);
+
+    /// Consumer replay policy invalid
+    pub const CONSUMER_REPLAY_POLICY_INVALID: ErrorCode = ErrorCode(10182);
+
+    /// Consumer ack wait negative
+    pub const CONSUMER_ACK_WAIT_NEGATIVE: ErrorCode = ErrorCode(10183);
+
+    /// Consumer backoff negative
+    pub const CONSUMER_BACKOFF_NEGATIVE: ErrorCode = ErrorCode(10184);
+
+    /// Required API level
+    pub const REQUIRED_API_LEVEL: ErrorCode = ErrorCode(10185);
+
+    /// Mirror with message schedules
+    pub const MIRROR_WITH_MSG_SCHEDULES: ErrorCode = ErrorCode(10186);
+
+    /// Source with message schedules
+    pub const SOURCE_WITH_MSG_SCHEDULES: ErrorCode = ErrorCode(10187);
+
+    /// Message schedules disabled
+    pub const MESSAGE_SCHEDULES_DISABLED: ErrorCode = ErrorCode(10188);
+
+    /// Message schedules pattern invalid
+    pub const MESSAGE_SCHEDULES_PATTERN_INVALID: ErrorCode = ErrorCode(10189);
+
+    /// Message schedules target invalid
+    pub const MESSAGE_SCHEDULES_TARGET_INVALID: ErrorCode = ErrorCode(10190);
+
+    /// Message schedules TTL invalid
+    pub const MESSAGE_SCHEDULES_TTL_INVALID: ErrorCode = ErrorCode(10191);
+
+    /// Message schedules rollup invalid
+    pub const MESSAGE_SCHEDULES_ROLLUP_INVALID: ErrorCode = ErrorCode(10192);
+
+    /// Stream expected last seq per subject invalid
+    pub const STREAM_EXPECTED_LAST_SEQ_PER_SUBJECT_INVALID: ErrorCode = ErrorCode(10193);
+
+    /// Stream offline reason
+    pub const STREAM_OFFLINE_REASON: ErrorCode = ErrorCode(10194);
+
+    /// Consumer offline reason
+    pub const CONSUMER_OFFLINE_REASON: ErrorCode = ErrorCode(10195);
+
+    /// Consumer priority group with policy none
+    pub const CONSUMER_PRIORITY_GROUP_WITH_POLICY_NONE: ErrorCode = ErrorCode(10196);
+
+    /// Consumer pinned TTL without priority policy none
+    pub const CONSUMER_PINNED_TTL_WITHOUT_PRIORITY_POLICY_NONE: ErrorCode = ErrorCode(10197);
+
+    /// Mirror with atomic publish
+    pub const MIRROR_WITH_ATOMIC_PUBLISH: ErrorCode = ErrorCode(10198);
+
+    /// Atomic publish batch too large
+    pub const ATOMIC_PUBLISH_TOO_LARGE_BATCH: ErrorCode = ErrorCode(10199);
+
+    /// Atomic publish batch commit invalid
+    pub const ATOMIC_PUBLISH_INVALID_BATCH_COMMIT: ErrorCode = ErrorCode(10200);
 }
 
 /// `Error` type returned from an API response when an error occurs.
