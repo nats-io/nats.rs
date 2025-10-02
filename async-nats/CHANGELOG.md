@@ -1,3 +1,14 @@
+# v0.44.0
+## Overview
+A release that focuses on reorganization of types and improvement of extension traits for [orbit](https://github.com/synadia-io/orbit.rs)
+
+## What's Changed
+* Enable service API by default by @Jarema in https://github.com/nats-io/nats.rs/pull/1461
+* Extend client traits by @Jarema in https://github.com/nats-io/nats.rs/pull/1456
+* Reorganize `message` types by @Jarema in https://github.com/nats-io/nats.rs/pull/1462
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.43.1...async-nats/v0.44.0
 
 # v0.43.1
 
