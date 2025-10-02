@@ -45,8 +45,9 @@ mod jetstream {
         PullConsumer, PushConsumer, ReplayPolicy,
     };
     use async_nats::jetstream::context::{
-        GetStreamByNameErrorKind, PublishAckFuture, PublishErrorKind, PublishMessage,
+        GetStreamByNameErrorKind, PublishAckFuture, PublishErrorKind,
     };
+    use async_nats::jetstream::message::PublishMessage;
     use async_nats::jetstream::response::Response;
     #[cfg(feature = "server_2_10")]
     use async_nats::jetstream::stream::ConsumerLimits;
