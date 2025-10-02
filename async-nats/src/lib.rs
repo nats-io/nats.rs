@@ -354,12 +354,19 @@ pub(crate) enum ServerOp {
     },
 }
 
+/// An alias. This is done to avoid breaking changes
+/// in the public API. However this will get deprecated in the future in favor of
+/// [crate::message::OutboundMessage].
+#[deprecated(
+    since = "0.44.0",
+    note = "use `async_nats::message::OutboundMessage` instead"
+)]
 pub type PublishMessage = crate::message::OutboundMessage;
 
 /// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]
 pub(crate) enum Command {
-    Publish(PublishMessage),
+    Publish(OutboundMessage),
     Request {
         subject: Subject,
         payload: Bytes,
@@ -899,7 +906,7 @@ impl ConnectionHandler {
                 self.connection.enqueue_write_op(&pub_op);
             }
 
-            Command::Publish(PublishMessage {
+            Command::Publish(OutboundMessage {
                 subject,
                 payload,
                 reply: respond,
@@ -1737,6 +1744,7 @@ macro_rules! from_with_timeout {
 pub(crate) use from_with_timeout;
 
 use crate::connection::ShouldFlush;
+use crate::message::OutboundMessage;
 
 #[cfg(test)]
 mod tests {

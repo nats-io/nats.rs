@@ -18,7 +18,7 @@ use std::future::Future;
 use crate::connection::State;
 use crate::message::OutboundMessage;
 use crate::subject::ToSubject;
-use crate::{PublishMessage, ServerInfo};
+use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
@@ -173,14 +173,14 @@ impl traits::Subscriber for Client {
     }
 }
 
-impl Sink<PublishMessage> for Client {
+impl Sink<OutboundMessage> for Client {
     type Error = PublishError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.poll_sender.poll_ready_unpin(cx).map_err(Into::into)
     }
 
-    fn start_send(mut self: Pin<&mut Self>, msg: PublishMessage) -> Result<(), Self::Error> {
+    fn start_send(mut self: Pin<&mut Self>, msg: OutboundMessage) -> Result<(), Self::Error> {
         self.poll_sender
             .start_send_unpin(Command::Publish(msg))
             .map_err(Into::into)
@@ -332,7 +332,7 @@ impl Client {
         }
 
         self.sender
-            .send(Command::Publish(PublishMessage {
+            .send(Command::Publish(OutboundMessage {
                 subject,
                 payload,
                 reply: None,
@@ -370,7 +370,7 @@ impl Client {
         let subject = subject.to_subject();
 
         self.sender
-            .send(Command::Publish(PublishMessage {
+            .send(Command::Publish(OutboundMessage {
                 subject,
                 payload,
                 reply: None,
@@ -406,7 +406,7 @@ impl Client {
         let reply = reply.to_subject();
 
         self.sender
-            .send(Command::Publish(PublishMessage {
+            .send(Command::Publish(OutboundMessage {
                 subject,
                 payload,
                 reply: Some(reply),
@@ -445,7 +445,7 @@ impl Client {
         let reply = reply.to_subject();
 
         self.sender
-            .send(Command::Publish(PublishMessage {
+            .send(Command::Publish(OutboundMessage {
                 subject,
                 payload,
                 reply: Some(reply),
