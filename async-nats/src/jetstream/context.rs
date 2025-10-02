@@ -14,15 +14,12 @@
 //! Manage operations on [Context], create/delete/update [Stream]
 
 use crate::error::Error;
-use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::jetstream::account::Account;
+use crate::jetstream::message::PublishMessage;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
-use crate::{
-    header, is_valid_subject, jetstream, Client, Command, HeaderMap, HeaderValue, Message,
-    StatusCode,
-};
+use crate::{is_valid_subject, jetstream, Client, Command, Message, StatusCode};
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Future, StreamExt, TryFutureExt};
@@ -410,7 +407,7 @@ impl Context {
         subject: S,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
-        self.send_publish(subject, Publish::build().payload(payload))
+        self.send_publish(subject, PublishMessage::build().payload(payload))
             .await
     }
 
@@ -441,8 +438,11 @@ impl Context {
         headers: crate::header::HeaderMap,
         payload: Bytes,
     ) -> Result<PublishAckFuture, PublishError> {
-        self.send_publish(subject, Publish::build().payload(payload).headers(headers))
-            .await
+        self.send_publish(
+            subject,
+            PublishMessage::build().payload(payload).headers(headers),
+        )
+        .await
     }
 
     /// Publish a message built by [Publish] and returns an acknowledgment future.
@@ -470,7 +470,7 @@ impl Context {
     pub async fn send_publish<S: ToSubject>(
         &self,
         subject: S,
-        publish: Publish,
+        publish: PublishMessage,
     ) -> Result<PublishAckFuture, PublishError> {
         let permit = if self.backpressure_on_inflight {
             // When backpressure is enabled, wait for a permit to become available
@@ -1733,7 +1733,7 @@ impl traits::Publisher for Context {
     ) -> impl Future<Output = Result<PublishAckFuture, PublishError>> {
         self.send_publish(
             message.subject,
-            Publish {
+            PublishMessage {
                 payload: message.payload,
                 headers: message.headers,
             },
@@ -1988,89 +1988,14 @@ impl futures_util::Stream for Streams {
         }
     }
 }
-/// Used for building customized `publish` message.
-#[derive(Default, Clone, Debug)]
-pub struct Publish {
-    payload: Bytes,
-    headers: Option<header::HeaderMap>,
-}
-impl Publish {
-    /// Creates a new custom Publish struct to be used with.
-    pub fn build() -> Self {
-        Default::default()
-    }
 
-    /// Sets the payload for the message.
-    pub fn payload(mut self, payload: Bytes) -> Self {
-        self.payload = payload;
-        self
-    }
-    /// Adds headers to the message.
-    pub fn headers(mut self, headers: HeaderMap) -> Self {
-        self.headers = Some(headers);
-        self
-    }
-    /// A shorthand to add a single header.
-    pub fn header<N: IntoHeaderName, V: IntoHeaderValue>(mut self, name: N, value: V) -> Self {
-        self.headers
-            .get_or_insert(header::HeaderMap::new())
-            .insert(name, value);
-        self
-    }
-    /// Sets the `Nats-Msg-Id` header, that is used by stream deduplicate window.
-    pub fn message_id<T: AsRef<str>>(self, id: T) -> Self {
-        self.header(header::NATS_MESSAGE_ID, id.as_ref())
-    }
-    /// Sets expected last message ID.
-    /// It sets the `Nats-Expected-Last-Msg-Id` header with provided value.
-    pub fn expected_last_message_id<T: AsRef<str>>(self, last_message_id: T) -> Self {
-        self.header(
-            header::NATS_EXPECTED_LAST_MESSAGE_ID,
-            last_message_id.as_ref(),
-        )
-    }
-    /// Sets the last expected stream sequence.
-    /// It sets the `Nats-Expected-Last-Sequence` header with provided value.
-    pub fn expected_last_sequence(self, last_sequence: u64) -> Self {
-        self.header(
-            header::NATS_EXPECTED_LAST_SEQUENCE,
-            HeaderValue::from(last_sequence),
-        )
-    }
-    /// Sets the last expected stream sequence for a subject this message will be published to.
-    /// It sets the `Nats-Expected-Last-Subject-Sequence` header with provided value.
-    pub fn expected_last_subject_sequence(self, subject_sequence: u64) -> Self {
-        self.header(
-            header::NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
-            HeaderValue::from(subject_sequence),
-        )
-    }
-    /// Sets the expected stream name.
-    /// It sets the `Nats-Expected-Stream` header with provided value.
-    pub fn expected_stream<T: AsRef<str>>(self, stream: T) -> Self {
-        self.header(
-            header::NATS_EXPECTED_STREAM,
-            HeaderValue::from(stream.as_ref()),
-        )
-    }
-
-    #[cfg(feature = "server_2_11")]
-    /// Sets TTL for a single message.
-    /// It sets the `Nats-TTL` header with provided value.
-    pub fn ttl(self, ttl: Duration) -> Self {
-        self.header(header::NATS_MESSAGE_TTL, ttl.as_secs().to_string())
-    }
-
-    /// Creates an [jetstream::message::OutboundMessage] that can be sent using
-    /// [traits::Publisher::publish_message].
-    pub fn outbound_message<S: ToSubject>(self, subject: S) -> jetstream::message::OutboundMessage {
-        jetstream::message::OutboundMessage {
-            subject: subject.to_subject(),
-            payload: self.payload,
-            headers: self.headers,
-        }
-    }
-}
+/// Alias to avoid breaking changes.
+/// Please use `jetstream::message::PublishMessage` instead.
+#[deprecated(
+    note = "use jetstream::message::PublishMessage instead",
+    since = "0.44.0"
+)]
+pub type Publish = super::message::PublishMessage;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RequestErrorKind {
