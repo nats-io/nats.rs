@@ -57,7 +57,7 @@ pub mod traits {
     use bytes::Bytes;
     use serde::{de::DeserializeOwned, Serialize};
 
-    use crate::{jetstream::message, subject::ToSubject};
+    use crate::{jetstream::message, subject::ToSubject, Request};
 
     use super::RequestError;
 
@@ -71,6 +71,14 @@ pub mod traits {
             S: ToSubject,
             T: ?Sized + Serialize,
             V: DeserializeOwned;
+    }
+
+    pub trait RequestSender {
+        fn send_request<S: ToSubject>(
+            &self,
+            subject: S,
+            request: Request,
+        ) -> impl Future<Output = Result<(), crate::PublishError>>;
     }
 
     pub trait Publisher {
@@ -1538,6 +1546,37 @@ impl Context {
         Ok(response)
     }
 
+    /// Send a JetStream API request without waiting for a response.
+    /// The subject will be automatically prefixed with the JetStream API prefix.
+    ///
+    /// This is useful for operations that need custom response handling,
+    /// such as streaming responses (batch get) where the caller manages
+    /// their own subscription to the reply inbox.
+    ///
+    /// Used mostly by extension crates.
+    pub async fn send_request<S: ToSubject>(
+        &self,
+        subject: S,
+        request: crate::client::Request,
+    ) -> Result<(), crate::PublishError> {
+        let prefixed_subject = format!("{}.{}", self.prefix, subject.to_subject());
+        let inbox = request.inbox.unwrap_or_else(|| self.client.new_inbox());
+        let payload = request.payload.unwrap_or_default();
+
+        match request.headers {
+            Some(headers) => {
+                self.client
+                    .publish_with_reply_and_headers(prefixed_subject, inbox, headers, payload)
+                    .await
+            }
+            None => {
+                self.client
+                    .publish_with_reply(prefixed_subject, inbox, payload)
+                    .await
+            }
+        }
+    }
+
     /// Creates a new object store bucket.
     ///
     /// # Examples
@@ -1715,6 +1754,16 @@ impl traits::Requester for Context {
 impl traits::TimeoutProvider for Context {
     fn timeout(&self) -> Duration {
         self.timeout
+    }
+}
+
+impl traits::RequestSender for Context {
+    fn send_request<S: ToSubject>(
+        &self,
+        subject: S,
+        request: crate::client::Request,
+    ) -> impl Future<Output = Result<(), crate::PublishError>> {
+        self.send_request(subject, request)
     }
 }
 
