@@ -127,10 +127,10 @@ pub(crate) struct Inner {
     #[serde(rename = "num_errors")]
     pub(crate) errors: usize,
     /// Total processing time for all requests.
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde")]
     pub(crate) processing_time: std::time::Duration,
     /// Average processing time for request.
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde")]
     pub(crate) average_processing_time: std::time::Duration,
     /// Last error that occurred.
     pub(crate) last_error: Option<error::Error>,
@@ -169,10 +169,10 @@ pub struct Stats {
     #[serde(rename = "num_errors")]
     pub errors: usize,
     /// Total processing time for all requests.
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde")]
     pub processing_time: std::time::Duration,
     /// Average processing time for request.
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde")]
     pub average_processing_time: std::time::Duration,
     /// Last error that occurred.
     #[serde(with = "serde_error_string")]

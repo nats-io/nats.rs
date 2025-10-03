@@ -30,10 +30,10 @@ use crate::{
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
 use bytes::Bytes;
+use chrono::{DateTime, FixedOffset};
 use futures_util::{future::BoxFuture, FutureExt, TryFutureExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
@@ -972,8 +972,10 @@ impl<I> Stream<I> {
     /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
-    /// let pause_until =
-    ///     time::OffsetDateTime::now_utc().saturating_add(time::Duration::seconds_f32(10.0));
+    /// let pause_until = chrono::Utc::now()
+    ///     .with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
+    ///     .checked_add_signed(chrono::Duration::milliseconds(10000))
+    ///     .unwrap();
     ///
     /// jetstream
     ///     .get_stream("events")
@@ -987,7 +989,7 @@ impl<I> Stream<I> {
     pub async fn pause_consumer(
         &self,
         name: &str,
-        pause_until: OffsetDateTime,
+        pause_until: DateTime<FixedOffset>,
     ) -> Result<PauseResponse, ConsumerError> {
         self.request_pause_consumer(name, Some(pause_until)).await
     }
@@ -1021,7 +1023,7 @@ impl<I> Stream<I> {
     async fn request_pause_consumer(
         &self,
         name: &str,
-        pause_until: Option<OffsetDateTime>,
+        pause_until: Option<DateTime<FixedOffset>>,
     ) -> Result<PauseResponse, ConsumerError> {
         let subject = format!("CONSUMER.PAUSE.{}.{}", self.name, name);
         let payload = &PauseResumeConsumerRequest { pause_until };
@@ -1162,7 +1164,7 @@ pub struct Config {
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
     pub max_consumers: i32,
     /// Maximum age of any message in the stream, expressed in nanoseconds
-    #[serde(with = "serde_nanos")]
+    #[serde(with = "crate::duration_serde")]
     pub max_age: Duration,
     /// The largest message that will be accepted by the Stream
     #[serde(default, skip_serializing_if = "is_default", rename = "max_msg_size")]
@@ -1175,7 +1177,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub no_ack: bool,
     /// The window within which to track duplicate messages.
-    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    #[serde(
+        default,
+        skip_serializing_if = "is_default",
+        with = "crate::duration_serde"
+    )]
     pub duplicate_window: Duration,
     /// The owner of the template associated with this stream.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -1258,12 +1264,8 @@ pub struct Config {
 
     /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
-    #[serde(
-        default,
-        with = "rfc3339::option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub pause_until: Option<OffsetDateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_until: Option<DateTime<FixedOffset>>,
 
     /// Allows setting a TTL for a message in the stream.
     #[cfg(feature = "server_2_11")]
@@ -1273,7 +1275,11 @@ pub struct Config {
     /// Enables delete markers for messages deleted from the stream and sets the TTL
     /// for how long the marker should be kept.
     #[cfg(feature = "server_2_11")]
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_nanos")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::duration_serde::option"
+    )]
     pub subject_delete_marker_ttl: Option<Duration>,
 
     /// Allows atomic publish operations.
@@ -1336,7 +1342,7 @@ where
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct ConsumerLimits {
     /// Sets the maximum [crate::jetstream::consumer::Config::inactive_threshold] that can be set on the consumer.
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde")]
     pub inactive_threshold: std::time::Duration,
     /// Sets the maximum [crate::jetstream::consumer::Config::max_ack_pending] that can be set on the consumer.
     #[serde(default)]
@@ -1565,8 +1571,7 @@ pub struct Info {
     /// The configuration associated with this stream.
     pub config: Config,
     /// The time that this stream was created.
-    #[serde(with = "rfc3339")]
-    pub created: time::OffsetDateTime,
+    pub created: DateTime<FixedOffset>,
     /// Various metrics associated with this stream.
     pub state: State,
     /// Information about leader and replicas.
@@ -1597,17 +1602,16 @@ pub struct DeleteStatus {
 #[derive(Deserialize)]
 pub struct PauseResponse {
     pub paused: bool,
-    #[serde(with = "rfc3339")]
-    pub pause_until: OffsetDateTime,
-    #[serde(default, with = "serde_nanos")]
+    pub pause_until: DateTime<FixedOffset>,
+    #[serde(default, with = "crate::duration_serde::option")]
     pub pause_remaining: Option<Duration>,
 }
 
 #[cfg(feature = "server_2_11")]
 #[derive(Serialize, Debug)]
 struct PauseResumeConsumerRequest {
-    #[serde(with = "rfc3339::option", skip_serializing_if = "Option::is_none")]
-    pause_until: Option<OffsetDateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pause_until: Option<DateTime<FixedOffset>>,
 }
 
 /// information about the given stream.
@@ -1621,14 +1625,14 @@ pub struct State {
     #[serde(rename = "first_seq")]
     pub first_sequence: u64,
     /// The time associated with the oldest message still present in this stream
-    #[serde(with = "rfc3339", rename = "first_ts")]
-    pub first_timestamp: time::OffsetDateTime,
+    #[serde(rename = "first_ts")]
+    pub first_timestamp: DateTime<FixedOffset>,
     /// The last sequence number assigned to a message in this stream
     #[serde(rename = "last_seq")]
     pub last_sequence: u64,
     /// The time that the last message was received by this stream
-    #[serde(with = "rfc3339", rename = "last_ts")]
-    pub last_timestamp: time::OffsetDateTime,
+    #[serde(rename = "last_ts")]
+    pub last_timestamp: DateTime<FixedOffset>,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
     /// The number of subjects in the stream
@@ -1665,8 +1669,8 @@ pub struct RawMessage {
     pub headers: Option<String>,
 
     /// The time the message was published.
-    #[serde(rename = "time", with = "rfc3339")]
-    pub time: time::OffsetDateTime,
+    #[serde(rename = "time")]
+    pub time: DateTime<FixedOffset>,
 }
 
 impl TryFrom<RawMessage> for StreamMessage {
@@ -1793,8 +1797,8 @@ pub struct ClusterInfo {
     #[serde(default)]
     pub leader: Option<String>,
     /// The time since this server has been the leader.
-    #[serde(default, with = "rfc3339::option")]
-    pub leader_since: Option<OffsetDateTime>,
+    #[serde(default)]
+    pub leader_since: Option<DateTime<FixedOffset>>,
     /// Indicates if this account is a system account.
     #[cfg(feature = "server_2_12")]
     #[serde(default)]
@@ -1817,7 +1821,7 @@ pub struct PeerInfo {
     /// Indicates if the server is up to date and synchronized.
     pub current: bool,
     /// Nanoseconds since this peer was last seen.
-    #[serde(with = "serde_nanos")]
+    #[serde(with = "crate::duration_serde")]
     pub active: Duration,
     /// Indicates the node is considered offline by the group.
     #[serde(default)]
@@ -1891,14 +1895,9 @@ pub struct Source {
     /// Optional source start sequence.
     #[serde(default, rename = "opt_start_seq", skip_serializing_if = "is_default")]
     pub start_sequence: Option<u64>,
-    #[serde(
-        default,
-        rename = "opt_start_time",
-        skip_serializing_if = "is_default",
-        with = "rfc3339::option"
-    )]
+    #[serde(default, rename = "opt_start_time", skip_serializing_if = "is_default")]
     /// Optional source start time.
-    pub start_time: Option<OffsetDateTime>,
+    pub start_time: Option<DateTime<FixedOffset>>,
     /// Optional additional filter subject.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: Option<String>,

@@ -27,6 +27,8 @@ use crate::{
 };
 
 use bytes::Bytes;
+#[cfg(feature = "server_2_11")]
+use chrono::{DateTime, FixedOffset};
 use futures_util::{future::BoxFuture, FutureExt};
 use portable_atomic::AtomicU64;
 use serde::{Deserialize, Serialize};
@@ -39,8 +41,6 @@ use std::{
     sync::Arc,
 };
 use std::{sync::atomic::Ordering, time::Duration};
-#[cfg(feature = "server_2_11")]
-use time::{serde::rfc3339, OffsetDateTime};
 use tracing::{debug, trace};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
@@ -221,7 +221,11 @@ pub struct Config {
     /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub ack_wait: Duration,
     /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -261,7 +265,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub flow_control: bool,
     /// Enable idle heartbeat messages
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub idle_heartbeat: Duration,
     /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
@@ -274,19 +282,19 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
     /// Custom backoff for missed acknowledgments.
-    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub backoff: Vec<Duration>,
     /// Threshold for consumer inactivity
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub inactive_threshold: Duration,
     /// Create a consumer paused until provided deadline.
     #[cfg(feature = "server_2_11")]
-    #[serde(
-        default,
-        with = "rfc3339::option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub pause_until: Option<OffsetDateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_until: Option<DateTime<FixedOffset>>,
 }
 
 impl FromConsumer for Config {

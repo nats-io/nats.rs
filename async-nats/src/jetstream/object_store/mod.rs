@@ -37,7 +37,7 @@ use super::context::{PublishError, PublishErrorKind};
 use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
-use time::{serde::rfc3339, OffsetDateTime};
+use chrono::{DateTime, FixedOffset};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
@@ -70,7 +70,7 @@ pub struct Config {
     /// A short description of the purpose of this storage bucket.
     pub description: Option<String>,
     /// Maximum age of any value in the bucket, expressed in nanoseconds
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde")]
     pub max_age: Duration,
     /// How large the storage bucket may become in total bytes.
     pub max_bytes: i64,
@@ -358,7 +358,9 @@ impl ObjectStore {
             chunks: object_chunks,
             size: object_size,
             digest: Some(format!("SHA-256={}", URL_SAFE.encode(digest))),
-            modified: Some(OffsetDateTime::now_utc()),
+            modified: Some(
+                chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
+            ),
             deleted: false,
             metadata: object_meta.metadata,
             headers: object_meta.headers,
@@ -721,7 +723,9 @@ impl ObjectStore {
             nuid: nuid::next().to_string(),
             size: 0,
             chunks: 0,
-            modified: Some(OffsetDateTime::now_utc()),
+            modified: Some(
+                chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
+            ),
             digest: None,
             deleted: false,
             metadata: HashMap::default(),
@@ -786,7 +790,9 @@ impl ObjectStore {
             nuid: nuid::next().to_string(),
             size: 0,
             chunks: 0,
-            modified: Some(OffsetDateTime::now_utc()),
+            modified: Some(
+                chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
+            ),
             digest: None,
             deleted: false,
             metadata: HashMap::default(),
@@ -1107,9 +1113,9 @@ pub struct ObjectInfo {
     #[serde(default)]
     pub chunks: usize,
     /// Date and time the object was last modified.
-    #[serde(default, with = "rfc3339::option")]
+    #[serde(default)]
     #[serde(rename = "mtime")]
-    pub modified: Option<time::OffsetDateTime>,
+    pub modified: Option<DateTime<FixedOffset>>,
     /// Digest of the object stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,

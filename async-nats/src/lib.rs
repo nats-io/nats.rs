@@ -258,6 +258,7 @@ pub use client::{
 pub use options::{AuthError, ConnectOptions};
 
 mod crypto;
+mod duration_serde;
 pub mod error;
 pub mod header;
 pub mod jetstream;

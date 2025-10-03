@@ -18,12 +18,11 @@ use crate::subject::ToSubject;
 use crate::{error, header, message, Error, HeaderValue};
 use crate::{subject::Subject, HeaderMap};
 use bytes::Bytes;
+use chrono::{DateTime, FixedOffset};
 use futures_util::future::TryFutureExt;
 use futures_util::StreamExt;
 use std::fmt::Display;
 use std::{mem, time::Duration};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 /// A message received directly from the stream, without leveraging a consumer.
 #[derive(Debug, Clone)]
@@ -32,7 +31,7 @@ pub struct StreamMessage {
     pub sequence: u64,
     pub headers: HeaderMap,
     pub payload: Bytes,
-    pub time: OffsetDateTime,
+    pub time: DateTime<FixedOffset>,
 }
 
 /// An outbound message to be published.
@@ -182,7 +181,7 @@ impl TryFrom<crate::Message> for StreamMessage {
                 StreamMessageError::with_source(StreamMessageErrorKind::MissingHeader, "timestamp")
             })
             .and_then(|time| {
-                OffsetDateTime::parse(time.as_str(), &Rfc3339).map_err(|err| {
+                DateTime::parse_from_rfc3339(time.as_str()).map_err(|err| {
                     StreamMessageError::with_source(
                         StreamMessageErrorKind::ParseError,
                         format!("could not parse timestamp header: {err}"),
@@ -478,8 +477,9 @@ impl Message {
                 stream_sequence: try_parse!(),
                 consumer_sequence: try_parse!(),
                 published: {
-                    let nanos: i128 = try_parse!();
-                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                    let nanos: i64 = try_parse!();
+                    chrono::DateTime::from_timestamp_nanos(nanos)
+                        .with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
                 },
                 pending: try_parse!(),
                 token: if n_tokens >= 9 {
@@ -500,8 +500,9 @@ impl Message {
                 stream_sequence: try_parse!(),
                 consumer_sequence: try_parse!(),
                 published: {
-                    let nanos: i128 = try_parse!();
-                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                    let nanos: i64 = try_parse!();
+                    chrono::DateTime::from_timestamp_nanos(nanos)
+                        .with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
                 },
                 pending: try_parse!(),
                 token: None,
@@ -741,7 +742,7 @@ pub struct Info<'a> {
     /// the number of messages known by the server to be pending to this consumer
     pub pending: u64,
     /// the time that this message was received by the server from its publisher
-    pub published: time::OffsetDateTime,
+    pub published: DateTime<FixedOffset>,
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
 }

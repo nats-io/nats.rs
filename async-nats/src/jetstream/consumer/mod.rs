@@ -19,12 +19,9 @@ pub mod push;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use time::serde::rfc3339;
-
-#[cfg(feature = "server_2_11")]
-use time::OffsetDateTime;
 
 use super::context::{ConsumerInfoError, RequestError};
 use super::response::Response;
@@ -165,8 +162,7 @@ pub struct Info {
     /// The consumer's unique name
     pub name: String,
     /// The time the consumer was created
-    #[serde(with = "rfc3339")]
-    pub created: time::OffsetDateTime,
+    pub created: DateTime<FixedOffset>,
     /// The consumer's configuration
     pub config: Config,
     /// Statistics for delivered messages
@@ -194,7 +190,7 @@ pub struct Info {
     pub paused: bool,
     #[cfg(feature = "server_2_11")]
     /// The remaining time the consumer is paused
-    #[serde(default, with = "serde_nanos")]
+    #[serde(default, with = "crate::duration_serde::option")]
     pub pause_remaining: Option<Duration>,
 }
 
@@ -208,12 +204,8 @@ pub struct SequenceInfo {
     #[serde(rename = "stream_seq")]
     pub stream_sequence: u64,
     // Last activity for the sequence
-    #[serde(
-        default,
-        with = "rfc3339::option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub last_active: Option<time::OffsetDateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active: Option<DateTime<FixedOffset>>,
 }
 
 /// Configuration for consumers. From a high level, the
@@ -287,7 +279,11 @@ pub struct Config {
     /// How messages should be acknowledged
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub ack_wait: Duration,
     /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -327,7 +323,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub flow_control: bool,
     /// Enable idle heartbeat messages
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub idle_heartbeat: Duration,
     /// Maximum size of a request batch
     #[serde(default, skip_serializing_if = "is_default")]
@@ -336,10 +336,18 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_bytes: i64,
     /// Maximum value for request expiration
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub max_expires: Duration,
     /// Threshold for ephemeral consumer inactivity
-    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    #[serde(
+        default,
+        with = "crate::duration_serde",
+        skip_serializing_if = "is_default"
+    )]
     pub inactive_threshold: Duration,
     /// Number of consumer replicas
     #[serde(default, skip_serializing_if = "is_default")]
@@ -353,7 +361,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
     /// Custom backoff for missed acknowledgments.
-    #[serde(default, skip_serializing_if = "is_default", with = "serde_nanos")]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub backoff: Vec<Duration>,
     #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
@@ -363,12 +371,8 @@ pub struct Config {
     pub priority_groups: Vec<String>,
     /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
-    #[serde(
-        default,
-        with = "rfc3339::option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub pause_until: Option<OffsetDateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_until: Option<DateTime<FixedOffset>>,
 }
 
 #[cfg(feature = "server_2_11")]
@@ -452,8 +456,8 @@ pub enum DeliverPolicy {
     /// configured `opt_start_time` parameter.
     #[serde(rename = "by_start_time")]
     ByStartTime {
-        #[serde(rename = "opt_start_time", with = "rfc3339")]
-        start_time: time::OffsetDateTime,
+        #[serde(rename = "opt_start_time")]
+        start_time: DateTime<FixedOffset>,
     },
     /// `LastPerSubject` will start the consumer with the last message
     /// for all subjects received.

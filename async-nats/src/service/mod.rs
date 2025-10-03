@@ -23,6 +23,7 @@ use std::{
 
 use bytes::Bytes;
 pub mod endpoint;
+use chrono::{DateTime, FixedOffset};
 use futures_util::{
     stream::{self, SelectAll},
     Future, StreamExt,
@@ -30,8 +31,6 @@ use futures_util::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use time::serde::rfc3339;
-use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::debug;
 
@@ -88,8 +87,7 @@ pub struct Stats {
     pub id: String,
     // Service version.
     pub version: String,
-    #[serde(with = "rfc3339")]
-    pub started: OffsetDateTime,
+    pub started: DateTime<FixedOffset>,
     /// Statistics of all endpoints.
     pub endpoints: Vec<endpoint::Stats>,
 }
@@ -348,7 +346,7 @@ impl Service {
             .queue_group
             .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
         let id = nuid::next().to_string();
-        let started = time::OffsetDateTime::now_utc();
+        let started = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
             kind: "io.nats.micro.v1.info_response".to_string(),

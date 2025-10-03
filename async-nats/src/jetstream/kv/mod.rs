@@ -24,10 +24,10 @@ use std::{
 
 use crate::HeaderValue;
 use bytes::Bytes;
+use chrono::{DateTime, FixedOffset};
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use time::OffsetDateTime;
 use tracing::debug;
 
 use crate::error::Error;
@@ -1522,7 +1522,7 @@ pub struct Entry {
     /// Distance from the latest value.
     pub delta: u64,
     /// The time the data was put in the bucket.
-    pub created: OffsetDateTime,
+    pub created: DateTime<FixedOffset>,
     /// The kind of operation that caused this entry.
     pub operation: Operation,
     /// Set to true after all historical messages have been received, and
