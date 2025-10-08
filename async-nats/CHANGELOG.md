@@ -1,3 +1,13 @@
+# v0.44.2
+## Overview
+This PR adds a new method to Context traits and fixes the docs build
+
+## What's Changed
+* Add send_request method to JetStream Context by @Jarema in https://github.com/nats-io/nats.rs/pull/1466
+* Fix docs by @Jarema in https://github.com/nats-io/nats.rs/pull/1468
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.44.1...async-nats/v0.44.2
+
 # v0.44.1
 ## What's Changed
 * Add missing errors types by @Jarema in https://github.com/nats-io/nats.rs/pull/1464
