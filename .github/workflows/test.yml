@@ -195,7 +195,7 @@ jobs:
 
       - name: Install stable Rust on ubuntu-latest
         id:   install-rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Restore cached build artifacts
         uses: Swatinem/rust-cache@v2
         with:
