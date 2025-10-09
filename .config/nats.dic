@@ -193,3 +193,6 @@ RawMessage
 last_by_subject
 OutboundMessage
 publish_message
+untagged
+deserialization
+serde's
