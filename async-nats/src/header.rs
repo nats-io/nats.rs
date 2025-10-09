@@ -23,7 +23,7 @@
 use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A struct for handling NATS headers.
 /// Has a similar API to `http::header`, but properly serializes and deserializes
@@ -44,9 +44,48 @@ use serde::{Deserialize, Serialize};
 /// # }
 /// ```
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct HeaderMap {
     inner: HashMap<HeaderName, Vec<HeaderValue>>,
+}
+
+/// Helper enum for backward-compatible deserialization using serde's untagged feature
+/// This is required because of the bug #1470 where the client incorrectly serialized
+/// headers with an "inner" wrapper.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum HeaderMapHelper {
+    // Legacy format with "inner" wrapper
+    Legacy {
+        inner: HashMap<HeaderName, Vec<HeaderValue>>,
+    },
+    // Proper format - direct HashMap
+    Current(HashMap<HeaderName, Vec<HeaderValue>>),
+}
+
+impl<'de> Deserialize<'de> for HeaderMap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Use the untagged enum to automatically try both formats
+        let helper = HeaderMapHelper::deserialize(deserializer)?;
+
+        Ok(match helper {
+            HeaderMapHelper::Legacy { inner } => HeaderMap { inner },
+            HeaderMapHelper::Current(inner) => HeaderMap { inner },
+        })
+    }
+}
+
+impl Serialize for HeaderMap {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Serialize as the new format (direct HashMap without "inner" wrapper)
+        self.inner.serialize(serializer)
+    }
 }
 
 impl FromIterator<(HeaderName, HeaderValue)> for HeaderMap {
@@ -242,6 +281,7 @@ impl HeaderMap {
 /// headers.insert("Another", "AnotherValue");
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct HeaderValue {
     inner: String,
 }
@@ -867,5 +907,142 @@ mod tests {
         let value: HeaderValue = string.into();
 
         assert_eq!("some value", value.as_str());
+    }
+
+    #[test]
+    fn header_map_backward_compatible_deserialization() {
+        // Test new format (direct HashMap) - this is how it should serialize now
+        let new_format_json =
+            r#"{"Content-Type": ["application/json"], "Authorization": ["Bearer token"]}"#;
+        let header_map: HeaderMap = serde_json::from_str(new_format_json).unwrap();
+
+        assert_eq!(
+            header_map.get("Content-Type").unwrap().as_str(),
+            "application/json"
+        );
+        assert_eq!(
+            header_map.get("Authorization").unwrap().as_str(),
+            "Bearer token"
+        );
+
+        // Test legacy format (with "inner" wrapper) - this is the old format that should still work
+        let legacy_format_json = r#"{"inner": {"Content-Type": ["application/json"], "Authorization": ["Bearer token"]}}"#;
+        let header_map_legacy: HeaderMap = serde_json::from_str(legacy_format_json).unwrap();
+
+        assert_eq!(
+            header_map_legacy.get("Content-Type").unwrap().as_str(),
+            "application/json"
+        );
+        assert_eq!(
+            header_map_legacy.get("Authorization").unwrap().as_str(),
+            "Bearer token"
+        );
+
+        // Both should be equal after deserialization
+        assert_eq!(header_map, header_map_legacy);
+    }
+
+    #[test]
+    fn header_map_serialization_new_format() {
+        // Test that serialization uses the new format (no "inner" wrapper)
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", "application/json");
+        headers.insert("Authorization", "Bearer token");
+
+        let serialized = serde_json::to_string(&headers).unwrap();
+
+        // Should not contain "inner" key
+        assert!(!serialized.contains("inner"));
+
+        // Should be able to deserialize back
+        let deserialized: HeaderMap = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(headers, deserialized);
+    }
+
+    #[test]
+    fn header_map_roundtrip_compatibility() {
+        // Test that we can roundtrip both formats
+        let mut original = HeaderMap::new();
+        original.insert("X-Custom-Header", "custom-value");
+        original.append("Multi-Value", "value1");
+        original.append("Multi-Value", "value2");
+
+        // Serialize using new format
+        let new_serialized = serde_json::to_string(&original).unwrap();
+        let new_deserialized: HeaderMap = serde_json::from_str(&new_serialized).unwrap();
+        assert_eq!(original, new_deserialized);
+
+        // Manually create legacy format JSON
+        let legacy_json = format!(r#"{{"inner": {}}}"#, new_serialized);
+        let legacy_deserialized: HeaderMap = serde_json::from_str(&legacy_json).unwrap();
+        assert_eq!(original, legacy_deserialized);
+    }
+
+    #[test]
+    fn header_map_invalid_format_error() {
+        // Test that invalid JSON returns proper error
+        let invalid_json = r#"{"not_inner_or_direct": {"Content-Type": ["application/json"]}}"#;
+        let result = serde_json::from_str::<HeaderMap>(invalid_json);
+        assert!(result.is_err());
+
+        let error_message = result.unwrap_err().to_string();
+        // With untagged enum, serde will report that data doesn't match any variant
+        assert!(error_message.contains("did not match any variant"));
+    }
+
+    #[test]
+    fn header_map_empty_cases() {
+        // Test empty HeaderMap serialization/deserialization
+        let empty = HeaderMap::new();
+        let serialized = serde_json::to_string(&empty).unwrap();
+        assert_eq!(serialized, "{}");
+
+        let deserialized: HeaderMap = serde_json::from_str("{}").unwrap();
+        assert!(deserialized.is_empty());
+
+        // Test legacy empty format
+        let legacy_empty = r#"{"inner": {}}"#;
+        let legacy_deserialized: HeaderMap = serde_json::from_str(legacy_empty).unwrap();
+        assert!(legacy_deserialized.is_empty());
+    }
+
+    #[test]
+    fn header_map_mixed_legacy_detection() {
+        // Test that an "inner" header name doesn't confuse the deserializer
+        // This would be a new format where "inner" is a legitimate header name
+        let json_with_inner_header =
+            r#"{"inner": ["some-value"], "Other-Header": ["other-value"]}"#;
+        let header_map: HeaderMap = serde_json::from_str(json_with_inner_header).unwrap();
+
+        // Should have two headers
+        assert_eq!(header_map.len(), 2);
+        assert_eq!(header_map.get("inner").unwrap().as_str(), "some-value");
+        assert_eq!(
+            header_map.get("Other-Header").unwrap().as_str(),
+            "other-value"
+        );
+    }
+
+    #[test]
+    fn header_map_large_headers() {
+        // Test with many headers
+        let mut headers = HeaderMap::new();
+        for i in 0..100 {
+            headers.insert(format!("Header-{}", i), format!("Value-{}", i));
+        }
+
+        let serialized = serde_json::to_string(&headers).unwrap();
+        let deserialized: HeaderMap = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(headers.len(), deserialized.len());
+        for i in 0..100 {
+            assert_eq!(
+                deserialized
+                    .get(format!("Header-{}", i).as_str())
+                    .unwrap()
+                    .as_str(),
+                format!("Value-{}", i)
+            );
+        }
     }
 }

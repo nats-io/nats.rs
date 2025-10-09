@@ -26,6 +26,7 @@ mod object_store {
     use rand::RngCore;
     use tokio::io::AsyncReadExt;
 
+    use async_nats::jetstream::object_store::ObjectInfo;
     use ring::digest::{self, SHA256};
 
     #[tokio::test]
@@ -712,5 +713,71 @@ mod object_store {
         let mut buffer = Vec::new();
         let result = object.read(&mut buffer).await.unwrap();
         assert_eq!(result, 0);
+    }
+
+    #[tokio::test]
+    async fn object_info_header_backward_compatibility() {
+        // Test that ObjectInfo can deserialize both old and new HeaderMap formats
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", "application/json");
+        headers.insert("X-Custom", "test-value");
+
+        // Test new format (current format after fix)
+        let object_info_new = ObjectInfo {
+            name: "test-object".to_string(),
+            description: Some("Test object".to_string()),
+            metadata: std::collections::HashMap::new(),
+            headers: Some(headers.clone()),
+            options: None,
+            bucket: "test-bucket".to_string(),
+            nuid: "test-nuid".to_string(),
+            size: 1024,
+            chunks: 1,
+            modified: None,
+            digest: Some("test-digest".to_string()),
+            deleted: false,
+        };
+
+        // Serialize using new format
+        let new_serialized = serde_json::to_string(&object_info_new).unwrap();
+
+        // Should not contain "inner" in headers
+        assert!(!new_serialized.contains(r#""inner":"#));
+
+        // Should deserialize correctly
+        let new_deserialized: ObjectInfo = serde_json::from_str(&new_serialized).unwrap();
+        assert_eq!(object_info_new, new_deserialized);
+
+        // Manually create legacy format (with "inner" wrapper in headers)
+        let legacy_json = new_serialized.replace(
+            r#""headers":{"Content-Type":["application/json"],"X-Custom":["test-value"]}"#,
+            r#""headers":{"inner":{"Content-Type":["application/json"],"X-Custom":["test-value"]}}"#
+        );
+
+        // Legacy format should also deserialize correctly
+        let legacy_deserialized: ObjectInfo = serde_json::from_str(&legacy_json).unwrap();
+        assert_eq!(object_info_new, legacy_deserialized);
+
+        // Headers should be identical regardless of serialization format
+        assert_eq!(
+            new_deserialized
+                .headers
+                .as_ref()
+                .unwrap()
+                .get("Content-Type"),
+            legacy_deserialized
+                .headers
+                .as_ref()
+                .unwrap()
+                .get("Content-Type")
+        );
+        assert_eq!(
+            new_deserialized.headers.as_ref().unwrap().get("X-Custom"),
+            legacy_deserialized
+                .headers
+                .as_ref()
+                .unwrap()
+                .get("X-Custom")
+        );
     }
 }
