@@ -2457,9 +2457,9 @@ mod jetstream {
             .unwrap();
         let mut consumer = stream.get_consumer("pull").await.unwrap();
 
-        for _ in 0..10 {
+        for i in 0..10 {
             context
-                .publish("events", "dat".into())
+                .publish("events", format!("dat-{i}").into())
                 .await
                 .unwrap()
                 .await
@@ -2523,10 +2523,11 @@ mod jetstream {
         if let Some(message) = iter.next().await {
             message
                 .unwrap()
-                .ack_with(async_nats::jetstream::AckKind::Nak(None))
+                .double_ack_with(async_nats::jetstream::AckKind::Nak(None))
                 .await
                 .unwrap();
         }
+
         client.flush().await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;

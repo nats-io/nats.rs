@@ -338,6 +338,63 @@ impl Message {
         }
     }
 
+    /// Acknowledges a message delivery by sending a chosen [AckKind] to the server
+    /// and awaits for confirmation for the server that it received the message.
+    /// Useful if user wants to ensure `exactly once` semantics.
+    ///
+    /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
+    /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::AckKind;
+    /// use futures_util::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     message?.double_ack_with(AckKind::Ack).await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn double_ack_with(&self, ack_kind: AckKind) -> Result<(), Error> {
+        if let Some(ref reply) = self.reply {
+            let inbox = self.context.client.new_inbox();
+            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
+            self.context
+                .client
+                .publish_with_reply(reply.clone(), inbox, ack_kind.into())
+                .await?;
+            match tokio::time::timeout(self.context.timeout, subscription.next())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "double ack response timed out",
+                    )
+                })? {
+                Some(_) => Ok(()),
+                None => Err(Box::new(std::io::Error::other("subscription dropped"))),
+            }
+        } else {
+            Err(Box::new(std::io::Error::other(
+                "No reply subject, not a JetStream message",
+            )))
+        }
+    }
+
     /// Acknowledges a message delivery by sending `+ACK` to the server
     /// and awaits for confirmation for the server that it received the message.
     /// Useful if user wants to ensure `exactly once` semantics.
@@ -369,29 +426,7 @@ impl Message {
     /// # }
     /// ```
     pub async fn double_ack(&self) -> Result<(), Error> {
-        if let Some(ref reply) = self.reply {
-            let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.clone()).await?;
-            self.context
-                .client
-                .publish_with_reply(reply.clone(), inbox, AckKind::Ack.into())
-                .await?;
-            match tokio::time::timeout(self.context.timeout, subscription.next())
-                .await
-                .map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "double ack response timed out",
-                    )
-                })? {
-                Some(_) => Ok(()),
-                None => Err(Box::new(std::io::Error::other("subscription dropped"))),
-            }
-        } else {
-            Err(Box::new(std::io::Error::other(
-                "No reply subject, not a JetStream message",
-            )))
-        }
+        self.double_ack_with(AckKind::Ack).await
     }
 
     /// Returns the `JetStream` message ID
@@ -535,8 +570,7 @@ impl Acker {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use async_nats::jetstream::Message;
+    /// use async_nats::jetstream::{consumer::PullConsumer, Message};
     /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -581,9 +615,7 @@ impl Acker {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use async_nats::jetstream::AckKind;
-    /// use async_nats::jetstream::Message;
+    /// use async_nats::jetstream::{consumer::PullConsumer, AckKind, Message};
     /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -614,6 +646,68 @@ impl Acker {
                 .publish(reply.to_owned(), kind.into())
                 .map_err(Error::from)
                 .await
+        } else {
+            Err(Box::new(std::io::Error::other(
+                "No reply subject, not a JetStream message",
+            )))
+        }
+    }
+
+    /// Acknowledges a message delivery by sending the chosen [AckKind] to the server
+    /// and awaits for confirmation for the server that it received the message.
+    /// Useful if user wants to ensure `exactly once` semantics.
+    ///
+    /// If [AckPolicy][crate::jetstream::consumer::AckPolicy] is set to `All` or `Explicit`, messages has to be acked.
+    /// Otherwise redeliveries will occur and [Consumer][crate::jetstream::consumer::Consumer] will not be able to advance.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::{AckKind, Message};
+    /// use futures_util::StreamExt;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let consumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("pull")
+    ///     .await?;
+    ///
+    /// let mut messages = consumer.fetch().max_messages(100).messages().await?;
+    ///
+    /// while let Some(message) = messages.next().await {
+    ///     let (message, acker) = message.map(Message::split)?;
+    ///     // Do something with the message. Ownership can be taken over `Message`.
+    ///     // while retaining ability to ack later.
+    ///     println!("message: {:?}", message);
+    ///     // Ack it. `Message` may be dropped already.
+    ///     acker.double_ack_with(AckKind::Ack).await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn double_ack_with(&self, ack_kind: AckKind) -> Result<(), Error> {
+        if let Some(ref reply) = self.reply {
+            let inbox = self.context.client.new_inbox();
+            let mut subscription = self.context.client.subscribe(inbox.to_owned()).await?;
+            self.context
+                .client
+                .publish_with_reply(reply.to_owned(), inbox, ack_kind.into())
+                .await?;
+            match tokio::time::timeout(self.context.timeout, subscription.next())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "double ack response timed out",
+                    )
+                })? {
+                Some(_) => Ok(()),
+                None => Err(Box::new(std::io::Error::other("subscription dropped"))),
+            }
         } else {
             Err(Box::new(std::io::Error::other(
                 "No reply subject, not a JetStream message",
@@ -658,29 +752,7 @@ impl Acker {
     /// # }
     /// ```
     pub async fn double_ack(&self) -> Result<(), Error> {
-        if let Some(ref reply) = self.reply {
-            let inbox = self.context.client.new_inbox();
-            let mut subscription = self.context.client.subscribe(inbox.to_owned()).await?;
-            self.context
-                .client
-                .publish_with_reply(reply.to_owned(), inbox, AckKind::Ack.into())
-                .await?;
-            match tokio::time::timeout(self.context.timeout, subscription.next())
-                .await
-                .map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "double ack response timed out",
-                    )
-                })? {
-                Some(_) => Ok(()),
-                None => Err(Box::new(std::io::Error::other("subscription dropped"))),
-            }
-        } else {
-            Err(Box::new(std::io::Error::other(
-                "No reply subject, not a JetStream message",
-            )))
-        }
+        self.double_ack_with(AckKind::Ack).await
     }
 }
 /// The kinds of response used for acknowledging a processed message.
