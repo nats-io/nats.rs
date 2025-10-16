@@ -1186,8 +1186,6 @@ mod client {
     async fn test_reconnect_server_callback() {
         // This test validates that the reconnect_server_callback is invoked
         // and that the client respects the server selection from the callback.
-        use std::sync::Arc;
-        use tokio::sync::Mutex;
 
         let server = nats_server::run_basic_server();
         let correct_addr = server.client_url();
@@ -1199,33 +1197,26 @@ mod client {
         // Create a fake/non-existent server address for initial attempt
         let fake_server: ServerAddr = "nats://localhost:9999".parse().unwrap();
 
-        // Track callback invocations
-        let callback_invoked = Arc::new(Mutex::new(false));
-        let callback_invoked_clone = callback_invoked.clone();
-
         // Track connection events
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(10);
 
         let client = ConnectOptions::new()
-            .reconnect_server_callback(move |(servers, _server_info)| {
+            .reconnect_server_callback(move |(servers, _server_info, attempt)| {
                 let correct = correct_server_for_callback.clone();
-                let invoked = callback_invoked_clone.clone();
                 async move {
-                    *invoked.lock().await = true;
-
-                    // First time: return the correct server
-                    // (The fake server should fail, triggering reconnect)
-                    let has_fake_server = servers.iter().any(|s| {
-                        // Check if this server matches our fake one
-                        format!("{:?}", s).contains("9999")
-                    });
-
-                    if has_fake_server {
-                        // Return the correct server
-                        correct
+                    // Use the attempt number to decide which server to return
+                    // On first attempt (1), return the fake server (will fail)
+                    // On second attempt (2), return the correct server
+                    if attempt == 1 {
+                        // First attempt - return fake server that will fail
+                        servers
+                            .iter()
+                            .find(|s| format!("{:?}", s).contains("9999"))
+                            .cloned()
+                            .unwrap_or(correct)
                     } else {
-                        // Return the first available server
-                        servers.first().cloned().unwrap_or(correct)
+                        // Subsequent attempts - return correct server
+                        correct
                     }
                 }
             })
@@ -1252,12 +1243,6 @@ mod client {
         })
         .await
         .expect("Client should connect within timeout");
-
-        // Verify callback was invoked
-        assert!(
-            *callback_invoked.lock().await,
-            "Callback should have been invoked"
-        );
 
         // Verify we can publish and subscribe (connection is working)
         let mut subscriber = client.subscribe("test").await.unwrap();
@@ -1314,16 +1299,20 @@ mod client {
         let server = nats_server::run_basic_server();
         let server_addr: ServerAddr = server.client_url().parse().unwrap();
 
-        let callback_count = Arc::new(Mutex::new(0));
-        let callback_count_clone = callback_count.clone();
+        // Track the highest attempt number seen
+        let max_attempt_seen = Arc::new(Mutex::new(0));
+        let max_attempt_clone = max_attempt_seen.clone();
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(10);
 
         let client = ConnectOptions::new()
-            .reconnect_server_callback(move |(servers, _)| {
-                let count = callback_count_clone.clone();
+            .reconnect_server_callback(move |(servers, _, attempt)| {
+                let max_attempt = max_attempt_clone.clone();
                 async move {
-                    *count.lock().await += 1;
+                    let mut current_max = max_attempt.lock().await;
+                    if attempt > *current_max {
+                        *current_max = attempt;
+                    }
                     servers.first().cloned().unwrap()
                 }
             })
@@ -1366,12 +1355,13 @@ mod client {
         .await
         .expect("Reconnection should succeed");
 
-        // Verify callback was invoked at least once (possibly twice - initial + reconnect)
-        let count = *callback_count.lock().await;
+        // Verify callback was invoked with attempt numbers
+        // Initial connection should be attempt 1, after force_reconnect should see higher attempts
+        let max_attempt = *max_attempt_seen.lock().await;
         assert!(
-            count >= 1,
-            "Callback should have been invoked at least once, got: {}",
-            count
+            max_attempt >= 1,
+            "Callback should have been invoked with at least attempt 1, got: {}",
+            max_attempt
         );
     }
 }

@@ -67,7 +67,7 @@ pub struct ConnectOptions {
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) server_info_callback: Option<CallbackArg1<ServerInfo, ()>>,
     pub(crate) reconnect_server_callback:
-        Option<CallbackArg1<(Vec<ServerAddr>, ServerInfo), ServerAddr>>,
+        Option<CallbackArg1<(Vec<ServerAddr>, ServerInfo, usize), ServerAddr>>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -943,20 +943,26 @@ impl ConnectOptions {
     }
 
     /// Registers a callback for customizing server selection during reconnection.
-    /// The callback receives the list of available servers and the most recent ServerInfo,
-    /// and should return the ServerAddr to connect to.
+    /// The callback receives:
+    /// - List of available servers
+    /// - Most recent ServerInfo
+    /// - Current reconnection attempt number (starts at 1)
+    ///
+    /// The callback should return the ServerAddr to connect to.
     ///
     /// This allows fine-grained control over reconnection logic, such as:
     /// - Custom server selection algorithms
     /// - Geographic server preference
     /// - Dynamic server list manipulation
+    /// - Attempt-based retry strategies
     ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::ConnectError> {
     /// async_nats::ConnectOptions::new()
-    ///     .reconnect_server_callback(|(servers, server_info)| async move {
+    ///     .reconnect_server_callback(|(servers, server_info, attempt)| async move {
+    ///         println!("Reconnection attempt {}", attempt);
     ///         // Always prefer the first server in the list
     ///         servers
     ///             .first()
@@ -970,11 +976,11 @@ impl ConnectOptions {
     /// ```
     pub fn reconnect_server_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
     where
-        F: Fn((Vec<ServerAddr>, ServerInfo)) -> Fut + Send + Sync + 'static,
+        F: Fn((Vec<ServerAddr>, ServerInfo, usize)) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ServerAddr> + 'static + Send + Sync,
     {
         self.reconnect_server_callback = Some(CallbackArg1::<
-            (Vec<ServerAddr>, ServerInfo),
+            (Vec<ServerAddr>, ServerInfo, usize),
             ServerAddr,
         >(Box::new(move |args| Box::pin(cb(args)))));
         self
