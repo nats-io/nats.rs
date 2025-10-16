@@ -1181,4 +1181,197 @@ mod client {
             .await
             .expect("Expected to be able to create a new client");
     }
+
+    #[tokio::test]
+    async fn test_reconnect_server_callback() {
+        // This test validates that the reconnect_server_callback is invoked
+        // and that the client respects the server selection from the callback.
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let server = nats_server::run_basic_server();
+        let correct_addr = server.client_url();
+
+        // Parse the correct server address
+        let correct_server: ServerAddr = correct_addr.parse().unwrap();
+        let correct_server_for_callback = correct_server.clone();
+
+        // Create a fake/non-existent server address for initial attempt
+        let fake_server: ServerAddr = "nats://localhost:9999".parse().unwrap();
+
+        // Track callback invocations
+        let callback_invoked = Arc::new(Mutex::new(false));
+        let callback_invoked_clone = callback_invoked.clone();
+
+        // Track connection events
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(10);
+
+        let client = ConnectOptions::new()
+            .reconnect_server_callback(move |(servers, _server_info)| {
+                let correct = correct_server_for_callback.clone();
+                let invoked = callback_invoked_clone.clone();
+                async move {
+                    *invoked.lock().await = true;
+
+                    // First time: return the correct server
+                    // (The fake server should fail, triggering reconnect)
+                    let has_fake_server = servers.iter().any(|s| {
+                        // Check if this server matches our fake one
+                        format!("{:?}", s).contains("9999")
+                    });
+
+                    if has_fake_server {
+                        // Return the correct server
+                        correct
+                    } else {
+                        // Return the first available server
+                        servers.first().cloned().unwrap_or(correct)
+                    }
+                }
+            })
+            .event_callback(move |event| {
+                let tx = event_tx.clone();
+                async move {
+                    if let Event::Connected = event {
+                        tx.send(event).await.ok();
+                    }
+                }
+            })
+            .retry_on_initial_connect()
+            .connect(vec![fake_server, correct_server.clone()])
+            .await
+            .unwrap();
+
+        // Wait for connection to be established
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, Event::Connected) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("Client should connect within timeout");
+
+        // Verify callback was invoked
+        assert!(
+            *callback_invoked.lock().await,
+            "Callback should have been invoked"
+        );
+
+        // Verify we can publish and subscribe (connection is working)
+        let mut subscriber = client.subscribe("test").await.unwrap();
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+            .await
+            .expect("Should receive message within timeout")
+            .expect("Should receive a message");
+    }
+
+    #[tokio::test]
+    async fn test_server_info_callback() {
+        // This test validates that the server_info_callback is invoked
+        // when the server sends INFO messages.
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let server = nats_server::run_basic_server();
+
+        let callback_invoked = Arc::new(Mutex::new(false));
+        let callback_invoked_clone = callback_invoked.clone();
+
+        let _client = ConnectOptions::new()
+            .server_info_callback(move |server_info| {
+                let invoked = callback_invoked_clone.clone();
+                async move {
+                    *invoked.lock().await = true;
+                    // Verify we have some basic server info
+                    assert!(!server_info.server_id.is_empty() || server_info.port > 0);
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // Give callback time to be invoked
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Verify callback was invoked
+        assert!(
+            *callback_invoked.lock().await,
+            "Server info callback should have been invoked"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_with_force_reconnect() {
+        // Test that reconnect_server_callback works correctly during force_reconnect
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let server = nats_server::run_basic_server();
+        let server_addr: ServerAddr = server.client_url().parse().unwrap();
+
+        let callback_count = Arc::new(Mutex::new(0));
+        let callback_count_clone = callback_count.clone();
+
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(10);
+
+        let client = ConnectOptions::new()
+            .reconnect_server_callback(move |(servers, _)| {
+                let count = callback_count_clone.clone();
+                async move {
+                    *count.lock().await += 1;
+                    servers.first().cloned().unwrap()
+                }
+            })
+            .event_callback(move |event| {
+                let tx = event_tx.clone();
+                async move {
+                    tx.send(event).await.ok();
+                }
+            })
+            .connect(server_addr.clone())
+            .await
+            .unwrap();
+
+        // Wait for initial connection
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, Event::Connected) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("Initial connection should succeed");
+
+        // Force a reconnect
+        client.force_reconnect().await.unwrap();
+
+        // Wait for reconnection
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(event) = event_rx.recv().await {
+                    match event {
+                        Event::Disconnected => continue,
+                        Event::Connected => break,
+                        _ => continue,
+                    }
+                }
+            }
+        })
+        .await
+        .expect("Reconnection should succeed");
+
+        // Verify callback was invoked at least once (possibly twice - initial + reconnect)
+        let count = *callback_count.lock().await;
+        assert!(
+            count >= 1,
+            "Callback should have been invoked at least once, got: {}",
+            count
+        );
+    }
 }

@@ -13,7 +13,7 @@
 
 use crate::auth::Auth;
 use crate::connector;
-use crate::{Client, ConnectError, Event, ToServerAddrs};
+use crate::{Client, ConnectError, Event, ServerAddr, ServerInfo, ToServerAddrs};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures_util::Future;
@@ -65,6 +65,9 @@ pub struct ConnectOptions {
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
+    pub(crate) server_info_callback: Option<CallbackArg1<ServerInfo, ()>>,
+    pub(crate) reconnect_server_callback:
+        Option<CallbackArg1<(Vec<ServerAddr>, ServerInfo), ServerAddr>>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -117,6 +120,8 @@ impl Default for ConnectOptions {
             }),
             auth: Default::default(),
             auth_callback: None,
+            server_info_callback: None,
+            reconnect_server_callback: None,
         }
     }
 }
@@ -907,6 +912,71 @@ impl ConnectOptions {
     /// ```
     pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
         self.read_buffer_capacity = size;
+        self
+    }
+
+    /// Registers a callback for when the server sends new INFO messages.
+    /// This typically happens when the server discovers new servers in the cluster.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .server_info_callback(|server_info| async move {
+    ///         println!("Server info updated: {:?}", server_info);
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn server_info_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn(ServerInfo) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + 'static + Send + Sync,
+    {
+        self.server_info_callback = Some(CallbackArg1::<ServerInfo, ()>(Box::new(
+            move |server_info| Box::pin(cb(server_info)),
+        )));
+        self
+    }
+
+    /// Registers a callback for customizing server selection during reconnection.
+    /// The callback receives the list of available servers and the most recent ServerInfo,
+    /// and should return the ServerAddr to connect to.
+    ///
+    /// This allows fine-grained control over reconnection logic, such as:
+    /// - Custom server selection algorithms
+    /// - Geographic server preference
+    /// - Dynamic server list manipulation
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .reconnect_server_callback(|(servers, server_info)| async move {
+    ///         // Always prefer the first server in the list
+    ///         servers
+    ///             .first()
+    ///             .cloned()
+    ///             .unwrap_or_else(|| "nats://localhost:4222".parse().unwrap())
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reconnect_server_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn((Vec<ServerAddr>, ServerInfo)) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ServerAddr> + 'static + Send + Sync,
+    {
+        self.reconnect_server_callback = Some(CallbackArg1::<
+            (Vec<ServerAddr>, ServerInfo),
+            ServerAddr,
+        >(Box::new(move |args| Box::pin(cb(args)))));
         self
     }
 }

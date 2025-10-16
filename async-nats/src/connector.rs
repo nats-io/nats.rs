@@ -67,6 +67,9 @@ pub(crate) struct ConnectorOptions {
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) max_reconnects: Option<usize>,
+    pub(crate) server_info_callback: Option<CallbackArg1<ServerInfo, ()>>,
+    pub(crate) reconnect_server_callback:
+        Option<CallbackArg1<(Vec<ServerAddr>, ServerInfo), ServerAddr>>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -79,6 +82,7 @@ pub(crate) struct Connector {
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
     pub(crate) max_payload: Arc<AtomicUsize>,
+    last_server_info: Option<ServerInfo>,
 }
 
 pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
@@ -110,6 +114,7 @@ impl Connector {
             state_tx,
             max_payload,
             connect_stats,
+            last_server_info: None,
         })
     }
 
@@ -141,7 +146,39 @@ impl Connector {
         let mut error = None;
 
         let mut servers = self.servers.clone();
-        if !self.options.retain_servers_order {
+
+        // If reconnect_server_callback is provided, let the user select the server
+        if let Some(ref callback) = self.options.reconnect_server_callback {
+            // Get the latest server info (use default if this is the first connection)
+            let server_info = self.last_server_info.clone().unwrap_or_default();
+
+            // Extract just the ServerAddr from the tuple
+            let server_addrs: Vec<ServerAddr> =
+                servers.iter().map(|(addr, _)| addr.clone()).collect();
+
+            // Call the user's callback
+            let selected_server = callback.call((server_addrs, server_info)).await;
+
+            // Find the selected server in our list and put it first
+            if let Some(pos) = servers
+                .iter()
+                .position(|(addr, _)| addr == &selected_server)
+            {
+                let selected = servers.remove(pos);
+                servers.insert(0, selected);
+                tracing::debug!(
+                    server = ?selected_server,
+                    "user selected server via reconnect_server_callback"
+                );
+            } else {
+                // Server not in our list, add it
+                tracing::debug!(
+                    server = ?selected_server,
+                    "user selected new server via reconnect_server_callback, adding to list"
+                );
+                servers.insert(0, (selected_server, 0));
+            }
+        } else if !self.options.retain_servers_order {
             servers.shuffle(&mut thread_rng());
             // sort_by is stable, meaning it will retain the order for equal elements.
             servers.sort_by(|a, b| a.1.cmp(&b.1));
@@ -187,6 +224,11 @@ impl Connector {
                     .await
                 {
                     Ok((server_info, mut connection)) => {
+                        // Call server_info_callback if provided
+                        if let Some(ref callback) = self.options.server_info_callback {
+                            callback.call(server_info.clone()).await;
+                        }
+
                         if !self.options.ignore_discovered_servers {
                             for url in &server_info.connect_urls {
                                 let server_addr = url.parse::<ServerAddr>().map_err(|err| {
@@ -327,6 +369,8 @@ impl Connector {
                                     server_info.max_payload,
                                     std::sync::atomic::Ordering::Relaxed,
                                 );
+                                // Save server info for next reconnect callback
+                                self.last_server_info = Some(server_info.clone());
                                 return Ok((server_info, connection));
                             }
                             None => {
