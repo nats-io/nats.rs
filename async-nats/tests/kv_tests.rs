@@ -1484,6 +1484,65 @@ mod kv {
         assert_eq!(Operation::Purge, entry.operation);
     }
 
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn watch_with_limit_markers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        // Create a bucket with a very short max_age to trigger automatic expiration
+        // and limit_markers enabled to generate marker messages
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "maxage".into(),
+                description: "test maxage markers".into(),
+                history: 10,
+                max_age: Duration::from_millis(500),
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(10)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Start watching all keys (this will watch for new updates)
+        let mut watcher = kv.watch_all().await.unwrap();
+
+        // Put a key that will age out
+        kv.put("expiring_key", "value".into()).await.unwrap();
+
+        // First entry should be the Put operation we just did
+        let entry = watcher.next().await.unwrap().unwrap();
+        assert_eq!(entry.key, "expiring_key");
+        assert_eq!(entry.operation, Operation::Put);
+        assert_eq!(entry.value.as_ref(), b"value");
+
+        // Wait for the key to age out - the server will emit a marker message
+        // We need to wait longer than max_age (500ms) for the server to process expiration
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        // The next entry should be the MaxAge marker with Operation::Purge
+        // This is the key assertion - before the fix, this would be Operation::Put with empty payload
+        let entry = watcher.next().await.unwrap().unwrap();
+        assert_eq!(entry.key, "expiring_key");
+        assert_eq!(
+            entry.operation,
+            Operation::Purge,
+            "MaxAge marker should result in Operation::Purge, not Operation::Put"
+        );
+        assert_eq!(
+            entry.value.as_ref(),
+            b"",
+            "MaxAge marker should have empty payload"
+        );
+    }
+
     #[tokio::test]
     async fn create_or_update_key_value() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
