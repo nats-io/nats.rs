@@ -57,6 +57,9 @@ async-nats = {path = ".", features = ["service", "server_2_10"], default-feature
 reqwest = "0.11.18"
 jsonschema = "0.17.1"
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tokio-uring = "0.5"
+
 # for -Z minimal-versions
 num = "0.4.1"
 
