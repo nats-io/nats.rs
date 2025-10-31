@@ -95,7 +95,7 @@ pub mod traits {
     }
 
     pub trait ClientProvider {
-        fn client(&self) -> crate::Client;
+        fn client(&self) -> &crate::Client;
     }
 
     pub trait TimeoutProvider {
@@ -342,8 +342,8 @@ impl Context {
     }
 
     /// Return a clone of the underlying NATS client.
-    pub fn client(&self) -> Client {
-        self.client.clone()
+    pub fn client(&self) -> &Client {
+        &self.client
     }
 
     /// Waits until all pending `acks` are received from the server.
@@ -1731,7 +1731,7 @@ impl crate::client::traits::Publisher for Context {
 }
 
 impl traits::ClientProvider for Context {
-    fn client(&self) -> crate::Client {
+    fn client(&self) -> &crate::Client {
         self.client()
     }
 }
