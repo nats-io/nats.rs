@@ -1,3 +1,19 @@
+# v0.45.0
+## Overview
+
+A smaller release adding missing `value` field to `pub_ack` and some additional fixes.
+
+## Added
+* Add pub ack `value` field by @Jarema in https://github.com/nats-io/nats.rs/pull/1473
+* Add `double_ack_with` method to JetStream Messages by @OtaK in https://github.com/nats-io/nats.rs/pull/1474
+
+## Fixed
+* Fix object store headers serde by @Jarema in https://github.com/nats-io/nats.rs/pull/1472
+* Fix Kv limit markers in watches by @Jarema in https://github.com/nats-io/nats.rs/pull/1475
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.44.2...async-nats/v0.45.0
+
+
 # v0.44.2
 ## Overview
 This PR adds a new method to Context traits and fixes the docs build
