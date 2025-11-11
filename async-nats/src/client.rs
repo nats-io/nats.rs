@@ -719,8 +719,8 @@ impl Client {
     }
 
     /// Drains all subscriptions, stops any new messages from being published, and flushes any remaining
-    /// messages, then closes the connection. Once completed, any associated streams associated with the
-    /// client will be closed, and further client commands will fail
+    /// messages, then closes the connection. Once completed, any streams associated with the
+    /// connection and its [Clients](crate::Client) will be closed, and further [crate::Client] commands will fail.
     ///
     /// # Examples
     ///
