@@ -161,7 +161,7 @@ impl fmt::Display for Subject {
 
 pub trait ToSubject {
     fn to_subject(&self) -> Subject;
-    
+
     /// Returns true if this subject needs validation before use.
     /// Default implementation returns true for safety.
     fn needs_validation(&self) -> bool {
@@ -191,7 +191,7 @@ impl ToSubject for ValidatedSubject {
     fn to_subject(&self) -> Subject {
         self.inner.clone()
     }
-    
+
     fn needs_validation(&self) -> bool {
         false // Already validated!
     }
@@ -201,7 +201,7 @@ impl ToSubject for &ValidatedSubject {
     fn to_subject(&self) -> Subject {
         self.inner.clone()
     }
-    
+
     fn needs_validation(&self) -> bool {
         false // Already validated!
     }
@@ -243,7 +243,10 @@ impl fmt::Display for SubjectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SubjectError::InvalidFormat => {
-                write!(f, "Invalid subject: contains spaces, control characters, or starts/ends with '.'")
+                write!(
+                    f,
+                    "Invalid subject: contains spaces, control characters, or starts/ends with '.'"
+                )
             }
         }
     }
@@ -256,8 +259,8 @@ impl ValidatedSubject {
     ///
     /// # Examples
     /// ```
-    /// use async_nats::subject::{ValidatedSubject, SubjectError};
-    /// 
+    /// use async_nats::subject::{SubjectError, ValidatedSubject};
+    ///
     /// let subject = ValidatedSubject::new("events.data").unwrap();
     /// assert!(ValidatedSubject::new("events data").is_err());
     /// ```
@@ -278,11 +281,11 @@ impl ValidatedSubject {
     /// # Examples
     /// ```
     /// use async_nats::subject::ValidatedSubject;
-    /// 
+    ///
     /// const EVENTS_TOPIC: ValidatedSubject = ValidatedSubject::from_static("events.data");
     /// ```
     pub const fn from_static(s: &'static str) -> Self {
-        // Note: We can't validate at compile time in stable Rust, 
+        // Note: We can't validate at compile time in stable Rust,
         // so this is marked as a const fn that should only be used with known-valid strings
         Self {
             inner: Subject::from_static(s),

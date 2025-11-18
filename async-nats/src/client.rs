@@ -318,18 +318,18 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        // Only validate if the subject needs it
-        if subject.needs_validation() {
-            let subj = subject.to_subject();
-            if !crate::is_valid_subject(&subj) {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-                ));
-            }
-        }
+        // Check if validation is needed before converting
+        let needs_validation = subject.needs_validation();
         let subject = subject.to_subject();
-        
+
+        // Validate if necessary
+        if needs_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
             return Err(PublishError::with_source(
@@ -378,17 +378,17 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        // Only validate if the subject needs it
-        if subject.needs_validation() {
-            let subj = subject.to_subject();
-            if !crate::is_valid_subject(&subj) {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-                ));
-            }
-        }
+        // Check if validation is needed before converting
+        let needs_validation = subject.needs_validation();
         let subject = subject.to_subject();
+
+        // Validate if necessary
+        if needs_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -423,27 +423,25 @@ impl Client {
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        // Only validate if the subjects need it
-        if subject.needs_validation() {
-            let subj = subject.to_subject();
-            if !crate::is_valid_subject(&subj) {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    "Invalid subject: contains spaces, control characters, or starts/ends with '.'"  ,
-                ));
-            }
-        }
-        if reply.needs_validation() {
-            let rep = reply.to_subject();
-            if !crate::is_valid_subject(&rep) {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'"  ,
-                ));
-            }
-        }
+        // Check if validation is needed before converting
+        let needs_subject_validation = subject.needs_validation();
+        let needs_reply_validation = reply.needs_validation();
         let subject = subject.to_subject();
         let reply = reply.to_subject();
+
+        // Validate if necessary
+        if needs_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+        if needs_reply_validation && !crate::is_valid_subject(&reply) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -481,27 +479,25 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        // Only validate if the subjects need it
-        if subject.needs_validation() {
-            let subj = subject.to_subject();
-            if !crate::is_valid_subject(&subj) {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    "Invalid subject: contains spaces, control characters, or starts/ends with '.'"  ,
-                ));
-            }
-        }
-        if reply.needs_validation() {
-            let rep = reply.to_subject();
-            if !crate::is_valid_subject(&rep) {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'"  ,
-                ));
-            }
-        }
+        // Check if validation is needed before converting
+        let needs_subject_validation = subject.needs_validation();
+        let needs_reply_validation = reply.needs_validation();
         let subject = subject.to_subject();
         let reply = reply.to_subject();
+
+        // Validate if necessary
+        if needs_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+        if needs_reply_validation && !crate::is_valid_subject(&reply) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
 
         self.sender
             .send(Command::Publish(OutboundMessage {
