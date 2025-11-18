@@ -1723,8 +1723,44 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+/// Const-compatible subject validation (no external dependencies like memchr)
+/// Used for compile-time validation in const contexts
+pub(crate) const fn is_valid_subject_const(s: &str) -> bool {
+    let bytes = s.as_bytes();
+
+    // Empty subjects are invalid
+    if bytes.is_empty() {
+        return false;
+    }
+
+    // Cannot start or end with '.'
+    if bytes[0] == b'.' || bytes[bytes.len() - 1] == b'.' {
+        return false;
+    }
+
+    // Check for invalid characters (whitespace and control chars)
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b' ' || b == b'\t' || b == b'\r' || b == b'\n' {
+            return false;
+        }
+        i += 1;
+    }
+
+    true
+}
+
+/// Runtime subject validation using optimized memchr for performance
 pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
     let subject_str = subject.as_ref();
+
+    // Empty subjects are invalid
+    if subject_str.is_empty() {
+        return false;
+    }
+
+    // Use SIMD-optimized memchr for performance
     !subject_str.starts_with('.')
         && !subject_str.ends_with('.')
         && memchr::memchr3(b' ', b'\r', b'\n', subject_str.as_bytes()).is_none()

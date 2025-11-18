@@ -272,21 +272,30 @@ impl ValidatedSubject {
         Ok(Self { inner: subject })
     }
 
-    /// Creates a new `ValidatedSubject` from a static string.
-    /// This should only be used with compile-time constants that are known to be valid.
+    /// Creates a new `ValidatedSubject` from a static string with compile-time validation.
     ///
-    /// # Safety
-    /// The caller must ensure the subject is valid according to NATS rules.
+    /// This function validates the subject at compile time. If the subject is invalid,
+    /// compilation will fail with a panic message.
+    ///
+    /// # Panics
+    /// Panics at compile time if the subject is invalid (contains spaces, control characters,
+    /// starts/ends with '.', or is empty).
     ///
     /// # Examples
     /// ```
     /// use async_nats::subject::ValidatedSubject;
     ///
+    /// // Valid - compiles successfully
     /// const EVENTS_TOPIC: ValidatedSubject = ValidatedSubject::from_static("events.data");
+    ///
+    /// // Invalid - would fail to compile:
+    /// // const BAD: ValidatedSubject = ValidatedSubject::from_static("events data");
     /// ```
     pub const fn from_static(s: &'static str) -> Self {
-        // Note: We can't validate at compile time in stable Rust,
-        // so this is marked as a const fn that should only be used with known-valid strings
+        // Validate at compile time
+        if !crate::is_valid_subject_const(s) {
+            panic!("Invalid subject: contains spaces, control characters, or starts/ends with '.'");
+        }
         Self {
             inner: Subject::from_static(s),
         }
