@@ -280,7 +280,7 @@ pub trait ServiceExt {
     fn service_builder(&self) -> ServiceBuilder;
 }
 
-impl ServiceExt for crate::Client {
+impl ServiceExt for Client {
     type Output = Pin<Box<dyn Future<Output = Result<Service, crate::Error>> + Send>>;
 
     fn add_service(&self, config: Config) -> Self::Output {
@@ -319,7 +319,7 @@ pub struct Service {
     info: Info,
     client: Client,
     handle: JoinHandle<Result<(), Error>>,
-    shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    shutdown_tx: Sender<()>,
     subjects: Arc<Mutex<Vec<String>>>,
     queue_group: String,
 }
@@ -348,7 +348,7 @@ impl Service {
             .queue_group
             .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
         let id = nuid::next().to_string();
-        let started = time::OffsetDateTime::now_utc();
+        let started = OffsetDateTime::now_utc();
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
             kind: "io.nats.micro.v1.info_response".to_string(),
@@ -591,7 +591,7 @@ pub struct Group {
     prefix: String,
     stats: Arc<Mutex<Endpoints>>,
     client: Client,
-    shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    shutdown_tx: Sender<()>,
     subjects: Arc<Mutex<Vec<String>>>,
     queue_group: String,
 }
@@ -665,14 +665,7 @@ impl Group {
     /// # }
     /// ```
     pub async fn endpoint<S: ToString>(&self, subject: S) -> Result<Endpoint, Error> {
-        let mut endpoint = EndpointBuilder::new(
-            self.client.clone(),
-            self.stats.clone(),
-            self.shutdown_tx.clone(),
-            self.subjects.clone(),
-            self.queue_group.clone(),
-        );
-        endpoint.prefix = Some(self.prefix.clone());
+        let endpoint = self.endpoint_builder();
         endpoint.add(subject.to_string()).await
     }
 
@@ -710,7 +703,7 @@ async fn verb_subscription(
     verb: Verb,
     name: String,
     id: String,
-) -> Result<futures_util::stream::Fuse<SelectAll<Subscriber>>, Error> {
+) -> Result<stream::Fuse<SelectAll<Subscriber>>, Error> {
     let verb_all = client
         .subscribe(format!("{SERVICE_API_PREFIX}.{verb}"))
         .await?;
@@ -824,7 +817,7 @@ impl EndpointBuilder {
         }
     }
 
-    /// Name of the [Endpoint]. By default subject of the endpoint is used.
+    /// Name of the [Endpoint]. By default, the subject of the endpoint is used.
     pub fn name<S: ToString>(mut self, name: S) -> EndpointBuilder {
         self.name = Some(name.to_string());
         self
@@ -836,7 +829,7 @@ impl EndpointBuilder {
         self
     }
 
-    /// Custom queue group for the [Endpoint]. Otherwise it will be derived from group or service.
+    /// Custom queue group for the [Endpoint]. Otherwise, it will be derived from group or service.
     pub fn queue_group<S: ToString>(mut self, queue_group: S) -> EndpointBuilder {
         self.queue_group = queue_group.to_string();
         self
