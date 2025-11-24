@@ -182,7 +182,7 @@ impl ServiceBuilder {
     }
 
     /// Starts the service with configured options.
-    pub async fn start<S: ToString>(self, name: S, version: S) -> Result<Service, Error> {
+    pub async fn start<S1: ToString, S2: ToString>(self, name: S1, version: S2) -> Result<Service, Error> {
         Service::add(
             self.client,
             Config {
