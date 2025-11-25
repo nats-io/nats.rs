@@ -267,7 +267,12 @@ fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
         cmd.arg("-c").arg(cfg);
     }
 
-    let child = cmd.spawn().unwrap();
+    let child = cmd.spawn().unwrap_or_else(|e| panic!(
+        "'nats-server' command cannot be executed due to: '{}'. \
+        Please check that NATS server is installed. For more information please see: \
+        https://docs.nats.io/running-a-nats-service/introduction/installation#installing-via-a-package-manager",
+        e
+    ));
     Inner {
         port: port.map(ToString::to_string),
         cfg: cfg.to_string(),
