@@ -3,21 +3,17 @@ use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
-    // Connect to NATS
-    let client = async_nats::connect("localhost:4222").await?;
-    println!("Connected to NATS");
+    // Connect to NATS demo server
+    let client = async_nats::connect("demo.nats.io").await?;
 
-    println!("Waiting for messages...");
-
-    // NATS-DOC-START
     // Subscribe to 'hello'
     let mut subscriber = client.subscribe("hello").await?;
+    println!("Listening for messages on 'hello'...");
 
     // Process messages
     while let Some(msg) = subscriber.next().await {
         println!("Received: {}", String::from_utf8_lossy(&msg.payload));
     }
-    // NATS-DOC-END
 
     Ok(())
 }
