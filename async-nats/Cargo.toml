@@ -3,6 +3,7 @@ name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
 version = "0.45.0"
 edition = "2021"
+rust-version = "1.79.0"
 description = "A async Rust NATS client"
 license = "Apache-2.0"
 documentation = "https://docs.rs/async-nats"
