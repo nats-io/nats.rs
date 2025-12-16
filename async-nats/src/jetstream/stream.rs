@@ -1140,12 +1140,13 @@ pub struct Config {
     /// A name for the Stream. Must not have spaces, tabs or period `.` characters
     pub name: String,
     /// How large the Stream may become in total bytes before the configured discard policy kicks in
+    #[serde(default)]
     pub max_bytes: i64,
     /// How large the Stream may become in total messages before the configured discard policy kicks in
-    #[serde(rename = "max_msgs")]
+    #[serde(default, rename = "max_msgs")]
     pub max_messages: i64,
     /// Maximum amount of messages to keep per subject
-    #[serde(rename = "max_msgs_per_subject")]
+    #[serde(default, rename = "max_msgs_per_subject")]
     pub max_messages_per_subject: i64,
     /// When a Stream has reached its configured `max_bytes` or `max_msgs`, this policy kicks in.
     /// `DiscardPolicy::New` refuses new messages or `DiscardPolicy::Old` (default) deletes old messages to make space
@@ -1160,9 +1161,10 @@ pub struct Config {
     /// How message retention is considered, `Limits` (default), `Interest` or `WorkQueue`
     pub retention: RetentionPolicy,
     /// How many Consumers can be defined for a given Stream, -1 for unlimited
+    #[serde(default)]
     pub max_consumers: i32,
     /// Maximum age of any message in the stream, expressed in nanoseconds
-    #[serde(with = "serde_nanos")]
+    #[serde(default, with = "serde_nanos")]
     pub max_age: Duration,
     /// The largest message that will be accepted by the Stream
     #[serde(default, skip_serializing_if = "is_default", rename = "max_msg_size")]
