@@ -86,7 +86,6 @@ compatibility_tests = []
 [[bench]]
 name = "main"
 harness = false
-lto = true
 
 [package.metadata.docs.rs]
 # We can't use `all-features` because the `fips` doesn't compile in restricted docs.rs environment.

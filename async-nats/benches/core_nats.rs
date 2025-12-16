@@ -13,7 +13,7 @@ pub fn publish(c: &mut Criterion) {
     throughput_group.sample_size(10);
     throughput_group.warm_up_time(std::time::Duration::from_secs(1));
 
-    for &size in [32, 1024, 8192].iter() {
+    for &size in [1, 32, 1024, 8192].iter() {
         throughput_group.throughput(criterion::Throughput::Bytes(
             size as u64 * messages_per_iter,
         ));
@@ -41,7 +41,7 @@ pub fn publish(c: &mut Criterion) {
     messages_group.sample_size(10);
     messages_group.warm_up_time(std::time::Duration::from_secs(1));
 
-    for &size in [32, 1024, 8192].iter() {
+    for &size in [0, 32, 1024, 8192].iter() {
         messages_group.throughput(criterion::Throughput::Elements(messages_per_iter));
         messages_group.bench_with_input(
             criterion::BenchmarkId::from_parameter(size),

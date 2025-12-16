@@ -8,3 +8,13 @@ members = [
   "nats-server"
 ]
 
+
+[profile.bench]
+opt-level = 3
+lto = "fat"              # Full whole-program optimization (NOT "thin")
+codegen-units = 1
+incremental = false
+panic = "abort"          # No unwinding overhead
+overflow-checks = false  # Skip integer overflow checks
+debug = false            # No debug symbols
+rpath = false
