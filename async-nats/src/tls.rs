@@ -13,6 +13,7 @@
 
 use crate::connector::ConnectorOptions;
 use crate::tls;
+use rustls_pki_types::pem::PemObject;
 use rustls_webpki::types::{CertificateDer, PrivateKeyDer};
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
@@ -25,8 +26,15 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 pub(crate) async fn load_certs(path: PathBuf) -> io::Result<Vec<CertificateDer<'static>>> {
     tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(path)?;
-        let mut reader = BufReader::new(file);
-        rustls_pemfile::certs(&mut reader).collect::<io::Result<Vec<_>>>()
+        let reader = BufReader::new(file);
+        CertificateDer::pem_reader_iter(reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("could not load certificates: {}", e),
+                )
+            })
     })
     .await?
 }
@@ -37,8 +45,12 @@ pub(crate) async fn load_key(path: PathBuf) -> io::Result<PrivateKeyDer<'static>
     tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(path)?;
         let mut reader = BufReader::new(file);
-        rustls_pemfile::private_key(&mut reader)?
-            .ok_or_else(|| io::Error::other("could not find client key in the path"))
+        PrivateKeyDer::from_pem_reader(&mut reader).map_err(|e| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                format!("could not load private key: {}", e),
+            )
+        })
     })
     .await?
 }
