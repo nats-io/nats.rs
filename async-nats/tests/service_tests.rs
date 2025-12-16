@@ -13,11 +13,11 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::{collections::HashMap, str::from_utf8};
-    use std::fmt::Display;
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures_util::StreamExt;
     use jsonschema::JSONSchema;
+    use std::fmt::Display;
+    use std::{collections::HashMap, str::from_utf8};
     use tracing::debug;
 
     #[tokio::test]
@@ -461,7 +461,7 @@ mod service {
         struct SemVer {
             major: i32,
             minor: i32,
-            patch: i32
+            patch: i32,
         }
 
         impl Display for SemVer {
@@ -472,7 +472,14 @@ mod service {
 
         let service = client
             .service_builder()
-            .start("service", SemVer { major: 1, minor: 0, patch: 0 })
+            .start(
+                "service",
+                SemVer {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+            )
             .await
             .unwrap();
 

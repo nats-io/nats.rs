@@ -182,7 +182,11 @@ impl ServiceBuilder {
     }
 
     /// Starts the service with configured options.
-    pub async fn start<N: ToString, V: ToString>(self, name: N, version: V) -> Result<Service, Error> {
+    pub async fn start<N: ToString, V: ToString>(
+        self,
+        name: N,
+        version: V,
+    ) -> Result<Service, Error> {
         Service::add(
             self.client,
             Config {
