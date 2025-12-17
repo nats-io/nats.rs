@@ -36,7 +36,7 @@ time = { version = "0.3.36", features = ["parsing", "formatting", "serde", "serd
 rustls-native-certs = "0.7"
 tracing = "0.1"
 thiserror = "1.0"
-base64 = "0.22"
+base64 = { version = "0.22", optional = true }
 tryhard = { version = "0.5", optional = true }
 ring = { version = "0.17", optional = true }
 rand = "0.8"
@@ -63,7 +63,7 @@ num = "0.4.1"
 [features]
 default = ["server_2_10", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets"]
 # Enables Service API for the client.
-jetstream = ["dep:time", "dep:serde_nanos", "dep:tryhard"]
+jetstream = ["dep:time", "dep:serde_nanos", "dep:tryhard", "dep:base64"]
 kv = ["jetstream"]
 object-store = ["jetstream", "crypto"]
 service = ["dep:time", "dep:serde_nanos"]
@@ -72,7 +72,7 @@ websockets = ["dep:tokio-websockets"]
 aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets?/aws-lc-rs", "rustls-webpki/aws_lc_rs"]
 ring = ["dep:ring", "tokio-rustls/ring", "tokio-websockets?/ring"]
 fips = ["aws-lc-rs", "tokio-rustls/fips"]
-nkeys = ["dep:nkeys"]
+nkeys = ["dep:nkeys", "dep:base64"]
 # All experimental features are part of this feature flag.
 experimental = []
 # Features that require nats-server version 2.10 or higher.
@@ -95,7 +95,7 @@ lto = true
 
 [package.metadata.docs.rs]
 # We can't use `all-features` because the `fips` doesn't compile in restricted docs.rs environment.
-features = ["server_2_10",  "service", "experimental", "ring", "aws-lc-rs"]
+features = ["server_2_10", "server_2_11", "server_2_12", "jetstream", "kv", "object-store", "service", "nkeys", "crypto", "websockets", "experimental", "ring", "aws-lc-rs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
