@@ -129,8 +129,12 @@ pub mod account;
 pub mod consumer;
 pub mod context;
 mod errors;
+#[cfg(feature = "kv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv")))]
 pub mod kv;
 pub mod message;
+#[cfg(feature = "object-store")]
+#[cfg_attr(docsrs, doc(cfg(feature = "object-store")))]
 pub mod object_store;
 pub mod publish;
 pub mod response;

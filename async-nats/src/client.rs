@@ -620,7 +620,7 @@ impl Client {
     /// # }
     /// ```
     pub fn new_inbox(&self) -> String {
-        format!("{}.{}", self.inbox_prefix, nuid::next())
+        format!("{}.{}", self.inbox_prefix, crate::id_generator::next())
     }
 
     /// Subscribes to a subject to receive [messages][Message].

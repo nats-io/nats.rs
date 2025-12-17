@@ -257,12 +257,18 @@ pub use client::{
 };
 pub use options::{AuthError, ConnectOptions};
 
+#[cfg(feature = "crypto")]
+#[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
 pub mod error;
 pub mod header;
+mod id_generator;
+#[cfg(feature = "jetstream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jetstream")))]
 pub mod jetstream;
 pub mod message;
 #[cfg(feature = "service")]
+#[cfg_attr(docsrs, doc(cfg(feature = "service")))]
 pub mod service;
 pub mod status;
 pub mod subject;
@@ -872,7 +878,7 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    let prefix = Subject::from(format!("{}.{}.", prefix, nuid::next()));
+                    let prefix = Subject::from(format!("{}.{}.", prefix, id_generator::next()));
                     let subject = Subject::from(format!("{prefix}*"));
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
@@ -1723,12 +1729,14 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
     let subject_str = subject.as_ref();
     !subject_str.starts_with('.')
         && !subject_str.ends_with('.')
         && subject_str.bytes().all(|c| !c.is_ascii_whitespace())
 }
+#[allow(unused_macros)]
 macro_rules! from_with_timeout {
     ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {
         impl From<$origin> for $t {
@@ -1741,6 +1749,7 @@ macro_rules! from_with_timeout {
         }
     };
 }
+#[allow(unused_imports)]
 pub(crate) use from_with_timeout;
 
 use crate::connection::ShouldFlush;

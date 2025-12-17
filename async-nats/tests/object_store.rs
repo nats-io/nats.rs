@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "object-store")]
 mod object_store {
     use std::{collections::HashMap, io, time::Duration};
 

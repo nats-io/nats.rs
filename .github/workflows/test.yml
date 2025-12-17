@@ -107,7 +107,7 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test tls --features=${{ matrix.tls_feature }} --no-default-features -- --nocapture
+          cargo test tls --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
 
   server_2_11_tests:
     defaults:
@@ -143,7 +143,7 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test --no-default-features --features ring,server_2_10,server_2_11
+          cargo test --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,ring,server_2_10,server_2_11
 
   check_format:
     name: check format (ubuntu-latest / nightly)

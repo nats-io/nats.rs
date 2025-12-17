@@ -35,7 +35,9 @@ use crate::SocketAddr;
 use crate::ToServerAddrs;
 use crate::LANG;
 use crate::VERSION;
+#[cfg(any(feature = "nkeys", feature = "jetstream"))]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+#[cfg(any(feature = "nkeys", feature = "jetstream"))]
 use base64::engine::Engine;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -225,6 +227,7 @@ impl Connector {
                             no_responders: true,
                         };
 
+                        #[cfg(feature = "nkeys")]
                         if let Some(nkey) = self.options.auth.nkey.as_ref() {
                             match nkeys::KeyPair::from_seed(nkey.as_str()) {
                                 Ok(key_pair) => {
@@ -252,6 +255,7 @@ impl Connector {
                             }
                         }
 
+                        #[cfg(feature = "nkeys")]
                         if let Some(jwt) = self.options.auth.jwt.as_ref() {
                             if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
                                 match sign_fn.call(server_info.nonce.clone()).await {
@@ -270,22 +274,34 @@ impl Connector {
                         }
 
                         if let Some(callback) = self.options.auth_callback.as_ref() {
-                            let auth = callback
+                            let auth: crate::Auth = callback
                                 .call(server_info.nonce.as_bytes().to_vec())
                                 .await
                                 .map_err(|err| {
-                                tracing::error!(error = %err, "auth callback failed");
-                                ConnectError::with_source(
-                                    crate::ConnectErrorKind::Authentication,
-                                    err,
-                                )
-                            })?;
+                                    tracing::error!(error = %err, "auth callback failed");
+                                    ConnectError::with_source(
+                                        crate::ConnectErrorKind::Authentication,
+                                        err,
+                                    )
+                                })?;
                             connect_info.user = auth.username;
                             connect_info.pass = auth.password;
                             connect_info.user_jwt = auth.jwt;
-                            connect_info.signature = auth
-                                .signature
-                                .map(|signature| URL_SAFE_NO_PAD.encode(signature));
+                            #[cfg(any(feature = "nkeys", feature = "jetstream"))]
+                            {
+                                connect_info.signature = auth
+                                    .signature
+                                    .map(|signature| URL_SAFE_NO_PAD.encode(signature));
+                            }
+                            #[cfg(not(any(feature = "nkeys", feature = "jetstream")))]
+                            {
+                                connect_info.signature = auth.signature.map(|_| {
+                                    tracing::warn!(
+                                        "signature authentication requires 'nkeys' or 'jetstream' feature"
+                                    );
+                                    String::new()
+                                });
+                            }
                             connect_info.auth_token = auth.token;
                             connect_info.nkey = auth.nkey;
                         }
