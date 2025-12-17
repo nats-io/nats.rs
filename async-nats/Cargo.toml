@@ -97,6 +97,10 @@ harness = false
 features = ["server_2_10", "server_2_11", "server_2_12", "jetstream", "kv", "object-store", "service", "nkeys", "crypto", "websockets", "experimental", "ring", "aws-lc-rs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
+[package.metadata.cargo-hack]
+# Optimize feature powerset testing
+# See CARGO_HACK_STRATEGY.md for detailed explanation
+
 [[example]]
 name = "kv"
 required-features = ["kv"]

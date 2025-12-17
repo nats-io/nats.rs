@@ -1728,12 +1728,14 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
     let subject_str = subject.as_ref();
     !subject_str.starts_with('.')
         && !subject_str.ends_with('.')
         && subject_str.bytes().all(|c| !c.is_ascii_whitespace())
 }
+#[allow(unused_macros)]
 macro_rules! from_with_timeout {
     ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {
         impl From<$origin> for $t {
@@ -1746,6 +1748,7 @@ macro_rules! from_with_timeout {
         }
     };
 }
+#[allow(unused_imports)]
 pub(crate) use from_with_timeout;
 
 use crate::connection::ShouldFlush;

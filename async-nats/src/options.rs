@@ -20,13 +20,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures_util::Future;
 use std::fmt::Formatter;
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-    pin::Pin,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fmt, path::PathBuf, pin::Pin, time::Duration};
+#[cfg(feature = "nkeys")]
+use std::{path::Path, sync::Arc};
+#[cfg(feature = "nkeys")]
 use tokio::io;
 use tokio_rustls::rustls;
 
