@@ -347,7 +347,7 @@ impl Service {
         let queue_group = config
             .queue_group
             .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
-        let id = nuid::next().to_string();
+        let id = crate::id_generator::next();
         let started = time::OffsetDateTime::now_utc();
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
