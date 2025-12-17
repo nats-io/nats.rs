@@ -10,6 +10,7 @@ FEATURES=(
   "object-store"
   "service"
   "nkeys"
+  "nuid"
   "crypto"
   "websockets"
   "server_2_10"
@@ -22,7 +23,7 @@ echo "Feature Combination Testing for async-nats"
 echo "================================================================"
 echo ""
 
-echo "=== Phase 1: Test each feature individually with ring (10 checks) ==="
+echo "=== Phase 1: Test each feature individually with ring (11 checks) ==="
 for feature in "${FEATURES[@]}"; do
   echo "Testing: $feature + ring"
   cargo check --no-default-features --features "$feature,ring" --quiet
@@ -101,5 +102,5 @@ echo "  ✓ aws-lc-rs full"
 echo ""
 echo "================================================================"
 echo "✓ All feature combination tests passed!"
-echo "  Total: 25 checks completed successfully"
+echo "  Total: 26 checks completed successfully"
 echo "================================================================"

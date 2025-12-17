@@ -294,7 +294,7 @@ impl ObjectStore {
         // Fetch any existing object info, if there is any for later use.
         let maybe_existing_object_info = (self.info(&object_meta.name).await).ok();
 
-        let object_nuid = nuid::next();
+        let object_nuid = crate::id_generator::next();
         let chunk_subject = Subject::from(format!("$O.{}.C.{}", &self.name, &object_nuid));
 
         let mut object_chunks = 0;
@@ -718,7 +718,7 @@ impl ObjectStore {
                 max_chunk_size: None,
             }),
             bucket: self.name.clone(),
-            nuid: nuid::next().to_string(),
+            nuid: crate::id_generator::next(),
             size: 0,
             chunks: 0,
             modified: Some(OffsetDateTime::now_utc()),
@@ -783,7 +783,7 @@ impl ObjectStore {
                 max_chunk_size: None,
             }),
             bucket: self.name.clone(),
-            nuid: nuid::next().to_string(),
+            nuid: crate::id_generator::next(),
             size: 0,
             chunks: 0,
             modified: Some(OffsetDateTime::now_utc()),
