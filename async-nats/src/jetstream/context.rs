@@ -1112,6 +1112,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "kv")]
     pub async fn update_key_value(
         &self,
         config: crate::jetstream::kv::Config,
@@ -1166,6 +1167,7 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "kv")]
     pub async fn create_or_update_key_value(
         &self,
         config: crate::jetstream::kv::Config,
