@@ -14,7 +14,9 @@
 use crate::auth::Auth;
 use crate::connector;
 use crate::{Client, ConnectError, Event, ToServerAddrs};
+#[cfg(feature = "nkeys")]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+#[cfg(feature = "nkeys")]
 use base64::engine::Engine;
 use futures_util::Future;
 use std::fmt::Formatter;
@@ -289,6 +291,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub fn with_nkey(seed: String) -> Self {
         ConnectOptions::default().nkey(seed)
     }
@@ -310,6 +313,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub fn nkey(mut self, seed: String) -> Self {
         self.auth.nkey = Some(seed);
         self
@@ -339,6 +343,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub fn with_jwt<F, Fut>(jwt: String, sign_cb: F) -> Self
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
@@ -374,6 +379,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub fn jwt<F, Fut>(mut self, jwt: String, sign_cb: F) -> Self
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
@@ -412,6 +418,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub async fn with_credentials_file(path: impl AsRef<Path>) -> io::Result<Self> {
         let cred_file_contents = crate::auth_utils::load_creds(path.as_ref()).await?;
         Self::with_credentials(&cred_file_contents)
@@ -434,6 +441,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub async fn credentials_file(self, path: impl AsRef<Path>) -> io::Result<Self> {
         let cred_file_contents = crate::auth_utils::load_creds(path.as_ref()).await?;
         self.credentials(&cred_file_contents)
@@ -466,6 +474,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub fn with_credentials(creds: &str) -> io::Result<Self> {
         ConnectOptions::default().credentials(creds)
     }
@@ -500,6 +509,7 @@ impl ConnectOptions {
     /// # }
     /// ```
     #[cfg(feature = "nkeys")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nkeys")))]
     pub fn credentials(self, creds: &str) -> io::Result<Self> {
         let (jwt, key_pair) = crate::auth_utils::parse_jwt_and_key_from_creds(creds)?;
         let key_pair = std::sync::Arc::new(key_pair);
