@@ -1007,6 +1007,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "kv")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "kv")))]
     pub async fn get_key_value<T: Into<String>>(&self, bucket: T) -> Result<Store, KeyValueError> {
         let bucket: String = bucket.into();
         if !crate::jetstream::kv::is_valid_bucket_name(&bucket) {
@@ -1066,6 +1067,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "kv")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "kv")))]
     pub async fn create_key_value(
         &self,
         config: crate::jetstream::kv::Config,
@@ -1113,6 +1115,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "kv")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "kv")))]
     pub async fn update_key_value(
         &self,
         config: crate::jetstream::kv::Config,
@@ -1168,6 +1171,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "kv")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "kv")))]
     pub async fn create_or_update_key_value(
         &self,
         config: crate::jetstream::kv::Config,
@@ -1220,6 +1224,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "kv")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "kv")))]
     pub async fn delete_key_value<T: AsRef<str>>(
         &self,
         bucket: T,
@@ -1603,6 +1608,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "object-store")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "object-store")))]
     pub async fn create_object_store(
         &self,
         config: super::object_store::Config,
@@ -1664,6 +1670,7 @@ impl Context {
     /// # }
     /// ```
     #[cfg(feature = "object-store")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "object-store")))]
     pub async fn get_object_store<T: AsRef<str>>(
         &self,
         bucket_name: T,
