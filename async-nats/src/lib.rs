@@ -262,6 +262,7 @@ pub use options::{AuthError, ConnectOptions};
 mod crypto;
 pub mod error;
 pub mod header;
+mod id_generator;
 #[cfg(feature = "jetstream")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jetstream")))]
 pub mod jetstream;
@@ -877,7 +878,7 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    let prefix = Subject::from(format!("{}.{}.", prefix, nuid::next()));
+                    let prefix = Subject::from(format!("{}.{}.", prefix, id_generator::next()));
                     let subject = Subject::from(format!("{prefix}*"));
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
