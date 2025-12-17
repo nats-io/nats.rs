@@ -13,12 +13,16 @@
 
 #[cfg(feature = "nkeys")]
 use nkeys::KeyPair;
+#[cfg(feature = "nkeys")]
 use once_cell::sync::Lazy;
+#[cfg(feature = "nkeys")]
 use regex::Regex;
+#[cfg(feature = "nkeys")]
 use std::{io, path::Path};
 
 /// Loads user credentials file with jwt and key. Return file contents.
 /// Uses tokio non-blocking io
+#[cfg(feature = "nkeys")]
 pub(crate) async fn load_creds(path: &Path) -> io::Result<String> {
     tokio::fs::read_to_string(path).await.map_err(|err| {
         io::Error::other(format!("loading creds file '{}': {}", path.display(), err))
@@ -66,18 +70,21 @@ pub(crate) fn parse_jwt_and_key_from_creds(contents: &str) -> io::Result<(&str, 
 // SUAIO3FHUX5PNV2LQIIP7TZ3N4L7TX3W53MQGEIVYFIGA635OZCKEYHFLM
 // ------END USER NKEY SEED------
 // ```
+#[cfg(feature = "nkeys")]
 static USER_CONFIG_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))")
         .unwrap()
 });
 
 /// Parses a credentials file and returns its user JWT.
+#[cfg(feature = "nkeys")]
 fn parse_decorated_jwt(contents: &str) -> Option<&str> {
     let capture = USER_CONFIG_RE.captures_iter(contents).next()?;
     Some(capture.get(1)?.as_str())
 }
 
 /// Parses a credentials file and returns its nkey.
+#[cfg(feature = "nkeys")]
 fn parse_decorated_nkey(contents: &str) -> Option<&str> {
     let capture = USER_CONFIG_RE.captures_iter(contents).nth(1)?;
     Some(capture.get(1)?.as_str())

@@ -274,16 +274,16 @@ impl Connector {
                         }
 
                         if let Some(callback) = self.options.auth_callback.as_ref() {
-                            let auth = callback
+                            let auth: crate::Auth = callback
                                 .call(server_info.nonce.as_bytes().to_vec())
                                 .await
                                 .map_err(|err| {
-                                tracing::error!(error = %err, "auth callback failed");
-                                ConnectError::with_source(
-                                    crate::ConnectErrorKind::Authentication,
-                                    err,
-                                )
-                            })?;
+                                    tracing::error!(error = %err, "auth callback failed");
+                                    ConnectError::with_source(
+                                        crate::ConnectErrorKind::Authentication,
+                                        err,
+                                    )
+                                })?;
                             connect_info.user = auth.username;
                             connect_info.pass = auth.password;
                             connect_info.user_jwt = auth.jwt;
