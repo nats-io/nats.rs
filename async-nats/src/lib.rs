@@ -258,13 +258,16 @@ pub use client::{
 pub use options::{AuthError, ConnectOptions};
 
 #[cfg(feature = "crypto")]
+#[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
 pub mod error;
 pub mod header;
 #[cfg(feature = "jetstream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jetstream")))]
 pub mod jetstream;
 pub mod message;
 #[cfg(feature = "service")]
+#[cfg_attr(docsrs, doc(cfg(feature = "service")))]
 pub mod service;
 pub mod status;
 pub mod subject;
