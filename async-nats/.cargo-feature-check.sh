@@ -100,7 +100,22 @@ cargo check --no-default-features --features jetstream,kv,service,nkeys,aws-lc-r
 echo "  ✓ aws-lc-rs full"
 
 echo ""
+echo "=== Phase 5: Test chrono datetime backend (3 checks) ==="
+
+echo "Testing: chrono-crate with jetstream"
+cargo check --no-default-features --features chrono-crate,ring --quiet
+echo "  ✓ chrono jetstream"
+
+echo "Testing: chrono-crate with service"
+cargo check --no-default-features --features chrono-crate,service,ring --quiet
+echo "  ✓ chrono service"
+
+echo "Testing: chrono-crate full stack"
+cargo check --no-default-features --features chrono-crate,kv,object-store,service,ring --quiet
+echo "  ✓ chrono full stack"
+
+echo ""
 echo "================================================================"
 echo "✓ All feature combination tests passed!"
-echo "  Total: 26 checks completed successfully"
+echo "  Total: 29 checks completed successfully"
 echo "================================================================"

@@ -37,7 +37,7 @@ use super::context::{PublishError, PublishErrorKind};
 use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
-use time::{serde::rfc3339, OffsetDateTime};
+use crate::time_compat::{datetime_serde as rfc3339, DateTimeType as OffsetDateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
@@ -1109,7 +1109,7 @@ pub struct ObjectInfo {
     /// Date and time the object was last modified.
     #[serde(default, with = "rfc3339::option")]
     #[serde(rename = "mtime")]
-    pub modified: Option<time::OffsetDateTime>,
+    pub modified: Option<OffsetDateTime>,
     /// Digest of the object stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,

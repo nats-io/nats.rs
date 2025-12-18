@@ -18,7 +18,7 @@ use futures_util::{
 };
 
 #[cfg(feature = "server_2_11")]
-use time::{serde::rfc3339, OffsetDateTime};
+use crate::time_compat::{datetime_serde as rfc3339, DateTimeType as OffsetDateTime};
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;

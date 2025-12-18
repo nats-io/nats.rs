@@ -23,6 +23,7 @@ use std::{
 
 use bytes::Bytes;
 pub mod endpoint;
+use crate::time_compat::{datetime_serde as rfc3339, now_utc, DateTimeType as OffsetDateTime};
 use futures_util::{
     stream::{self, SelectAll},
     Future, StreamExt,
@@ -30,8 +31,6 @@ use futures_util::{
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use time::serde::rfc3339;
-use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::debug;
 
@@ -348,7 +347,7 @@ impl Service {
             .queue_group
             .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
         let id = crate::id_generator::next();
-        let started = time::OffsetDateTime::now_utc();
+        let started = now_utc();
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
             kind: "io.nats.micro.v1.info_response".to_string(),

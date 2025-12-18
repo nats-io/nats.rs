@@ -26,6 +26,8 @@ use crate::{
     StatusCode, Subscriber,
 };
 
+#[cfg(feature = "server_2_11")]
+use crate::time_compat::{datetime_serde as rfc3339, DateTimeType as OffsetDateTime};
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, FutureExt};
 use portable_atomic::AtomicU64;
@@ -39,8 +41,6 @@ use std::{
     sync::Arc,
 };
 use std::{sync::atomic::Ordering, time::Duration};
-#[cfg(feature = "server_2_11")]
-use time::{serde::rfc3339, OffsetDateTime};
 use tracing::{debug, trace};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);

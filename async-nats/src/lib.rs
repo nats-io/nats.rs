@@ -260,6 +260,8 @@ pub use options::{AuthError, ConnectOptions};
 #[cfg(feature = "crypto")]
 #[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
+#[cfg(any(feature = "jetstream", feature = "service"))]
+mod duration_serde;
 pub mod error;
 pub mod header;
 mod id_generator;
@@ -272,6 +274,8 @@ pub mod message;
 pub mod service;
 pub mod status;
 pub mod subject;
+#[cfg(any(feature = "jetstream", feature = "service"))]
+mod time_compat;
 mod tls;
 
 pub use message::Message;

@@ -25,7 +25,11 @@ use std::{
 };
 
 use crate::{
-    error::Error, header::HeaderName, is_valid_subject, HeaderMap, HeaderValue, StatusCode,
+    error::Error,
+    header::HeaderName,
+    is_valid_subject,
+    time_compat::{datetime_serde as rfc3339, DateTimeType as OffsetDateTime},
+    HeaderMap, HeaderValue, StatusCode,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
@@ -33,7 +37,6 @@ use bytes::Bytes;
 use futures_util::{future::BoxFuture, FutureExt, TryFutureExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use time::{serde::rfc3339, OffsetDateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
@@ -1568,7 +1571,7 @@ pub struct Info {
     pub config: Config,
     /// The time that this stream was created.
     #[serde(with = "rfc3339")]
-    pub created: time::OffsetDateTime,
+    pub created: OffsetDateTime,
     /// Various metrics associated with this stream.
     pub state: State,
     /// Information about leader and replicas.
@@ -1624,13 +1627,13 @@ pub struct State {
     pub first_sequence: u64,
     /// The time associated with the oldest message still present in this stream
     #[serde(with = "rfc3339", rename = "first_ts")]
-    pub first_timestamp: time::OffsetDateTime,
+    pub first_timestamp: OffsetDateTime,
     /// The last sequence number assigned to a message in this stream
     #[serde(rename = "last_seq")]
     pub last_sequence: u64,
     /// The time that the last message was received by this stream
     #[serde(with = "rfc3339", rename = "last_ts")]
-    pub last_timestamp: time::OffsetDateTime,
+    pub last_timestamp: OffsetDateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
     /// The number of subjects in the stream
@@ -1668,7 +1671,7 @@ pub struct RawMessage {
 
     /// The time the message was published.
     #[serde(rename = "time", with = "rfc3339")]
-    pub time: time::OffsetDateTime,
+    pub time: OffsetDateTime,
 }
 
 impl TryFrom<RawMessage> for StreamMessage {

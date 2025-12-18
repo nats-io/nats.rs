@@ -22,12 +22,12 @@ use std::{
     time::Duration,
 };
 
+use crate::time_compat::DateTimeType as OffsetDateTime;
 use crate::HeaderValue;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use time::OffsetDateTime;
 use tracing::debug;
 
 use crate::error::Error;
