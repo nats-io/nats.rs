@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod kv {
-    use std::{collections::HashMap, str::from_utf8, time::Duration};
+    use std::{collections::HashMap, error::Error, str::from_utf8, time::Duration};
 
     use async_nats::{
         jetstream::{
@@ -82,6 +82,10 @@ mod kv {
 
         let create = kv.create("key", payload.clone()).await;
         assert!(create.is_err());
+        assert_eq!(
+            create.as_ref().unwrap_err().kind(),
+            async_nats::jetstream::kv::CreateErrorKind::AlreadyExists
+        );
 
         kv.delete("key").await.unwrap();
         let create = kv.create("key", payload.clone()).await;
@@ -90,6 +94,42 @@ mod kv {
         kv.purge("key").await.unwrap();
         let create = kv.create("key", payload.clone()).await;
         assert!(create.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_with_failure() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".into(),
+                description: "test_description".into(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload: Bytes = "data".into();
+
+        let create = kv.create("", payload.clone()).await;
+        assert!(create.is_err());
+        assert_eq!(
+            create.as_ref().unwrap_err().kind(),
+            async_nats::jetstream::kv::CreateErrorKind::InvalidKey
+        );
+        // Verify the source error contains the expected message
+        let source = create.as_ref().unwrap_err().source().unwrap();
+        assert!(source.to_string().contains("key cannot be empty"));
     }
 
     #[tokio::test]

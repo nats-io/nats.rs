@@ -1568,10 +1568,14 @@ pub enum CreateErrorKind {
 impl From<UpdateError> for CreateError {
     fn from(error: UpdateError) -> Self {
         match error.kind() {
-            UpdateErrorKind::InvalidKey => Error::from(CreateErrorKind::InvalidKey),
-            UpdateErrorKind::TimedOut => Error::from(CreateErrorKind::Publish),
-            UpdateErrorKind::WrongLastRevision => Error::from(CreateErrorKind::AlreadyExists),
-            UpdateErrorKind::Other => Error::from(CreateErrorKind::Other),
+            UpdateErrorKind::InvalidKey => {
+                CreateError::with_source(CreateErrorKind::InvalidKey, error)
+            }
+            UpdateErrorKind::TimedOut => CreateError::with_source(CreateErrorKind::Publish, error),
+            UpdateErrorKind::WrongLastRevision => {
+                CreateError::with_source(CreateErrorKind::AlreadyExists, error)
+            }
+            UpdateErrorKind::Other => CreateError::with_source(CreateErrorKind::Other, error),
         }
     }
 }
@@ -1579,9 +1583,11 @@ impl From<UpdateError> for CreateError {
 impl From<PutError> for CreateError {
     fn from(error: PutError) -> Self {
         match error.kind() {
-            PutErrorKind::InvalidKey => Error::from(CreateErrorKind::InvalidKey),
-            PutErrorKind::Publish => Error::from(CreateErrorKind::Publish),
-            PutErrorKind::Ack => Error::from(CreateErrorKind::Ack),
+            PutErrorKind::InvalidKey => {
+                CreateError::with_source(CreateErrorKind::InvalidKey, error)
+            }
+            PutErrorKind::Publish => CreateError::with_source(CreateErrorKind::Publish, error),
+            PutErrorKind::Ack => CreateError::with_source(CreateErrorKind::Ack, error),
         }
     }
 }
@@ -1589,9 +1595,11 @@ impl From<PutError> for CreateError {
 impl From<EntryError> for CreateError {
     fn from(error: EntryError) -> Self {
         match error.kind() {
-            EntryErrorKind::InvalidKey => Error::from(CreateErrorKind::InvalidKey),
-            EntryErrorKind::TimedOut => Error::from(CreateErrorKind::Publish),
-            EntryErrorKind::Other => Error::from(CreateErrorKind::Other),
+            EntryErrorKind::InvalidKey => {
+                CreateError::with_source(CreateErrorKind::InvalidKey, error)
+            }
+            EntryErrorKind::TimedOut => CreateError::with_source(CreateErrorKind::Publish, error),
+            EntryErrorKind::Other => CreateError::with_source(CreateErrorKind::Other, error),
         }
     }
 }
