@@ -2164,6 +2164,8 @@ mod jetstream {
 
         messages.next().await.unwrap().unwrap().ack().await.unwrap();
         let name = &consumer.cached_info().name;
+        // Sleep for a moment before trying to delete a consumer, as files cleanup is not happening instantly
+        tokio::time::sleep(Duration::from_millis(100)).await;
         stream.delete_consumer(name).await.unwrap();
         let now = Instant::now();
         tokio::time::sleep(Duration::from_secs(10)).await;
