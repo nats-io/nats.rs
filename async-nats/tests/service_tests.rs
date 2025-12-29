@@ -13,11 +13,11 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::{collections::HashMap, str::from_utf8};
-
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures_util::StreamExt;
     use jsonschema::JSONSchema;
+    use std::fmt::Display;
+    use std::{collections::HashMap, str::from_utf8};
     use tracing::debug;
 
     #[tokio::test]
@@ -458,9 +458,28 @@ mod service {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
+        struct SemVer {
+            major: i32,
+            minor: i32,
+            patch: i32,
+        }
+
+        impl Display for SemVer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+            }
+        }
+
         let service = client
             .service_builder()
-            .start("service", "1.0.0")
+            .start(
+                "service",
+                SemVer {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+            )
             .await
             .unwrap();
 
