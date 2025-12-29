@@ -15,7 +15,7 @@ use std::{error, fmt};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize, Default)]
 pub struct ErrorCode(pub u64);
 
 impl ErrorCode {
@@ -621,6 +621,7 @@ impl ErrorCode {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Error {
     code: usize,
+    #[serde(default)]
     err_code: ErrorCode,
     description: Option<String>,
 }
