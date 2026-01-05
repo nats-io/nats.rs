@@ -194,7 +194,7 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
             new_port
         })
         .collect::<Vec<usize>>();
-    let cluster = [port + 1, port + 101, port + 201];
+    let cluster = [ports[0] + 1, ports[1] + 1, ports[2] + 1];
 
     let s1 = run_cluster_node_with_port(
         cfg.0[0],
@@ -220,6 +220,10 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
         "cluster".to_string(),
         cluster[2],
     );
+
+    // Give the cluster a moment to establish routing and elect a leader.
+    thread::sleep(Duration::from_millis(2000));
+
     Cluster {
         servers: vec![s1, s2, s3],
     }
