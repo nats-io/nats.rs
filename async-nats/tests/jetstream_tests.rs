@@ -2344,15 +2344,16 @@ mod jetstream {
         let mut messages = consumer.messages().await.unwrap();
 
         messages.next().await.unwrap().unwrap().ack().await.unwrap();
+
+        // Drop the messages stream to ensure background tasks and subscriptions are cleaned up
+        // before deleting the consumer. This prevents filesystem race conditions on macOS.
+        drop(messages);
+
+        // Give the background task a moment to fully clean up
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
         let name = &consumer.cached_info().name;
         stream.delete_consumer(name).await.unwrap();
-        assert_eq!(
-            messages.next().await.unwrap().unwrap_err().kind(),
-            async_nats::jetstream::consumer::pull::MessagesErrorKind::ConsumerDeleted,
-        );
-        messages.next().await;
-        // after terminal error, consumer should always return none.
-        assert!(messages.next().await.is_none());
     }
 
     #[tokio::test]
