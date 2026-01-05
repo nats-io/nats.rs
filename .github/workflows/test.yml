@@ -73,6 +73,38 @@ jobs:
           cargo test --features slow_tests,websockets -- --nocapture
       # TLS and version-specific tests are now run in parallel in a separate job
 
+  nats_server_tests:
+    defaults:
+      run:
+        working-directory: ./nats-server
+    name: nats-server tests (ubuntu-latest / stable)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Generate go.sum
+        run: touch go.sum
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+      - name: Install nats-server
+        run: go install github.com/nats-io/nats-server/v2@main
+      - name: Install stable Rust
+        id: install-rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache the build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
+          cache-on-failure: true
+      - name: Run nats-server tests
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          cargo test --lib -- --test-threads=1 --nocapture
+
   tls_tests:
     defaults:
       run:
