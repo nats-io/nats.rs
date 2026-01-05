@@ -16,6 +16,6 @@ rand = "0.8"
 tokio-retry = "0.3.0"
 
 [dev-dependencies]
-async-nats = "0.38"
+async-nats = { path = "../async-nats" }
 tokio = { version = "1", features = ["full"]  }
 futures-util = "0.3"
