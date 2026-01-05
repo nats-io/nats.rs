@@ -355,7 +355,6 @@ pub fn run_basic_server() -> Server {
 #[cfg(test)]
 mod tests {
 
-    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_with_js() {
         use crate::run_cluster;
@@ -390,7 +389,6 @@ mod tests {
         jetstream.delete_stream("replicated").await.unwrap();
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_without_js() {
         use crate::run_cluster;
