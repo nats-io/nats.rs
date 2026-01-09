@@ -67,6 +67,9 @@ pub(crate) struct ConnectorOptions {
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) max_reconnects: Option<usize>,
+    pub(crate) server_info_callback: Option<CallbackArg1<ServerInfo, ()>>,
+    pub(crate) reconnect_server_callback:
+        Option<CallbackArg1<(Vec<ServerAddr>, ServerInfo, usize), ServerAddr>>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -79,6 +82,7 @@ pub(crate) struct Connector {
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
     pub(crate) state_tx: tokio::sync::watch::Sender<State>,
     pub(crate) max_payload: Arc<AtomicUsize>,
+    last_server_info: Option<ServerInfo>,
 }
 
 pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
@@ -110,6 +114,7 @@ impl Connector {
             state_tx,
             max_payload,
             connect_stats,
+            last_server_info: None,
         })
     }
 
@@ -140,6 +145,86 @@ impl Connector {
         tracing::debug!(attempt = %self.attempts, "connecting to server");
         let mut error = None;
 
+        // If reconnect_server_callback is provided, use it to select server on each attempt
+        if self.options.reconnect_server_callback.is_some() {
+            loop {
+                self.attempts += 1;
+                if let Some(max_reconnects) = self.options.max_reconnects {
+                    if self.attempts > max_reconnects {
+                        tracing::error!(
+                            attempts = %self.attempts,
+                            max_reconnects = %max_reconnects,
+                            "max reconnection attempts reached"
+                        );
+                        self.events_tx
+                            .try_send(Event::ClientError(ClientError::MaxReconnects))
+                            .ok();
+                        return Err(ConnectError::new(crate::ConnectErrorKind::MaxReconnects));
+                    }
+                }
+
+                let duration = (self.options.reconnect_delay_callback)(self.attempts);
+                tracing::debug!(
+                    attempt = %self.attempts,
+                    delay_ms = %duration.as_millis(),
+                    "attempting connection with user callback"
+                );
+
+                sleep(duration).await;
+
+                // Get the latest server info (use default if this is the first connection)
+                let server_info = self.last_server_info.clone().unwrap_or_default();
+
+                // Extract just the ServerAddr from the tuple
+                let server_addrs: Vec<ServerAddr> =
+                    self.servers.iter().map(|(addr, _)| addr.clone()).collect();
+
+                // Call the user's callback to select the server for this attempt
+                let server_addr = if let Some(ref callback) = self.options.reconnect_server_callback
+                {
+                    callback
+                        .call((server_addrs, server_info, self.attempts))
+                        .await
+                } else {
+                    // This shouldn't happen due to the outer check, but provide a fallback
+                    server_addrs
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "nats://localhost:4222".parse().unwrap())
+                };
+
+                tracing::debug!(
+                    server = ?server_addr,
+                    "user selected server via reconnect_server_callback"
+                );
+
+                // Ensure the selected server is in our list
+                if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
+                    tracing::debug!(
+                        server = ?server_addr,
+                        "user selected new server, adding to list"
+                    );
+                    self.servers.push((server_addr.clone(), 0));
+                }
+
+                // Try to connect to the selected server
+                match self.try_connect_to_server_addr(&server_addr).await {
+                    Ok((server_info, connection)) => {
+                        return Ok((server_info, connection));
+                    }
+                    Err(err) => {
+                        tracing::debug!(
+                            server = ?server_addr,
+                            error = %err,
+                            "connection attempt failed, will retry"
+                        );
+                        error.replace(err);
+                    }
+                }
+            }
+        }
+
+        // Default behavior: shuffle and iterate through servers
         let mut servers = self.servers.clone();
         if !self.options.retain_servers_order {
             servers.shuffle(&mut thread_rng());
@@ -173,185 +258,223 @@ impl Connector {
 
             sleep(duration).await;
 
-            let socket_addrs = server_addr
-                .socket_addrs()
+            // Use the same helper method as the callback path
+            match self.try_connect_to_server_addr(&server_addr).await {
+                Ok((server_info, connection)) => {
+                    return Ok((server_info, connection));
+                }
+                Err(err) => {
+                    tracing::debug!(
+                        server = ?server_addr,
+                        error = %err,
+                        "connection attempt failed"
+                    );
+                    error.replace(err);
+                }
+            }
+        }
+
+        Err(error.unwrap())
+    }
+
+    /// Helper method to attempt connection to a specific server address.
+    /// Handles DNS resolution, authentication, server info callbacks, and server discovery.
+    /// Used by both the callback-based and default reconnection paths.
+    async fn try_connect_to_server_addr(
+        &mut self,
+        server_addr: &ServerAddr,
+    ) -> Result<(ServerInfo, Connection), ConnectError> {
+        let socket_addrs = server_addr
+            .socket_addrs()
+            .await
+            .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
+
+        let mut last_error = None;
+
+        for socket_addr in socket_addrs {
+            match self
+                .try_connect_to(
+                    &socket_addr,
+                    server_addr.tls_required(),
+                    server_addr.clone(),
+                )
                 .await
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
-            for socket_addr in socket_addrs {
-                match self
-                    .try_connect_to(
-                        &socket_addr,
-                        server_addr.tls_required(),
-                        server_addr.clone(),
-                    )
-                    .await
-                {
-                    Ok((server_info, mut connection)) => {
-                        if !self.options.ignore_discovered_servers {
-                            for url in &server_info.connect_urls {
-                                let server_addr = url.parse::<ServerAddr>().map_err(|err| {
-                                    ConnectError::with_source(
-                                        crate::ConnectErrorKind::ServerParse,
-                                        err,
-                                    )
-                                })?;
-                                if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
-                                    tracing::debug!(
-                                        discovered_url = %url,
-                                        "adding discovered server"
-                                    );
-                                    self.servers.push((server_addr, 0));
-                                }
+            {
+                Ok((server_info, mut connection)) => {
+                    // Call server_info_callback if provided
+                    if let Some(ref callback) = self.options.server_info_callback {
+                        callback.call(server_info.clone()).await;
+                    }
+
+                    if !self.options.ignore_discovered_servers {
+                        for url in &server_info.connect_urls {
+                            let discovered_addr = url.parse::<ServerAddr>().map_err(|err| {
+                                ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                            })?;
+                            if !self
+                                .servers
+                                .iter()
+                                .any(|(addr, _)| addr == &discovered_addr)
+                            {
+                                tracing::debug!(
+                                    discovered_url = %url,
+                                    "adding discovered server"
+                                );
+                                self.servers.push((discovered_addr, 0));
                             }
                         }
+                    }
 
-                        let tls_required = self.options.tls_required || server_addr.tls_required();
-                        let mut connect_info = ConnectInfo {
-                            tls_required,
-                            name: self.options.name.clone(),
-                            pedantic: false,
-                            verbose: false,
-                            lang: LANG.to_string(),
-                            version: VERSION.to_string(),
-                            protocol: Protocol::Dynamic,
-                            user: self.options.auth.username.to_owned(),
-                            pass: self.options.auth.password.to_owned(),
-                            auth_token: self.options.auth.token.to_owned(),
-                            user_jwt: None,
-                            nkey: None,
-                            signature: None,
-                            echo: !self.options.no_echo,
-                            headers: true,
-                            no_responders: true,
-                        };
+                    let tls_required = self.options.tls_required || server_addr.tls_required();
+                    let mut connect_info = ConnectInfo {
+                        tls_required,
+                        name: self.options.name.clone(),
+                        pedantic: false,
+                        verbose: false,
+                        lang: LANG.to_string(),
+                        version: VERSION.to_string(),
+                        protocol: Protocol::Dynamic,
+                        user: self.options.auth.username.to_owned(),
+                        pass: self.options.auth.password.to_owned(),
+                        auth_token: self.options.auth.token.to_owned(),
+                        user_jwt: None,
+                        nkey: None,
+                        signature: None,
+                        echo: !self.options.no_echo,
+                        headers: true,
+                        no_responders: true,
+                    };
 
-                        if let Some(nkey) = self.options.auth.nkey.as_ref() {
-                            match nkeys::KeyPair::from_seed(nkey.as_str()) {
-                                Ok(key_pair) => {
-                                    let nonce = server_info.nonce.clone();
-                                    match key_pair.sign(nonce.as_bytes()) {
-                                        Ok(signed) => {
-                                            connect_info.nkey = Some(key_pair.public_key());
-                                            connect_info.signature =
-                                                Some(URL_SAFE_NO_PAD.encode(signed));
-                                        }
-                                        Err(_) => {
-                                            tracing::error!("failed to sign nonce with nkey");
-                                            return Err(ConnectError::new(
-                                                crate::ConnectErrorKind::Authentication,
-                                            ));
-                                        }
-                                    };
+                    if let Some(nkey) = self.options.auth.nkey.as_ref() {
+                        match nkeys::KeyPair::from_seed(nkey.as_str()) {
+                            Ok(key_pair) => {
+                                let nonce = server_info.nonce.clone();
+                                match key_pair.sign(nonce.as_bytes()) {
+                                    Ok(signed) => {
+                                        connect_info.nkey = Some(key_pair.public_key());
+                                        connect_info.signature =
+                                            Some(URL_SAFE_NO_PAD.encode(signed));
+                                    }
+                                    Err(_) => {
+                                        tracing::error!("failed to sign nonce with nkey");
+                                        return Err(ConnectError::new(
+                                            crate::ConnectErrorKind::Authentication,
+                                        ));
+                                    }
+                                };
+                            }
+                            Err(_) => {
+                                tracing::error!("failed to create key pair from nkey seed");
+                                return Err(ConnectError::new(
+                                    crate::ConnectErrorKind::Authentication,
+                                ));
+                            }
+                        }
+                    }
+
+                    if let Some(jwt) = self.options.auth.jwt.as_ref() {
+                        if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
+                            match sign_fn.call(server_info.nonce.clone()).await {
+                                Ok(sig) => {
+                                    connect_info.user_jwt = Some(jwt.clone());
+                                    connect_info.signature = Some(sig);
                                 }
                                 Err(_) => {
-                                    tracing::error!("failed to create key pair from nkey seed");
+                                    tracing::error!("failed to sign nonce with JWT callback");
                                     return Err(ConnectError::new(
                                         crate::ConnectErrorKind::Authentication,
                                     ));
                                 }
                             }
                         }
+                    }
 
-                        if let Some(jwt) = self.options.auth.jwt.as_ref() {
-                            if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
-                                match sign_fn.call(server_info.nonce.clone()).await {
-                                    Ok(sig) => {
-                                        connect_info.user_jwt = Some(jwt.clone());
-                                        connect_info.signature = Some(sig);
-                                    }
-                                    Err(_) => {
-                                        tracing::error!("failed to sign nonce with JWT callback");
-                                        return Err(ConnectError::new(
-                                            crate::ConnectErrorKind::Authentication,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-
-                        if let Some(callback) = self.options.auth_callback.as_ref() {
-                            let auth = callback
-                                .call(server_info.nonce.as_bytes().to_vec())
-                                .await
-                                .map_err(|err| {
+                    if let Some(callback) = self.options.auth_callback.as_ref() {
+                        let auth = callback
+                            .call(server_info.nonce.as_bytes().to_vec())
+                            .await
+                            .map_err(|err| {
                                 tracing::error!(error = %err, "auth callback failed");
                                 ConnectError::with_source(
                                     crate::ConnectErrorKind::Authentication,
                                     err,
                                 )
                             })?;
-                            connect_info.user = auth.username;
-                            connect_info.pass = auth.password;
-                            connect_info.user_jwt = auth.jwt;
-                            connect_info.signature = auth
-                                .signature
-                                .map(|signature| URL_SAFE_NO_PAD.encode(signature));
-                            connect_info.auth_token = auth.token;
-                            connect_info.nkey = auth.nkey;
-                        }
+                        connect_info.user = auth.username;
+                        connect_info.pass = auth.password;
+                        connect_info.user_jwt = auth.jwt;
+                        connect_info.signature = auth
+                            .signature
+                            .map(|signature| URL_SAFE_NO_PAD.encode(signature));
+                        connect_info.auth_token = auth.token;
+                        connect_info.nkey = auth.nkey;
+                    }
 
-                        connection
-                            .easy_write_and_flush(
-                                [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
-                            )
-                            .await?;
+                    connection
+                        .easy_write_and_flush(
+                            [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
+                        )
+                        .await?;
 
-                        match connection.read_op().await? {
-                            Some(ServerOp::Error(err)) => match err {
-                                ServerError::AuthorizationViolation => {
-                                    tracing::error!(error = %err, "authorization violation");
-                                    return Err(ConnectError::with_source(
-                                        crate::ConnectErrorKind::AuthorizationViolation,
-                                        err,
-                                    ));
-                                }
-                                err => {
-                                    tracing::error!(error = %err, "server error during connection");
-                                    return Err(ConnectError::with_source(
-                                        crate::ConnectErrorKind::Io,
-                                        err,
-                                    ));
-                                }
-                            },
-                            Some(_) => {
-                                tracing::info!(
-                                    server = %server_info.port,
-                                    max_payload = %server_info.max_payload,
-                                    "connected successfully"
-                                );
-                                self.attempts = 0;
-                                self.connect_stats.connects.add(1, Ordering::Relaxed);
-                                self.events_tx.try_send(Event::Connected).ok();
-                                self.state_tx.send(State::Connected).ok();
-                                self.max_payload.store(
-                                    server_info.max_payload,
-                                    std::sync::atomic::Ordering::Relaxed,
-                                );
-                                return Ok((server_info, connection));
-                            }
-                            None => {
-                                tracing::error!("connection closed unexpectedly");
+                    match connection.read_op().await? {
+                        Some(ServerOp::Error(err)) => match err {
+                            ServerError::AuthorizationViolation => {
+                                tracing::error!(error = %err, "authorization violation");
                                 return Err(ConnectError::with_source(
-                                    crate::ConnectErrorKind::Io,
-                                    "broken pipe",
+                                    crate::ConnectErrorKind::AuthorizationViolation,
+                                    err,
                                 ));
                             }
+                            err => {
+                                tracing::error!(error = %err, "server error during connection");
+                                return Err(ConnectError::with_source(
+                                    crate::ConnectErrorKind::Io,
+                                    err,
+                                ));
+                            }
+                        },
+                        Some(_) => {
+                            tracing::info!(
+                                server = %server_info.port,
+                                max_payload = %server_info.max_payload,
+                                "connected successfully"
+                            );
+                            self.attempts = 0;
+                            self.connect_stats.connects.add(1, Ordering::Relaxed);
+                            self.events_tx.try_send(Event::Connected).ok();
+                            self.state_tx.send(State::Connected).ok();
+                            self.max_payload.store(
+                                server_info.max_payload,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
+                            // Save server info for next reconnect callback
+                            self.last_server_info = Some(server_info.clone());
+                            return Ok((server_info, connection));
+                        }
+                        None => {
+                            tracing::error!("connection closed unexpectedly");
+                            return Err(ConnectError::with_source(
+                                crate::ConnectErrorKind::Io,
+                                "broken pipe",
+                            ));
                         }
                     }
-
-                    Err(inner) => {
-                        tracing::debug!(
-                            server = ?server_addr,
-                            error = %inner,
-                            "connection attempt failed"
-                        );
-                        error.replace(inner)
-                    }
-                };
+                }
+                Err(err) => {
+                    tracing::debug!(
+                        server = ?server_addr,
+                        error = %err,
+                        "socket connection attempt failed"
+                    );
+                    // Save the error and continue trying other socket addresses
+                    last_error = Some(err);
+                    continue;
+                }
             }
         }
 
-        Err(error.unwrap())
+        // If we get here, all socket addresses failed - return the last error
+        Err(last_error.unwrap_or_else(|| ConnectError::new(crate::ConnectErrorKind::Io)))
     }
 
     pub(crate) async fn try_connect_to(
