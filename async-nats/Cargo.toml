@@ -61,7 +61,7 @@ jsonschema = "0.17.1"
 num = "0.4.1"
 
 [features]
-default = ["server_2_10", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
+default = ["server_2_10", "server_2_11", "server_2_12", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
 # Enables Service API for the client.
 jetstream = ["dep:time", "dep:serde_nanos", "dep:tryhard", "dep:base64"]
 kv = ["jetstream"]
@@ -97,14 +97,10 @@ harness = false
 
 [package.metadata.docs.rs]
 # We can't use `all-features` because the `fips` doesn't compile in restricted docs.rs environment.
-features = ["server_2_10", "server_2_11", "server_2_12", "jetstream", "kv", "object-store", "service", "nkeys", "crypto", "websockets", "experimental", "ring", "aws-lc-rs"]
+features = ["server_2_10", "server_2_11", "server_2_12", "jetstream", "kv", "object-store", "service", "nkeys", "nuid", "crypto", "websockets", "experimental", "ring", "aws-lc-rs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-hack]
 # Optimize feature powerset testing
 # See CARGO_HACK_STRATEGY.md for detailed explanation
-
-[[example]]
-name = "kv"
-required-features = ["kv"]
 
