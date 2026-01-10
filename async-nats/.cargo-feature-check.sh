@@ -23,7 +23,7 @@ echo "Feature Combination Testing for async-nats"
 echo "================================================================"
 echo ""
 
-echo "=== Phase 1: Test each feature individually with ring (11 checks) ==="
+echo "=== Phase 1: Test each feature individually with ring  ==="
 for feature in "${FEATURES[@]}"; do
   echo "Testing: $feature + ring"
   cargo check --no-default-features --features "$feature,ring" --quiet
@@ -31,7 +31,7 @@ for feature in "${FEATURES[@]}"; do
 done
 echo ""
 
-echo "=== Phase 2: Important feature combinations (8 checks) ==="
+echo "=== Phase 2: Important feature combinations  ==="
 
 echo "Testing: minimal (ring only)"
 cargo check --no-default-features --features ring --quiet
@@ -54,7 +54,7 @@ cargo check --no-default-features --features object-store,ring --quiet
 echo "  ✓ object-store"
 
 echo "Testing: full stack"
-cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,ring --quiet
+cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,ring --quiet
 echo "  ✓ full stack"
 
 echo "Testing: default"
@@ -66,7 +66,7 @@ cargo check --no-default-features --features jetstream,service,nkeys,ring --quie
 echo "  ✓ jetstream + service"
 
 echo ""
-echo "=== Phase 3: Real-world combinations (5 checks) ==="
+echo "=== Phase 3: Real-world combinations  ==="
 
 echo "Testing: jetstream + nkeys (streams with auth)"
 cargo check --no-default-features --features jetstream,nkeys,ring --quiet
@@ -89,18 +89,17 @@ cargo check --no-default-features --features websockets,nkeys,ring --quiet
 echo "  ✓ websockets + nkeys"
 
 echo ""
-echo "=== Phase 4: Test aws-lc-rs crypto backend (2 checks) ==="
+echo "=== Phase 4: Test aws-lc-rs crypto backend  ==="
 
 echo "Testing: minimal with aws-lc-rs"
 cargo check --no-default-features --features aws-lc-rs --quiet
 echo "  ✓ aws-lc-rs minimal"
 
 echo "Testing: full with aws-lc-rs"
-cargo check --no-default-features --features jetstream,kv,service,nkeys,aws-lc-rs --quiet
+cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,aws-lc-rs --quiet
 echo "  ✓ aws-lc-rs full"
 
 echo ""
 echo "================================================================"
 echo "✓ All feature combination tests passed!"
-echo "  Total: 26 checks completed successfully"
 echo "================================================================"

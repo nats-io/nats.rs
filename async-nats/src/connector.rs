@@ -295,12 +295,15 @@ impl Connector {
                             }
                             #[cfg(not(any(feature = "nkeys", feature = "jetstream")))]
                             {
-                                connect_info.signature = auth.signature.map(|_| {
-                                    tracing::warn!(
+                                if auth.signature.is_some() {
+                                    tracing::error!(
                                         "signature authentication requires 'nkeys' or 'jetstream' feature"
                                     );
-                                    String::new()
-                                });
+                                    return Err(ConnectError::new(
+                                        crate::ConnectErrorKind::Authentication,
+                                    ));
+                                }
+                                connect_info.signature = None;
                             }
                             connect_info.auth_token = auth.token;
                             connect_info.nkey = auth.nkey;
