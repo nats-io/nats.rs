@@ -1095,6 +1095,9 @@ mod client {
         client.publish("test", "data".into()).await.unwrap();
         client.flush().await.unwrap();
 
+        // TODO: Use proper synchronization, this is a horrible hack.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         // Send the drain command
         sub.drain().await.expect("Expected to drain the sub");
 
