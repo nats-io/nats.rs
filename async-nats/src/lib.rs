@@ -151,7 +151,7 @@
 //! # Ok(())
 //! # }
 //! ```
-//! ### Object Store store
+//! ### Object Store
 //!
 //! Object [Store][jetstream::object_store::ObjectStore] is accessed through [jetstream::Context].
 //!

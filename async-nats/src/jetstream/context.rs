@@ -1707,6 +1707,8 @@ impl Context {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "object-store")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "object-store")))]
     pub async fn delete_object_store<T: AsRef<str>>(
         &self,
         bucket_name: T,
@@ -2264,6 +2266,7 @@ pub type UpdateStreamErrorKind = CreateStreamErrorKind;
 pub type DeleteStreamError = GetStreamError;
 pub type DeleteStreamErrorKind = GetStreamErrorKind;
 
+#[cfg(feature = "kv")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KeyValueErrorKind {
     InvalidStoreName,
@@ -2271,6 +2274,7 @@ pub enum KeyValueErrorKind {
     JetStream,
 }
 
+#[cfg(feature = "kv")]
 impl Display for KeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -2281,8 +2285,10 @@ impl Display for KeyValueErrorKind {
     }
 }
 
+#[cfg(feature = "kv")]
 pub type KeyValueError = Error<KeyValueErrorKind>;
 
+#[cfg(any(feature = "kv", feature = "object-store"))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CreateKeyValueErrorKind {
     InvalidStoreName,
@@ -2293,6 +2299,7 @@ pub enum CreateKeyValueErrorKind {
     LimitMarkersNotSupported,
 }
 
+#[cfg(any(feature = "kv", feature = "object-store"))]
 impl Display for CreateKeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -2308,6 +2315,7 @@ impl Display for CreateKeyValueErrorKind {
     }
 }
 
+#[cfg(feature = "kv")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UpdateKeyValueErrorKind {
     InvalidStoreName,
@@ -2319,6 +2327,7 @@ pub enum UpdateKeyValueErrorKind {
     NotFound,
 }
 
+#[cfg(feature = "kv")]
 impl Display for UpdateKeyValueErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -2334,18 +2343,24 @@ impl Display for UpdateKeyValueErrorKind {
         }
     }
 }
+#[cfg(feature = "kv")]
 pub type CreateKeyValueError = Error<CreateKeyValueErrorKind>;
+#[cfg(feature = "kv")]
 pub type UpdateKeyValueError = Error<UpdateKeyValueErrorKind>;
 
-pub type CreateObjectStoreError = CreateKeyValueError;
+#[cfg(feature = "object-store")]
+pub type CreateObjectStoreError = Error<CreateKeyValueErrorKind>;
+#[cfg(feature = "object-store")]
 pub type CreateObjectStoreErrorKind = CreateKeyValueErrorKind;
 
+#[cfg(feature = "object-store")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ObjectStoreErrorKind {
     InvalidBucketName,
     GetStore,
 }
 
+#[cfg(feature = "object-store")]
 impl Display for ObjectStoreErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -2355,9 +2370,12 @@ impl Display for ObjectStoreErrorKind {
     }
 }
 
+#[cfg(feature = "object-store")]
 pub type ObjectStoreError = Error<ObjectStoreErrorKind>;
 
+#[cfg(feature = "object-store")]
 pub type DeleteObjectStore = ObjectStoreError;
+#[cfg(feature = "object-store")]
 pub type DeleteObjectStoreKind = ObjectStoreErrorKind;
 
 #[derive(Clone, Debug, PartialEq)]
