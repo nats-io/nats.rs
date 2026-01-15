@@ -24,7 +24,7 @@ mod client {
     use std::path::PathBuf;
     use std::str::FromStr;
     use std::sync::atomic::Ordering;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[tokio::test]
     async fn force_reconnect() {
@@ -1180,5 +1180,30 @@ mod client {
         let _client2 = async_nats::connect(server.client_url())
             .await
             .expect("Expected to be able to create a new client");
+    }
+
+    #[tokio::test]
+    async fn drain_subscription_deadlock() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut subscriber = client.subscribe("test").await.unwrap();
+        client.flush().await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        let start = Instant::now();
+        subscriber.drain().await.unwrap();
+
+        // With the bug: next() would block until the server sends a ping (~60s)
+        // With the fix: next() returns None immediately after drain completes
+        subscriber.next().await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_secs() < 5,
+            "drain took too long: {:?} - bug likely present",
+            elapsed
+        );
     }
 }
