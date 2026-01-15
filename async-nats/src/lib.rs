@@ -451,6 +451,7 @@ pub(crate) struct ConnectionHandler {
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
     is_draining: bool,
+    drain_pong: bool,
 }
 
 impl ConnectionHandler {
@@ -474,6 +475,7 @@ impl ConnectionHandler {
             should_reconnect: false,
             flush_observers: Vec::new(),
             is_draining: false,
+            drain_pong: false,
         }
     }
 
@@ -558,7 +560,9 @@ impl ConnectionHandler {
                 // Note: safe to assume subscription drain has completed at this point, as we would have flushed
                 // all outgoing UNSUB messages in the previous call to this fn, and we would have processed and
                 // delivered any remaining messages to the subscription in the loop above.
-                self.handler.subscriptions.retain(|_, s| !s.is_draining);
+                if std::mem::take(&mut self.handler.drain_pong) {
+                    self.handler.subscriptions.retain(|_, s| !s.is_draining);
+                }
 
                 if self.handler.is_draining {
                     // The entire connection is draining. This means we flushed outgoing messages in the previous
@@ -693,6 +697,7 @@ impl ConnectionHandler {
             }
             ServerOp::Pong => {
                 debug!("received PONG");
+                self.drain_pong = true;
                 self.pending_pings = self.pending_pings.saturating_sub(1);
             }
             ServerOp::Error(error) => {
@@ -824,6 +829,7 @@ impl ConnectionHandler {
                 self.flush_observers.push(observer);
             }
             Command::Drain { sid } => {
+                self.drain_pong = false;
                 let mut drain_sub = |sid: u64, sub: &mut Subscription| {
                     sub.is_draining = true;
                     self.connection
@@ -842,6 +848,7 @@ impl ConnectionHandler {
                         drain_sub(sid, sub);
                     }
                 }
+                self.connection.enqueue_write_op(&ClientOp::Ping);
             }
             Command::Subscribe {
                 sid,
