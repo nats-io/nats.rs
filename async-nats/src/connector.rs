@@ -35,9 +35,9 @@ use crate::SocketAddr;
 use crate::ToServerAddrs;
 use crate::LANG;
 use crate::VERSION;
-#[cfg(any(feature = "nkeys", feature = "jetstream"))]
+#[cfg(feature = "nkeys")]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-#[cfg(any(feature = "nkeys", feature = "jetstream"))]
+#[cfg(feature = "nkeys")]
 use base64::engine::Engine;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -287,17 +287,17 @@ impl Connector {
                             connect_info.user = auth.username;
                             connect_info.pass = auth.password;
                             connect_info.user_jwt = auth.jwt;
-                            #[cfg(any(feature = "nkeys", feature = "jetstream"))]
+                            #[cfg(feature = "nkeys")]
                             {
                                 connect_info.signature = auth
                                     .signature
                                     .map(|signature| URL_SAFE_NO_PAD.encode(signature));
                             }
-                            #[cfg(not(any(feature = "nkeys", feature = "jetstream")))]
+                            #[cfg(not(feature = "nkeys"))]
                             {
                                 if auth.signature.is_some() {
                                     tracing::error!(
-                                        "signature authentication requires 'nkeys' or 'jetstream' feature"
+                                        "signature authentication requires 'nkeys' feature"
                                     );
                                     return Err(ConnectError::new(
                                         crate::ConnectErrorKind::Authentication,
