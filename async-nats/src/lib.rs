@@ -574,6 +574,7 @@ impl ConnectionHandler {
                 // trigger a call to `poll_write`
 
                 let mut made_progress = true;
+                let mut wake_self = false;
                 loop {
                     while !self.handler.connection.is_write_buf_full() {
                         debug_assert!(self.recv_buf.is_empty());
@@ -589,12 +590,20 @@ impl ConnectionHandler {
                                 made_progress = true;
 
                                 for cmd in recv_buf.drain(..) {
+                                    wake_self |= matches!(&cmd, Command::Drain { .. });
                                     handler.handle_command(cmd);
                                 }
                             }
                             // TODO: replace `_` with `0` after bumping MSRV to 1.75
                             Poll::Ready(_) => return Poll::Ready(ExitReason::Closed),
                         }
+                    }
+
+                    // If one of the commands was a drain, then we are in shutdown mode
+                    // and cannot rely on server inbound messages to wake us up in a
+                    // timely fashion.
+                    if wake_self {
+                        cx.waker().wake_by_ref();
                     }
 
                     // The first round will poll both from
