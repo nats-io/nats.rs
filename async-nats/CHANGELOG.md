@@ -1,3 +1,30 @@
+# v0.46.0
+
+This release introduces disabled by default feature-gating of features and modules.
+Users can now disable `nkeys`, `object-store`, or others, to limit the size of the final binary and dependency pulled in.
+
+## Added
+* Hide features & modules behind feature flags by @Jarema in https://github.com/nats-io/nats.rs/pull/1494
+
+## Fixed
+* Eliminate build-time warnings for `async-nats` by @vkolomeyko in https://github.com/nats-io/nats.rs/pull/1489
+* Fix error deserialization when err_code is absent by @Jarema in https://github.com/nats-io/nats.rs/pull/1497
+* Fix slow subscription shutdown after drain by @Jarema in https://github.com/nats-io/nats.rs/pull/1504
+
+## Changed
+* Relax type constraints around `ServiceBuilder::start` by @vkolomeyko in https://github.com/nats-io/nats.rs/pull/1486
+* Use with_source for CreateError to maintain original error source by @LouiseSianEvans in https://github.com/nats-io/nats.rs/pull/1495
+* Switch to rustls-pki-types by @Jarema in https://github.com/nats-io/nats.rs/pull/1492
+* Tidy-up `async-nats/src/service/mod.rs` by @vkolomeyko in https://github.com/nats-io/nats.rs/pull/1487
+* Make some consumer/stream config accept `omitempty` case by @Jarema in https://github.com/nats-io/nats.rs/pull/1493
+* Improve the `drain` docs for better clarity by @Jarema in https://github.com/nats-io/nats.rs/pull/1484
+
+## New Contributors
+* @vkolomeyko made their first contribution in https://github.com/nats-io/nats.rs/pull/1489
+* @LouiseSianEvans made their first contribution in https://github.com/nats-io/nats.rs/pull/1495
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.45.0...async-nats/v0.46.0
+
 # v0.45.0
 ## Overview
 
@@ -76,8 +103,6 @@ This release adds support for 2.12 server features and adds JetStream backpressu
 ## Fixed
 * Fix linter issues by @Jarema in https://github.com/nats-io/nats.rs/pull/1427
 * Improve push ordered consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/1445
-
-## Changed
 
 ## Changed
 * Expose get_info for consumer by @nitsky in https://github.com/nats-io/nats.rs/pull/1428
