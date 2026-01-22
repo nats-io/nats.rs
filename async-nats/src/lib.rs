@@ -203,6 +203,7 @@ use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::future::Future;
 use std::iter;
@@ -429,7 +430,6 @@ struct Subscription {
     queue_group: Option<String>,
     delivered: u64,
     max: Option<u64>,
-    is_draining: bool,
 }
 
 #[derive(Debug)]
@@ -451,6 +451,7 @@ pub(crate) struct ConnectionHandler {
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
     is_draining: bool,
+    drain_pings: VecDeque<u64>,
 }
 
 impl ConnectionHandler {
@@ -474,6 +475,7 @@ impl ConnectionHandler {
             should_reconnect: false,
             flush_observers: Vec::new(),
             is_draining: false,
+            drain_pings: VecDeque::new(),
         }
     }
 
@@ -558,7 +560,9 @@ impl ConnectionHandler {
                 // Note: safe to assume subscription drain has completed at this point, as we would have flushed
                 // all outgoing UNSUB messages in the previous call to this fn, and we would have processed and
                 // delivered any remaining messages to the subscription in the loop above.
-                self.handler.subscriptions.retain(|_, s| !s.is_draining);
+                while let Some(sid) = self.handler.drain_pings.pop_front() {
+                    self.handler.subscriptions.remove(&sid);
+                }
 
                 if self.handler.is_draining {
                     // The entire connection is draining. This means we flushed outgoing messages in the previous
@@ -824,24 +828,25 @@ impl ConnectionHandler {
                 self.flush_observers.push(observer);
             }
             Command::Drain { sid } => {
-                let mut drain_sub = |sid: u64, sub: &mut Subscription| {
-                    sub.is_draining = true;
+                let mut drain_sub = |sid: u64| {
+                    self.drain_pings.push_back(sid);
                     self.connection
                         .enqueue_write_op(&ClientOp::Unsubscribe { sid, max: None });
                 };
 
                 if let Some(sid) = sid {
-                    if let Some(sub) = self.subscriptions.get_mut(&sid) {
-                        drain_sub(sid, sub);
+                    if self.subscriptions.get_mut(&sid).is_some() {
+                        drain_sub(sid);
                     }
                 } else {
                     // sid isn't set, so drain the whole client
                     self.connector.events_tx.try_send(Event::Draining).ok();
                     self.is_draining = true;
-                    for (&sid, sub) in self.subscriptions.iter_mut() {
-                        drain_sub(sid, sub);
+                    for (&sid, _) in self.subscriptions.iter_mut() {
+                        drain_sub(sid);
                     }
                 }
+                self.connection.enqueue_write_op(&ClientOp::Ping);
             }
             Command::Subscribe {
                 sid,
@@ -855,7 +860,6 @@ impl ConnectionHandler {
                     max: None,
                     subject: subject.to_owned(),
                     queue_group: queue_group.to_owned(),
-                    is_draining: false,
                 };
 
                 self.subscriptions.insert(sid, subscription);
