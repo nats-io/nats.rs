@@ -1335,21 +1335,46 @@ impl Store {
     /// # }
     /// ```
     pub async fn keys(&self) -> Result<Keys, HistoryError> {
-        let subject = format!("{}>", self.prefix.as_str());
+        self.keys_with_filters(vec![">"]).await
+    }
 
-        let consumer = self
-            .stream
-            .create_consumer(super::consumer::push::OrderedConfig {
+    pub async fn keys_with_filters(
+        &self,
+        filters: impl IntoIterator<Item = &str>,
+    ) -> Result<Keys, HistoryError> {
+        let mut config: super::consumer::push::OrderedConfig =
+            super::consumer::push::OrderedConfig {
                 deliver_subject: self.stream.context.client.new_inbox(),
                 description: Some("kv history consumer".to_string()),
-                filter_subject: subject,
                 headers_only: true,
                 replay_policy: super::consumer::ReplayPolicy::Instant,
                 // We only need to know the latest state for each key, not the whole history
                 deliver_policy: DeliverPolicy::LastPerSubject,
                 ..Default::default()
-            })
-            .await?;
+            };
+
+        let mut filters = filters.into_iter().map(|f| format!("{}{}", self.prefix, f));
+
+        match (filters.next(), filters.next()) {
+            (Some(first), None) => {
+                config.filter_subject = first;
+            }
+            (Some(first), Some(_second)) => {
+                #[cfg(feature = "server_2_10")]
+                {
+                    config.filter_subjects = vec![first, _second];
+                    config.filter_subjects.extend(filters);
+                }
+                #[cfg(not(feature = "server_2_10"))]
+                {
+                    config.filter_subject = first;
+                    // maybe a warning
+                }
+            }
+            _ => {}
+        }
+
+        let consumer = self.stream.create_consumer(config).await?;
 
         let entries = History {
             done: consumer.info.num_pending == 0,
