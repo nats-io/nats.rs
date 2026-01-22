@@ -886,7 +886,7 @@ impl ConnectOptions {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let mut root_store = async_nats::rustls::RootCertStore::empty();
     ///
-    /// root_store.add_parsable_certificates(rustls_native_certs::load_native_certs()?);
+    /// root_store.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
     ///
     /// let tls_client = async_nats::rustls::ClientConfig::builder()
     ///     .with_root_certificates(root_store)
