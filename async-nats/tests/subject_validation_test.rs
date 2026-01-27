@@ -1,4 +1,4 @@
-use async_nats::subject::{SubjectError, ValidatedSubject};
+use async_nats::subject::{SubjectError, ToSubject, ValidatedSubject};
 
 // Compile-time validation tests - these should compile successfully
 const VALID1: ValidatedSubject = ValidatedSubject::from_static("events.data");
@@ -90,12 +90,10 @@ fn test_invalid_empty_subject() {
 
 #[test]
 fn test_validated_subject_to_subject_trait() {
-    use async_nats::subject::ToSubject;
-
     let validated = ValidatedSubject::new("test.subject").unwrap();
 
     // Should convert to Subject without validation overhead
-    let subject_result = validated.to_subject_validated();
+    let subject_result = validated.clone().to_subject_validated();
     assert!(subject_result.is_ok());
     assert_eq!(subject_result.unwrap().as_str(), "test.subject");
 
