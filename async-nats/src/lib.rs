@@ -1064,6 +1064,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.request_timeout,
         max_payload,
         statistics,
+        options.skip_subject_validation,
     );
 
     task::spawn(async move {
