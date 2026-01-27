@@ -88,6 +88,7 @@ pub struct Client {
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
+    skip_subject_validation: bool,
 }
 
 pub mod traits {
@@ -206,6 +207,7 @@ impl Client {
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
         statistics: Arc<Statistics>,
+        skip_subject_validation: bool,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -219,6 +221,7 @@ impl Client {
             request_timeout,
             max_payload,
             connection_stats: statistics,
+            skip_subject_validation,
         }
     }
 
@@ -321,7 +324,7 @@ impl Client {
         let subject = subject.to_subject();
 
         // Validate subject format
-        if !crate::is_valid_subject(&subject) {
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -379,7 +382,7 @@ impl Client {
         let subject = subject.to_subject();
 
         // Validate subject format
-        if !crate::is_valid_subject(&subject) {
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -423,7 +426,7 @@ impl Client {
         let reply = reply.to_subject();
 
         // Validate subject format
-        if !crate::is_valid_subject(&subject) {
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -470,7 +473,7 @@ impl Client {
         let reply = reply.to_subject();
 
         // Validate subject format
-        if !crate::is_valid_subject(&subject) {
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -676,7 +679,7 @@ impl Client {
         let subject = subject.to_subject();
 
         // Validate subject format
-        if !crate::is_valid_subject(&subject) {
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -722,7 +725,7 @@ impl Client {
         let subject = subject.to_subject();
 
         // Validate subject format
-        if !crate::is_valid_subject(&subject) {
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
