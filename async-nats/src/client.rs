@@ -88,6 +88,7 @@ pub struct Client {
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
+    skip_subject_validation: bool,
 }
 
 pub mod traits {
@@ -206,6 +207,7 @@ impl Client {
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
         statistics: Arc<Statistics>,
+        skip_subject_validation: bool,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -219,6 +221,7 @@ impl Client {
             request_timeout,
             max_payload,
             connection_stats: statistics,
+            skip_subject_validation,
         }
     }
 
@@ -319,6 +322,15 @@ impl Client {
         payload: Bytes,
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
+
+        // Validate subject format
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
             return Err(PublishError::with_source(
@@ -369,6 +381,14 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
 
+        // Validate subject format
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+
         self.sender
             .send(Command::Publish(OutboundMessage {
                 subject,
@@ -404,6 +424,14 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
         let reply = reply.to_subject();
+
+        // Validate subject format
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -443,6 +471,14 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
         let reply = reply.to_subject();
+
+        // Validate subject format
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -641,6 +677,15 @@ impl Client {
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
         let subject = subject.to_subject();
+
+        // Validate subject format
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ))));
+        }
+
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -678,6 +723,14 @@ impl Client {
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
         let subject = subject.to_subject();
+
+        // Validate subject format
+        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ))));
+        }
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
