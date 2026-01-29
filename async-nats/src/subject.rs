@@ -205,6 +205,12 @@ impl ToSubject for ValidatedSubject {
     }
 }
 
+impl ToSubject for &ValidatedSubject {
+    fn to_subject(&self) -> Subject {
+        self.inner.clone()
+    }
+}
+
 impl Serialize for Subject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

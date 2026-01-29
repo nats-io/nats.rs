@@ -323,7 +323,6 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
 
-        // Validate subject format
         if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
@@ -381,7 +380,6 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = subject.to_subject();
 
-        // Validate subject format
         if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
@@ -425,7 +423,6 @@ impl Client {
         let subject = subject.to_subject();
         let reply = reply.to_subject();
 
-        // Validate subject format
         if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
@@ -472,7 +469,6 @@ impl Client {
         let subject = subject.to_subject();
         let reply = reply.to_subject();
 
-        // Validate subject format
         if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
@@ -678,7 +674,6 @@ impl Client {
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
         let subject = subject.to_subject();
 
-        // Validate subject format
         if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -724,7 +719,6 @@ impl Client {
     ) -> Result<Subscriber, SubscribeError> {
         let subject = subject.to_subject();
 
-        // Validate subject format
         if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
