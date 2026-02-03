@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use criterion::{criterion_group, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 use async_nats::subject::ValidatedSubject;
 
@@ -14,7 +14,8 @@ static SUBJECT_128: &str = "segment.segment.segment.segment.segment.segment.segm
 // Pre-validated subjects at compile time
 const VALIDATED_5: ValidatedSubject = ValidatedSubject::from_static("bench");
 const VALIDATED_16: ValidatedSubject = ValidatedSubject::from_static("bench.data.testx");
-const VALIDATED_32: ValidatedSubject = ValidatedSubject::from_static("events.data.bench.test.messages");
+const VALIDATED_32: ValidatedSubject =
+    ValidatedSubject::from_static("events.data.bench.test.messages");
 const VALIDATED_128: ValidatedSubject = ValidatedSubject::from_static("segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.segment.x");
 
 async fn publish_with_static_str(
@@ -175,3 +176,4 @@ pub fn publish_validation_comparison(c: &mut Criterion) {
 }
 
 criterion_group!(subject_validation, publish_validation_comparison);
+criterion_main!(subject_validation);
