@@ -66,6 +66,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
+    pub(crate) auth_url_callback: Option<CallbackArg1<(), Result<String, AuthError>>>,
     pub(crate) max_reconnects: Option<usize>,
 }
 
@@ -126,7 +127,28 @@ impl Connector {
                             error,
                         ))
                     }
+                    ConnectErrorKind::AuthorizationViolation => {
+                        // Handle WebSocket authorization violations
+                        tracing::info!("Authorization violation in WebSocket handshake, attempting auth_url_callback");
+                        if self.handle_auth_error("WebSocket handshake").await? {
+                            // Continue with the next iteration of connect loop
+                            continue;
+                        }
+                        
+                        tracing::error!("Auth URL callback failed or not configured, propagating authorization violation error");
+                        self.events_tx
+                            .try_send(Event::ClientError(ClientError::Other(error.to_string())))
+                            .ok();
+                    }
+                    ConnectErrorKind::AuthCallbackReconnect => {
+                        // Auth callback succeeded and we need to reconnect with new credentials
+                        // This is expected behavior, so don't generate a ClientError event
+                        tracing::info!("Auth callback succeeded, continuing with normal reconnection flow");
+                        // Simply continue - this will allow the normal reconnection logic to handle it
+                        continue;
+                    }
                     other => {
+                        tracing::error!("Connection failed with error: {} (kind: {:?})", error, other);
                         self.events_tx
                             .try_send(Event::ClientError(ClientError::Other(other.to_string())))
                             .ok();
@@ -134,6 +156,54 @@ impl Connector {
                 },
             }
         }
+    }
+
+    /// Handles authentication errors by calling auth_url_callback and updating server list
+    async fn handle_auth_error(&mut self, error_context: &str) -> Result<bool, ConnectError> {
+        if let Some(callback) = &self.options.auth_url_callback {
+            tracing::info!("Authentication error in {}, calling auth_url_callback", error_context);
+            tracing::info!("Attempting to get new server URL from auth_url_callback...");
+            
+            match callback.call(()).await {
+                Ok(new_url) => {
+                    tracing::info!("Received new URL from auth_url_callback, updating servers");
+                    match new_url.parse::<ServerAddr>() {
+                        Ok(new_server_addr) => {
+                            // Replace the server list with the new URL
+                            self.servers = vec![(new_server_addr, 0)];
+                            // Reset attempts to allow reconnection
+                            self.attempts = 0;
+                            tracing::info!("Updated server list, will retry connection");
+                            return Ok(true); // Should retry
+                        }
+                        Err(parse_err) => {
+                            tracing::error!(
+                                error = %parse_err, 
+                                "Failed to parse new URL from auth_url_callback"
+                            );
+                            tracing::info!("Auth URL callback returned invalid URL");
+                        }
+                    }
+                }
+                Err(callback_err) => {
+                    tracing::error!(
+                        error = %callback_err, 
+                        "auth_url_callback failed in {}", error_context
+                    );
+                    tracing::info!("Auth URL callback returned error: {}", callback_err);
+                }
+            }
+        } else {
+            tracing::info!("Authentication error detected but no auth_url_callback configured - using fallback reconnection");
+            tracing::info!("To fix auth issues, configure auth_url_callback in ConnectOptions");
+        }
+        Ok(false) // Don't retry
+    }
+
+
+    /// Checks if an error is authentication-related
+    fn is_auth_error(error: &str) -> bool {
+        error.contains("status code 401")
     }
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
@@ -297,20 +367,43 @@ impl Connector {
                             .await?;
 
                         match connection.read_op().await? {
-                            Some(ServerOp::Error(err)) => match err {
-                                ServerError::AuthorizationViolation => {
-                                    tracing::error!(error = %err, "authorization violation");
-                                    return Err(ConnectError::with_source(
-                                        crate::ConnectErrorKind::AuthorizationViolation,
-                                        err,
-                                    ));
+                            Some(ServerOp::Error(err)) => {
+                                let error_text = err.to_string();
+                                tracing::info!(error = %err, error_text = %error_text, "received server error during connection");
+                                
+                                let should_try_auth_callback = match err {
+                                    ServerError::AuthorizationViolation => true,
+                                    _ => Self::is_auth_error(&error_text)
+                                };
+                                
+                                if should_try_auth_callback {
+                                    if self.handle_auth_error("server handshake").await? {
+                                        // Auth callback updated servers, propagate auth error to trigger reconnection
+                                        // This ensures subscriptions are properly restored via normal reconnection flow
+                                        tracing::info!("Auth callback succeeded, propagating auth error to trigger proper reconnection");
+                                        // Use special auth callback error type for clear messaging
+                                        return Err(ConnectError::with_source(
+                                            crate::ConnectErrorKind::AuthCallbackReconnect,
+                                            err,
+                                        ));
+                                    }
                                 }
-                                err => {
-                                    tracing::error!(error = %err, "server error during connection");
-                                    return Err(ConnectError::with_source(
-                                        crate::ConnectErrorKind::Io,
-                                        err,
-                                    ));
+                                
+                                match err {
+                                    ServerError::AuthorizationViolation => {
+                                        tracing::error!(error = %err, "authorization violation");
+                                        return Err(ConnectError::with_source(
+                                            crate::ConnectErrorKind::AuthorizationViolation,
+                                            err,
+                                        ));
+                                    }
+                                    err => {
+                                        tracing::error!(error = %err, "server error during connection");
+                                        return Err(ConnectError::with_source(
+                                            crate::ConnectErrorKind::Io,
+                                            err,
+                                        ));
+                                    }
                                 }
                             },
                             Some(_) => {
@@ -327,7 +420,7 @@ impl Connector {
                                     server_info.max_payload,
                                     std::sync::atomic::Ordering::Relaxed,
                                 );
-                                return Ok((server_info, connection));
+                                        return Ok((server_info, connection));
                             }
                             None => {
                                 tracing::error!("connection closed unexpectedly");
@@ -338,16 +431,33 @@ impl Connector {
                             }
                         }
                     }
-
                     Err(inner) => {
                         tracing::debug!(
                             server = ?server_addr,
+                            socket = %socket_addr,
                             error = %inner,
                             "connection attempt failed"
                         );
-                        error.replace(inner)
+                        
+                        // Handle auth errors for this connection attempt
+                        let error_text = inner.to_string();
+                        if Self::is_auth_error(&error_text) {
+                            if self.handle_auth_error("handshake").await? {
+                                // Auth callback updated servers, propagate error to trigger reconnection
+                                // This ensures subscriptions are properly restored via normal reconnection flow
+                                tracing::info!("Auth callback succeeded, propagating connection error to trigger proper reconnection");
+                                // Use special auth callback error type for clear messaging
+                                return Err(ConnectError::with_source(
+                                    crate::ConnectErrorKind::AuthCallbackReconnect,
+                                    inner,
+                                ));
+                            }
+                        }
+                        
+                        error.replace(inner);
+                        // Continue trying next socket address
                     }
-                };
+                }
             }
         }
 
@@ -368,6 +478,10 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             #[cfg(feature = "websockets")]
             "ws" => {
+                tracing::info!(
+                    server = %server_addr.as_url_str(),
+                    "attempting WebSocket handshake"
+                );
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
                     tokio_websockets::client::Builder::new()
@@ -379,7 +493,19 @@ impl Connector {
                 )
                 .await
                 .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                .map_err(|err| {
+                    let error_text = err.to_string();
+                    tracing::info!(error = %err, error_text = %error_text, "WebSocket connection failed");
+                    
+                    // Check if this is an HTTP authentication error during WebSocket handshake
+                    // Only treat as auth error if it's a real HTTP 401, not generic connection issues
+                     if (Self::is_auth_error(&error_text)) {
+                        tracing::info!("Detected WebSocket HTTP 401 error, treating as authorization violation");
+                        ConnectError::with_source(crate::ConnectErrorKind::AuthorizationViolation, err)
+                    } else {
+                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                    }
+                })?;
 
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
@@ -403,7 +529,19 @@ impl Connector {
                 )
                 .await
                 .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                .map_err(|err| {
+                    let error_text = err.to_string();
+                    tracing::info!(error = %err, error_text = %error_text, "WebSocket TLS connection failed");
+                    
+                    // Check if this is an HTTP authentication error during WebSocket handshake
+                    // Only treat as auth error if it's a real HTTP 401, not generic connection issues
+                     if (Self::is_auth_error(&error_text)) {
+                        tracing::info!("Detected WebSocket TLS HTTP 401 error, treating as authorization violation");
+                        ConnectError::with_source(crate::ConnectErrorKind::AuthorizationViolation, err)
+                    } else {
+                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                    }
+                })?;
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }

@@ -1024,6 +1024,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             read_buffer_capacity: options.read_buffer_capacity,
             reconnect_delay_callback: options.reconnect_delay_callback,
             auth_callback: options.auth_callback,
+            auth_url_callback: options.auth_url_callback,
             max_reconnects: options.max_reconnects,
         },
         events_tx,
@@ -1193,6 +1194,8 @@ pub enum ConnectErrorKind {
     Authentication,
     /// Server returned authorization violation error.
     AuthorizationViolation,
+    /// Auth URL callback succeeded, triggering reconnection with new credentials.
+    AuthCallbackReconnect,
     /// Connect timed out.
     TimedOut,
     /// Erroneous TLS setup.
@@ -1210,6 +1213,7 @@ impl Display for ConnectErrorKind {
             Self::Dns => write!(f, "DNS error"),
             Self::Authentication => write!(f, "failed signing nonce"),
             Self::AuthorizationViolation => write!(f, "authorization violation"),
+            Self::AuthCallbackReconnect => write!(f, "auth callback triggered reconnection"),
             Self::TimedOut => write!(f, "timed out"),
             Self::Tls => write!(f, "TLS error"),
             Self::Io => write!(f, "IO error"),

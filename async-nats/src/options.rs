@@ -65,6 +65,7 @@ pub struct ConnectOptions {
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
+    pub(crate) auth_url_callback: Option<CallbackArg1<(), Result<String, AuthError>>>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -117,6 +118,7 @@ impl Default for ConnectOptions {
             }),
             auth: Default::default(),
             auth_callback: None,
+            auth_url_callback: None,
         }
     }
 }
@@ -907,6 +909,35 @@ impl ConnectOptions {
     /// ```
     pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
         self.read_buffer_capacity = size;
+        self
+    }
+
+    /// Creates a builder with a custom auth url callback to be called when a 401 error is encountered during handshake.
+    /// The callback should return a new connection string to use for reconnection.
+    /// If the callback fails, the standard reconnect mechanism will be used.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .auth_url_callback(|| async move {
+    ///         // Get new connection URL from your auth service
+    ///         Ok("nats://new-server:4222".to_string())
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn auth_url_callback<F, Fut>(mut self, callback: F) -> Self
+    where
+        F: Fn(()) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<String, AuthError>> + 'static + Send + Sync,
+    {
+        self.auth_url_callback = Some(CallbackArg1::<(), Result<String, AuthError>>(Box::new(
+            move |()| Box::pin(callback(())),
+        )));
         self
     }
 }
