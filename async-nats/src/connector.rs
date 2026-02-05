@@ -40,6 +40,7 @@ use base64::engine::Engine;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp;
+use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -68,6 +69,10 @@ pub(crate) struct ConnectorOptions {
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) auth_url_callback: Option<CallbackArg1<(), Result<String, AuthError>>>,
     pub(crate) max_reconnects: Option<usize>,
+    /// Custom headers to be sent during WebSocket handshake.
+    /// Only used when the `websockets` feature is enabled.
+    #[cfg_attr(not(feature = "websockets"), allow(dead_code))]
+    pub(crate) handshake_headers: HashMap<String, String>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -482,14 +487,30 @@ impl Connector {
                     server = %server_addr.as_url_str(),
                     "attempting WebSocket handshake"
                 );
+                let mut ws_builder = tokio_websockets::client::Builder::new()
+                    .uri(server_addr.as_url_str())
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?;
+
+                // Add custom handshake headers
+                for (name, value) in &self.options.handshake_headers {
+                    if let (Ok(header_name), Ok(header_value)) = (
+                        http::header::HeaderName::try_from(name.as_str()),
+                        http::header::HeaderValue::try_from(value.as_str()),
+                    ) {
+                        ws_builder = ws_builder.add_header(header_name, header_value);
+                    } else {
+                        tracing::warn!(
+                            header_name = %name,
+                            "failed to parse custom handshake header, skipping"
+                        );
+                    }
+                }
+
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
-                    tokio_websockets::client::Builder::new()
-                        .uri(server_addr.as_url_str())
-                        .map_err(|err| {
-                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                        })?
-                        .connect(),
+                    ws_builder.connect(),
                 )
                 .await
                 .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
@@ -499,7 +520,7 @@ impl Connector {
                     
                     // Check if this is an HTTP authentication error during WebSocket handshake
                     // Only treat as auth error if it's a real HTTP 401, not generic connection issues
-                     if (Self::is_auth_error(&error_text)) {
+                    if Self::is_auth_error(&error_text) {
                         tracing::info!("Detected WebSocket HTTP 401 error, treating as authorization violation");
                         ConnectError::with_source(crate::ConnectErrorKind::AuthorizationViolation, err)
                     } else {
@@ -517,15 +538,32 @@ impl Connector {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
+                let ws_connector = tokio_websockets::Connector::Rustls(tls_connector);
+                let mut ws_builder = tokio_websockets::client::Builder::new()
+                    .connector(&ws_connector)
+                    .uri(server_addr.as_url_str())
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?;
+
+                // Add custom handshake headers
+                for (name, value) in &self.options.handshake_headers {
+                    if let (Ok(header_name), Ok(header_value)) = (
+                        http::header::HeaderName::try_from(name.as_str()),
+                        http::header::HeaderValue::try_from(value.as_str()),
+                    ) {
+                        ws_builder = ws_builder.add_header(header_name, header_value);
+                    } else {
+                        tracing::warn!(
+                            header_name = %name,
+                            "failed to parse custom handshake header, skipping"
+                        );
+                    }
+                }
+
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
-                    tokio_websockets::client::Builder::new()
-                        .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                        .uri(server_addr.as_url_str())
-                        .map_err(|err| {
-                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                        })?
-                        .connect(),
+                    ws_builder.connect(),
                 )
                 .await
                 .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
@@ -535,7 +573,7 @@ impl Connector {
                     
                     // Check if this is an HTTP authentication error during WebSocket handshake
                     // Only treat as auth error if it's a real HTTP 401, not generic connection issues
-                     if (Self::is_auth_error(&error_text)) {
+                    if Self::is_auth_error(&error_text) {
                         tracing::info!("Detected WebSocket TLS HTTP 401 error, treating as authorization violation");
                         ConnectError::with_source(crate::ConnectErrorKind::AuthorizationViolation, err)
                     } else {
