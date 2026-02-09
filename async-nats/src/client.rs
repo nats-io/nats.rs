@@ -436,6 +436,7 @@ impl Client {
         payload: Bytes,
     ) -> Result<(), PublishError> {
         let is_validated = subject.__is_validated();
+        let is_reply_validated = reply.__is_validated();
         let subject = subject.to_subject();
         let reply = reply.to_subject();
 
@@ -444,6 +445,14 @@ impl Client {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+
+        if !is_reply_validated && !self.skip_subject_validation && !crate::is_valid_subject(&reply)
+        {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'",
             ));
         }
 
@@ -484,6 +493,7 @@ impl Client {
         payload: Bytes,
     ) -> Result<(), PublishError> {
         let is_validated = subject.__is_validated();
+        let is_reply_validated = reply.__is_validated();
         let subject = subject.to_subject();
         let reply = reply.to_subject();
 
@@ -492,6 +502,14 @@ impl Client {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+
+        if !is_reply_validated && !self.skip_subject_validation && !crate::is_valid_subject(&reply)
+        {
+            return Err(PublishError::with_source(
+                PublishErrorKind::BadSubject,
+                "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'",
             ));
         }
 

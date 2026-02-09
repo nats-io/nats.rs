@@ -1199,6 +1199,12 @@ mod client {
             .await
             .expect_err("subscribe should reject subject with spaces");
 
+        // publish_with_reply should reject an invalid reply subject
+        client
+            .publish_with_reply("valid", "bad reply", "data".into())
+            .await
+            .expect_err("publish_with_reply should reject reply subject with spaces");
+
         // request should also reject a subject with spaces
         let err = client
             .request("bad subject", "data".into())
