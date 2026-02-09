@@ -101,12 +101,15 @@ pub mod traits {
     use super::{PublishError, Request, RequestError, SubscribeError};
 
     pub trait Publisher {
-        fn publish_with_reply<S: ToSubject, R: ToSubject>(
+        fn publish_with_reply<S, R>(
             &self,
             subject: S,
             reply: R,
             payload: Bytes,
-        ) -> impl Future<Output = Result<(), PublishError>>;
+        ) -> impl Future<Output = Result<(), PublishError>>
+        where
+            S: ToSubject,
+            R: ToSubject;
 
         fn publish_message(
             &self,
@@ -114,17 +117,21 @@ pub mod traits {
         ) -> impl Future<Output = Result<(), PublishError>>;
     }
     pub trait Subscriber {
-        fn subscribe<S: ToSubject>(
+        fn subscribe<S>(
             &self,
             subject: S,
-        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>;
+        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>
+        where
+            S: ToSubject;
     }
     pub trait Requester {
-        fn send_request<S: ToSubject>(
+        fn send_request<S>(
             &self,
             subject: S,
             request: Request,
-        ) -> impl Future<Output = Result<Message, RequestError>>;
+        ) -> impl Future<Output = Result<Message, RequestError>>
+        where
+            S: ToSubject;
     }
     pub trait TimeoutProvider {
         fn timeout(&self) -> Option<Duration>;
@@ -148,12 +155,16 @@ impl traits::TimeoutProvider for Client {
 }
 
 impl traits::Publisher for Client {
-    fn publish_with_reply<S: ToSubject, R: ToSubject>(
+    fn publish_with_reply<S, R>(
         &self,
         subject: S,
         reply: R,
         payload: Bytes,
-    ) -> impl Future<Output = Result<(), PublishError>> {
+    ) -> impl Future<Output = Result<(), PublishError>>
+    where
+        S: ToSubject,
+        R: ToSubject,
+    {
         self.publish_with_reply(subject, reply, payload)
     }
 
@@ -166,10 +177,10 @@ impl traits::Publisher for Client {
 }
 
 impl traits::Subscriber for Client {
-    fn subscribe<S: ToSubject>(
-        &self,
-        subject: S,
-    ) -> impl Future<Output = Result<Subscriber, SubscribeError>> {
+    fn subscribe<S>(&self, subject: S) -> impl Future<Output = Result<Subscriber, SubscribeError>>
+    where
+        S: ToSubject,
+    {
         self.subscribe(subject)
     }
 }
@@ -321,9 +332,11 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
 
-        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+        // Skip validation for pre-validated subjects
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -378,9 +391,11 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
 
-        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+        // Skip validation for pre-validated subjects
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -420,10 +435,12 @@ impl Client {
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
         let reply = reply.to_subject();
 
-        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+        // Skip validation for pre-validated subjects
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -466,10 +483,12 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
         let reply = reply.to_subject();
 
-        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+        // Skip validation for pre-validated subjects
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -559,9 +578,24 @@ impl Client {
         subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
 
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+            return Err(RequestError::with_source(
+                RequestErrorKind::Other,
+                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
+            ));
+        }
+
         if let Some(inbox) = request.inbox {
+            // Validate custom inbox subject
+            if !self.skip_subject_validation && !crate::is_valid_subject(&inbox) {
+                return Err(RequestError::with_source(
+                    RequestErrorKind::Other,
+                    "Invalid inbox subject: contains spaces, control characters, or starts/ends with '.'",
+                ));
+            }
             let timeout = request.timeout.unwrap_or(self.request_timeout);
             let mut subscriber = self.subscribe(inbox.clone()).await?;
             let payload: Bytes = request.payload.unwrap_or_default();
@@ -672,9 +706,11 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
 
-        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+        // Skip validation for pre-validated subjects
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
@@ -717,9 +753,11 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
+        let is_validated = subject.__is_validated();
         let subject = subject.to_subject();
 
-        if !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
+        // Skip validation for pre-validated subjects
+        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Invalid subject: contains spaces, control characters, or starts/ends with '.'",

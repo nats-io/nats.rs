@@ -243,7 +243,7 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
-pub use subject::Subject;
+pub use subject::{Subject, SubjectError, ToSubject, ValidatedSubject};
 
 mod auth;
 pub(crate) mod auth_utils;

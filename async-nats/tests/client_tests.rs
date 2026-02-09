@@ -1183,6 +1183,35 @@ mod client {
     }
 
     #[tokio::test]
+    async fn subject_validation_rejects_bad_subjects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // publish should reject a subject with spaces
+        client
+            .publish("bad subject", "data".into())
+            .await
+            .expect_err("publish should reject subject with spaces");
+
+        // subscribe should reject a subject with spaces
+        client
+            .subscribe("bad subject")
+            .await
+            .expect_err("subscribe should reject subject with spaces");
+
+        // request should also reject a subject with spaces
+        let err = client
+            .request("bad subject", "data".into())
+            .await
+            .expect_err("request should reject subject with spaces");
+        // Verify it's actually a validation error, not a timeout or no-responders error
+        assert!(
+            format!("{err:?}").contains("subject") || format!("{err:?}").contains("Subject"),
+            "expected a subject validation error, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn drain_subscription_deadlock() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();

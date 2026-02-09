@@ -179,6 +179,15 @@ impl fmt::Display for Subject {
 
 pub trait ToSubject {
     fn to_subject(&self) -> Subject;
+
+    /// Internal method to check if the subject has been pre-validated.
+    ///
+    /// This is used internally to skip runtime validation for pre-validated subjects.
+    /// Users should not need to call or implement this method directly.
+    #[doc(hidden)]
+    fn __is_validated(&self) -> bool {
+        false
+    }
 }
 
 impl ToSubject for Subject {
@@ -203,11 +212,19 @@ impl ToSubject for ValidatedSubject {
     fn to_subject(&self) -> Subject {
         self.inner.clone()
     }
+
+    fn __is_validated(&self) -> bool {
+        true
+    }
 }
 
 impl ToSubject for &ValidatedSubject {
     fn to_subject(&self) -> Subject {
         self.inner.clone()
+    }
+
+    fn __is_validated(&self) -> bool {
+        true
     }
 }
 
