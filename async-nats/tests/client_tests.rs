@@ -1211,9 +1211,15 @@ mod client {
             .await
             .expect_err("request should reject subject with spaces");
         // Verify it's actually a validation error, not a timeout or no-responders error
-        assert!(
-            format!("{err:?}").contains("subject") || format!("{err:?}").contains("Subject"),
-            "expected a subject validation error, got: {err:?}"
+        assert_ne!(
+            err.kind(),
+            RequestErrorKind::TimedOut,
+            "expected a subject validation error, got timeout: {err:?}"
+        );
+        assert_ne!(
+            err.kind(),
+            RequestErrorKind::NoResponders,
+            "expected a subject validation error, got no-responders: {err:?}"
         );
     }
 

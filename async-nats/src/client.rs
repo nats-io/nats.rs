@@ -332,16 +332,13 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let is_validated = subject.__is_validated();
-        let subject = subject.to_subject();
-
-        // Skip validation for pre-validated subjects
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject
+                .to_validated_subject()
+                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
+        };
 
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
@@ -391,16 +388,13 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let is_validated = subject.__is_validated();
-        let subject = subject.to_subject();
-
-        // Skip validation for pre-validated subjects
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject
+                .to_validated_subject()
+                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
+        };
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -435,26 +429,20 @@ impl Client {
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let is_validated = subject.__is_validated();
-        let is_reply_validated = reply.__is_validated();
-        let subject = subject.to_subject();
-        let reply = reply.to_subject();
-
-        // Skip validation for pre-validated subjects
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
-
-        if !is_reply_validated && !self.skip_subject_validation && !crate::is_valid_subject(&reply)
-        {
-            return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
-                "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject
+                .to_validated_subject()
+                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
+        };
+        let reply = if self.skip_subject_validation {
+            reply.to_subject()
+        } else {
+            reply
+                .to_validated_subject()
+                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
+        };
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -492,26 +480,20 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let is_validated = subject.__is_validated();
-        let is_reply_validated = reply.__is_validated();
-        let subject = subject.to_subject();
-        let reply = reply.to_subject();
-
-        // Skip validation for pre-validated subjects
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
-
-        if !is_reply_validated && !self.skip_subject_validation && !crate::is_valid_subject(&reply)
-        {
-            return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
-                "Invalid reply subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject
+                .to_validated_subject()
+                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
+        };
+        let reply = if self.skip_subject_validation {
+            reply.to_subject()
+        } else {
+            reply
+                .to_validated_subject()
+                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
+        };
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -596,15 +578,13 @@ impl Client {
         subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let is_validated = subject.__is_validated();
-        let subject = subject.to_subject();
-
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(RequestError::with_source(
-                RequestErrorKind::Other,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject
+                .to_validated_subject()
+                .map_err(|e| RequestError::with_source(RequestErrorKind::Other, e))?
+        };
 
         if let Some(inbox) = request.inbox {
             // Validate custom inbox subject
@@ -724,16 +704,16 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let is_validated = subject.__is_validated();
-        let subject = subject.to_subject();
-
-        // Skip validation for pre-validated subjects
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(SubscribeError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ))));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject.to_validated_subject().map_err(|e| {
+                SubscribeError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    e,
+                )))
+            })?
+        };
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -771,16 +751,16 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let is_validated = subject.__is_validated();
-        let subject = subject.to_subject();
-
-        // Skip validation for pre-validated subjects
-        if !is_validated && !self.skip_subject_validation && !crate::is_valid_subject(&subject) {
-            return Err(SubscribeError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Invalid subject: contains spaces, control characters, or starts/ends with '.'",
-            ))));
-        }
+        let subject = if self.skip_subject_validation {
+            subject.to_subject()
+        } else {
+            subject.to_validated_subject().map_err(|e| {
+                SubscribeError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    e,
+                )))
+            })?
+        };
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);

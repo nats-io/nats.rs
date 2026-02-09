@@ -180,13 +180,17 @@ impl fmt::Display for Subject {
 pub trait ToSubject {
     fn to_subject(&self) -> Subject;
 
-    /// Internal method to check if the subject has been pre-validated.
+    /// Converts to a validated `Subject`, returning an error if validation fails.
     ///
-    /// This is used internally to skip runtime validation for pre-validated subjects.
-    /// Users should not need to call or implement this method directly.
-    #[doc(hidden)]
-    fn __is_validated(&self) -> bool {
-        false
+    /// The default implementation validates the subject after conversion.
+    /// Types that are already validated (e.g., [`ValidatedSubject`]) override this
+    /// to skip redundant validation.
+    fn to_validated_subject(&self) -> Result<Subject, SubjectError> {
+        let s = self.to_subject();
+        if !crate::is_valid_subject(&s) {
+            return Err(SubjectError::InvalidFormat);
+        }
+        Ok(s)
     }
 }
 
@@ -213,8 +217,8 @@ impl ToSubject for ValidatedSubject {
         self.inner.clone()
     }
 
-    fn __is_validated(&self) -> bool {
-        true
+    fn to_validated_subject(&self) -> Result<Subject, SubjectError> {
+        Ok(self.inner.clone())
     }
 }
 
@@ -223,8 +227,8 @@ impl ToSubject for &ValidatedSubject {
         self.inner.clone()
     }
 
-    fn __is_validated(&self) -> bool {
-        true
+    fn to_validated_subject(&self) -> Result<Subject, SubjectError> {
+        Ok(self.inner.clone())
     }
 }
 
