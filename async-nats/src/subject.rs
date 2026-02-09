@@ -335,12 +335,15 @@ impl ValidatedSubject {
             panic!("subject cannot end with '.'");
         }
 
-        // Check for invalid characters (whitespace and control characters)
+        // Check for invalid characters and consecutive dots
         let mut i = 0;
         while i < len {
             let c = bytes[i];
             if c == b' ' || c == b'\t' || c == b'\r' || c == b'\n' {
                 panic!("subject cannot contain whitespace or control characters");
+            }
+            if c == b'.' && i + 1 < len && bytes[i + 1] == b'.' {
+                panic!("subject cannot contain consecutive dots");
             }
             i += 1;
         }

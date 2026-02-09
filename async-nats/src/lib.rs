@@ -1744,6 +1744,7 @@ pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
 
     bytes[0] != b'.'
         && bytes[bytes.len() - 1] != b'.'
+        && memchr::memmem::find(bytes, b"..").is_none()
         && memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none()
         && memchr::memchr(b'\t', bytes).is_none()
 }

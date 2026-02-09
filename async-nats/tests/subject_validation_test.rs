@@ -81,6 +81,18 @@ fn test_invalid_subjects_ends_with_dot() {
 }
 
 #[test]
+fn test_invalid_subjects_with_consecutive_dots() {
+    assert!(matches!(
+        ValidatedSubject::new("events..data"),
+        Err(SubjectError::InvalidFormat)
+    ));
+    assert!(matches!(
+        ValidatedSubject::new("a..b..c"),
+        Err(SubjectError::InvalidFormat)
+    ));
+}
+
+#[test]
 fn test_invalid_empty_subject() {
     assert!(matches!(
         ValidatedSubject::new(""),
