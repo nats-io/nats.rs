@@ -760,7 +760,7 @@ impl Request {
             None => {
                 return Err(PublishError::with_source(
                     PublishErrorKind::BadSubject,
-                    "Missing reply subject",
+                    "Request is missing reply subject to respond to",
                 ))
             }
             Some(subject) => subject,
