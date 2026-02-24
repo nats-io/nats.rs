@@ -35,7 +35,9 @@ use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::debug;
 
-use crate::{Client, Error, HeaderMap, Message, PublishError, Subscriber};
+use crate::{
+    client::PublishErrorKind, Client, Error, HeaderMap, Message, PublishError, Subscriber,
+};
 
 use self::endpoint::Endpoint;
 
@@ -754,7 +756,15 @@ impl Request {
     /// # }
     /// ```
     pub async fn respond(&self, response: Result<Bytes, error::Error>) -> Result<(), PublishError> {
-        let reply = self.message.reply.clone().unwrap();
+        let reply = match self.message.reply.clone() {
+            None => {
+                return Err(PublishError::with_source(
+                    PublishErrorKind::BadSubject,
+                    "Request is missing reply subject to respond to",
+                ))
+            }
+            Some(subject) => subject,
+        };
         let result = match response {
             Ok(payload) => self.client.publish(reply, payload).await,
             Err(err) => {
