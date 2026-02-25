@@ -1224,6 +1224,49 @@ mod client {
     }
 
     #[tokio::test]
+    async fn request_validates_subject() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // request should reject a subject with spaces
+        let err = client
+            .request("bad subject", "data".into())
+            .await
+            .expect_err("request should reject subject with spaces");
+        assert_eq!(err.kind(), RequestErrorKind::Other);
+
+        // request_with_headers should reject a subject with spaces
+        let err = client
+            .request_with_headers("bad subject", async_nats::HeaderMap::new(), "data".into())
+            .await
+            .expect_err("request_with_headers should reject subject with spaces");
+        assert_eq!(err.kind(), RequestErrorKind::Other);
+    }
+
+    #[tokio::test]
+    async fn skip_subject_validation_allows_bad_subjects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::ConnectOptions::new()
+            .skip_subject_validation(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // These should all succeed when validation is disabled.
+        // The server may reject them, but the client should not.
+        // Use subjects that are invalid but won't crash the protocol parser.
+        client
+            .publish("foo..bar", "data".into())
+            .await
+            .expect("publish should allow double dots when validation is skipped");
+
+        client
+            .subscribe("foo..bar")
+            .await
+            .expect("subscribe should allow double dots when validation is skipped");
+    }
+
+    #[tokio::test]
     async fn drain_subscription_deadlock() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();

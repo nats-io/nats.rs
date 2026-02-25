@@ -85,6 +85,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_initial_connect)
             .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
+            .entry(&"skip_subject_validation", &self.skip_subject_validation)
             .finish()
     }
 }
@@ -869,9 +870,9 @@ impl ConnectOptions {
     /// By default, the client validates all subjects to ensure they don't contain
     /// invalid characters (whitespace, control characters) and don't start or end with `.`.
     ///
-    /// # Safety
-    /// Using invalid subjects may cause protocol errors or undefined behavior with
-    /// the NATS server. Only disable validation if you are certain all subjects are valid.
+    /// # Warning
+    /// Using invalid subjects may cause protocol errors with the NATS server.
+    /// Only disable validation if you are certain all subjects are valid.
     ///
     /// # Examples
     /// ```no_run

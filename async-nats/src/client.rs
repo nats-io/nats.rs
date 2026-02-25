@@ -35,7 +35,6 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
-use tracing::trace;
 
 static VERSION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
@@ -236,6 +235,23 @@ impl Client {
         }
     }
 
+    /// Converts a subject to a [`Subject`], optionally validating it.
+    ///
+    /// If subject validation is enabled (the default), the subject is validated
+    /// before conversion. If validation is disabled via
+    /// [`ConnectOptions::skip_subject_validation`], the subject is converted
+    /// without validation.
+    fn maybe_validate_subject<S: ToSubject>(
+        &self,
+        subject: S,
+    ) -> Result<crate::Subject, crate::subject::SubjectError> {
+        if self.skip_subject_validation {
+            Ok(subject.to_subject())
+        } else {
+            subject.to_validated_subject()
+        }
+    }
+
     /// Returns the default timeout for requests set when creating the client.
     ///
     /// # Examples
@@ -332,13 +348,9 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject
-                .to_validated_subject()
-                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
-        };
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
@@ -388,13 +400,9 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject
-                .to_validated_subject()
-                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
-        };
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -429,20 +437,12 @@ impl Client {
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject
-                .to_validated_subject()
-                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
-        };
-        let reply = if self.skip_subject_validation {
-            reply.to_subject()
-        } else {
-            reply
-                .to_validated_subject()
-                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
-        };
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+        let reply = self
+            .maybe_validate_subject(reply)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -480,20 +480,12 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject
-                .to_validated_subject()
-                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
-        };
-        let reply = if self.skip_subject_validation {
-            reply.to_subject()
-        } else {
-            reply
-                .to_validated_subject()
-                .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?
-        };
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+        let reply = self
+            .maybe_validate_subject(reply)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -522,13 +514,6 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
-
-        trace!(
-            "request sent to subject: {} ({})",
-            subject.as_ref(),
-            payload.len()
-        );
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
@@ -554,8 +539,6 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
-
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
@@ -578,22 +561,11 @@ impl Client {
         subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject
-                .to_validated_subject()
-                .map_err(|e| RequestError::with_source(RequestErrorKind::Other, e))?
-        };
+        let subject = self
+            .maybe_validate_subject(subject)
+            .map_err(|e| RequestError::with_source(RequestErrorKind::Other, e))?;
 
         if let Some(inbox) = request.inbox {
-            // Validate custom inbox subject
-            if !self.skip_subject_validation && !crate::is_valid_subject(&inbox) {
-                return Err(RequestError::with_source(
-                    RequestErrorKind::Other,
-                    "Invalid inbox subject: contains spaces, control characters, or starts/ends with '.'",
-                ));
-            }
             let timeout = request.timeout.unwrap_or(self.request_timeout);
             let mut subscriber = self.subscribe(inbox.clone()).await?;
             let payload: Bytes = request.payload.unwrap_or_default();
@@ -704,16 +676,12 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject.to_validated_subject().map_err(|e| {
-                SubscribeError(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    e,
-                )))
-            })?
-        };
+        let subject = self.maybe_validate_subject(subject).map_err(|e| {
+            SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e,
+            )))
+        })?;
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -751,16 +719,12 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = if self.skip_subject_validation {
-            subject.to_subject()
-        } else {
-            subject.to_validated_subject().map_err(|e| {
-                SubscribeError(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    e,
-                )))
-            })?
-        };
+        let subject = self.maybe_validate_subject(subject).map_err(|e| {
+            SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e,
+            )))
+        })?;
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
