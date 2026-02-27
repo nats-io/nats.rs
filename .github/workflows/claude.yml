@@ -37,10 +37,12 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            Review this PR. Focus on:
+            Review this PR for code quality, security, and correctness. Focus on:
             - Correctness and potential bugs
             - Safety issues (unsafe code, panics, unwraps in non-test code)
             - API design consistency with the rest of the crate
             - Performance implications
             Be concise. Only flag real issues, not style nits.
-          claude_args: "--max-turns 50"
+            Post your review as a PR comment using `gh pr comment` and use inline comments for specific code issues.
+          claude_args: "--max-turns 30"
+          show_full_output: true
