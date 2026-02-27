@@ -44,3 +44,4 @@ jobs:
             - Performance implications
             Be concise. Only flag real issues, not style nits.
           claude_args: "--max-turns 50"
+          show_full_output: true
