@@ -4,7 +4,6 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  id-token: write
 
 on:
   issue_comment:
@@ -21,6 +20,18 @@ jobs:
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     steps:
+      - name: Check user permission
+        uses: actions-cool/check-user-permission@v2
+        id: check
+        with:
+          require: 'write'
+
+      - name: Abort if unauthorized
+        if: steps.check.outputs.require-result != 'true'
+        run: |
+          echo "User does not have write permission. Skipping."
+          exit 1
+
       - uses: actions/checkout@v4
 
       - uses: anthropics/claude-code-action@v1
@@ -44,5 +55,5 @@ jobs:
             - Performance implications
             Be concise. Only flag real issues, not style nits.
             Post your review as a PR comment using `gh pr comment` and use inline comments for specific code issues.
-          claude_args: "--max-turns 30"
+          claude_args: "--max-turns 15"
           show_full_output: true
