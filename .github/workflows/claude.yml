@@ -1,0 +1,46 @@
+name: Claude Code
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude-interactive:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  claude-auto-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          direct_prompt: |
+            Review this PR. Focus on:
+            - Correctness and potential bugs
+            - Safety issues (unsafe code, panics, unwraps in non-test code)
+            - API design consistency with the rest of the crate
+            - Performance implications
+            Be concise. Only flag real issues, not style nits.
+          claude_args: "--max-turns 5"
