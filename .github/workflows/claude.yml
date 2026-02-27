@@ -43,4 +43,4 @@ jobs:
             - API design consistency with the rest of the crate
             - Performance implications
             Be concise. Only flag real issues, not style nits.
-          claude_args: "--max-turns 5"
+          claude_args: "--max-turns 50"
