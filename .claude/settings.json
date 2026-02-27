@@ -2,16 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(git:*)",
-      "Bash(gh pr view:*)",
-      "Bash(gh pr diff:*)",
-      "Bash(gh api:*)",
-      "Bash(cargo build:*)",
-      "Bash(cargo check:*)",
-      "Bash(cargo test:*)",
-      "Bash(cargo clippy:*)",
-      "Bash(cargo fmt:*)",
-      "Bash(cargo doc:*)",
-      "Bash(find:*)"
+      "Bash(gh:*)",
+      "Bash(cargo:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)"
     ],
     "deny": []
   }
