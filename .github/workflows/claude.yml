@@ -36,7 +36,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          direct_prompt: |
+          prompt: |
             Review this PR. Focus on:
             - Correctness and potential bugs
             - Safety issues (unsafe code, panics, unwraps in non-test code)
