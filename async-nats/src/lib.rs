@@ -748,11 +748,14 @@ impl ConnectionHandler {
                                 }
                             }
                         }
-                        Err(mpsc::error::TrySendError::Full(_)) => {
+                        Err(mpsc::error::TrySendError::Full(returned_message)) => {
                             debug!("slow consumer detected for subscription {}", sid);
                             self.connector
                                 .events_tx
-                                .try_send(Event::SlowConsumer(sid))
+                                .try_send(Event::SlowConsumer(SlowConsumer {
+                                    sid,
+                                    subject: returned_message.subject,
+                                }))
                                 .ok();
                         }
                         Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -1103,7 +1106,7 @@ pub enum Event {
     LameDuckMode,
     Draining,
     Closed,
-    SlowConsumer(u64),
+    SlowConsumer(SlowConsumer),
     ServerError(ServerError),
     ClientError(ClientError),
 }
@@ -1116,7 +1119,11 @@ impl fmt::Display for Event {
             Event::LameDuckMode => write!(f, "lame duck mode detected"),
             Event::Draining => write!(f, "draining"),
             Event::Closed => write!(f, "closed"),
-            Event::SlowConsumer(sid) => write!(f, "slow consumers for subscription {sid}"),
+            Event::SlowConsumer(slow_consumer) => write!(
+                f,
+                "slow consumers for subscription {} on subject {}",
+                slow_consumer.sid, slow_consumer.subject
+            ),
             Event::ServerError(err) => write!(f, "server error: {err}"),
             Event::ClientError(err) => write!(f, "client error: {err}"),
         }
@@ -1437,7 +1444,7 @@ impl From<ClientError> for CallbackError {
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
 pub enum ServerError {
     AuthorizationViolation,
-    SlowConsumer(u64),
+    SlowConsumer(SlowConsumer),
     Other(String),
 }
 
@@ -1469,9 +1476,25 @@ impl std::fmt::Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AuthorizationViolation => write!(f, "nats: authorization violation"),
-            Self::SlowConsumer(sid) => write!(f, "nats: subscription {sid} is a slow consumer"),
+            Self::SlowConsumer(slow_consumer) => write!(
+                f,
+                "nats: subscription {} on subject {} is a slow consumer",
+                slow_consumer.sid, slow_consumer.subject,
+            ),
             Self::Other(error) => write!(f, "nats: {error}"),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlowConsumer {
+    pub sid: u64,
+    pub subject: Subject,
+}
+
+impl std::fmt::Display for SlowConsumer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "slow consumer {} on subject {}", self.sid, self.subject)
     }
 }
 
