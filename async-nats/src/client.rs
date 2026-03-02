@@ -25,20 +25,20 @@ use crate::error::Error;
 use bytes::Bytes;
 use futures_util::future::TryFutureExt;
 use futures_util::{Sink, SinkExt as _, StreamExt};
-use once_cell::sync::Lazy;
 use portable_atomic::AtomicU64;
 use regex::Regex;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
 use tracing::trace;
 
-static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
+static VERSION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.

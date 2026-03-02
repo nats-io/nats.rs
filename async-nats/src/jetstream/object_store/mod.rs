@@ -23,7 +23,7 @@ use base64::engine::general_purpose::URL_SAFE;
 use base64::engine::Engine;
 use bytes::BytesMut;
 use futures_util::future::BoxFuture;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tokio::io::AsyncReadExt;
 
 use futures_util::{Stream, StreamExt};
@@ -43,8 +43,10 @@ const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
 const ROLLUP_SUBJECT: &str = "sub";
 
-static BUCKET_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
-static OBJECT_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
+static BUCKET_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
+static OBJECT_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
 
 pub(crate) fn is_valid_bucket_name(bucket_name: &str) -> bool {
     BUCKET_NAME_RE.is_match(bucket_name)
