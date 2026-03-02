@@ -27,9 +27,9 @@ use futures_util::{
     stream::{self, SelectAll},
     Future, StreamExt,
 };
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 use time::serde::rfc3339;
 use time::OffsetDateTime;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
@@ -48,12 +48,12 @@ pub const NATS_SERVICE_ERROR_CODE: &str = "Nats-Service-Error-Code";
 
 // uses recommended semver validation expression from
 // https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-static SEMVER: Lazy<Regex> = Lazy::new(|| {
+static SEMVER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$")
         .unwrap()
 });
 // From ADR-33: Name can only have A-Z, a-z, 0-9, dash, underscore.
-static NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9\-_]+$").unwrap());
+static NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9\-_]+$").unwrap());
 
 /// Represents state for all endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]

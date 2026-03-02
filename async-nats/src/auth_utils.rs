@@ -14,9 +14,9 @@
 #[cfg(feature = "nkeys")]
 use nkeys::KeyPair;
 #[cfg(feature = "nkeys")]
-use once_cell::sync::Lazy;
-#[cfg(feature = "nkeys")]
 use regex::Regex;
+#[cfg(feature = "nkeys")]
+use std::sync::LazyLock;
 #[cfg(feature = "nkeys")]
 use std::{io, path::Path};
 
@@ -71,7 +71,7 @@ pub(crate) fn parse_jwt_and_key_from_creds(contents: &str) -> io::Result<(&str, 
 // ------END USER NKEY SEED------
 // ```
 #[cfg(feature = "nkeys")]
-static USER_CONFIG_RE: Lazy<Regex> = Lazy::new(|| {
+static USER_CONFIG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\s*(?:(?:[-]{3,}.*[-]{3,}\r?\n)([\w\-.=]+)(?:\r?\n[-]{3,}.*[-]{3,}\r?\n))")
         .unwrap()
 });

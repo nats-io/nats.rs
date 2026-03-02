@@ -25,8 +25,8 @@ use std::{
 use crate::HeaderValue;
 use bytes::Bytes;
 use futures_util::StreamExt;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 use time::OffsetDateTime;
 use tracing::debug;
 
@@ -87,8 +87,10 @@ fn kv_operation_from_message(message: &crate::message::Message) -> Result<Operat
     }
 }
 
-static VALID_BUCKET_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
-static VALID_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
+static VALID_BUCKET_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
+static VALID_KEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
 
 pub(crate) const MAX_HISTORY: i64 = 64;
 const ALL_KEYS: &str = ">";
