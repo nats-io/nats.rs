@@ -10,7 +10,6 @@ This file lists the dependencies used in this repository.
 | memchr 2.6.3              | MIT OR Unlicense         |
 | nkeys 0.3.2               | Apache-2.0               |
 | nuid 0.5.0                | Apache-2.0               |
-| once_cell 1.18.0          | Apache-2.0 OR MIT        |
 | rand 0.8.5                | Apache-2.0 OR MIT        |
 | regex 1.9.5               | Apache-2.0 OR MIT        |
 | ring 0.16.20              | MIT AND ISC AND OpenSSL  |
