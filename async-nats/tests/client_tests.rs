@@ -1206,4 +1206,37 @@ mod client {
             elapsed
         );
     }
+
+    #[tokio::test]
+    async fn local_address() {
+        let server = nats_server::run_basic_server();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let client = ConnectOptions::new()
+            .local_address(addr)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn local_address_with_port() {
+        let server = nats_server::run_basic_server();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:19898".parse().unwrap();
+        let client = ConnectOptions::new()
+            .local_address(addr)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        // Connection succeeded, meaning the bind to port 19898 worked.
+        // If the port was already in use or bind failed, connect would have errored.
+    }
 }

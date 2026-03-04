@@ -20,6 +20,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use futures_util::Future;
 use std::fmt::Formatter;
+use std::net::SocketAddr;
 use std::{fmt, path::PathBuf, pin::Pin, time::Duration};
 #[cfg(feature = "nkeys")]
 use std::{path::Path, sync::Arc};
@@ -64,6 +65,7 @@ pub struct ConnectOptions {
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
+    pub(crate) local_address: Option<SocketAddr>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -116,6 +118,7 @@ impl Default for ConnectOptions {
             }),
             auth: Default::default(),
             auth_callback: None,
+            local_address: None,
         }
     }
 }
@@ -922,6 +925,38 @@ impl ConnectOptions {
     /// ```
     pub fn read_buffer_capacity(mut self, size: u16) -> ConnectOptions {
         self.read_buffer_capacity = size;
+        self
+    }
+
+    /// Sets the local socket address that the client will bind to when connecting
+    /// to the server. This is useful when the client machine has multiple
+    /// network interfaces and you want to control which one is used, or when
+    /// you need to bind to a specific local port.
+    ///
+    /// Use port `0` to let the operating system assign an ephemeral port.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// // Bind to a specific IP with an OS-assigned port
+    /// let addr: std::net::SocketAddr = "192.168.1.10:0".parse().unwrap();
+    /// async_nats::ConnectOptions::new()
+    ///     .local_address(addr)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    ///
+    /// // Bind to a specific IP and port
+    /// let addr: std::net::SocketAddr = "192.168.1.10:9898".parse().unwrap();
+    /// async_nats::ConnectOptions::new()
+    ///     .local_address(addr)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn local_address(mut self, address: SocketAddr) -> ConnectOptions {
+        self.local_address = Some(address);
         self
     }
 }
