@@ -48,7 +48,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::time::sleep;
 use tokio_rustls::rustls;
 
@@ -69,6 +69,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) max_reconnects: Option<usize>,
+    pub(crate) local_address: Option<SocketAddr>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -427,12 +428,29 @@ impl Connector {
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             _ => {
-                let tcp_stream = tokio::time::timeout(
-                    self.options.connection_timeout,
-                    TcpStream::connect(socket_addr),
-                )
-                .await
-                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+                let tcp_stream = if let Some(local_addr) = self.options.local_address {
+                    let socket = if local_addr.is_ipv4() {
+                        TcpSocket::new_v4()?
+                    } else {
+                        TcpSocket::new_v6()?
+                    };
+                    socket.bind(local_addr).map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                    })?;
+                    tokio::time::timeout(
+                        self.options.connection_timeout,
+                        socket.connect(*socket_addr),
+                    )
+                    .await
+                    .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??
+                } else {
+                    tokio::time::timeout(
+                        self.options.connection_timeout,
+                        TcpStream::connect(socket_addr),
+                    )
+                    .await
+                    .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??
+                };
                 tcp_stream.set_nodelay(true)?;
 
                 Connection::new(
