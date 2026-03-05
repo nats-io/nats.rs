@@ -613,7 +613,7 @@ pub struct OrderedConfig {
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(rename = "rate_limit_bps", default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
@@ -2524,7 +2524,7 @@ pub struct Config {
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(rename = "rate_limit_bps", default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
