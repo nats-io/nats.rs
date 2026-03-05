@@ -58,6 +58,9 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// Retrieves `info` about [Consumer] from the server, updates the cached `info` inside
     /// [Consumer] and returns it.
     ///
+    /// When possible, use [`Message::info()`][crate::jetstream::Message::info] instead —
+    /// message metadata often already contains the needed information and does not require a server call.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -84,6 +87,9 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     }
 
     /// Retrieves `info` about [Consumer] from the server. Does not update the cache.
+    ///
+    /// When possible, use [`Message::info()`][crate::jetstream::Message::info] instead —
+    /// message metadata often already contains the needed information and does not require a server call.
     ///
     /// # Examples
     ///
