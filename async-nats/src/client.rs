@@ -90,6 +90,11 @@ pub struct Client {
     connection_stats: Arc<Statistics>,
 }
 
+/// Traits for abstracting NATS client operations.
+///
+/// This module provides traits that enable generic programming, testing with mocks,
+/// and custom client implementations. Use these when you want to write code that
+/// works with any NATS client rather than a specific concrete type.
 pub mod traits {
     use std::{future::Future, time::Duration};
 
@@ -99,7 +104,21 @@ pub mod traits {
 
     use super::{PublishError, Request, RequestError, SubscribeError};
 
+    /// Trait for types that can publish messages to NATS subjects.
+    ///
+    /// Implemented by [`crate::Client`]. Useful for writing generic code
+    /// that can publish messages without depending directly on
+    /// a concrete client type.
     pub trait Publisher {
+        /// Publish a message to a subject with an explicit reply subject.
+        ///
+        /// The reply subject enables request-reply patterns by indicating where
+        /// responses should be sent.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`PublishError`] if the connection is closed, the subject is invalid,
+        /// or the payload exceeds maximum size.
         fn publish_with_reply<S: ToSubject, R: ToSubject>(
             &self,
             subject: S,
@@ -107,25 +126,69 @@ pub mod traits {
             payload: Bytes,
         ) -> impl Future<Output = Result<(), PublishError>>;
 
+        /// Publish a fully constructed outbound NATS message.
+        ///
+        /// Provides low-level control for publishing messages with headers and
+        /// custom metadata. Use this when you need fine-grained message construction.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`PublishError`] if the connection is closed, the subject is invalid,
+        /// or the payload exceeds maximum size.
         fn publish_message(
             &self,
             msg: message::OutboundMessage,
         ) -> impl Future<Output = Result<(), PublishError>>;
     }
+
+    /// Trait for types that can create subscriptions to NATS subjects.
+    ///
+    /// Implemented by [`crate::Client`]. Enables receiving messages from subjects
+    /// using wildcards (`*` for single token, `>` for multiple tokens).
     pub trait Subscriber {
+        /// Subscribe to a subject and receive messages published to it.
+        ///
+        /// Creates a subscription stream that receives messages matching the subject pattern.
+        /// Subscriptions only receive messages published after creation; use JetStream for
+        /// persistence and historical messages.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`SubscribeError`] if the connection is closed or the subject is invalid.
         fn subscribe<S: ToSubject>(
             &self,
             subject: S,
         ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>;
     }
+
+    /// Trait for types that can perform request/reply interactions.
+    ///
+    /// Implemented by [`crate::Client`]. Enables RPC-style communication by sending
+    /// requests and waiting for responses.
     pub trait Requester {
+        /// Send a request to a subject and wait for a single response.
+        ///
+        /// Automatically manages reply inbox creation and cleanup. The request will
+        /// time out if no response is received within the configured duration.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`RequestError`] if the request times out, the connection is closed,
+        /// or no responders are available.
         fn send_request<S: ToSubject>(
             &self,
             subject: S,
             request: Request,
         ) -> impl Future<Output = Result<Message, RequestError>>;
     }
+
+    /// Provides an optional request timeout configuration.
+    ///
+    /// Used by request builders and client request methods to specify custom
+    /// timeout durations. Implementations return `None` to use default timeout behavior,
+    /// or `Some(Duration)` to specify a custom timeout.
     pub trait TimeoutProvider {
+        /// Return the configured request timeout, if any.
         fn timeout(&self) -> Option<Duration>;
     }
 }
