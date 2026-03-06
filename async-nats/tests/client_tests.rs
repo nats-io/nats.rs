@@ -569,8 +569,8 @@ mod client {
             .event_callback(move |event| {
                 let tx = tx.clone();
                 async move {
-                    if let Event::SlowConsumer(_) = event {
-                        tx.send(()).await.unwrap()
+                    if let Event::SlowConsumer(sc) = event {
+                        tx.send(sc).await.unwrap()
                     }
                 }
             })
@@ -587,15 +587,18 @@ mod client {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        let sc = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        assert_eq!(sc.subject.as_str(), "data");
+        let sc = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(sc.subject.as_str(), "data");
     }
+
     #[tokio::test]
     async fn no_echo() {
         // no_echo disabled.
