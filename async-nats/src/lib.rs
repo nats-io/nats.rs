@@ -1035,6 +1035,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             reconnect_delay_callback: options.reconnect_delay_callback,
             auth_callback: options.auth_callback,
             max_reconnects: options.max_reconnects,
+            local_address: options.local_address,
         },
         events_tx,
         state_tx,
