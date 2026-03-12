@@ -168,7 +168,14 @@ impl traits::Publisher for Client {
     }
 
     async fn publish_message(&self, msg: OutboundMessage) -> Result<(), PublishError> {
-        if !self.skip_subject_validation && !crate::is_valid_publish_subject(&msg.subject) {
+        if self.skip_subject_validation {
+            if msg.subject.is_empty() {
+                return Err(PublishError::with_source(
+                    PublishErrorKind::BadSubject,
+                    crate::subject::SubjectError::InvalidFormat,
+                ));
+            }
+        } else if !crate::is_valid_publish_subject(&msg.subject) {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 crate::subject::SubjectError::InvalidFormat,
@@ -248,19 +255,24 @@ impl Client {
         subject: S,
     ) -> Result<crate::Subject, crate::subject::SubjectError> {
         let subject = subject.to_subject();
-        if !self.skip_subject_validation && !crate::is_valid_publish_subject(&subject) {
+        if self.skip_subject_validation {
+            if subject.is_empty() {
+                return Err(crate::subject::SubjectError::InvalidFormat);
+            }
+        } else if !crate::is_valid_publish_subject(&subject) {
             return Err(crate::subject::SubjectError::InvalidFormat);
         }
         Ok(subject)
     }
 
     /// Validates a subject for subscribing (protocol-framing + dot structure).
-    pub(crate) fn maybe_validate_subscribe_subject<S: ToSubject>(
+    /// Always runs regardless of `skip_subject_validation` (matches Go/Java behavior).
+    pub(crate) fn validate_subscribe_subject<S: ToSubject>(
         &self,
         subject: S,
     ) -> Result<crate::Subject, crate::subject::SubjectError> {
         let subject = subject.to_subject();
-        if !self.skip_subject_validation && !subject.is_valid() {
+        if !subject.is_valid() {
             return Err(crate::subject::SubjectError::InvalidFormat);
         }
         Ok(subject)
@@ -690,14 +702,12 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let subject = self
-            .maybe_validate_subscribe_subject(subject)
-            .map_err(|e| {
-                SubscribeError(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    e,
-                )))
-            })?;
+        let subject = self.validate_subscribe_subject(subject).map_err(|e| {
+            SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e,
+            )))
+        })?;
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -735,16 +745,14 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = self
-            .maybe_validate_subscribe_subject(subject)
-            .map_err(|e| {
-                SubscribeError(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    e,
-                )))
-            })?;
+        let subject = self.validate_subscribe_subject(subject).map_err(|e| {
+            SubscribeError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e,
+            )))
+        })?;
 
-        if !self.skip_subject_validation && !crate::is_valid_queue_group(&queue_group) {
+        if !crate::is_valid_queue_group(&queue_group) {
             return Err(SubscribeError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "invalid queue group name",
