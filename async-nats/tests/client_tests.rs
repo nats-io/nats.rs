@@ -1280,7 +1280,7 @@ mod client {
     }
 
     #[tokio::test]
-    async fn skip_subject_validation_allows_bad_subjects() {
+    async fn skip_subject_validation_allows_bad_publish_subjects() {
         let server = nats_server::run_basic_server();
         let client = async_nats::ConnectOptions::new()
             .skip_subject_validation(true)
@@ -1288,18 +1288,27 @@ mod client {
             .await
             .unwrap();
 
-        // These should all succeed when validation is disabled.
-        // The server may reject them, but the client should not.
-        // Use subjects that are invalid but won't crash the protocol parser.
+        // Publish validation is skippable — double dots are allowed through.
         client
             .publish("foo..bar", "data".into())
             .await
             .expect("publish should allow double dots when validation is skipped");
+    }
 
+    #[tokio::test]
+    async fn skip_subject_validation_still_validates_subscribe() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::ConnectOptions::new()
+            .skip_subject_validation(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // Subscribe validation always runs (matching Go/Java behavior).
         client
             .subscribe("foo..bar")
             .await
-            .expect("subscribe should allow double dots when validation is skipped");
+            .expect_err("subscribe should reject double dots even when skip is enabled");
     }
 
     #[tokio::test]

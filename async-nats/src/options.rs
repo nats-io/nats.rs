@@ -868,14 +868,18 @@ impl ConnectOptions {
         self
     }
 
-    /// Disables subject validation.
+    /// Disables subject validation for publish operations.
     ///
     /// By default, the client validates all subjects to ensure they don't contain
     /// invalid characters (whitespace, control characters) and don't start or end with `.`.
     ///
+    /// This option only affects **publish** validation. Subscribe and queue group
+    /// validation always runs regardless of this setting, matching the behavior
+    /// of the Go and Java NATS clients.
+    ///
     /// # Warning
     /// Using invalid subjects may cause protocol errors with the NATS server.
-    /// Only disable validation if you are certain all subjects are valid.
+    /// Only disable validation if you are certain all published subjects are valid.
     ///
     /// # Examples
     /// ```no_run
