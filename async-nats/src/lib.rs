@@ -1738,7 +1738,7 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
 /// Checks if a subject contains only protocol-safe characters.
 /// Rejects empty subjects and subjects containing whitespace characters
 /// (space, tab, CR, LF) which would break protocol framing.
-/// Used for publish paths — matches nats.go `validateSubject`.
+/// Used for publish paths. Matches nats.go `validateSubject`.
 pub(crate) fn is_valid_publish_subject<T: AsRef<str>>(subject: T) -> bool {
     let bytes = subject.as_ref().as_bytes();
 

@@ -203,3 +203,5 @@ performant
 thread_rng
 NUID's
 whitespace
+LF
+nats
