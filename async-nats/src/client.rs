@@ -360,6 +360,11 @@ impl Client {
 
     /// Publish a [Message] to a given subject.
     ///
+    /// Returns `PublishErrorKind::BadSubject` if the subject is invalid
+    /// (empty or contains whitespace). This check can be disabled with
+    /// [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation] (empty subjects are
+    /// always rejected).
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -571,6 +576,9 @@ impl Client {
 
     /// Sends the request created by the [Request].
     ///
+    /// Returns `RequestErrorKind::BadSubject` if the subject is invalid
+    /// (empty or contains whitespace).
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -589,7 +597,7 @@ impl Client {
     ) -> Result<Message, RequestError> {
         let subject = self
             .maybe_validate_publish_subject(subject)
-            .map_err(|e| RequestError::with_source(RequestErrorKind::Other, e))?;
+            .map_err(|e| RequestError::with_source(RequestErrorKind::BadSubject, e))?;
 
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
@@ -687,6 +695,10 @@ impl Client {
 
     /// Subscribes to a subject to receive [messages][Message].
     ///
+    /// Returns an error if the subject is invalid (empty, contains whitespace,
+    /// or has malformed dot structure). This validation always runs regardless
+    /// of [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation].
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -725,6 +737,11 @@ impl Client {
     }
 
     /// Subscribes to a subject with a queue group to receive [messages][Message].
+    ///
+    /// Returns an error if the subject is invalid (empty, contains whitespace,
+    /// or has malformed dot structure) or if the queue group name is invalid
+    /// (empty or contains whitespace). Subject and queue group validation always
+    /// runs regardless of [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation].
     ///
     /// # Examples
     ///
@@ -1025,6 +1042,9 @@ pub enum RequestErrorKind {
     TimedOut,
     /// No one is listening on request subject.
     NoResponders,
+    /// BadSubject is returned when the subject of the request is invalid (empty or contains
+    /// whitespace).
+    BadSubject,
     /// Other errors, client/io related.
     Other,
 }
@@ -1034,6 +1054,7 @@ impl Display for RequestErrorKind {
         match self {
             Self::TimedOut => write!(f, "request timed out"),
             Self::NoResponders => write!(f, "no responders"),
+            Self::BadSubject => write!(f, "bad subject - contains whitespace or is empty"),
             Self::Other => write!(f, "request failed"),
         }
     }

@@ -87,7 +87,7 @@ impl From<crate::RequestError> for DirectGetError {
                     "no responders".to_string(),
                 ))
             }
-            crate::RequestErrorKind::Other => {
+            crate::RequestErrorKind::BadSubject | crate::RequestErrorKind::Other => {
                 DirectGetError::with_source(DirectGetErrorKind::Other, err)
             }
         }

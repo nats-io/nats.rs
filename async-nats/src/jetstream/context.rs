@@ -2102,7 +2102,7 @@ impl From<crate::RequestError> for RequestError {
             crate::RequestErrorKind::NoResponders => {
                 RequestError::new(RequestErrorKind::NoResponders)
             }
-            crate::RequestErrorKind::Other => {
+            crate::RequestErrorKind::BadSubject | crate::RequestErrorKind::Other => {
                 RequestError::with_source(RequestErrorKind::Other, error)
             }
         }

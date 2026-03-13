@@ -130,7 +130,7 @@ impl Subject {
     /// - Not be empty
     /// - Not start or end with `.`
     /// - Not contain consecutive dots (`..`)
-    /// - Not contain whitespace or control characters
+    /// - Not contain whitespace (space, tab, CR, LF)
     #[inline]
     pub fn is_valid(&self) -> bool {
         crate::is_valid_subject(self)
@@ -198,7 +198,7 @@ impl Subject {
         while i < len {
             let c = bytes[i];
             if c == b' ' || c == b'\t' || c == b'\r' || c == b'\n' {
-                panic!("subject cannot contain whitespace or control characters");
+                panic!("subject cannot contain whitespace (space, tab, CR, LF)");
             }
             if c == b'.' && i + 1 < len && bytes[i + 1] == b'.' {
                 panic!("subject cannot contain consecutive dots");
