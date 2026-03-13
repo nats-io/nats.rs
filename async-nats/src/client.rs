@@ -249,7 +249,7 @@ impl Client {
     }
 
     /// Validates a subject for publishing (protocol-framing safety only).
-    /// Checks for empty and whitespace — does not check dot structure.
+    /// Checks for empty and whitespace. Does not check dot structure.
     pub(crate) fn maybe_validate_publish_subject<S: ToSubject>(
         &self,
         subject: S,
