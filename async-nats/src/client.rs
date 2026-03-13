@@ -168,14 +168,9 @@ impl traits::Publisher for Client {
     }
 
     async fn publish_message(&self, msg: OutboundMessage) -> Result<(), PublishError> {
-        if self.skip_subject_validation {
-            if msg.subject.is_empty() {
-                return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
-                    crate::subject::SubjectError::InvalidFormat,
-                ));
-            }
-        } else if !crate::is_valid_publish_subject(&msg.subject) {
+        if msg.subject.is_empty()
+            || (!self.skip_subject_validation && !crate::is_valid_publish_subject(&msg.subject))
+        {
             return Err(PublishError::with_source(
                 PublishErrorKind::BadSubject,
                 crate::subject::SubjectError::InvalidFormat,
@@ -255,11 +250,9 @@ impl Client {
         subject: S,
     ) -> Result<crate::Subject, crate::subject::SubjectError> {
         let subject = subject.to_subject();
-        if self.skip_subject_validation {
-            if subject.is_empty() {
-                return Err(crate::subject::SubjectError::InvalidFormat);
-            }
-        } else if !crate::is_valid_publish_subject(&subject) {
+        if subject.is_empty()
+            || (!self.skip_subject_validation && !crate::is_valid_publish_subject(&subject))
+        {
             return Err(crate::subject::SubjectError::InvalidFormat);
         }
         Ok(subject)
