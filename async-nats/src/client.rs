@@ -714,12 +714,9 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let subject = self.validate_subscribe_subject(subject).map_err(|e| {
-            SubscribeError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                e,
-            )))
-        })?;
+        let subject = self
+            .validate_subscribe_subject(subject)
+            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::BadSubject, e))?;
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -762,18 +759,12 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = self.validate_subscribe_subject(subject).map_err(|e| {
-            SubscribeError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                e,
-            )))
-        })?;
+        let subject = self
+            .validate_subscribe_subject(subject)
+            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::BadSubject, e))?;
 
         if !crate::is_valid_queue_group(&queue_group) {
-            return Err(SubscribeError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "invalid queue group name",
-            ))));
+            return Err(SubscribeError::new(SubscribeErrorKind::BadQueueGroup));
         }
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
@@ -1015,13 +1006,32 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for ReconnectError {
     }
 }
 
-#[derive(Error, Debug)]
-#[error("failed to send subscribe: {0}")]
-pub struct SubscribeError(#[source] crate::Error);
+/// An error returned from the [`Client::subscribe`] or [`Client::queue_subscribe`] functions.
+pub type SubscribeError = Error<SubscribeErrorKind>;
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        SubscribeError(Box::new(err))
+        SubscribeError::with_source(SubscribeErrorKind::Other, err)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SubscribeErrorKind {
+    /// The subject is invalid (empty, contains whitespace, or has malformed dot structure).
+    BadSubject,
+    /// The queue group name is invalid (empty or contains whitespace).
+    BadQueueGroup,
+    /// Other errors, client/io related.
+    Other,
+}
+
+impl Display for SubscribeErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadSubject => write!(f, "bad subject"),
+            Self::BadQueueGroup => write!(f, "bad queue group name"),
+            Self::Other => write!(f, "subscribe failed"),
+        }
     }
 }
 
