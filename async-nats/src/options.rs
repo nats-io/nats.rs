@@ -65,6 +65,7 @@ pub struct ConnectOptions {
     pub(crate) read_buffer_capacity: u16,
     pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
+    pub(crate) skip_subject_validation: bool,
     pub(crate) local_address: Option<SocketAddr>,
 }
 
@@ -86,6 +87,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_initial_connect)
             .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
+            .entry(&"skip_subject_validation", &self.skip_subject_validation)
             .finish()
     }
 }
@@ -118,6 +120,7 @@ impl Default for ConnectOptions {
             }),
             auth: Default::default(),
             auth_callback: None,
+            skip_subject_validation: false,
             local_address: None,
         }
     }
@@ -862,6 +865,35 @@ impl ConnectOptions {
     pub fn max_reconnects<T: Into<Option<usize>>>(mut self, max_reconnects: T) -> ConnectOptions {
         let val: Option<usize> = max_reconnects.into();
         self.max_reconnects = if val == Some(0) { None } else { val };
+        self
+    }
+
+    /// Disables subject validation for publish operations.
+    ///
+    /// By default, the client validates all subjects to ensure they don't contain
+    /// invalid characters (whitespace, control characters) and don't start or end with `.`.
+    ///
+    /// This option only affects **publish** validation. Subscribe and queue group
+    /// validation always runs regardless of this setting, matching the behavior
+    /// of the Go and Java NATS clients.
+    ///
+    /// # Warning
+    /// Using invalid subjects may cause protocol errors with the NATS server.
+    /// Only disable validation if you are certain all published subjects are valid.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .skip_subject_validation(true)
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn skip_subject_validation(mut self, skip: bool) -> ConnectOptions {
+        self.skip_subject_validation = skip;
         self
     }
 

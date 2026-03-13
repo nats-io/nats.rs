@@ -650,7 +650,7 @@ mod service {
         let request = endpoint.next().await.unwrap();
         let err = request.respond(Ok("ok".into())).await.unwrap_err();
         // check the correct error was returned
-        assert_eq!(err.kind(), PublishErrorKind::BadSubject);
+        assert_eq!(err.kind(), PublishErrorKind::InvalidSubject);
         assert!(err.source().is_some());
     }
 }
