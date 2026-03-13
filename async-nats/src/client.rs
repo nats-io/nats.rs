@@ -58,7 +58,7 @@ impl From<tokio_util::sync::PollSendError<Command>> for PublishError {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum PublishErrorKind {
     MaxPayloadExceeded,
-    BadSubject,
+    InvalidSubject,
     Send,
 }
 
@@ -67,7 +67,7 @@ impl Display for PublishErrorKind {
         match self {
             PublishErrorKind::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
             PublishErrorKind::Send => write!(f, "failed to send message"),
-            PublishErrorKind::BadSubject => write!(f, "bad subject"),
+            PublishErrorKind::InvalidSubject => write!(f, "invalid subject"),
         }
     }
 }
@@ -172,7 +172,7 @@ impl traits::Publisher for Client {
             || (!self.skip_subject_validation && !crate::is_valid_publish_subject(&msg.subject))
         {
             return Err(PublishError::with_source(
-                PublishErrorKind::BadSubject,
+                PublishErrorKind::InvalidSubject,
                 crate::subject::SubjectError::InvalidFormat,
             ));
         }
@@ -353,7 +353,7 @@ impl Client {
 
     /// Publish a [Message] to a given subject.
     ///
-    /// Returns `PublishErrorKind::BadSubject` if the subject is invalid
+    /// Returns `PublishErrorKind::InvalidSubject` if the subject is invalid
     /// (empty or contains whitespace). This check can be disabled with
     /// [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation] (empty subjects are
     /// always rejected).
@@ -374,7 +374,7 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = self
             .maybe_validate_publish_subject(subject)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
@@ -426,7 +426,7 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = self
             .maybe_validate_publish_subject(subject)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -463,10 +463,10 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = self
             .maybe_validate_publish_subject(subject)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
         let reply = self
             .maybe_validate_publish_subject(reply)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -506,10 +506,10 @@ impl Client {
     ) -> Result<(), PublishError> {
         let subject = self
             .maybe_validate_publish_subject(subject)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
         let reply = self
             .maybe_validate_publish_subject(reply)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::BadSubject, e))?;
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -569,7 +569,7 @@ impl Client {
 
     /// Sends the request created by the [Request].
     ///
-    /// Returns `RequestErrorKind::BadSubject` if the subject is invalid
+    /// Returns `RequestErrorKind::InvalidSubject` if the subject is invalid
     /// (empty or contains whitespace).
     ///
     /// # Examples
@@ -590,7 +590,7 @@ impl Client {
     ) -> Result<Message, RequestError> {
         let subject = self
             .maybe_validate_publish_subject(subject)
-            .map_err(|e| RequestError::with_source(RequestErrorKind::BadSubject, e))?;
+            .map_err(|e| RequestError::with_source(RequestErrorKind::InvalidSubject, e))?;
 
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
@@ -709,7 +709,7 @@ impl Client {
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
         let subject = self
             .validate_subscribe_subject(subject)
-            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::BadSubject, e))?;
+            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::InvalidSubject, e))?;
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -754,10 +754,10 @@ impl Client {
     ) -> Result<Subscriber, SubscribeError> {
         let subject = self
             .validate_subscribe_subject(subject)
-            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::BadSubject, e))?;
+            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::InvalidSubject, e))?;
 
         if !crate::is_valid_queue_group(&queue_group) {
-            return Err(SubscribeError::new(SubscribeErrorKind::BadQueueGroup));
+            return Err(SubscribeError::new(SubscribeErrorKind::InvalidQueueName));
         }
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
@@ -1011,9 +1011,9 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SubscribeErrorKind {
     /// The subject is invalid (empty, contains whitespace, or has malformed dot structure).
-    BadSubject,
+    InvalidSubject,
     /// The queue group name is invalid (empty or contains whitespace).
-    BadQueueGroup,
+    InvalidQueueName,
     /// Other errors, client/io related.
     Other,
 }
@@ -1021,8 +1021,8 @@ pub enum SubscribeErrorKind {
 impl Display for SubscribeErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BadSubject => write!(f, "bad subject"),
-            Self::BadQueueGroup => write!(f, "bad queue group name"),
+            Self::InvalidSubject => write!(f, "invalid subject"),
+            Self::InvalidQueueName => write!(f, "invalid queue name"),
             Self::Other => write!(f, "subscribe failed"),
         }
     }
@@ -1045,9 +1045,8 @@ pub enum RequestErrorKind {
     TimedOut,
     /// No one is listening on request subject.
     NoResponders,
-    /// BadSubject is returned when the subject of the request is invalid (empty or contains
-    /// whitespace).
-    BadSubject,
+    /// The subject is invalid (empty or contains whitespace).
+    InvalidSubject,
     /// Other errors, client/io related.
     Other,
 }
@@ -1057,7 +1056,7 @@ impl Display for RequestErrorKind {
         match self {
             Self::TimedOut => write!(f, "request timed out"),
             Self::NoResponders => write!(f, "no responders"),
-            Self::BadSubject => write!(f, "bad subject - contains whitespace or is empty"),
+            Self::InvalidSubject => write!(f, "invalid subject"),
             Self::Other => write!(f, "request failed"),
         }
     }

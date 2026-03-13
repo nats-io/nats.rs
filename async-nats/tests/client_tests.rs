@@ -1233,14 +1233,14 @@ mod client {
             .request("bad subject", "data".into())
             .await
             .expect_err("request should reject subject with spaces");
-        assert_eq!(err.kind(), RequestErrorKind::BadSubject);
+        assert_eq!(err.kind(), RequestErrorKind::InvalidSubject);
 
         // request_with_headers should reject a subject with spaces
         let err = client
             .request_with_headers("bad subject", async_nats::HeaderMap::new(), "data".into())
             .await
             .expect_err("request_with_headers should reject subject with spaces");
-        assert_eq!(err.kind(), RequestErrorKind::BadSubject);
+        assert_eq!(err.kind(), RequestErrorKind::InvalidSubject);
     }
 
     #[tokio::test]

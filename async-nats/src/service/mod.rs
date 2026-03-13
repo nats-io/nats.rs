@@ -759,7 +759,7 @@ impl Request {
         let reply = match self.message.reply.clone() {
             None => {
                 return Err(PublishError::with_source(
-                    PublishErrorKind::BadSubject,
+                    PublishErrorKind::InvalidSubject,
                     "Request is missing reply subject to respond to",
                 ))
             }
