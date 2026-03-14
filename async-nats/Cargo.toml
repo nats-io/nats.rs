@@ -16,7 +16,7 @@ categories = ["network-programming", "api-bindings"]
 [dependencies]
 aws-lc-rs = { version = "1.6", optional = true }
 memchr = "2.4"
-bytes = { version = "1.4.0", features = ["serde"] }
+bytes = { version = "1.11.1", features = ["serde"] }
 futures-util = { version = "0.3.28", default-features = false, features = ["std", "sink"] }
 nkeys = { version = "0.4", optional = true }
 regex = "1.9.1"
