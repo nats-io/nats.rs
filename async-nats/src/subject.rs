@@ -7,8 +7,8 @@ use std::str::{from_utf8, Utf8Error};
 /// Error type for subject validation failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubjectError {
-    /// The subject format is invalid (contains whitespace, control characters,
-    /// starts/ends with `.`, or is empty).
+    /// The subject format is invalid (contains whitespace, starts/ends with `.`,
+    /// has consecutive dots, or is empty).
     InvalidFormat,
 }
 

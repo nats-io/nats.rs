@@ -870,8 +870,8 @@ impl ConnectOptions {
 
     /// Disables subject validation for publish operations.
     ///
-    /// By default, the client validates all subjects to ensure they don't contain
-    /// invalid characters (whitespace, control characters) and don't start or end with `.`.
+    /// By default, the client validates publish subjects to ensure they don't contain
+    /// whitespace characters (space, tab, CR, LF).
     ///
     /// This option only affects **publish** validation. Subscribe and queue group
     /// validation always runs regardless of this setting, matching the behavior

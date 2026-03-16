@@ -1779,6 +1779,7 @@ pub(crate) fn is_valid_queue_group(queue_group: &str) -> bool {
 
     memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none() && memchr::memchr(b'\t', bytes).is_none()
 }
+
 #[allow(unused_macros)]
 macro_rules! from_with_timeout {
     ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {

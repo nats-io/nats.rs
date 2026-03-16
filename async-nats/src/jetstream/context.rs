@@ -2078,6 +2078,7 @@ pub type Publish = super::message::PublishMessage;
 pub enum RequestErrorKind {
     NoResponders,
     TimedOut,
+    InvalidSubject,
     Other,
 }
 
@@ -2086,6 +2087,7 @@ impl Display for RequestErrorKind {
         match self {
             Self::TimedOut => write!(f, "timed out"),
             Self::Other => write!(f, "request failed"),
+            Self::InvalidSubject => write!(f, "invalid subject"),
             Self::NoResponders => write!(f, "requested JetStream resource does not exist"),
         }
     }
@@ -2102,7 +2104,10 @@ impl From<crate::RequestError> for RequestError {
             crate::RequestErrorKind::NoResponders => {
                 RequestError::new(RequestErrorKind::NoResponders)
             }
-            crate::RequestErrorKind::InvalidSubject | crate::RequestErrorKind::Other => {
+            crate::RequestErrorKind::InvalidSubject => {
+                RequestError::with_source(RequestErrorKind::InvalidSubject, error)
+            }
+            crate::RequestErrorKind::Other => {
                 RequestError::with_source(RequestErrorKind::Other, error)
             }
         }
@@ -2163,6 +2168,9 @@ impl From<RequestError> for ConsumerInfoError {
     fn from(error: RequestError) -> Self {
         match error.kind() {
             RequestErrorKind::TimedOut => ConsumerInfoError::new(ConsumerInfoErrorKind::TimedOut),
+            RequestErrorKind::InvalidSubject => {
+                ConsumerInfoError::with_source(ConsumerInfoErrorKind::InvalidName, error)
+            }
             RequestErrorKind::Other => {
                 ConsumerInfoError::with_source(ConsumerInfoErrorKind::Request, error)
             }
@@ -2222,6 +2230,9 @@ impl From<RequestError> for CreateStreamError {
                 CreateStreamError::new(CreateStreamErrorKind::JetStreamUnavailable)
             }
             RequestErrorKind::TimedOut => CreateStreamError::new(CreateStreamErrorKind::TimedOut),
+            RequestErrorKind::InvalidSubject => {
+                CreateStreamError::with_source(CreateStreamErrorKind::InvalidStreamName, error)
+            }
             RequestErrorKind::Other => {
                 CreateStreamError::with_source(CreateStreamErrorKind::Response, error)
             }
@@ -2415,7 +2426,9 @@ impl From<RequestError> for AccountError {
                 AccountError::with_source(AccountErrorKind::JetStreamUnavailable, err)
             }
             RequestErrorKind::TimedOut => AccountError::new(AccountErrorKind::TimedOut),
-            RequestErrorKind::Other => AccountError::with_source(AccountErrorKind::Other, err),
+            RequestErrorKind::Other | RequestErrorKind::InvalidSubject => {
+                AccountError::with_source(AccountErrorKind::Other, err)
+            }
         }
     }
 }
