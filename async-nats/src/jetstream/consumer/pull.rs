@@ -637,16 +637,16 @@ pub struct OrderedConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
     /// Maximum number of messages that can be requested in single Pull Request.
-    /// This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
-    /// [stream]
+    /// This is used explicitly by [Consumer::batch] and [Consumer::fetch], but also, under the hood, by [Consumer::messages] and
+    /// [Consumer::stream]
     pub max_batch: i64,
     /// Maximum number of bytes that can be requested in single Pull Request.
-    /// This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
-    /// [stream]
+    /// This is used explicitly by [Consumer::batch] and [Consumer::fetch], but also, under the hood, by [Consumer::messages] and
+    /// [Consumer::stream]
     pub max_bytes: i64,
     /// Maximum expiry that can be set for a single Pull Request.
-    /// This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
-    /// [stream]
+    /// This is used explicitly by [Consumer::batch] and [Consumer::fetch], but also, under the hood, by [Consumer::messages] and
+    /// [Consumer::stream]
     pub max_expires: Duration,
 }
 

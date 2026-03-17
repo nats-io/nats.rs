@@ -270,7 +270,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub memory_storage: bool,
     #[cfg(feature = "server_2_10")]
-    // Additional consumer metadata.
+    /// Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
     /// Custom backoff for missed acknowledgments.
@@ -424,7 +424,7 @@ pub struct OrderedConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_waiting: i64,
     #[cfg(feature = "server_2_10")]
-    // Additional consumer metadata.
+    /// Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
 }
