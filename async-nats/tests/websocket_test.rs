@@ -30,7 +30,7 @@ mod websockets {
         // Simple pub/sub
         let mut sub = client.subscribe("foo").await.unwrap();
         client.publish("foo", "hello".into()).await.unwrap();
-        assert_eq!(sub.next().await.unwrap().payload, "hello");
+        assert_eq!(sub.next().await.unwrap().unwrap().payload, "hello");
 
         // Large messages
         let payload = bytes::Bytes::from(vec![22; 1024 * 1024]);
@@ -39,7 +39,7 @@ mod websockets {
         for _ in 0..10 {
             client.publish("foo", payload.clone()).await.unwrap();
         }
-        while let Some(msg) = sub.next().await {
+        while let Some(Ok(msg)) = sub.next().await {
             assert_eq!(msg.payload, payload);
         }
 
@@ -48,7 +48,7 @@ mod websockets {
         tokio::task::spawn({
             let client = client.clone();
             async move {
-                let request = requests.next().await.unwrap();
+                let request = requests.next().await.unwrap().unwrap();
                 client
                     .publish(request.reply.unwrap(), request.payload)
                     .await
@@ -73,6 +73,6 @@ mod websockets {
 
         let mut sub = client.subscribe("foo").await.unwrap();
         client.publish("foo", "hello".into()).await.unwrap();
-        assert_eq!(sub.next().await.unwrap().payload, "hello");
+        assert_eq!(sub.next().await.unwrap().unwrap().payload, "hello");
     }
 }

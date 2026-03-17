@@ -71,6 +71,7 @@ mod client {
         tokio::time::timeout(Duration::from_secs(5), sub.next())
             .await
             .unwrap()
+            .unwrap()
             .unwrap();
     }
 
@@ -125,7 +126,7 @@ mod client {
         for mut subscriber in subscribers.into_iter() {
             results.push(tokio::spawn(async move {
                 let mut count = 0u32;
-                while let Ok(Some(_)) = tokio::time::timeout(
+                while let Ok(Some(Ok(_))) = tokio::time::timeout(
                     tokio::time::Duration::from_millis(1000),
                     subscriber.next(),
                 )
@@ -189,7 +190,7 @@ mod client {
 
         client.flush().await.unwrap();
 
-        let message = subscriber.next().await.unwrap();
+        let message = subscriber.next().await.unwrap().unwrap();
         assert_eq!(message.headers.unwrap(), headers);
 
         let mut headers = async_nats::HeaderMap::new();
@@ -201,7 +202,7 @@ mod client {
             .await
             .unwrap();
 
-        let message = subscriber.next().await.unwrap();
+        let message = subscriber.next().await.unwrap().unwrap();
         assert_eq!(message.headers.unwrap(), headers);
     }
 
@@ -215,7 +216,7 @@ mod client {
         tokio::spawn({
             let client = client.clone();
             async move {
-                let msg = sub.next().await.unwrap();
+                let msg = sub.next().await.unwrap().unwrap();
                 client
                     .publish(msg.reply.unwrap(), "resp".into())
                     .await
@@ -241,7 +242,7 @@ mod client {
         tokio::spawn({
             let client = client.clone();
             async move {
-                let msg = sub.next().await.unwrap();
+                let msg = sub.next().await.unwrap().unwrap();
                 client
                     .publish(msg.reply.unwrap(), "reply".into())
                     .await
@@ -300,7 +301,7 @@ mod client {
             let client = client.clone();
             let inbox = inbox.clone();
             async move {
-                let request = sub.next().await.unwrap();
+                let request = sub.next().await.unwrap().unwrap();
                 let reply = request.reply.unwrap();
                 assert_eq!(reply, inbox);
                 client.publish(reply, "ok".into()).await.unwrap();
@@ -550,7 +551,7 @@ mod client {
 
         let mut sub = client.subscribe("data").await.unwrap();
         client.publish("data", "data".into()).await.unwrap();
-        sub.next().await.unwrap();
+        sub.next().await.unwrap().unwrap();
 
         nats_server::set_lame_duck_mode(&server);
         tokio::time::timeout(Duration::from_secs(10), rx.recv())
@@ -753,7 +754,7 @@ mod client {
         tokio::task::spawn({
             let client = client.clone();
             async move {
-                let msg = subscription.next().await.unwrap();
+                let msg = subscription.next().await.unwrap().unwrap();
                 client
                     .publish(msg.reply.unwrap(), "prefix workers".into())
                     .await
@@ -762,7 +763,7 @@ mod client {
         });
 
         client.request("request", "data".into()).await.unwrap();
-        inbox_wildcard_subscription.next().await.unwrap();
+        inbox_wildcard_subscription.next().await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -802,7 +803,7 @@ mod client {
         client.publish("DATA", "payload".into()).await.unwrap();
         tokio::time::sleep(Duration::from_secs(2)).await;
         let _server = nats_server::run_server_with_port("", Some("7779"));
-        sub.next().await.unwrap();
+        sub.next().await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -990,7 +991,7 @@ mod client {
         tokio::task::spawn({
             let client = client.clone();
             async move {
-                let msg = responder.next().await.unwrap();
+                let msg = responder.next().await.unwrap().unwrap();
                 client
                     .publish(msg.reply.unwrap(), "response".into())
                     .await
@@ -1002,8 +1003,8 @@ mod client {
         let mut sub = client.subscribe("test").await.unwrap();
         client.publish("test", "data".into()).await.unwrap();
         client.publish("test", "data".into()).await.unwrap();
-        sub.next().await.unwrap();
-        sub.next().await.unwrap();
+        sub.next().await.unwrap().unwrap();
+        sub.next().await.unwrap().unwrap();
 
         client.flush().await.unwrap();
         client.force_reconnect().await.unwrap();
@@ -1238,5 +1239,105 @@ mod client {
 
         // Connection succeeded, meaning the bind to port 19898 worked.
         // If the port was already in use or bind failed, connect would have errored.
+    }
+
+    #[tokio::test]
+    async fn subscribe_permission_error() {
+        let server = nats_server::run_server("tests/configs/sub_deny.conf");
+        let client = ConnectOptions::new()
+            .user_and_password("test".into(), "test".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut subscriber = client.subscribe("denied.subject").await.unwrap();
+
+        // The server sends a permission violation error for the denied subscription.
+        let result = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+            .await
+            .expect("should receive error within timeout")
+            .expect("stream should not be closed");
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.kind(),
+            async_nats::SubscriberErrorKind::PermissionsViolation
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_permission_error_multiple_subs() {
+        let server = nats_server::run_server("tests/configs/sub_deny.conf");
+        let client = ConnectOptions::new()
+            .user_and_password("test".into(), "test".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut sub1 = client.subscribe("denied.one").await.unwrap();
+        let mut sub2 = client.subscribe("denied.one").await.unwrap();
+
+        // Each subscription should receive its own permission error.
+        let r1 = tokio::time::timeout(Duration::from_secs(5), sub1.next())
+            .await
+            .expect("sub1 timeout")
+            .expect("sub1 not closed");
+        assert_eq!(
+            r1.unwrap_err().kind(),
+            async_nats::SubscriberErrorKind::PermissionsViolation
+        );
+
+        let r2 = tokio::time::timeout(Duration::from_secs(5), sub2.next())
+            .await
+            .expect("sub2 timeout")
+            .expect("sub2 not closed");
+        assert_eq!(
+            r2.unwrap_err().kind(),
+            async_nats::SubscriberErrorKind::PermissionsViolation
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_permission_error_with_event() {
+        use tokio::sync::mpsc;
+
+        let server = nats_server::run_server("tests/configs/sub_deny.conf");
+        let (event_tx, mut event_rx) = mpsc::channel(16);
+        let client = ConnectOptions::new()
+            .user_and_password("test".into(), "test".into())
+            .event_callback(move |event| {
+                let tx = event_tx.clone();
+                async move {
+                    tx.send(event).await.ok();
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let mut subscriber = client.subscribe("denied.subject").await.unwrap();
+
+        // Subscriber should get the error.
+        let result = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+            .await
+            .expect("should receive error within timeout")
+            .expect("stream should not be closed");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            async_nats::SubscriberErrorKind::PermissionsViolation
+        );
+
+        // Event callback should also fire (may receive other events first).
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let event = tokio::time::timeout(remaining, event_rx.recv())
+                .await
+                .expect("should receive ServerError event within timeout")
+                .expect("event channel not closed");
+            if matches!(event, Event::ServerError(_)) {
+                break;
+            }
+        }
     }
 }

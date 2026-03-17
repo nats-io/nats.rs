@@ -61,7 +61,7 @@ mod compatibility {
                  return;
                 }
                 message = tests.as_mut().peek() => {
-                let test: Test = Test::try_from(message.unwrap()).unwrap();
+                let test: Test = Test::try_from(message.unwrap().as_ref().unwrap()).unwrap();
                     match test.suite.as_str() {
                         "object-store" => {
                             let object_store = ObjectStore {
@@ -118,7 +118,7 @@ mod compatibility {
 
     impl ObjectStore {
         async fn default_bucket(&self, mut test_commands: PinnedSubscriber<'_>) {
-            let create = test_commands.as_mut().next().await.unwrap();
+            let create = test_commands.as_mut().next().await.unwrap().unwrap();
             println!("received first request: {}", create.subject);
 
             let given: TestRequest<HashMap<String, String>> =
@@ -138,7 +138,7 @@ mod compatibility {
                 .unwrap();
             self.client.flush().await.unwrap();
 
-            let done = test_commands.next().await.unwrap();
+            let done = test_commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -147,7 +147,7 @@ mod compatibility {
         }
 
         async fn custom_bucket(&self, mut commands: PinnedSubscriber<'_>) {
-            let create = commands.as_mut().next().await.unwrap();
+            let create = commands.as_mut().next().await.unwrap().unwrap();
             println!("received custom request: {}", create.subject);
 
             let custom_config: TestRequest<object_store::Config> =
@@ -164,7 +164,7 @@ mod compatibility {
                 .unwrap();
             self.client.flush().await.unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -181,7 +181,7 @@ mod compatibility {
                 test_request: TestRequest<ObjectMetadata>,
             }
 
-            let object_request = commands.as_mut().next().await.unwrap();
+            let object_request = commands.as_mut().next().await.unwrap().unwrap();
             println!("received third request: {}", object_request.subject);
             let reply = object_request.reply.unwrap().clone();
             let object_request: ObjectRequest =
@@ -203,7 +203,7 @@ mod compatibility {
             self.client.publish(reply, "".into()).await.unwrap();
             self.client.flush().await.unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -217,7 +217,7 @@ mod compatibility {
                 object: String,
                 bucket: String,
             }
-            let get_request = commands.as_mut().next().await.unwrap();
+            let get_request = commands.as_mut().next().await.unwrap().unwrap();
 
             let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
 
@@ -240,7 +240,7 @@ mod compatibility {
                 .await
                 .unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -255,7 +255,7 @@ mod compatibility {
                 bucket: String,
                 link_name: String,
             }
-            let get_request = commands.as_mut().next().await.unwrap();
+            let get_request = commands.as_mut().next().await.unwrap().unwrap();
 
             let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
 
@@ -272,7 +272,7 @@ mod compatibility {
                 .await
                 .unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -286,7 +286,7 @@ mod compatibility {
                 object: String,
                 bucket: String,
             }
-            let get_request = commands.as_mut().next().await.unwrap();
+            let get_request = commands.as_mut().next().await.unwrap().unwrap();
 
             let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
 
@@ -309,7 +309,7 @@ mod compatibility {
                 .await
                 .unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -325,7 +325,7 @@ mod compatibility {
                 config: UpdateMetadata,
             }
 
-            let update_command = commands.as_mut().next().await.unwrap();
+            let update_command = commands.as_mut().next().await.unwrap().unwrap();
 
             let given: Metadata = serde_json::from_slice(&update_command.payload).unwrap();
 
@@ -344,7 +344,7 @@ mod compatibility {
                 .await
                 .unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -359,7 +359,7 @@ mod compatibility {
                 object: String,
                 bucket: String,
             }
-            let get_request = commands.as_mut().next().await.unwrap();
+            let get_request = commands.as_mut().next().await.unwrap().unwrap();
 
             let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
             let bucket = async_nats::jetstream::new(self.client.clone())
@@ -376,7 +376,7 @@ mod compatibility {
                 .await
                 .unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -391,7 +391,7 @@ mod compatibility {
                 object: String,
                 bucket: String,
             }
-            let get_request = commands.as_mut().next().await.unwrap();
+            let get_request = commands.as_mut().next().await.unwrap().unwrap();
 
             let request: Command = serde_json::from_slice(&get_request.payload).unwrap();
             let bucket = async_nats::jetstream::new(self.client.clone())
@@ -411,7 +411,7 @@ mod compatibility {
                 .await
                 .unwrap();
 
-            let done = commands.next().await.unwrap();
+            let done = commands.next().await.unwrap().unwrap();
             if done.headers.is_some() {
                 panic!("test failed: {:?}", done.headers);
             } else {
@@ -460,7 +460,7 @@ mod compatibility {
             group: Option<String>,
         }
 
-        let test_request = tests.next().await.unwrap();
+        let test_request = tests.next().await.unwrap().unwrap();
         println!(
             "received first request: {}",
             from_utf8(&test_request.payload).unwrap()
@@ -538,7 +538,7 @@ mod compatibility {
             .await
             .unwrap();
 
-        let cleanup = tests.next().await.expect("failed to get cleanup");
+        let cleanup = tests.next().await.expect("failed to get cleanup").unwrap();
         service.stop().await.expect("failed to stop service");
         client
             .publish(cleanup.reply.unwrap(), "".into())

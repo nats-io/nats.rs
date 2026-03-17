@@ -4080,7 +4080,7 @@ mod jetstream {
             .await
             .unwrap();
 
-        sub.next().await.unwrap();
+        sub.next().await.unwrap().unwrap();
 
         let mut sub = client.subscribe("SOMETHING_ACK").await.unwrap();
         consumer
@@ -4101,7 +4101,7 @@ mod jetstream {
             )
             .await
             .unwrap();
-        sub.next().await.unwrap();
+        sub.next().await.unwrap().unwrap();
     }
 
     #[cfg(feature = "server_2_11")]

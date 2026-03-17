@@ -55,7 +55,8 @@
 //!     }
 //!
 //!     // Receive and process messages
-//!     while let Some(message) = subscriber.next().await {
+//!     while let Some(result) = subscriber.next().await {
+//!         let message = result?;
 //!         println!("Received message {:?}", message);
 //!     }
 //!
@@ -110,7 +111,8 @@
 //! let mut subscriber = client.subscribe("foo").await.unwrap();
 //!
 //! // Receive and process messages
-//! while let Some(message) = subscriber.next().await {
+//! while let Some(result) = subscriber.next().await {
+//!     let message = result?;
 //!     println!("Received message {:?}", message);
 //! }
 //! #     Ok(())
@@ -430,6 +432,7 @@ struct Subscription {
     queue_group: Option<String>,
     delivered: u64,
     max: Option<u64>,
+    has_permission_error: bool,
 }
 
 #[derive(Debug)]
@@ -687,6 +690,19 @@ impl ConnectionHandler {
         }
     }
 
+    fn send_permission_error(subscription: &Subscription, error: &ServerError) {
+        let error_message = Message {
+            subject: subscription.subject.clone(),
+            reply: None,
+            payload: Bytes::new(),
+            headers: None,
+            status: Some(StatusCode::PERMISSIONS_VIOLATION),
+            description: Some(error.to_string()),
+            length: 0,
+        };
+        subscription.sender.try_send(error_message).ok();
+    }
+
     fn handle_server_op(&mut self, server_op: ServerOp) {
         self.ping_interval.reset();
 
@@ -701,6 +717,30 @@ impl ConnectionHandler {
             }
             ServerOp::Error(error) => {
                 debug!("received ERROR: {:?}", error);
+
+                // Route permission violation errors to the specific subscriber.
+                if let Some(sid) = error.subscription_sid() {
+                    // SID-based routing: runtime permission revocation includes the SID.
+                    if let Some(subscription) = self.subscriptions.get_mut(&sid) {
+                        Self::send_permission_error(subscription, &error);
+                        subscription.has_permission_error = true;
+                    }
+                } else if let Some((subject, queue)) = error.subscription_subject() {
+                    // Subject-based routing: subscribe-time permission errors have no SID.
+                    // Match the first subscription with this subject+queue that hasn't
+                    // already received a permission error.
+                    if let Some((_, subscription)) =
+                        self.subscriptions.iter_mut().find(|(_, sub)| {
+                            !sub.has_permission_error
+                                && sub.subject.as_str() == subject
+                                && sub.queue_group.as_deref() == queue
+                        })
+                    {
+                        Self::send_permission_error(subscription, &error);
+                        subscription.has_permission_error = true;
+                    }
+                }
+
                 self.connector
                     .events_tx
                     .try_send(Event::ServerError(error))
@@ -860,6 +900,7 @@ impl ConnectionHandler {
                     max: None,
                     subject: subject.to_owned(),
                     queue_group: queue_group.to_owned(),
+                    has_permission_error: false,
                 };
 
                 self.subscriptions.insert(sid, subscription);
@@ -970,7 +1011,8 @@ impl ConnectionHandler {
         self.subscriptions
             .retain(|_, subscription| !subscription.sender.is_closed());
 
-        for (sid, subscription) in &self.subscriptions {
+        for (sid, subscription) in &mut self.subscriptions {
+            subscription.has_permission_error = false;
             self.connection.enqueue_write_op(&ClientOp::Subscribe {
                 sid: *sid,
                 subject: subscription.subject.to_owned(),
@@ -1315,7 +1357,7 @@ impl Subscriber {
     ///     client.publish("test", "data".into()).await?;
     /// }
     ///
-    /// while let Some(message) = subscriber.next().await {
+    /// while let Some(Ok(message)) = subscriber.next().await {
     ///     println!("message received: {:?}", message);
     /// }
     /// println!("no more messages, unsubscribed");
@@ -1357,7 +1399,7 @@ impl Subscriber {
     /// client.flush().await?;
     /// subscriber.drain().await?;
     ///
-    /// while let Some(message) = subscriber.next().await {
+    /// while let Some(Ok(message)) = subscriber.next().await {
     ///     println!("message received: {:?}", message);
     /// }
     /// println!("no more messages, unsubscribed");
@@ -1402,10 +1444,19 @@ impl Drop for Subscriber {
 }
 
 impl Stream for Subscriber {
-    type Item = Message;
+    type Item = Result<Message, SubscriberError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
+        match self.receiver.poll_recv(cx) {
+            Poll::Ready(Some(msg)) if msg.status == Some(StatusCode::PERMISSIONS_VIOLATION) => {
+                Poll::Ready(Some(Err(SubscriberError::new(
+                    SubscriberErrorKind::PermissionsViolation,
+                ))))
+            }
+            Poll::Ready(Some(msg)) => Poll::Ready(Some(Ok(msg))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 
@@ -1464,7 +1515,69 @@ impl ServerError {
             _ => ServerError::Other(error),
         }
     }
+
+    /// Try to extract a subscription ID from a permission violation error.
+    ///
+    /// The NATS server includes the SID in runtime permission revocation errors:
+    /// `Permissions Violation for Subscription to "subject" (sid "123")`
+    fn subscription_sid(&self) -> Option<u64> {
+        let text = match self {
+            ServerError::Other(text) => text,
+            _ => return None,
+        };
+        let sid_marker = "(sid \"";
+        let sid_start = text.find(sid_marker)? + sid_marker.len();
+        let sid_end = text[sid_start..].find('"')? + sid_start;
+        text[sid_start..sid_end].parse().ok()
+    }
+
+    /// Try to extract a subject and optional queue group from a subscribe-time
+    /// permission violation error.
+    ///
+    /// Format: `Permissions Violation for Subscription to "subject"`
+    /// or: `Permissions Violation for Subscription to "subject" using queue "queue"`
+    fn subscription_subject(&self) -> Option<(&str, Option<&str>)> {
+        let text = match self {
+            ServerError::Other(text) => text,
+            _ => return None,
+        };
+        let marker = "Permissions Violation for Subscription to \"";
+        let start = text.find(marker)? + marker.len();
+        let end = text[start..].find('"')? + start;
+        let subject = &text[start..end];
+
+        let queue_marker = "using queue \"";
+        let queue = text[end..].find(queue_marker).map(|pos| {
+            let q_start = end + pos + queue_marker.len();
+            let q_end = text[q_start..]
+                .find('"')
+                .map(|p| p + q_start)
+                .unwrap_or(text.len());
+            &text[q_start..q_end]
+        });
+
+        Some((subject, queue))
+    }
 }
+
+/// Error returned by [`Subscriber`] stream when the server reports an error
+/// for a specific subscription.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SubscriberErrorKind {
+    /// The server denied the subscription due to a permissions violation.
+    PermissionsViolation,
+}
+
+impl Display for SubscriberErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PermissionsViolation => write!(f, "permissions violation"),
+        }
+    }
+}
+
+/// Error returned by [`Subscriber`] stream items.
+pub type SubscriberError = error::Error<SubscriberErrorKind>;
 
 impl std::fmt::Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

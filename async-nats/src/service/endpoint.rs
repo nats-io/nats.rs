@@ -71,20 +71,17 @@ impl Stream for Endpoint {
 
         trace!("checking for new messages");
         match self.requests.poll_next_unpin(cx) {
-            Poll::Ready(message) => {
+            Poll::Ready(Some(Ok(message))) => {
                 debug!("got next message");
-                match message {
-                    Some(message) => Poll::Ready(Some(Request {
-                        issued: Instant::now(),
-                        stats: self.stats.clone(),
-                        client: self.client.clone(),
-                        message,
-                        endpoint: self.endpoint.clone(),
-                    })),
-                    None => Poll::Ready(None),
-                }
+                Poll::Ready(Some(Request {
+                    issued: Instant::now(),
+                    stats: self.stats.clone(),
+                    client: self.client.clone(),
+                    message,
+                    endpoint: self.endpoint.clone(),
+                }))
             }
-
+            Poll::Ready(Some(Err(_))) | Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => {
                 trace!("still pending for messages");
                 Poll::Pending

@@ -22,7 +22,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let mut subscriber = client.subscribe("foo").await.unwrap();
 
     println!("Awaiting messages");
-    while let Some(message) = subscriber.next().await {
+    while let Some(Ok(message)) = subscriber.next().await {
         println!("Received message {message:?}");
     }
 

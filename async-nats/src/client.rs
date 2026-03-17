@@ -549,7 +549,7 @@ impl Client {
                 None => subscriber.next().await,
             };
             match request {
-                Some(message) => {
+                Some(Ok(message)) => {
                     if message.status == Some(StatusCode::NO_RESPONDERS) {
                         return Err(RequestError::with_source(
                             RequestErrorKind::NoResponders,
@@ -558,6 +558,7 @@ impl Client {
                     }
                     Ok(message)
                 }
+                Some(Err(err)) => Err(RequestError::with_source(RequestErrorKind::Other, err)),
                 None => Err(RequestError::with_source(
                     RequestErrorKind::Other,
                     "broken pipe",

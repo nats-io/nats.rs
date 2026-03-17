@@ -115,6 +115,7 @@ mod service {
         let mut info = infos
             .next()
             .await
+            .unwrap()
             .map(|message| serde_json::from_slice::<service::Info>(&message.payload).unwrap())
             .unwrap();
         let endpoint_stats = info.endpoints.pop().unwrap();
@@ -157,8 +158,8 @@ mod service {
             .publish_with_reply("$SRV.PING", reply, "".into())
             .await
             .unwrap();
-        responses.next().await.unwrap();
-        responses.next().await.unwrap();
+        responses.next().await.unwrap().unwrap();
+        responses.next().await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -187,7 +188,7 @@ mod service {
             .unwrap();
         let request = products.next().await.unwrap();
         request.respond(Ok("response".into())).await.unwrap();
-        responses.next().await.unwrap();
+        responses.next().await.unwrap().unwrap();
 
         let v2 = service.group("v2");
         let mut v2product = v2.endpoint("products").await.unwrap();
@@ -197,7 +198,7 @@ mod service {
             .unwrap();
         let request = v2product.next().await.unwrap();
         request.respond(Ok("v2".into())).await.unwrap();
-        let message = responses.next().await.unwrap();
+        let message = responses.next().await.unwrap().unwrap();
         assert_eq!(from_utf8(&message.payload).unwrap(), "v2");
     }
 
@@ -291,10 +292,10 @@ mod service {
 
         service.stop().await.unwrap();
 
-        assert!(response.next().await.is_some());
-        assert!(response.next().await.is_some());
-        assert!(response.next().await.is_some());
-        let error_response = response.next().await.unwrap();
+        assert!(response.next().await.unwrap().is_ok());
+        assert!(response.next().await.unwrap().is_ok());
+        assert!(response.next().await.unwrap().is_ok());
+        let error_response = response.next().await.unwrap().unwrap();
         assert_eq!(
             error_response
                 .headers

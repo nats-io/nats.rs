@@ -32,7 +32,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Publish the serialized payload.
     client.publish("foo", bytes.into()).await?;
 
-    while let Some(message) = subscriber.next().await {
+    while let Some(Ok(message)) = subscriber.next().await {
         // Deserialize the message payload into a Payload value.
         // let payload: Payload = serde_json::from_slice(message.payload.as_ref())?;
         if let Ok(payload) = serde_json::from_slice::<Payload>(&message.payload) {

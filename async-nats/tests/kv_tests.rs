@@ -1192,7 +1192,7 @@ mod kv {
 
         kv.put("key", "data".into()).await.unwrap();
 
-        let message = subscribe.next().await.unwrap();
+        let message = subscribe.next().await.unwrap().unwrap();
         assert_eq!("bar.$KV.test.key", message.subject.as_str());
     }
 

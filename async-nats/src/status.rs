@@ -260,6 +260,7 @@ impl StatusCode {
     pub const NOT_FOUND: StatusCode = StatusCode(new_nonzero_u16(404));
     pub const TIMEOUT: StatusCode = StatusCode(new_nonzero_u16(408));
     pub const NO_RESPONDERS: StatusCode = StatusCode(new_nonzero_u16(503));
+    pub const PERMISSIONS_VIOLATION: StatusCode = StatusCode(new_nonzero_u16(403));
     pub const REQUEST_TERMINATED: StatusCode = StatusCode(new_nonzero_u16(409));
 }
 

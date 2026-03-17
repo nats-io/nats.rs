@@ -385,7 +385,7 @@ impl Service {
             async move {
                 loop {
                     tokio::select! {
-                        Some(ping) = pings.next() => {
+                        Some(Ok(ping)) = pings.next() => {
                             let pong = serde_json::to_vec(&PingResponse{
                                 kind: "io.nats.micro.v1.ping_response".to_string(),
                                 name: info.name.clone(),
@@ -395,7 +395,7 @@ impl Service {
                             })?;
                             client.publish(ping.reply.unwrap(), pong.into()).await?;
                         },
-                        Some(info_request) = infos.next() => {
+                        Some(Ok(info_request)) = infos.next() => {
                             let info = info.clone();
 
                             let endpoints: Vec<endpoint::Info> = {
@@ -415,7 +415,7 @@ impl Service {
                             let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
                             client.publish(info_request.reply.unwrap(), info_json.clone()).await?;
                         },
-                        Some(stats_request) = stats.next() => {
+                        Some(Ok(stats_request)) = stats.next() => {
                             if let Some(stats_callback) = stats_callback.as_mut() {
                                 let mut endpoint_stats_locked = endpoints_state.lock().unwrap();
                                 for (key, value) in &mut endpoint_stats_locked.endpoints {

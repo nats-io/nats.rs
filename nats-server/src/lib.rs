@@ -400,6 +400,6 @@ mod tests {
             .unwrap();
         let mut subscribe = client.subscribe("foo").await.unwrap();
         client.publish("foo", "bar".into()).await.unwrap();
-        subscribe.next().await.unwrap();
+        subscribe.next().await.unwrap().unwrap();
     }
 }

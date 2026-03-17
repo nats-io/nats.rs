@@ -12,7 +12,7 @@ async fn main() -> Result<(), async_nats::Error> {
             let mut subscriber = client.subscribe("foo").await?;
 
             println!("Awaiting messages on foo");
-            while let Some(message) = subscriber.next().await {
+            while let Some(Ok(message)) = subscriber.next().await {
                 println!("Received message {message:?}");
             }
             // unfortunately we have to annotate return type in async blocks in Rust (for now)
@@ -27,7 +27,7 @@ async fn main() -> Result<(), async_nats::Error> {
             let mut subscriber = client.subscribe("bar").await?;
 
             println!("Awaiting messages on bar");
-            while let Some(message) = subscriber.next().await {
+            while let Some(Ok(message)) = subscriber.next().await {
                 println!("Received message {message:?}");
             }
 
