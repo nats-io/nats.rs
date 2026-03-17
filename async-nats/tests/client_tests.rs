@@ -1417,7 +1417,7 @@ mod client {
         let handle = tokio::spawn(async move {
             let (mut stream, _peer) = listener.accept().await.unwrap();
             // Send a valid INFO line so the client proceeds past INFO read.
-            let info = "INFO {\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":4222,\"max_payload\":1048576}\r\n";
+            let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{},\"max_payload\":1048576}}\r\n", addr.port());
             tokio::io::AsyncWriteExt::write_all(&mut stream, info.as_bytes())
                 .await
                 .unwrap();

@@ -49,7 +49,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpSocket, TcpStream};
-use tokio::time::{sleep, Instant};
+use tokio::time::sleep;
 use tokio_rustls::rustls;
 
 pub(crate) struct ConnectorOptions {
@@ -181,203 +181,58 @@ impl Connector {
                 .await
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
             for socket_addr in socket_addrs {
-                let deadline = Instant::now() + self.options.connection_timeout;
-                match self
-                    .try_connect_to(
+                match tokio::time::timeout(
+                    self.options.connection_timeout,
+                    self.try_connect_to(
                         &socket_addr,
                         server_addr.tls_required(),
                         server_addr.clone(),
-                        deadline,
-                    )
-                    .await
+                    ),
+                )
+                .await
                 {
-                    Ok((server_info, mut connection)) => {
-                        if !self.options.ignore_discovered_servers {
-                            for url in &server_info.connect_urls {
-                                let server_addr = url.parse::<ServerAddr>().map_err(|err| {
-                                    ConnectError::with_source(
-                                        crate::ConnectErrorKind::ServerParse,
-                                        err,
-                                    )
-                                })?;
-                                if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
-                                    tracing::debug!(
-                                        discovered_url = %url,
-                                        "adding discovered server"
-                                    );
-                                    self.servers.push((server_addr, 0));
-                                }
+                    Ok(Ok((server_info, connection))) => {
+                        tracing::info!(
+                            server = %server_info.port,
+                            max_payload = %server_info.max_payload,
+                            "connected successfully"
+                        );
+                        self.attempts = 0;
+                        self.connect_stats.connects.add(1, Ordering::Relaxed);
+                        self.events_tx.try_send(Event::Connected).ok();
+                        self.state_tx.send(State::Connected).ok();
+                        self.max_payload.store(
+                            server_info.max_payload,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                        return Ok((server_info, connection));
+                    }
+
+                    Ok(Err(inner)) => {
+                        match inner.kind() {
+                            ConnectErrorKind::AuthorizationViolation
+                            | ConnectErrorKind::Authentication => {
+                                return Err(inner);
                             }
-                        }
-
-                        let tls_required = self.options.tls_required || server_addr.tls_required();
-                        let mut connect_info = ConnectInfo {
-                            tls_required,
-                            name: self.options.name.clone(),
-                            pedantic: false,
-                            verbose: false,
-                            lang: LANG.to_string(),
-                            version: VERSION.to_string(),
-                            protocol: Protocol::Dynamic,
-                            user: self.options.auth.username.to_owned(),
-                            pass: self.options.auth.password.to_owned(),
-                            auth_token: self.options.auth.token.to_owned(),
-                            user_jwt: None,
-                            nkey: None,
-                            signature: None,
-                            echo: !self.options.no_echo,
-                            headers: true,
-                            no_responders: true,
-                        };
-
-                        #[cfg(feature = "nkeys")]
-                        if let Some(nkey) = self.options.auth.nkey.as_ref() {
-                            match nkeys::KeyPair::from_seed(nkey.as_str()) {
-                                Ok(key_pair) => {
-                                    let nonce = server_info.nonce.clone();
-                                    match key_pair.sign(nonce.as_bytes()) {
-                                        Ok(signed) => {
-                                            connect_info.nkey = Some(key_pair.public_key());
-                                            connect_info.signature =
-                                                Some(URL_SAFE_NO_PAD.encode(signed));
-                                        }
-                                        Err(_) => {
-                                            tracing::error!("failed to sign nonce with nkey");
-                                            return Err(ConnectError::new(
-                                                crate::ConnectErrorKind::Authentication,
-                                            ));
-                                        }
-                                    };
-                                }
-                                Err(_) => {
-                                    tracing::error!("failed to create key pair from nkey seed");
-                                    return Err(ConnectError::new(
-                                        crate::ConnectErrorKind::Authentication,
-                                    ));
-                                }
-                            }
-                        }
-
-                        #[cfg(feature = "nkeys")]
-                        if let Some(jwt) = self.options.auth.jwt.as_ref() {
-                            if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
-                                match sign_fn.call(server_info.nonce.clone()).await {
-                                    Ok(sig) => {
-                                        connect_info.user_jwt = Some(jwt.clone());
-                                        connect_info.signature = Some(sig);
-                                    }
-                                    Err(_) => {
-                                        tracing::error!("failed to sign nonce with JWT callback");
-                                        return Err(ConnectError::new(
-                                            crate::ConnectErrorKind::Authentication,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-
-                        if let Some(callback) = self.options.auth_callback.as_ref() {
-                            let auth: crate::Auth = callback
-                                .call(server_info.nonce.as_bytes().to_vec())
-                                .await
-                                .map_err(|err| {
-                                    tracing::error!(error = %err, "auth callback failed");
-                                    ConnectError::with_source(
-                                        crate::ConnectErrorKind::Authentication,
-                                        err,
-                                    )
-                                })?;
-                            connect_info.user = auth.username;
-                            connect_info.pass = auth.password;
-                            connect_info.user_jwt = auth.jwt;
-                            #[cfg(feature = "nkeys")]
-                            {
-                                connect_info.signature = auth
-                                    .signature
-                                    .map(|signature| URL_SAFE_NO_PAD.encode(signature));
-                            }
-                            #[cfg(not(feature = "nkeys"))]
-                            {
-                                if auth.signature.is_some() {
-                                    tracing::error!(
-                                        "signature authentication requires 'nkeys' feature"
-                                    );
-                                    return Err(ConnectError::new(
-                                        crate::ConnectErrorKind::Authentication,
-                                    ));
-                                }
-                                connect_info.signature = None;
-                            }
-                            connect_info.auth_token = auth.token;
-                            connect_info.nkey = auth.nkey;
-                        }
-
-                        tokio::time::timeout(
-                            deadline.saturating_duration_since(Instant::now()),
-                            connection.easy_write_and_flush(
-                                [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
-                            ),
-                        )
-                        .await
-                        .map_err(|_| {
-                            ConnectError::new(crate::ConnectErrorKind::TimedOut)
-                        })??;
-
-                        match tokio::time::timeout(
-                            deadline.saturating_duration_since(Instant::now()),
-                            connection.read_op(),
-                        )
-                        .await
-                        .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?? {
-                            Some(ServerOp::Error(err)) => match err {
-                                ServerError::AuthorizationViolation => {
-                                    tracing::error!(error = %err, "authorization violation");
-                                    return Err(ConnectError::with_source(
-                                        crate::ConnectErrorKind::AuthorizationViolation,
-                                        err,
-                                    ));
-                                }
-                                err => {
-                                    tracing::error!(error = %err, "server error during connection");
-                                    return Err(ConnectError::with_source(
-                                        crate::ConnectErrorKind::Io,
-                                        err,
-                                    ));
-                                }
-                            },
-                            Some(_) => {
-                                tracing::info!(
-                                    server = %server_info.port,
-                                    max_payload = %server_info.max_payload,
-                                    "connected successfully"
+                            _ => {
+                                tracing::debug!(
+                                    server = ?server_addr,
+                                    error = %inner,
+                                    "connection attempt failed"
                                 );
-                                self.attempts = 0;
-                                self.connect_stats.connects.add(1, Ordering::Relaxed);
-                                self.events_tx.try_send(Event::Connected).ok();
-                                self.state_tx.send(State::Connected).ok();
-                                self.max_payload.store(
-                                    server_info.max_payload,
-                                    std::sync::atomic::Ordering::Relaxed,
-                                );
-                                return Ok((server_info, connection));
-                            }
-                            None => {
-                                tracing::error!("connection closed unexpectedly");
-                                return Err(ConnectError::with_source(
-                                    crate::ConnectErrorKind::Io,
-                                    "broken pipe",
-                                ));
+                                error.replace(inner);
                             }
                         }
                     }
 
-                    Err(inner) => {
+                    Err(_) => {
                         tracing::debug!(
                             server = ?server_addr,
-                            error = %inner,
-                            "connection attempt failed"
+                            "connection handshake timed out"
                         );
-                        error.replace(inner)
+                        error.replace(ConnectError::new(
+                            crate::ConnectErrorKind::TimedOut,
+                        ));
                     }
                 };
             }
@@ -387,11 +242,10 @@ impl Connector {
     }
 
     pub(crate) async fn try_connect_to(
-        &self,
+        &mut self,
         socket_addr: &SocketAddr,
         tls_required: bool,
         server_addr: ServerAddr,
-        deadline: Instant,
     ) -> Result<(ServerInfo, Connection), ConnectError> {
         tracing::debug!(
             socket_addr = %socket_addr,
@@ -401,18 +255,16 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             #[cfg(feature = "websockets")]
             "ws" => {
-                let ws = tokio::time::timeout(
-                    deadline.saturating_duration_since(Instant::now()),
-                    tokio_websockets::client::Builder::new()
-                        .uri(server_addr.as_url_str())
-                        .map_err(|err| {
-                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                        })?
-                        .connect(),
-                )
-                .await
-                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                let ws = tokio_websockets::client::Builder::new()
+                    .uri(server_addr.as_url_str())
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?
+                    .connect()
+                    .await
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                    })?;
 
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
@@ -424,19 +276,17 @@ impl Connector {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio::time::timeout(
-                    deadline.saturating_duration_since(Instant::now()),
-                    tokio_websockets::client::Builder::new()
-                        .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                        .uri(server_addr.as_url_str())
-                        .map_err(|err| {
-                            ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                        })?
-                        .connect(),
-                )
-                .await
-                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+                let ws = tokio_websockets::client::Builder::new()
+                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                    .uri(server_addr.as_url_str())
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?
+                    .connect()
+                    .await
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                    })?;
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
@@ -450,19 +300,9 @@ impl Connector {
                     socket.bind(local_addr).map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Io, err)
                     })?;
-                    tokio::time::timeout(
-                        deadline.saturating_duration_since(Instant::now()),
-                        socket.connect(*socket_addr),
-                    )
-                    .await
-                    .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??
+                    socket.connect(*socket_addr).await?
                 } else {
-                    tokio::time::timeout(
-                        deadline.saturating_duration_since(Instant::now()),
-                        TcpStream::connect(socket_addr),
-                    )
-                    .await
-                    .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??
+                    TcpStream::connect(socket_addr).await?
                 };
                 tcp_stream.set_nodelay(true)?;
 
@@ -501,20 +341,10 @@ impl Connector {
         // There is no point in  checking if tls is required, because
         // the connection has to be be upgraded to TLS anyway as it's different flow.
         if self.options.tls_first && !server_addr.is_websocket() {
-            connection = tokio::time::timeout(
-                deadline.saturating_duration_since(Instant::now()),
-                tls_connection(connection),
-            )
-            .await
-            .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+            connection = tls_connection(connection).await?;
         }
 
-        let op = tokio::time::timeout(
-            deadline.saturating_duration_since(Instant::now()),
-            connection.read_op(),
-        )
-        .await
-        .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+        let op = connection.read_op().await?;
         let info = match op {
             Some(ServerOp::Info(info)) => {
                 tracing::debug!(
@@ -545,15 +375,160 @@ impl Connector {
             && !server_addr.is_websocket()
             && (self.options.tls_required || info.tls_required || tls_required)
         {
-            connection = tokio::time::timeout(
-                deadline.saturating_duration_since(Instant::now()),
-                tls_connection(connection),
-            )
-            .await
-            .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??;
+            connection = tls_connection(connection).await?;
         };
 
-        Ok((*info, connection))
+        // Discover servers from INFO.
+        if !self.options.ignore_discovered_servers {
+            for url in &info.connect_urls {
+                let server_addr = url.parse::<ServerAddr>().map_err(|err| {
+                    ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                })?;
+                if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
+                    tracing::debug!(
+                        discovered_url = %url,
+                        "adding discovered server"
+                    );
+                    self.servers.push((server_addr, 0));
+                }
+            }
+        }
+
+        // Build CONNECT message with auth info.
+        let tls_required = self.options.tls_required || server_addr.tls_required();
+        let mut connect_info = ConnectInfo {
+            tls_required,
+            name: self.options.name.clone(),
+            pedantic: false,
+            verbose: false,
+            lang: LANG.to_string(),
+            version: VERSION.to_string(),
+            protocol: Protocol::Dynamic,
+            user: self.options.auth.username.to_owned(),
+            pass: self.options.auth.password.to_owned(),
+            auth_token: self.options.auth.token.to_owned(),
+            user_jwt: None,
+            nkey: None,
+            signature: None,
+            echo: !self.options.no_echo,
+            headers: true,
+            no_responders: true,
+        };
+
+        #[cfg(feature = "nkeys")]
+        if let Some(nkey) = self.options.auth.nkey.as_ref() {
+            match nkeys::KeyPair::from_seed(nkey.as_str()) {
+                Ok(key_pair) => {
+                    let nonce = info.nonce.clone();
+                    match key_pair.sign(nonce.as_bytes()) {
+                        Ok(signed) => {
+                            connect_info.nkey = Some(key_pair.public_key());
+                            connect_info.signature = Some(URL_SAFE_NO_PAD.encode(signed));
+                        }
+                        Err(_) => {
+                            tracing::error!("failed to sign nonce with nkey");
+                            return Err(ConnectError::new(
+                                crate::ConnectErrorKind::Authentication,
+                            ));
+                        }
+                    };
+                }
+                Err(_) => {
+                    tracing::error!("failed to create key pair from nkey seed");
+                    return Err(ConnectError::new(
+                        crate::ConnectErrorKind::Authentication,
+                    ));
+                }
+            }
+        }
+
+        #[cfg(feature = "nkeys")]
+        if let Some(jwt) = self.options.auth.jwt.as_ref() {
+            if let Some(sign_fn) = self.options.auth.signature_callback.as_ref() {
+                match sign_fn.call(info.nonce.clone()).await {
+                    Ok(sig) => {
+                        connect_info.user_jwt = Some(jwt.clone());
+                        connect_info.signature = Some(sig);
+                    }
+                    Err(_) => {
+                        tracing::error!("failed to sign nonce with JWT callback");
+                        return Err(ConnectError::new(
+                            crate::ConnectErrorKind::Authentication,
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(callback) = self.options.auth_callback.as_ref() {
+            let auth: crate::Auth = callback
+                .call(info.nonce.as_bytes().to_vec())
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "auth callback failed");
+                    ConnectError::with_source(
+                        crate::ConnectErrorKind::Authentication,
+                        err,
+                    )
+                })?;
+            connect_info.user = auth.username;
+            connect_info.pass = auth.password;
+            connect_info.user_jwt = auth.jwt;
+            #[cfg(feature = "nkeys")]
+            {
+                connect_info.signature = auth
+                    .signature
+                    .map(|signature| URL_SAFE_NO_PAD.encode(signature));
+            }
+            #[cfg(not(feature = "nkeys"))]
+            {
+                if auth.signature.is_some() {
+                    tracing::error!(
+                        "signature authentication requires 'nkeys' feature"
+                    );
+                    return Err(ConnectError::new(
+                        crate::ConnectErrorKind::Authentication,
+                    ));
+                }
+                connect_info.signature = None;
+            }
+            connect_info.auth_token = auth.token;
+            connect_info.nkey = auth.nkey;
+        }
+
+        // Send CONNECT + PING, then wait for PONG.
+        connection
+            .easy_write_and_flush(
+                [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
+            )
+            .await?;
+
+        match connection.read_op().await? {
+            Some(ServerOp::Error(err)) => match err {
+                ServerError::AuthorizationViolation => {
+                    tracing::error!(error = %err, "authorization violation");
+                    Err(ConnectError::with_source(
+                        crate::ConnectErrorKind::AuthorizationViolation,
+                        err,
+                    ))
+                }
+                err => {
+                    tracing::error!(error = %err, "server error during connection");
+                    Err(ConnectError::with_source(
+                        crate::ConnectErrorKind::Io,
+                        err,
+                    ))
+                }
+            },
+            Some(_) => Ok((*info, connection)),
+            None => {
+                tracing::error!("connection closed unexpectedly");
+                Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    "broken pipe",
+                ))
+            }
+        }
     }
 }
 
