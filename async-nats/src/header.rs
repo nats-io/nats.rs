@@ -384,6 +384,10 @@ impl FromStr for HeaderValue {
 
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
+        assert!(
+            !v.contains(['\r', '\n']),
+            "invalid header value: cannot contain '\\r' or '\\n'"
+        );
         Self {
             inner: v.to_string(),
         }
@@ -392,6 +396,10 @@ impl From<&str> for HeaderValue {
 
 impl From<String> for HeaderValue {
     fn from(inner: String) -> Self {
+        assert!(
+            !inner.contains(['\r', '\n']),
+            "invalid header value: cannot contain '\\r' or '\\n'"
+        );
         Self { inner }
     }
 }
@@ -426,16 +434,34 @@ pub trait IntoHeaderName {
 
 impl IntoHeaderName for &str {
     fn into_header_name(self) -> HeaderName {
-        HeaderName {
-            inner: HeaderRepr::Custom(self.into()),
+        assert!(
+            !self.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126),
+            "invalid header name: cannot contain control characters, non-ASCII, or ':'"
+        );
+        match StandardHeader::from_bytes(self.as_bytes()) {
+            Some(v) => HeaderName {
+                inner: HeaderRepr::Standard(v),
+            },
+            None => HeaderName {
+                inner: HeaderRepr::Custom(self.into()),
+            },
         }
     }
 }
 
 impl IntoHeaderName for String {
     fn into_header_name(self) -> HeaderName {
-        HeaderName {
-            inner: HeaderRepr::Custom(self.into()),
+        assert!(
+            !self.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126),
+            "invalid header name: cannot contain control characters, non-ASCII, or ':'"
+        );
+        match StandardHeader::from_bytes(self.as_bytes()) {
+            Some(v) => HeaderName {
+                inner: HeaderRepr::Standard(v),
+            },
+            None => HeaderName {
+                inner: HeaderRepr::Custom(self.into()),
+            },
         }
     }
 }
@@ -452,15 +478,13 @@ pub trait IntoHeaderValue {
 
 impl IntoHeaderValue for &str {
     fn into_header_value(self) -> HeaderValue {
-        HeaderValue {
-            inner: self.to_string(),
-        }
+        HeaderValue::from(self)
     }
 }
 
 impl IntoHeaderValue for String {
     fn into_header_value(self) -> HeaderValue {
-        HeaderValue { inner: self }
+        HeaderValue::from(self)
     }
 }
 
@@ -1021,6 +1045,84 @@ mod tests {
             header_map.get("Other-Header").unwrap().as_str(),
             "other-value"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header value")]
+    fn header_value_from_str_rejects_cr() {
+        let _: HeaderValue = "value\rwith\rcr".into();
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header value")]
+    fn header_value_from_str_rejects_lf() {
+        let _: HeaderValue = "value\nwith\nlf".into();
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header value")]
+    fn header_value_from_string_rejects_crlf() {
+        let _: HeaderValue = "injected\r\nPUB attack 0\r\n\r\n".to_string().into();
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header value")]
+    fn header_value_into_trait_rejects_crlf() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Key", "value\r\nPUB attack 0\r\n\r\n");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header name")]
+    fn header_name_into_trait_rejects_cr() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Bad\rName", "value");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header name")]
+    fn header_name_into_trait_rejects_lf() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Bad\nName", "value");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header name")]
+    fn header_name_into_trait_rejects_space() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Bad Name", "value");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header name")]
+    fn header_name_into_trait_rejects_colon() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Bad:Name", "value");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid header name")]
+    fn header_name_from_string_rejects_control_chars() {
+        let name = "Bad\x00Name".to_string();
+        name.into_header_name();
+    }
+
+    #[test]
+    fn valid_header_values_still_work() {
+        let _: HeaderValue = "normal value".into();
+        let _: HeaderValue = "value with special chars !@#$%^&*()".into();
+        let _: HeaderValue = "".into();
+        let _: HeaderValue = String::from("string value").into();
+    }
+
+    #[test]
+    fn valid_header_names_still_work() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Custom-Header", "value");
+        headers.insert("Another-Header", "value");
+        headers.insert("$dollar", "value");
+        headers.insert("Nats-Stream", "value");
+        assert_eq!(headers.get("Nats-Stream").unwrap().as_str(), "value");
     }
 
     #[test]

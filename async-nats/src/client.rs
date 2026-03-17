@@ -35,7 +35,6 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
-use tracing::trace;
 
 static VERSION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
@@ -59,7 +58,7 @@ impl From<tokio_util::sync::PollSendError<Command>> for PublishError {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum PublishErrorKind {
     MaxPayloadExceeded,
-    BadSubject,
+    InvalidSubject,
     Send,
 }
 
@@ -68,7 +67,7 @@ impl Display for PublishErrorKind {
         match self {
             PublishErrorKind::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
             PublishErrorKind::Send => write!(f, "failed to send message"),
-            PublishErrorKind::BadSubject => write!(f, "bad subject"),
+            PublishErrorKind::InvalidSubject => write!(f, "invalid subject"),
         }
     }
 }
@@ -88,6 +87,7 @@ pub struct Client {
     request_timeout: Option<Duration>,
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
+    skip_subject_validation: bool,
 }
 
 pub mod traits {
@@ -100,12 +100,15 @@ pub mod traits {
     use super::{PublishError, Request, RequestError, SubscribeError};
 
     pub trait Publisher {
-        fn publish_with_reply<S: ToSubject, R: ToSubject>(
+        fn publish_with_reply<S, R>(
             &self,
             subject: S,
             reply: R,
             payload: Bytes,
-        ) -> impl Future<Output = Result<(), PublishError>>;
+        ) -> impl Future<Output = Result<(), PublishError>>
+        where
+            S: ToSubject,
+            R: ToSubject;
 
         fn publish_message(
             &self,
@@ -113,17 +116,21 @@ pub mod traits {
         ) -> impl Future<Output = Result<(), PublishError>>;
     }
     pub trait Subscriber {
-        fn subscribe<S: ToSubject>(
+        fn subscribe<S>(
             &self,
             subject: S,
-        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>;
+        ) -> impl Future<Output = Result<crate::Subscriber, SubscribeError>>
+        where
+            S: ToSubject;
     }
     pub trait Requester {
-        fn send_request<S: ToSubject>(
+        fn send_request<S>(
             &self,
             subject: S,
             request: Request,
-        ) -> impl Future<Output = Result<Message, RequestError>>;
+        ) -> impl Future<Output = Result<Message, RequestError>>
+        where
+            S: ToSubject;
     }
     pub trait TimeoutProvider {
         fn timeout(&self) -> Option<Duration>;
@@ -147,16 +154,28 @@ impl traits::TimeoutProvider for Client {
 }
 
 impl traits::Publisher for Client {
-    fn publish_with_reply<S: ToSubject, R: ToSubject>(
+    fn publish_with_reply<S, R>(
         &self,
         subject: S,
         reply: R,
         payload: Bytes,
-    ) -> impl Future<Output = Result<(), PublishError>> {
+    ) -> impl Future<Output = Result<(), PublishError>>
+    where
+        S: ToSubject,
+        R: ToSubject,
+    {
         self.publish_with_reply(subject, reply, payload)
     }
 
     async fn publish_message(&self, msg: OutboundMessage) -> Result<(), PublishError> {
+        if msg.subject.is_empty()
+            || (!self.skip_subject_validation && !crate::is_valid_publish_subject(&msg.subject))
+        {
+            return Err(PublishError::with_source(
+                PublishErrorKind::InvalidSubject,
+                crate::subject::SubjectError::InvalidFormat,
+            ));
+        }
         self.sender
             .send(Command::Publish(msg))
             .await
@@ -165,10 +184,10 @@ impl traits::Publisher for Client {
 }
 
 impl traits::Subscriber for Client {
-    fn subscribe<S: ToSubject>(
-        &self,
-        subject: S,
-    ) -> impl Future<Output = Result<Subscriber, SubscribeError>> {
+    fn subscribe<S>(&self, subject: S) -> impl Future<Output = Result<Subscriber, SubscribeError>>
+    where
+        S: ToSubject,
+    {
         self.subscribe(subject)
     }
 }
@@ -206,6 +225,7 @@ impl Client {
         request_timeout: Option<Duration>,
         max_payload: Arc<AtomicUsize>,
         statistics: Arc<Statistics>,
+        skip_subject_validation: bool,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -219,7 +239,36 @@ impl Client {
             request_timeout,
             max_payload,
             connection_stats: statistics,
+            skip_subject_validation,
         }
+    }
+
+    /// Validates a subject for publishing (protocol-framing safety only).
+    /// Checks for empty and whitespace. Does not check dot structure.
+    pub(crate) fn maybe_validate_publish_subject<S: ToSubject>(
+        &self,
+        subject: S,
+    ) -> Result<crate::Subject, crate::subject::SubjectError> {
+        let subject = subject.to_subject();
+        if subject.is_empty()
+            || (!self.skip_subject_validation && !crate::is_valid_publish_subject(&subject))
+        {
+            return Err(crate::subject::SubjectError::InvalidFormat);
+        }
+        Ok(subject)
+    }
+
+    /// Validates a subject for subscribing (protocol-framing + dot structure).
+    /// Always runs regardless of `skip_subject_validation` (matches Go/Java behavior).
+    pub(crate) fn validate_subscribe_subject<S: ToSubject>(
+        &self,
+        subject: S,
+    ) -> Result<crate::Subject, crate::subject::SubjectError> {
+        let subject = subject.to_subject();
+        if !subject.is_valid() {
+            return Err(crate::subject::SubjectError::InvalidFormat);
+        }
+        Ok(subject)
     }
 
     /// Returns the default timeout for requests set when creating the client.
@@ -304,6 +353,11 @@ impl Client {
 
     /// Publish a [Message] to a given subject.
     ///
+    /// Returns `PublishErrorKind::InvalidSubject` if the subject is invalid
+    /// (empty or contains whitespace). This check can be disabled with
+    /// [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation] (empty subjects are
+    /// always rejected).
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -318,7 +372,10 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .maybe_validate_publish_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
+
         let max_payload = self.max_payload.load(Ordering::Relaxed);
         if payload.len() > max_payload {
             return Err(PublishError::with_source(
@@ -367,7 +424,9 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .maybe_validate_publish_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -402,8 +461,12 @@ impl Client {
         reply: R,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
-        let reply = reply.to_subject();
+        let subject = self
+            .maybe_validate_publish_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
+        let reply = self
+            .maybe_validate_publish_subject(reply)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -441,8 +504,12 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<(), PublishError> {
-        let subject = subject.to_subject();
-        let reply = reply.to_subject();
+        let subject = self
+            .maybe_validate_publish_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
+        let reply = self
+            .maybe_validate_publish_subject(reply)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -471,13 +538,6 @@ impl Client {
         subject: S,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
-
-        trace!(
-            "request sent to subject: {} ({})",
-            subject.as_ref(),
-            payload.len()
-        );
         let request = Request::new().payload(payload);
         self.send_request(subject, request).await
     }
@@ -503,13 +563,14 @@ impl Client {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
-
         let request = Request::new().headers(headers).payload(payload);
         self.send_request(subject, request).await
     }
 
     /// Sends the request created by the [Request].
+    ///
+    /// Returns `RequestErrorKind::InvalidSubject` if the subject is invalid
+    /// (empty or contains whitespace).
     ///
     /// # Examples
     ///
@@ -527,7 +588,9 @@ impl Client {
         subject: S,
         request: Request,
     ) -> Result<Message, RequestError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .maybe_validate_publish_subject(subject)
+            .map_err(|e| RequestError::with_source(RequestErrorKind::InvalidSubject, e))?;
 
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
@@ -625,6 +688,10 @@ impl Client {
 
     /// Subscribes to a subject to receive [messages][Message].
     ///
+    /// Returns an error if the subject is invalid (empty, contains whitespace,
+    /// or has malformed dot structure). This validation always runs regardless
+    /// of [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation].
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -640,7 +707,10 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .validate_subscribe_subject(subject)
+            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::InvalidSubject, e))?;
+
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
 
@@ -657,6 +727,11 @@ impl Client {
     }
 
     /// Subscribes to a subject with a queue group to receive [messages][Message].
+    ///
+    /// Returns an error if the subject is invalid (empty, contains whitespace,
+    /// or has malformed dot structure) or if the queue group name is invalid
+    /// (empty or contains whitespace). Subject and queue group validation always
+    /// runs regardless of [`ConnectOptions::skip_subject_validation`][crate::ConnectOptions::skip_subject_validation].
     ///
     /// # Examples
     ///
@@ -677,7 +752,13 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = subject.to_subject();
+        let subject = self
+            .validate_subscribe_subject(subject)
+            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::InvalidSubject, e))?;
+
+        if !crate::is_valid_queue_group(&queue_group) {
+            return Err(SubscribeError::new(SubscribeErrorKind::InvalidQueueName));
+        }
 
         let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
@@ -918,13 +999,32 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for ReconnectError {
     }
 }
 
-#[derive(Error, Debug)]
-#[error("failed to send subscribe: {0}")]
-pub struct SubscribeError(#[source] crate::Error);
+/// An error returned from the [`Client::subscribe`] or [`Client::queue_subscribe`] functions.
+pub type SubscribeError = Error<SubscribeErrorKind>;
 
 impl From<tokio::sync::mpsc::error::SendError<Command>> for SubscribeError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
-        SubscribeError(Box::new(err))
+        SubscribeError::with_source(SubscribeErrorKind::Other, err)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SubscribeErrorKind {
+    /// The subject is invalid (empty, contains whitespace, or has malformed dot structure).
+    InvalidSubject,
+    /// The queue group name is invalid (empty or contains whitespace).
+    InvalidQueueName,
+    /// Other errors, client/io related.
+    Other,
+}
+
+impl Display for SubscribeErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSubject => write!(f, "invalid subject"),
+            Self::InvalidQueueName => write!(f, "invalid queue name"),
+            Self::Other => write!(f, "subscribe failed"),
+        }
     }
 }
 
@@ -945,6 +1045,8 @@ pub enum RequestErrorKind {
     TimedOut,
     /// No one is listening on request subject.
     NoResponders,
+    /// The subject is invalid (empty or contains whitespace).
+    InvalidSubject,
     /// Other errors, client/io related.
     Other,
 }
@@ -954,6 +1056,7 @@ impl Display for RequestErrorKind {
         match self {
             Self::TimedOut => write!(f, "request timed out"),
             Self::NoResponders => write!(f, "no responders"),
+            Self::InvalidSubject => write!(f, "invalid subject"),
             Self::Other => write!(f, "request failed"),
         }
     }
