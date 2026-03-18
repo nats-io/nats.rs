@@ -893,6 +893,14 @@ pub(crate) struct WebSocketAdapter {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+impl Drop for WebSocketAdapter {
+    fn drop(&mut self) {
+        self.inner.close().ok();
+        web_sys::console::log_1(&"Dropping the adapter!".into());
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
 impl WebSocketAdapter {
     pub(crate) async fn connect(url: &str) -> io::Result<Self> {
         let socket = WebSocket::new(url).map_err(websocket_js_error)?;
@@ -954,6 +962,7 @@ impl WebSocketAdapter {
         }) as Box<dyn FnMut(_)>));
         socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
 
+        web_sys::console::log_1(&"Creating the adapter!".into());
         let adapter = Self {
             inner: SendWrapper::new(socket),
             read_buf: BytesMut::new(),
