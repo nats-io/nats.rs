@@ -256,7 +256,8 @@ mod options;
 
 pub use auth::Auth;
 pub use client::{
-    Client, PublishError, Request, RequestError, RequestErrorKind, Statistics, SubscribeError,
+    CheckedSubscribeError, CheckedSubscribeErrorKind, Client, PublishError, Request, RequestError,
+    RequestErrorKind, Statistics, SubscribeError,
 };
 pub use options::{AuthError, ConnectOptions};
 
@@ -396,6 +397,9 @@ pub(crate) enum Command {
     Flush {
         observer: oneshot::Sender<()>,
     },
+    Ping {
+        observer: oneshot::Sender<()>,
+    },
     Drain {
         sid: Option<u64>,
     },
@@ -453,6 +457,7 @@ pub(crate) struct ConnectionHandler {
     ping_interval: Interval,
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
+    pong_waiters: VecDeque<oneshot::Sender<()>>,
     is_draining: bool,
     drain_pings: VecDeque<u64>,
 }
@@ -477,6 +482,7 @@ impl ConnectionHandler {
             ping_interval,
             should_reconnect: false,
             flush_observers: Vec::new(),
+            pong_waiters: VecDeque::new(),
             is_draining: false,
             drain_pings: VecDeque::new(),
         }
@@ -714,6 +720,9 @@ impl ConnectionHandler {
             ServerOp::Pong => {
                 debug!("received PONG");
                 self.pending_pings = self.pending_pings.saturating_sub(1);
+                if let Some(sender) = self.pong_waiters.pop_front() {
+                    sender.send(()).ok();
+                }
             }
             ServerOp::Error(error) => {
                 debug!("received ERROR: {:?}", error);
@@ -864,6 +873,10 @@ impl ConnectionHandler {
                         .enqueue_write_op(&ClientOp::Unsubscribe { sid, max });
                 }
             }
+            Command::Ping { observer } => {
+                self.pong_waiters.push_back(observer);
+                self.connection.enqueue_write_op(&ClientOp::Ping);
+            }
             Command::Flush { observer } => {
                 self.flush_observers.push(observer);
             }
@@ -997,6 +1010,7 @@ impl ConnectionHandler {
 
     async fn handle_disconnect(&mut self) -> Result<(), ConnectError> {
         self.pending_pings = 0;
+        self.pong_waiters.clear();
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
 

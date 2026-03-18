@@ -17,7 +17,7 @@ use std::future::Future;
 
 use crate::connection::State;
 use crate::message::OutboundMessage;
-use crate::subject::ToSubject;
+use crate::subject::{Subject, ToSubject};
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
@@ -695,6 +695,122 @@ impl Client {
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
+    /// Subscribes to a subject and verifies that the server accepted the subscription.
+    ///
+    /// Unlike [`Client::subscribe`], this method performs a PING/PONG round-trip after sending
+    /// the `SUB` command to ensure the server has processed it. If the server denies the
+    /// subscription (e.g., due to permissions), the error is returned immediately rather than
+    /// surfaced later through the [`Subscriber`] stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// match client.subscribe_checked("events.>").await {
+    ///     Ok(subscriber) => println!("subscribed"),
+    ///     Err(err) => eprintln!("subscribe denied: {err}"),
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn subscribe_checked<S: ToSubject>(
+        &self,
+        subject: S,
+    ) -> Result<Subscriber, CheckedSubscribeError> {
+        self.subscribe_checked_inner(subject.to_subject(), None)
+            .await
+    }
+
+    /// Subscribes to a subject with a queue group and verifies that the server accepted the
+    /// subscription.
+    ///
+    /// This is the checked variant of [`Client::queue_subscribe`]. See
+    /// [`Client::subscribe_checked`] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// match client
+    ///     .queue_subscribe_checked("events.>", "workers".into())
+    ///     .await
+    /// {
+    ///     Ok(subscriber) => println!("subscribed"),
+    ///     Err(err) => eprintln!("subscribe denied: {err}"),
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn queue_subscribe_checked<S: ToSubject>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> Result<Subscriber, CheckedSubscribeError> {
+        self.subscribe_checked_inner(subject.to_subject(), Some(queue_group))
+            .await
+    }
+
+    async fn subscribe_checked_inner(
+        &self,
+        subject: Subject,
+        queue_group: Option<String>,
+    ) -> Result<Subscriber, CheckedSubscribeError> {
+        let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, mut receiver) = mpsc::channel(self.subscription_capacity);
+        let requeue_sender = sender.clone();
+
+        self.sender
+            .send(Command::Subscribe {
+                sid,
+                subject,
+                queue_group,
+                sender,
+            })
+            .await
+            .map_err(|err| {
+                CheckedSubscribeError::with_source(CheckedSubscribeErrorKind::Other, err)
+            })?;
+
+        // PING/PONG barrier: ensures the server has processed the SUB and sent any -ERR.
+        self.ping().await.map_err(|err| {
+            CheckedSubscribeError::with_source(CheckedSubscribeErrorKind::Other, err)
+        })?;
+
+        // Check if a subscribe-time permission error was delivered.
+        match receiver.try_recv() {
+            Ok(msg) if msg.status == Some(StatusCode::PERMISSIONS_VIOLATION) => {
+                self.sender
+                    .send(Command::Unsubscribe { sid, max: None })
+                    .await
+                    .ok();
+                Err(CheckedSubscribeError::new(
+                    CheckedSubscribeErrorKind::PermissionsViolation,
+                ))
+            }
+            Ok(msg) => {
+                // Not a permission error — re-queue the message so the subscriber sees it.
+                requeue_sender.try_send(msg).ok();
+                Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+            }
+            Err(_) => Ok(Subscriber::new(sid, self.sender.clone(), receiver)),
+        }
+    }
+
+    async fn ping(&self) -> Result<(), PingError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Command::Ping { observer: tx })
+            .await
+            .map_err(|err| PingError::with_source(PingErrorKind::Send, err))?;
+        rx.await
+            .map_err(|err| PingError::with_source(PingErrorKind::Disconnected, err))?;
+        Ok(())
+    }
+
     /// Flushes the internal buffer ensuring that all messages are sent.
     ///
     /// # Examples
@@ -996,6 +1112,45 @@ impl Display for FlushErrorKind {
 }
 
 pub type FlushError = Error<FlushErrorKind>;
+
+/// Errors from the internal [`Client::ping`] method.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PingErrorKind {
+    Send,
+    Disconnected,
+}
+
+impl Display for PingErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Send => write!(f, "failed to send ping"),
+            Self::Disconnected => write!(f, "disconnected while waiting for pong"),
+        }
+    }
+}
+
+pub(crate) type PingError = Error<PingErrorKind>;
+
+/// Error kinds for [`Client::subscribe_checked`] and [`Client::queue_subscribe_checked`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CheckedSubscribeErrorKind {
+    /// Server denied the subscription due to a permissions violation.
+    PermissionsViolation,
+    /// Other error (failed to send command, connection lost, etc.).
+    Other,
+}
+
+impl Display for CheckedSubscribeErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PermissionsViolation => write!(f, "permissions violation"),
+            Self::Other => write!(f, "checked subscribe failed"),
+        }
+    }
+}
+
+/// Error returned by [`Client::subscribe_checked`] and [`Client::queue_subscribe_checked`].
+pub type CheckedSubscribeError = Error<CheckedSubscribeErrorKind>;
 
 /// Represents statistics for the instance of the client throughout its lifecycle.
 #[derive(Default, Debug)]

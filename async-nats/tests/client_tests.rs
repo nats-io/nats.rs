@@ -1242,7 +1242,7 @@ mod client {
     }
 
     #[tokio::test]
-    async fn subscribe_permission_error() {
+    async fn subscribe_checked_permission_denied() {
         let server = nats_server::run_server("tests/configs/sub_deny.conf");
         let client = ConnectOptions::new()
             .user_and_password("test".into(), "test".into())
@@ -1250,23 +1250,18 @@ mod client {
             .await
             .unwrap();
 
-        let mut subscriber = client.subscribe("denied.subject").await.unwrap();
-
-        // The server sends a permission violation error for the denied subscription.
-        let result = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+        let err = client
+            .subscribe_checked("denied.subject")
             .await
-            .expect("should receive error within timeout")
-            .expect("stream should not be closed");
-
-        let err = result.unwrap_err();
+            .unwrap_err();
         assert_eq!(
             err.kind(),
-            async_nats::SubscriberErrorKind::PermissionsViolation
+            async_nats::CheckedSubscribeErrorKind::PermissionsViolation
         );
     }
 
     #[tokio::test]
-    async fn subscribe_permission_error_multiple_subs() {
+    async fn subscribe_checked_allowed() {
         let server = nats_server::run_server("tests/configs/sub_deny.conf");
         let client = ConnectOptions::new()
             .user_and_password("test".into(), "test".into())
@@ -1274,31 +1269,34 @@ mod client {
             .await
             .unwrap();
 
-        let mut sub1 = client.subscribe("denied.one").await.unwrap();
-        let mut sub2 = client.subscribe("denied.one").await.unwrap();
+        // Subjects outside "denied.>" should be accepted.
+        let _subscriber = client.subscribe_checked("allowed.subject").await.unwrap();
+    }
 
-        // Each subscription should receive its own permission error.
-        let r1 = tokio::time::timeout(Duration::from_secs(5), sub1.next())
+    #[tokio::test]
+    async fn subscribe_checked_multiple_denied() {
+        let server = nats_server::run_server("tests/configs/sub_deny.conf");
+        let client = ConnectOptions::new()
+            .user_and_password("test".into(), "test".into())
+            .connect(server.client_url())
             .await
-            .expect("sub1 timeout")
-            .expect("sub1 not closed");
+            .unwrap();
+
+        let err1 = client.subscribe_checked("denied.one").await.unwrap_err();
         assert_eq!(
-            r1.unwrap_err().kind(),
-            async_nats::SubscriberErrorKind::PermissionsViolation
+            err1.kind(),
+            async_nats::CheckedSubscribeErrorKind::PermissionsViolation
         );
 
-        let r2 = tokio::time::timeout(Duration::from_secs(5), sub2.next())
-            .await
-            .expect("sub2 timeout")
-            .expect("sub2 not closed");
+        let err2 = client.subscribe_checked("denied.two").await.unwrap_err();
         assert_eq!(
-            r2.unwrap_err().kind(),
-            async_nats::SubscriberErrorKind::PermissionsViolation
+            err2.kind(),
+            async_nats::CheckedSubscribeErrorKind::PermissionsViolation
         );
     }
 
     #[tokio::test]
-    async fn subscribe_permission_error_with_event() {
+    async fn subscribe_checked_with_event_callback() {
         use tokio::sync::mpsc;
 
         let server = nats_server::run_server("tests/configs/sub_deny.conf");
@@ -1315,19 +1313,17 @@ mod client {
             .await
             .unwrap();
 
-        let mut subscriber = client.subscribe("denied.subject").await.unwrap();
-
-        // Subscriber should get the error.
-        let result = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+        // subscribe_checked should return the error immediately.
+        let err = client
+            .subscribe_checked("denied.subject")
             .await
-            .expect("should receive error within timeout")
-            .expect("stream should not be closed");
+            .unwrap_err();
         assert_eq!(
-            result.unwrap_err().kind(),
-            async_nats::SubscriberErrorKind::PermissionsViolation
+            err.kind(),
+            async_nats::CheckedSubscribeErrorKind::PermissionsViolation
         );
 
-        // Event callback should also fire (may receive other events first).
+        // Event callback should also fire.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -1339,5 +1335,24 @@ mod client {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn queue_subscribe_checked_permission_denied() {
+        let server = nats_server::run_server("tests/configs/sub_deny.conf");
+        let client = ConnectOptions::new()
+            .user_and_password("test".into(), "test".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let err = client
+            .queue_subscribe_checked("denied.subject", "myqueue".into())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.kind(),
+            async_nats::CheckedSubscribeErrorKind::PermissionsViolation
+        );
     }
 }
