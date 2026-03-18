@@ -36,6 +36,11 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
 
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::timeout as tokio_timeout;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::timeout as tokio_timeout;
+
 static VERSION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
 
@@ -605,7 +610,7 @@ impl Client {
             }
             let request = match timeout {
                 Some(timeout) => {
-                    tokio::time::timeout(timeout, subscriber.next())
+                    tokio_timeout(timeout, subscriber.next())
                         .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
                         .await?
                 }
@@ -647,7 +652,7 @@ impl Client {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
             let request = match timeout {
                 Some(timeout) => {
-                    tokio::time::timeout(timeout, receiver)
+                    tokio_timeout(timeout, receiver)
                         .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
                         .await?
                 }

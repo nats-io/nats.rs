@@ -52,9 +52,14 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::net::{TcpSocket, TcpStream};
-use tokio::time::sleep;
+
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_rustls::rustls;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::{sleep, timeout as tokio_timeout};
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::{sleep, timeout as tokio_timeout};
 
 pub(crate) struct ConnectorOptions {
     #[cfg(not(target_arch = "wasm32"))]
@@ -412,7 +417,7 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             #[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
             "ws" => {
-                let ws = tokio::time::timeout(
+                let ws = tokio_timeout(
                     self.options.connection_timeout,
                     tokio_websockets::client::Builder::new()
                         .uri(server_addr.as_url_str())
@@ -429,9 +434,20 @@ impl Connector {
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
             #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
-            "ws" => {
-                let con = WebSocketAdapter::connect(server_addr.as_url_str());
-                Connection::new(Box::new(con), 0, self.connect_stats.clone())
+            "ws" | "wss" => {
+                let con = tokio_timeout(
+                    self.options.connection_timeout,
+                    WebSocketAdapter::connect(server_addr.as_url_str()),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+
+                Connection::new(
+                    Box::new(con),
+                    self.options.read_buffer_capacity.into(),
+                    self.connect_stats.clone(),
+                )
             }
 
             #[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
@@ -441,7 +457,7 @@ impl Connector {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio::time::timeout(
+                let ws = tokio_timeout(
                     self.options.connection_timeout,
                     tokio_websockets::client::Builder::new()
                         .connector(&tokio_websockets::Connector::Rustls(tls_connector))
@@ -468,14 +484,14 @@ impl Connector {
                     socket.bind(local_addr).map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Io, err)
                     })?;
-                    tokio::time::timeout(
+                    tokio_timeout(
                         self.options.connection_timeout,
                         socket.connect(*socket_addr),
                     )
                     .await
                     .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))??
                 } else {
-                    tokio::time::timeout(
+                    tokio_timeout(
                         self.options.connection_timeout,
                         TcpStream::connect(socket_addr),
                     )
@@ -566,6 +582,7 @@ impl Connector {
             connection = tls_connection(connection).await?;
         };
 
+        web_sys::console::log_1(&"Returning try_connect_to!".into());
         Ok((*info, connection))
     }
 }
