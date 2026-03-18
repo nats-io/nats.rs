@@ -895,7 +895,11 @@ pub(crate) struct WebSocketAdapter {
 #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
 impl Drop for WebSocketAdapter {
     fn drop(&mut self) {
-        self.inner.close().ok();
+        self.inner.set_onopen(None);
+        self.inner.set_onerror(None);
+        self.inner.set_onclose(None);
+        self.inner.set_onmessage(None);
+        let _ = self.inner.close();
         web_sys::console::log_1(&"Dropping the adapter!".into());
     }
 }
