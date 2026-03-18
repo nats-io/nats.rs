@@ -238,6 +238,7 @@ const MULTIPLEXER_SID: u64 = 0;
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
 /// must be provided using `Options::tls_client_config`.
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
@@ -259,7 +260,7 @@ pub use client::{
 };
 pub use options::{AuthError, ConnectOptions};
 
-#[cfg(feature = "crypto")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "crypto"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
 pub mod error;
@@ -274,6 +275,7 @@ pub mod message;
 pub mod service;
 pub mod status;
 pub mod subject;
+#[cfg(not(target_arch = "wasm32"))]
 mod tls;
 
 pub use message::Message;
@@ -1020,11 +1022,17 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let mut connector = Connector::new(
         addrs,
         ConnectorOptions {
+            #[cfg(not(target_arch = "wasm32"))]
             tls_required: options.tls_required,
+            #[cfg(not(target_arch = "wasm32"))]
             certificates: options.certificates,
+            #[cfg(not(target_arch = "wasm32"))]
             client_key: options.client_key,
+            #[cfg(not(target_arch = "wasm32"))]
             client_cert: options.client_cert,
+            #[cfg(not(target_arch = "wasm32"))]
             tls_client_config: options.tls_client_config,
+            #[cfg(not(target_arch = "wasm32"))]
             tls_first: options.tls_first,
             auth: options.auth,
             no_echo: options.no_echo,
@@ -1036,6 +1044,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             reconnect_delay_callback: options.reconnect_delay_callback,
             auth_callback: options.auth_callback,
             max_reconnects: options.max_reconnects,
+            #[cfg(not(target_arch = "wasm32"))]
             local_address: options.local_address,
         },
         events_tx,
@@ -1521,6 +1530,7 @@ pub struct ConnectInfo {
     pub protocol: Protocol,
 
     /// Indicates whether the client requires an SSL connection.
+    #[cfg(not(target_arch = "wasm32"))]
     pub tls_required: bool,
 
     /// Connection username (if `auth_required` is set)
@@ -1656,6 +1666,7 @@ impl ServerAddr {
     }
 
     /// Return the sockets from resolving the server address.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr> + '_> {
         tokio::net::lookup_host((self.host(), self.port())).await
     }

@@ -17,6 +17,8 @@ use crate::connection::Connection;
 use crate::connection::State;
 #[cfg(feature = "websockets")]
 use crate::connection::WebSocketAdapter;
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+use crate::connection::WebSocketWebAdapter;
 use crate::options::CallbackArg1;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::tls;
@@ -44,30 +46,28 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp;
 use std::io;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::time::sleep;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
 use tokio_rustls::rustls;
 
+#[cfg_attr(
+    all(target_arch = "wasm32", feature = "websockets-web"),
+    allow(dead_code)
+)]
 pub(crate) struct ConnectorOptions {
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) tls_required: bool,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) certificates: Vec<PathBuf>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) client_cert: Option<PathBuf>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) client_key: Option<PathBuf>,
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) tls_first: bool,
     pub(crate) auth: Auth,
     pub(crate) no_echo: bool,
@@ -76,10 +76,9 @@ pub(crate) struct ConnectorOptions {
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
-    pub(crate) reconnect_delay_callback: Arc<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
+    pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) max_reconnects: Option<usize>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) local_address: Option<SocketAddr>,
 }
 
@@ -187,7 +186,7 @@ impl Connector {
 
             sleep(duration).await;
 
-            #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+            #[cfg(all(target_arch = "wasm32", feature = "websockets-web"))]
             let socket_addrs = if server_addr.is_websocket() {
                 vec![SocketAddr::from(([0, 0, 0, 0], 0))].into_iter()
             } else {
@@ -197,11 +196,12 @@ impl Connector {
                 ));
             };
 
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
             let socket_addrs = server_addr
                 .socket_addrs()
                 .await
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
+
             for socket_addr in socket_addrs {
                 match self
                     .try_connect_to(
@@ -230,10 +230,8 @@ impl Connector {
                             }
                         }
 
-                        #[cfg(not(target_arch = "wasm32"))]
                         let tls_required = self.options.tls_required || server_addr.tls_required();
                         let mut connect_info = ConnectInfo {
-                            #[cfg(not(target_arch = "wasm32"))]
                             tls_required,
                             name: self.options.name.clone(),
                             pedantic: false,
@@ -409,8 +407,31 @@ impl Connector {
             tls_required = %tls_required,
             "establishing connection"
         );
+
+        #[cfg(all(target_arch = "wasm32", feature = "websockets-web"))]
         let mut connection = match server_addr.scheme() {
-            #[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
+            "ws" | "wss" => {
+                let ws = tokio::time::timeout(
+                    self.options.connection_timeout,
+                    WebSocketWebAdapter::connect(server_addr.as_url_str()),
+                )
+                .await
+                .map_err(|_| ConnectError::new(crate::ConnectErrorKind::TimedOut))?
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+
+                Connection::new(Box::new(ws), 0, self.connect_stats.clone())
+            }
+            _ => {
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    "wasm32 only supports ws:// and wss:// transports",
+                ))
+            }
+        };
+
+        #[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
+        let mut connection = match server_addr.scheme() {
+            #[cfg(feature = "websockets")]
             "ws" => {
                 let ws = tokio::time::timeout(
                     self.options.connection_timeout,
@@ -428,13 +449,7 @@ impl Connector {
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
-            #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
-            "ws" => {
-                let con = WebSocketAdapter::connect(server_addr.as_url_str());
-                Connection::new(Box::new(con), 0, self.connect_stats.clone())
-            }
-
-            #[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
+            #[cfg(feature = "websockets")]
             "wss" => {
                 let tls_config =
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
@@ -457,7 +472,6 @@ impl Connector {
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
-            #[cfg(not(target_arch = "wasm32"))]
             _ => {
                 let tcp_stream = if let Some(local_addr) = self.options.local_address {
                     let socket = if local_addr.is_ipv4() {
@@ -490,16 +504,9 @@ impl Connector {
                     self.connect_stats.clone(),
                 )
             }
-            #[cfg(target_arch = "wasm32")]
-            _ => {
-                return Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::ServerParse,
-                    format!("unsupported scheme for address: {}", server_addr.scheme()),
-                ))
-            }
         };
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
         let tls_connection = |connection: Connection| async {
             tracing::debug!("upgrading connection to TLS");
             let tls_config = Arc::new(
@@ -526,7 +533,7 @@ impl Connector {
         // If `tls_first` was set, establish TLS connection before getting INFO.
         // There is no point in  checking if tls is required, because
         // the connection has to be be upgraded to TLS anyway as it's different flow.
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
         if self.options.tls_first && !server_addr.is_websocket() {
             connection = tls_connection(connection).await?;
         }
@@ -558,7 +565,7 @@ impl Connector {
         };
 
         // If `tls_first` was not set, establish TLS connection if it is required.
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_arch = "wasm32", feature = "websockets-web")))]
         if !self.options.tls_first
             && !server_addr.is_websocket()
             && (self.options.tls_required || info.tls_required || tls_required)
