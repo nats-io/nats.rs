@@ -582,7 +582,6 @@ impl Connector {
             connection = tls_connection(connection).await?;
         };
 
-        web_sys::console::log_1(&"Returning try_connect_to!".into());
         Ok((*info, connection))
     }
 }

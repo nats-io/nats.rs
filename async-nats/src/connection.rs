@@ -789,7 +789,7 @@ impl<T> WebSocketAdapter<T> {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone)]
-enum WebSocketWebState {
+enum WebSocketState {
     Connecting,
     Open,
     Closed {
@@ -800,25 +800,25 @@ enum WebSocketWebState {
 
 #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
 #[derive(Debug, Default)]
-struct WebSocketWebWakers {
+struct WebSocketWakers {
     read: Option<std::task::Waker>,
     write: Option<std::task::Waker>,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
 #[derive(Debug)]
-struct WebSocketWebShared {
-    state: Mutex<WebSocketWebState>,
-    wakers: Mutex<WebSocketWebWakers>,
+struct WebSocketShared {
+    state: Mutex<WebSocketState>,
+    wakers: Mutex<WebSocketWakers>,
     connect_tx: Mutex<Option<oneshot::Sender<io::Result<()>>>>,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
-impl WebSocketWebShared {
+impl WebSocketShared {
     fn new(connect_tx: oneshot::Sender<io::Result<()>>) -> Self {
         Self {
-            state: Mutex::new(WebSocketWebState::Connecting),
-            wakers: Mutex::new(WebSocketWebWakers::default()),
+            state: Mutex::new(WebSocketState::Connecting),
+            wakers: Mutex::new(WebSocketWakers::default()),
             connect_tx: Mutex::new(Some(connect_tx)),
         }
     }
@@ -844,7 +844,7 @@ impl WebSocketWebShared {
     }
 
     fn set_open(&self) {
-        *self.state.lock().unwrap() = WebSocketWebState::Open;
+        *self.state.lock().unwrap() = WebSocketState::Open;
         if let Some(tx) = self.connect_tx.lock().unwrap().take() {
             let _ = tx.send(Ok(()));
         }
@@ -854,10 +854,10 @@ impl WebSocketWebShared {
 
     fn set_closed(&self, kind: io::ErrorKind, message: String) {
         let mut state = self.state.lock().unwrap();
-        if matches!(*state, WebSocketWebState::Closed { .. }) {
+        if matches!(*state, WebSocketState::Closed { .. }) {
             return;
         }
-        *state = WebSocketWebState::Closed {
+        *state = WebSocketState::Closed {
             kind,
             message: message.clone(),
         };
@@ -872,7 +872,7 @@ impl WebSocketWebShared {
 
     fn io_error(&self) -> Option<io::Error> {
         match &*self.state.lock().unwrap() {
-            WebSocketWebState::Closed { kind, message } => {
+            WebSocketState::Closed { kind, message } => {
                 Some(io::Error::new(*kind, message.clone()))
             }
             _ => None,
@@ -885,7 +885,7 @@ pub(crate) struct WebSocketAdapter {
     inner: SendWrapper<WebSocket>,
     read_buf: BytesMut,
     read_rx: mpsc::UnboundedReceiver<io::Result<Vec<u8>>>,
-    shared: std::sync::Arc<WebSocketWebShared>,
+    shared: std::sync::Arc<WebSocketShared>,
     _on_open: SendWrapper<Closure<dyn FnMut(Event)>>,
     _on_error: SendWrapper<Closure<dyn FnMut(Event)>>,
     _on_close: SendWrapper<Closure<dyn FnMut(CloseEvent)>>,
@@ -900,7 +900,6 @@ impl Drop for WebSocketAdapter {
         self.inner.set_onclose(None);
         self.inner.set_onmessage(None);
         let _ = self.inner.close();
-        web_sys::console::log_1(&"Dropping the adapter!".into());
     }
 }
 
@@ -911,7 +910,7 @@ impl WebSocketAdapter {
         socket.set_binary_type(BinaryType::Arraybuffer);
 
         let (connect_tx, connect_rx) = oneshot::channel();
-        let shared = std::sync::Arc::new(WebSocketWebShared::new(connect_tx));
+        let shared = std::sync::Arc::new(WebSocketShared::new(connect_tx));
         let (read_tx, read_rx) = mpsc::unbounded_channel();
 
         let on_open_shared = shared.clone();
@@ -966,7 +965,6 @@ impl WebSocketAdapter {
         }) as Box<dyn FnMut(_)>));
         socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
 
-        web_sys::console::log_1(&"Creating the adapter!".into());
         let adapter = Self {
             inner: SendWrapper::new(socket),
             read_buf: BytesMut::new(),
