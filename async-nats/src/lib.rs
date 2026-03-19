@@ -1015,6 +1015,7 @@ impl ConnectionHandler {
 /// # Ok(())
 /// # }
 /// ```
+#[cfg(any(not(target_arch = "wasm32"), feature = "websockets"))]
 pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
@@ -1209,6 +1210,7 @@ impl fmt::Display for Event {
 /// .await?;
 /// # Ok(())
 /// # }
+#[cfg(any(not(target_arch = "wasm32"), feature = "websockets"))]
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }

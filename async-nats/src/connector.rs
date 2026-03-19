@@ -110,6 +110,14 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
     }
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+fn unsupported_transport_error() -> ConnectError {
+    ConnectError::with_source(
+        ConnectErrorKind::Io,
+        "wasm32 only supports ws:// and wss:// transports",
+    )
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -160,13 +168,23 @@ impl Connector {
         let mut error = None;
 
         let mut servers = self.servers.clone();
-        if !self.options.retain_servers_order {
+        if !self.options.retain_servers_order && servers.len() > 1 {
             servers.shuffle(&mut thread_rng());
             // sort_by is stable, meaning it will retain the order for equal elements.
             servers.sort_by(|a, b| a.1.cmp(&b.1));
         }
 
         for (server_addr, _) in servers {
+            #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+            if !server_addr.is_websocket() {
+                tracing::debug!(
+                    server = ?server_addr,
+                    "skipping unsupported non-websocket server on wasm32"
+                );
+                error.replace(unsupported_transport_error());
+                continue;
+            }
+
             self.attempts += 1;
             if let Some(max_reconnects) = self.options.max_reconnects {
                 if self.attempts > max_reconnects {
@@ -193,14 +211,7 @@ impl Connector {
             sleep(duration).await;
 
             #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
-            let socket_addrs = if server_addr.is_websocket() {
-                vec![SocketAddr::from(([0, 0, 0, 0], 0))].into_iter()
-            } else {
-                return Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::Io,
-                    "wasm32 only supports ws:// and wss:// transports",
-                ));
-            };
+            let socket_addrs = vec![SocketAddr::from(([0, 0, 0, 0], 0))].into_iter();
 
             #[cfg(not(target_arch = "wasm32"))]
             let socket_addrs = server_addr
@@ -225,6 +236,16 @@ impl Connector {
                                         err,
                                     )
                                 })?;
+
+                                #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+                                if !server_addr.is_websocket() {
+                                    tracing::debug!(
+                                        discovered_url = %url,
+                                        "ignoring discovered non-websocket server on wasm32"
+                                    );
+                                    continue;
+                                }
+
                                 if !self.servers.iter().any(|(addr, _)| addr == &server_addr) {
                                     tracing::debug!(
                                         discovered_url = %url,
