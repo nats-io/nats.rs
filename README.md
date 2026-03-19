@@ -46,23 +46,14 @@ stable, yet versioned <1.0.0, like `rustls`, which might introduce breaking chan
 
 Feature flags are Documented in `Cargo.toml` and can be viewed [here](https://docs.rs/crate/async-nats/latest/source/Cargo.toml.orig).
 
-### nats
+### nats (deprecated)
+
+> **Deprecated:** Use [`async-nats`](https://crates.io/crates/async-nats) instead.
+> This crate only receives critical security fixes.
 
 [![License Apache 2](https://img.shields.io/badge/License-Apache2-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Crates.io](https://img.shields.io/crates/v/nats.svg)](https://crates.io/crates/nats)
 [![Documentation](https://docs.rs/nats/badge.svg)](https://docs.rs/nats/)
-[![Build Status](https://github.com/nats-io/nats.rs/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/nats-io/nats.rs/actions)
-
-Legacy *synchronous* client that supports:
-
-* Core NATS
-* JetStream API
-* JetStream Management API
-* Key Value Store
-* Object Store
-
-This client does not get updates, unless those are security fixes.
-Please use the new `async-nats` crate.
 
 ### Documentation
 
