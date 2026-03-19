@@ -1,3 +1,6 @@
+> **Note:** This crate is deprecated. Use [`async-nats`](https://crates.io/crates/async-nats)
+> instead. Only critical security fixes will be applied going forward.
+
 # 0.25.0
 
 ## Overview

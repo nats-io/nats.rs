@@ -1,7 +1,7 @@
 [package]
 name = "nats"
 version = "0.25.0"
-description = "A Rust NATS client"
+description = "A Rust NATS client (deprecated — use async-nats instead)"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ features = ["unstable"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [badges]
-maintenance = { status = "actively-developed" }
+maintenance = { status = "deprecated" }
 
 [dependencies]
 base64 = "0.13.0"
