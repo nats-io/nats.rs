@@ -1,6 +1,20 @@
 > **Note:** This crate is deprecated. Use [`async-nats`](https://crates.io/crates/async-nats)
 > instead. Only critical security fixes will be applied going forward.
 
+# 0.26.0
+
+## Overview
+
+This release formally deprecates the `nats` crate. All public types and functions now carry
+`#[deprecated]` attributes that will emit compiler warnings for downstream users, directing them
+to migrate to [`async-nats`](https://crates.io/crates/async-nats).
+
+## What's Changed
+* Mark all public API items as `#[deprecated]`
+* Add prominent deprecation notice to crate-level docs
+* Update `Cargo.toml` maintenance status to `deprecated`
+* Update `README.md` with deprecation header
+
 # 0.25.0
 
 ## Overview
