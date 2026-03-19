@@ -40,8 +40,11 @@ use {
     web_sys::{BinaryType, CloseEvent, Event, MessageEvent, WebSocket},
 };
 
+#[cfg(feature = "websockets")]
+use tokio::io::ReadBuf;
+
 use bytes::{Buf, Bytes, BytesMut};
-use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 use tracing::trace;
 
 use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
