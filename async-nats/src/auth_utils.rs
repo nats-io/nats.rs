@@ -16,13 +16,15 @@ use nkeys::KeyPair;
 #[cfg(feature = "nkeys")]
 use regex::Regex;
 #[cfg(feature = "nkeys")]
-use std::sync::LazyLock;
+use std::io;
+#[cfg(all(not(target_arch = "wasm32"), feature = "nkeys"))]
+use std::path::Path;
 #[cfg(feature = "nkeys")]
-use std::{io, path::Path};
+use std::sync::LazyLock;
 
 /// Loads user credentials file with jwt and key. Return file contents.
 /// Uses tokio non-blocking io
-#[cfg(feature = "nkeys")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "nkeys"))]
 pub(crate) async fn load_creds(path: &Path) -> io::Result<String> {
     tokio::fs::read_to_string(path).await.map_err(|err| {
         io::Error::other(format!("loading creds file '{}': {}", path.display(), err))

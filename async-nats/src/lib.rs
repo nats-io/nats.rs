@@ -269,7 +269,6 @@ pub use client::{
 };
 pub use options::{AuthError, ConnectOptions};
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "crypto"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
 pub mod error;
