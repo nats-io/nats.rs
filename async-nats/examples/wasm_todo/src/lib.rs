@@ -10,6 +10,12 @@ struct Todo {
     date: NaiveDateTime,
 }
 
+#[derive(Clone)]
+enum TodoCommand {
+    Upsert(Todo),
+    Delete(String),
+}
+
 // TODO: take a look how we can ignore untracked fields.
 impl Serialize for Todo {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -47,7 +53,7 @@ pub fn App() -> impl IntoView {
     use async_nats::jetstream;
     use futures::{channel::mpsc, StreamExt};
 
-    let (tx, mut rx) = mpsc::channel::<Todo>(1);
+    let (tx, mut rx) = mpsc::channel::<TodoCommand>(1);
     let todos = RwSignal::new(Vec::<Todo>::new());
     let title = RwSignal::new(String::new());
 
@@ -69,24 +75,42 @@ pub fn App() -> impl IntoView {
             while let Some(msg) = watcher.next().await {
                 let msg = msg.unwrap();
 
-                let todo: Todo = serde_json::from_slice(&msg.value).unwrap();
-                todos.update(|todos| match todos.binary_search(&todo) {
-                    Ok(pos) => {
-                        todos[pos].id = todo.id;
-                        todos[pos].title.set(todo.title.get());
-                        todos[pos].completed.set(todo.completed.get());
-                        todos[pos].date = todo.date;
+                match msg.operation {
+                    jetstream::kv::Operation::Put => {
+                        let todo: Todo = serde_json::from_slice(&msg.value).unwrap();
+                        todos.update(|todos| match todos.binary_search(&todo) {
+                            Ok(pos) => {
+                                todos[pos].id = todo.id;
+                                todos[pos].title.set(todo.title.get());
+                                todos[pos].completed.set(todo.completed.get());
+                                todos[pos].date = todo.date;
+                            }
+                            Err(pos) => todos.insert(pos, todo),
+                        });
                     }
-                    Err(pos) => todos.insert(pos, todo),
-                });
+                    jetstream::kv::Operation::Delete | jetstream::kv::Operation::Purge => {
+                        todos.update(|todos| {
+                            if let Ok(pos) = todos.binary_search_by(|t| t.id.cmp(&msg.key)) {
+                                todos.remove(pos);
+                            }
+                        });
+                    }
+                }
             }
         };
 
         let push = async move {
-            while let Some(todo) = rx.next().await {
-                let value = serde_json::to_vec(&todo).unwrap();
-                kv.put(todo.id, value.into()).await.unwrap();
-                title.set(String::new());
+            while let Some(command) = rx.next().await {
+                match command {
+                    TodoCommand::Upsert(todo) => {
+                        let value = serde_json::to_vec(&todo).unwrap();
+                        kv.put(todo.id, value.into()).await.unwrap();
+                        title.set(String::new());
+                    }
+                    TodoCommand::Delete(id) => {
+                        kv.delete(id).await.unwrap();
+                    }
+                }
             }
         };
 
@@ -116,17 +140,22 @@ pub fn App() -> impl IntoView {
             date: chrono::Utc::now().naive_utc(),
         };
 
-        let _ = add_tx.try_send(todo);
+        let _ = add_tx.try_send(TodoCommand::Upsert(todo));
     };
 
     let mut toggle_tx = tx.clone();
     let toggle_todo = move |todo: &Todo, completed: bool| {
-        let _ = toggle_tx.try_send(Todo {
+        let _ = toggle_tx.try_send(TodoCommand::Upsert(Todo {
             id: todo.id.clone(),
             title: todo.title.clone(),
             completed: RwSignal::new(completed),
             date: todo.date,
-        });
+        }));
+    };
+
+    let mut delete_tx = tx.clone();
+    let delete_todo = move |todo: &Todo| {
+        let _ = delete_tx.try_send(TodoCommand::Delete(todo.id.clone()));
     };
 
     view! {
@@ -201,6 +230,7 @@ pub fn App() -> impl IntoView {
                                 key=|todo| todo.id.clone()
                                 children={
                                     let toggle_todo = toggle_todo.clone();
+                                    let delete_todo = delete_todo.clone();
                                     move |todo| {
                                     view! {
                                         <label class="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 transition hover:border-cyan-300/30 hover:bg-white/[0.06]">
@@ -229,6 +259,20 @@ pub fn App() -> impl IntoView {
                                                     {format!("#{}", todo.id.clone())}
                                                 </p>
                                             </div>
+                                            <button
+                                                class="shrink-0 rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-rose-200 transition hover:border-rose-300/40 hover:bg-rose-400/20"
+                                                type="button"
+                                                on:click={
+                                                    let mut delete_todo = delete_todo.clone();
+                                                    let todo = todo.clone();
+                                                    move |ev| {
+                                                        ev.stop_propagation();
+                                                        delete_todo(&todo);
+                                                    }
+                                                }
+                                            >
+                                                "Delete"
+                                            </button>
                                         </label>
                                     }
                                 }}
