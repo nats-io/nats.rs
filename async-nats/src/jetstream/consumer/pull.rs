@@ -23,7 +23,46 @@ use time::{serde::rfc3339, OffsetDateTime};
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
 use std::{future, pin::Pin, task::Poll, time::Duration};
-use tokio::{task::JoinHandle, time::Sleep};
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::{
+    spawn as tokio_spawn, task::JoinHandle, time::sleep as tokio_sleep,
+    time::timeout as tokio_timeout, time::Sleep,
+};
+
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::{sleep as tokio_sleep, timeout as tokio_timeout, Sleep};
+
+#[cfg(target_arch = "wasm32")]
+struct JoinHandle<T> {
+    abort_handle: futures::future::AbortHandle,
+    _marker: std::marker::PhantomData<T>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<T> JoinHandle<T> {
+    fn abort(&self) {
+        self.abort_handle.abort();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn tokio_spawn<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: std::future::Future<Output = ()> + 'static,
+    F::Output: 'static,
+{
+    let (future, abort_handle) = futures::future::abortable(future);
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = future.await;
+    });
+
+    JoinHandle {
+        abort_handle,
+        _marker: std::marker::PhantomData,
+    }
+}
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -347,11 +386,9 @@ impl Batch {
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch.clone(), inbox.clone()).await?;
 
-        let sleep = batch.expires.map(|expires| {
-            Box::pin(tokio::time::sleep(
-                expires.saturating_add(Duration::from_secs(5)),
-            ))
-        });
+        let sleep = batch
+            .expires
+            .map(|expires| Box::pin(tokio_sleep(expires.saturating_add(Duration::from_secs(5)))));
 
         Ok(Batch {
             pending_messages: batch.batch,
@@ -478,7 +515,7 @@ impl futures_util::Stream for Sequence {
                         subscriber,
                         context,
                         terminated: false,
-                        timeout: Some(Box::pin(tokio::time::sleep(Duration::from_secs(60)))),
+                        timeout: Some(Box::pin(tokio_sleep(Duration::from_secs(60)))),
                     })
                 }));
 
@@ -893,7 +930,7 @@ pub struct Stream {
     pending_request: bool,
     task_handle: JoinHandle<()>,
     terminated: bool,
-    heartbeat_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
+    heartbeat_timeout: Option<Pin<Box<Sleep>>>,
     started: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -923,7 +960,7 @@ impl Stream {
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-        let task_handle = tokio::task::spawn({
+        let task_handle = tokio_spawn({
             let batch = batch_config.clone();
             let consumer = consumer.clone();
             let mut context = consumer.context.clone();
@@ -938,7 +975,7 @@ impl Stream {
                             if expires.is_zero() {
                                 Either::Left(future::pending())
                             } else {
-                                Either::Right(tokio::time::sleep(
+                                Either::Right(tokio_sleep(
                                     expires.saturating_add(Duration::from_secs(5)),
                                 ))
                             }
@@ -1114,7 +1151,7 @@ impl futures_util::Stream for Stream {
             let timeout = self.batch_config.idle_heartbeat.saturating_mul(2);
             match self
                 .heartbeat_timeout
-                .get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)))
+                .get_or_insert_with(|| Box::pin(tokio_sleep(timeout)))
                 .poll_unpin(cx)
             {
                 Poll::Ready(_) => {
@@ -2769,7 +2806,7 @@ async fn recreate_consumer_stream(
     let config = config.to_owned();
     trace!("delete old consumer before creating new one");
 
-    tokio::time::timeout(
+    tokio_timeout(
         Duration::from_secs(5),
         context.delete_consumer_from_stream(consumer_name, stream_name),
     )
@@ -2786,7 +2823,7 @@ async fn recreate_consumer_stream(
         }
     };
     trace!("create the new ordered consumer for sequence {}", sequence);
-    let consumer = tokio::time::timeout(
+    let consumer = tokio_timeout(
         Duration::from_secs(5),
         context.create_consumer_on_stream(
             jetstream::consumer::pull::OrderedConfig {
@@ -2807,7 +2844,7 @@ async fn recreate_consumer_stream(
     };
 
     trace!("create iterator");
-    let stream = tokio::time::timeout(
+    let stream = tokio_timeout(
         Duration::from_secs(5),
         Stream::stream(
             BatchConfig {

@@ -43,6 +43,12 @@ use std::{sync::atomic::Ordering, time::Duration};
 use time::{serde::rfc3339, OffsetDateTime};
 use tracing::{debug, trace};
 
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::{time::sleep as tokio_sleep, time::timeout as tokio_timeout, time::Sleep};
+
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::{sleep as tokio_sleep, timeout as tokio_timeout, Sleep};
+
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
 
 impl Consumer<Config> {
@@ -118,7 +124,7 @@ pub struct Messages {
     context: Context,
     subscriber: Subscriber,
     config: Config,
-    heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
+    heartbeat_sleep: Option<Pin<Box<Sleep>>>,
 }
 
 impl futures_util::Stream for Messages {
@@ -129,7 +135,7 @@ impl futures_util::Stream for Messages {
             let heartbeat_sleep = self.config.idle_heartbeat.saturating_mul(2);
             match self
                 .heartbeat_sleep
-                .get_or_insert_with(|| Box::pin(tokio::time::sleep(heartbeat_sleep)))
+                .get_or_insert_with(|| Box::pin(tokio_sleep(heartbeat_sleep)))
                 .poll_unpin(cx)
             {
                 Poll::Ready(_) => {
@@ -537,7 +543,7 @@ pub struct Ordered {
     subscriber_future: Option<BoxFuture<'static, Result<Subscriber, ConsumerRecreateError>>>,
     stream_sequence: Arc<AtomicU64>,
     consumer_sequence: Arc<AtomicU64>,
-    heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
+    heartbeat_sleep: Option<Pin<Box<Sleep>>>,
     state: tokio::sync::watch::Receiver<State>,
     last_known_state: State,
     state_change_future:
@@ -556,7 +562,7 @@ impl futures_util::Stream for Ordered {
                 && self
                     .heartbeat_sleep
                     .get_or_insert_with(|| {
-                        Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
+                        Box::pin(tokio_sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
                     })
                     .poll_unpin(cx)
                     .is_ready()
@@ -870,7 +876,7 @@ async fn recreate_ephemeral_consumer(
     };
 
     let config = config.clone();
-    tokio::time::timeout(
+    tokio_timeout(
         Duration::from_secs(5),
         context.create_consumer_on_stream(
             jetstream::consumer::push::OrderedConfig {
