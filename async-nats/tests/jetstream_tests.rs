@@ -22,6 +22,7 @@ pub struct AccountInfo {
     pub consumers: i64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 mod jetstream {
 
     #[cfg(feature = "server_2_10")]

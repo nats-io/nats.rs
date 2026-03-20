@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(not(target_arch = "wasm32"))]
 mod client {
     use async_nats::client::Request;
     use async_nats::connection::State;

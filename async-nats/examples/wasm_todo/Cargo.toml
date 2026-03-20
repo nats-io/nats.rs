@@ -6,10 +6,6 @@ authors = ["Ramon Berrutti"]
 description = "A simple todo app using async-nats and WebAssembly"
 license = "MIT"
 
-[profile.release]
-codegen-units = 1
-lto = true
-
 [dependencies]
 console_error_panic_hook = "0.1.7"
 leptos = { version = "0.8.17", features = ["csr"] }
