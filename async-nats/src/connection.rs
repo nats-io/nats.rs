@@ -1465,7 +1465,7 @@ mod read_op {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod write_op {
     use std::sync::Arc;
 
