@@ -12,9 +12,9 @@
 // limitations under the License.
 
 use crate::connector::ConnectorOptions;
+use crate::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use crate::tls;
 use rustls_pki_types::pem::PemObject;
-use rustls_webpki::types::{CertificateDer, PrivateKeyDer};
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
