@@ -470,7 +470,7 @@ impl Connector {
             );
             let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
 
-            let domain = rustls_webpki::types::ServerName::try_from(server_addr.host())
+            let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
             let tls_stream = tls_connector
