@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "service")]
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 mod service {
     use async_nats::client::PublishErrorKind;
     use async_nats::service::{self, Info, ServiceExt, Stats};

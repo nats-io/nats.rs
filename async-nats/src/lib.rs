@@ -218,15 +218,24 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
+use tokio::time::Duration;
 use url::{Host, Url};
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::{interval, Interval, MissedTickBehavior};
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::{interval, Interval, MissedTickBehavior};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::sync::mpsc;
-use tokio::task;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::spawn as tokio_spawn;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as tokio_spawn;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -238,6 +247,7 @@ const MULTIPLEXER_SID: u64 = 0;
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
 /// must be provided using `Options::tls_client_config`.
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
@@ -259,7 +269,6 @@ pub use client::{
 };
 pub use options::{AuthError, ConnectOptions};
 
-#[cfg(feature = "crypto")]
 #[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
 pub mod error;
@@ -274,6 +283,7 @@ pub mod message;
 pub mod service;
 pub mod status;
 pub mod subject;
+#[cfg(not(target_arch = "wasm32"))]
 mod tls;
 
 pub use message::Message;
@@ -1005,6 +1015,7 @@ impl ConnectionHandler {
 /// # Ok(())
 /// # }
 /// ```
+#[cfg(any(not(target_arch = "wasm32"), feature = "websockets"))]
 pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
@@ -1020,11 +1031,17 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let mut connector = Connector::new(
         addrs,
         ConnectorOptions {
+            #[cfg(not(target_arch = "wasm32"))]
             tls_required: options.tls_required,
+            #[cfg(not(target_arch = "wasm32"))]
             certificates: options.certificates,
+            #[cfg(not(target_arch = "wasm32"))]
             client_key: options.client_key,
+            #[cfg(not(target_arch = "wasm32"))]
             client_cert: options.client_cert,
+            #[cfg(not(target_arch = "wasm32"))]
             tls_client_config: options.tls_client_config,
+            #[cfg(not(target_arch = "wasm32"))]
             tls_first: options.tls_first,
             auth: options.auth,
             no_echo: options.no_echo,
@@ -1036,6 +1053,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             reconnect_delay_callback: options.reconnect_delay_callback,
             auth_callback: options.auth_callback,
             max_reconnects: options.max_reconnects,
+            #[cfg(not(target_arch = "wasm32"))]
             local_address: options.local_address,
         },
         events_tx,
@@ -1069,7 +1087,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.skip_subject_validation,
     );
 
-    task::spawn(async move {
+    tokio_spawn(async move {
         while let Some(event) = events_rx.recv().await {
             tracing::info!("event: {}", event);
             if let Some(event_callback) = &options.event_callback {
@@ -1078,7 +1096,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move {
+    tokio_spawn(async move {
         if connection.is_none() && options.retry_on_initial_connect {
             let (info, connection_ok) = match connector.connect().await {
                 Ok((info, connection)) => (info, connection),
@@ -1192,6 +1210,7 @@ impl fmt::Display for Event {
 /// .await?;
 /// # Ok(())
 /// # }
+#[cfg(any(not(target_arch = "wasm32"), feature = "websockets"))]
 pub async fn connect<A: ToServerAddrs>(addrs: A) -> Result<Client, ConnectError> {
     connect_with_options(addrs, ConnectOptions::default()).await
 }
@@ -1390,7 +1409,7 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
 impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
-        tokio::spawn({
+        tokio_spawn({
             let sender = self.sender.clone();
             let sid = self.sid;
             async move {
@@ -1521,6 +1540,7 @@ pub struct ConnectInfo {
     pub protocol: Protocol,
 
     /// Indicates whether the client requires an SSL connection.
+    #[cfg(not(target_arch = "wasm32"))]
     pub tls_required: bool,
 
     /// Connection username (if `auth_required` is set)
@@ -1656,6 +1676,7 @@ impl ServerAddr {
     }
 
     /// Return the sockets from resolving the server address.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn socket_addrs(&self) -> io::Result<impl Iterator<Item = SocketAddr> + '_> {
         tokio::net::lookup_host((self.host(), self.port())).await
     }
