@@ -1183,6 +1183,135 @@ mod client {
     }
 
     #[tokio::test]
+    async fn subject_validation_rejects_bad_subjects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // publish should reject a subject with spaces
+        client
+            .publish("bad subject", "data".into())
+            .await
+            .expect_err("publish should reject subject with spaces");
+
+        // subscribe should reject a subject with spaces
+        client
+            .subscribe("bad subject")
+            .await
+            .expect_err("subscribe should reject subject with spaces");
+
+        // publish_with_reply should reject an invalid reply subject
+        client
+            .publish_with_reply("valid", "bad reply", "data".into())
+            .await
+            .expect_err("publish_with_reply should reject reply subject with spaces");
+
+        // request should also reject a subject with spaces
+        let err = client
+            .request("bad subject", "data".into())
+            .await
+            .expect_err("request should reject subject with spaces");
+        // Verify it's actually a validation error, not a timeout or no-responders error
+        assert_ne!(
+            err.kind(),
+            RequestErrorKind::TimedOut,
+            "expected a subject validation error, got timeout: {err:?}"
+        );
+        assert_ne!(
+            err.kind(),
+            RequestErrorKind::NoResponders,
+            "expected a subject validation error, got no-responders: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_validates_subject() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // request should reject a subject with spaces
+        let err = client
+            .request("bad subject", "data".into())
+            .await
+            .expect_err("request should reject subject with spaces");
+        assert_eq!(err.kind(), RequestErrorKind::InvalidSubject);
+
+        // request_with_headers should reject a subject with spaces
+        let err = client
+            .request_with_headers("bad subject", async_nats::HeaderMap::new(), "data".into())
+            .await
+            .expect_err("request_with_headers should reject subject with spaces");
+        assert_eq!(err.kind(), RequestErrorKind::InvalidSubject);
+    }
+
+    #[tokio::test]
+    async fn queue_subscribe_validates_queue_group() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // queue_subscribe should reject a queue group with spaces
+        client
+            .queue_subscribe("events", "bad group".into())
+            .await
+            .expect_err("queue_subscribe should reject queue group with spaces");
+
+        // queue_subscribe should reject a queue group with CRLF
+        client
+            .queue_subscribe("events", "bad\r\ngroup".into())
+            .await
+            .expect_err("queue_subscribe should reject queue group with CRLF");
+
+        // queue_subscribe should reject a queue group with tab
+        client
+            .queue_subscribe("events", "bad\tgroup".into())
+            .await
+            .expect_err("queue_subscribe should reject queue group with tab");
+
+        // queue_subscribe should reject an empty queue group
+        client
+            .queue_subscribe("events", "".into())
+            .await
+            .expect_err("queue_subscribe should reject empty queue group");
+
+        // valid queue group should succeed
+        client
+            .queue_subscribe("events", "workers".into())
+            .await
+            .expect("queue_subscribe should accept valid queue group");
+    }
+
+    #[tokio::test]
+    async fn skip_subject_validation_allows_bad_publish_subjects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::ConnectOptions::new()
+            .skip_subject_validation(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // Publish validation is skippable — double dots are allowed through.
+        client
+            .publish("foo..bar", "data".into())
+            .await
+            .expect("publish should allow double dots when validation is skipped");
+    }
+
+    #[tokio::test]
+    async fn skip_subject_validation_still_validates_subscribe() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::ConnectOptions::new()
+            .skip_subject_validation(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // Subscribe validation always runs (matching Go/Java behavior).
+        client
+            .subscribe("foo..bar")
+            .await
+            .expect_err("subscribe should reject double dots even when skip is enabled");
+    }
+
+    #[tokio::test]
     async fn drain_subscription_deadlock() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
