@@ -79,11 +79,9 @@ mod websockets {
 
 #[cfg(all(target_arch = "wasm32", feature = "websockets"))]
 mod websockets {
-    use async_nats::jetstream;
-    use bytes::Bytes;
     use futures_util::StreamExt;
-    use std::str::from_utf8;
     use wasm_bindgen_test::*;
+    use wasmtimer::tokio::sleep;
 
     wasm_bindgen_test_configure!(run_in_browser);
 
@@ -91,9 +89,11 @@ mod websockets {
     async fn core() {
         let client = async_nats::ConnectOptions::new()
             .retry_on_initial_connect()
-            .connect("ws://localhost:8444")
+            .connect("ws://127.0.0.1:8444")
             .await
             .unwrap();
+
+        sleep(std::time::Duration::from_secs(2)).await;
 
         // Simple pub/sub
         let mut sub = client.subscribe("foo").await.unwrap();
@@ -103,11 +103,17 @@ mod websockets {
 
     #[wasm_bindgen_test]
     async fn kv() {
+        use async_nats::jetstream;
+        use bytes::Bytes;
+        use std::str::from_utf8;
+
         let client = async_nats::ConnectOptions::new()
             .retry_on_initial_connect()
-            .connect("ws://localhost:8444")
+            .connect("ws://127.0.0.1:8444")
             .await
             .unwrap();
+
+        sleep(std::time::Duration::from_secs(2)).await;
 
         let js = jetstream::new(client);
         let kv = js
