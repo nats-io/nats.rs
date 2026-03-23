@@ -371,8 +371,8 @@ jobs:
         with:
           go-version: '1.25'
       - name: Install nats-server
-        run: go install github.com/nats-io/nats-server/v2@main
-      - name: Install stable Rust
+        run: go install github.com/nats-io/nats-server/v2@v2.12.5
+      - name: Install stable wasm32-unknown-unknown
         id: install-rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -386,16 +386,24 @@ jobs:
       - name: Install wasm-pack
         if: steps.cache-wasm-pack.outputs.cache-hit != 'true'
         run: cargo install wasm-pack
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli
       - name: Cache the build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
           cache-on-failure: true
           cache-targets: wasm32-unknown-unknown
-      - name: Start nats-server
-        run: nats-server --config tests/configs/ws.conf &
+      # - uses: browser-actions/setup-chrome@v2
+      #   name: Set up chromedriver
+      #   with:
+      #     install-chromedriver: true
+      #     install-dependencies: true
       - name: Run wasm tests
         env:
           RUST_BACKTRACE: 1
+          WASM_BINDGEN_TEST_WEBDRIVER_JSON: >-
+            {"goog:chromeOptions":{"args":["--no-sandbox","--disable-dev-shm-usage","-disable-gpu"]}}
         run: |
+          nats-server --config tests/configs/ws.conf &
           wasm-pack test --headless --chrome --test websocket_test --features websockets -- websockets --nocapture

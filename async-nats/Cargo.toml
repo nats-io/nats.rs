@@ -75,6 +75,7 @@ jsonschema = "0.17.1"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+criterion =  { version = "0.5", default-features = false, features = ["async_futures"] }
 wasm-bindgen-test = "0.3"
 
 # for -Z minimal-versions
