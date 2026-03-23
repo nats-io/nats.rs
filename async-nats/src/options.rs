@@ -642,8 +642,10 @@ impl ConnectOptions {
         self
     }
 
-    /// Sets a timeout for the underlying TcpStream connection to avoid hangs and deadlocks.
-    /// Default is set to 5 seconds.
+    /// Sets a timeout for the full connection establishment and handshake to avoid
+    /// hangs and deadlocks. This includes TCP/WebSocket connection, TLS setup,
+    /// waiting for the server INFO message, sending CONNECT/PING, and receiving
+    /// the initial server PONG response. Default is set to 5 seconds.
     ///
     /// # Examples
     /// ```no_run

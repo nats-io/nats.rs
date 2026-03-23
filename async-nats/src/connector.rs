@@ -208,31 +208,27 @@ impl Connector {
                         return Ok((server_info, connection));
                     }
 
-                    Ok(Err(inner)) => {
-                        match inner.kind() {
-                            ConnectErrorKind::AuthorizationViolation
-                            | ConnectErrorKind::Authentication => {
-                                return Err(inner);
-                            }
-                            _ => {
-                                tracing::debug!(
-                                    server = ?server_addr,
-                                    error = %inner,
-                                    "connection attempt failed"
-                                );
-                                error.replace(inner);
-                            }
+                    Ok(Err(inner)) => match inner.kind() {
+                        ConnectErrorKind::AuthorizationViolation
+                        | ConnectErrorKind::Authentication => {
+                            return Err(inner);
                         }
-                    }
+                        _ => {
+                            tracing::debug!(
+                                server = ?server_addr,
+                                error = %inner,
+                                "connection attempt failed"
+                            );
+                            error.replace(inner);
+                        }
+                    },
 
                     Err(_) => {
                         tracing::debug!(
                             server = ?server_addr,
                             "connection handshake timed out"
                         );
-                        error.replace(ConnectError::new(
-                            crate::ConnectErrorKind::TimedOut,
-                        ));
+                        error.replace(ConnectError::new(crate::ConnectErrorKind::TimedOut));
                     }
                 };
             }
@@ -262,9 +258,7 @@ impl Connector {
                     })?
                     .connect()
                     .await
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
-                    })?;
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
 
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
@@ -284,9 +278,7 @@ impl Connector {
                     })?
                     .connect()
                     .await
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
-                    })?;
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
                 let con = WebSocketAdapter::new(ws.0);
                 Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
@@ -427,17 +419,13 @@ impl Connector {
                         }
                         Err(_) => {
                             tracing::error!("failed to sign nonce with nkey");
-                            return Err(ConnectError::new(
-                                crate::ConnectErrorKind::Authentication,
-                            ));
+                            return Err(ConnectError::new(crate::ConnectErrorKind::Authentication));
                         }
                     };
                 }
                 Err(_) => {
                     tracing::error!("failed to create key pair from nkey seed");
-                    return Err(ConnectError::new(
-                        crate::ConnectErrorKind::Authentication,
-                    ));
+                    return Err(ConnectError::new(crate::ConnectErrorKind::Authentication));
                 }
             }
         }
@@ -452,9 +440,7 @@ impl Connector {
                     }
                     Err(_) => {
                         tracing::error!("failed to sign nonce with JWT callback");
-                        return Err(ConnectError::new(
-                            crate::ConnectErrorKind::Authentication,
-                        ));
+                        return Err(ConnectError::new(crate::ConnectErrorKind::Authentication));
                     }
                 }
             }
@@ -466,10 +452,7 @@ impl Connector {
                 .await
                 .map_err(|err| {
                     tracing::error!(error = %err, "auth callback failed");
-                    ConnectError::with_source(
-                        crate::ConnectErrorKind::Authentication,
-                        err,
-                    )
+                    ConnectError::with_source(crate::ConnectErrorKind::Authentication, err)
                 })?;
             connect_info.user = auth.username;
             connect_info.pass = auth.password;
@@ -483,12 +466,8 @@ impl Connector {
             #[cfg(not(feature = "nkeys"))]
             {
                 if auth.signature.is_some() {
-                    tracing::error!(
-                        "signature authentication requires 'nkeys' feature"
-                    );
-                    return Err(ConnectError::new(
-                        crate::ConnectErrorKind::Authentication,
-                    ));
+                    tracing::error!("signature authentication requires 'nkeys' feature");
+                    return Err(ConnectError::new(crate::ConnectErrorKind::Authentication));
                 }
                 connect_info.signature = None;
             }
@@ -498,9 +477,7 @@ impl Connector {
 
         // Send CONNECT + PING, then wait for PONG.
         connection
-            .easy_write_and_flush(
-                [ClientOp::Connect(connect_info), ClientOp::Ping].iter(),
-            )
+            .easy_write_and_flush([ClientOp::Connect(connect_info), ClientOp::Ping].iter())
             .await?;
 
         match connection.read_op().await? {
@@ -514,10 +491,7 @@ impl Connector {
                 }
                 err => {
                     tracing::error!(error = %err, "server error during connection");
-                    Err(ConnectError::with_source(
-                        crate::ConnectErrorKind::Io,
-                        err,
-                    ))
+                    Err(ConnectError::with_source(crate::ConnectErrorKind::Io, err))
                 }
             },
             Some(_) => Ok((*info, connection)),
