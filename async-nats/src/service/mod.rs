@@ -756,6 +756,34 @@ impl Request {
     /// # }
     /// ```
     pub async fn respond(&self, response: Result<Bytes, error::Error>) -> Result<(), PublishError> {
+        self.respond_with_headers(response, None).await
+    }
+
+    /// Sends response for the request with optional headers.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::service::ServiceExt;
+    /// use futures_util::StreamExt;
+    /// # let client = async_nats::connect("demo.nats.io").await?;
+    /// # let mut service = client
+    /// #    .service_builder().start("serviceA", "1.0.0.1").await?;
+    /// let mut endpoint = service.endpoint("endpoint").await?;
+    /// let request = endpoint.next().await.unwrap();
+    /// let mut headers = async_nats::HeaderMap::new();
+    /// headers.insert("x-success", "true");
+    /// request.respond_with_headers(Ok("hello".into()), Some(headers)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn respond_with_headers(
+        &self,
+        response: Result<Bytes, error::Error>,
+        headers: Option<HeaderMap>,
+    ) -> Result<(), PublishError> {
         let reply = match self.message.reply.clone() {
             None => {
                 return Err(PublishError::with_source(
@@ -766,7 +794,10 @@ impl Request {
             Some(subject) => subject,
         };
         let result = match response {
-            Ok(payload) => self.client.publish(reply, payload).await,
+            Ok(payload) => match headers {
+                None => self.client.publish(reply, payload).await,
+                Some(h) => self.client.publish_with_headers(reply, h, payload).await,
+            },
             Err(err) => {
                 self.stats
                     .lock()
@@ -778,11 +809,15 @@ impl Request {
                         stats.errors += 1;
                     })
                     .or_default();
-                let mut headers = HeaderMap::new();
-                headers.insert(NATS_SERVICE_ERROR, err.status.as_str());
-                headers.insert(NATS_SERVICE_ERROR_CODE, err.code.to_string().as_str());
+
+                let mut headers_map = match headers {
+                    Some(h) => h,
+                    None => HeaderMap::new(),
+                };
+                headers_map.insert(NATS_SERVICE_ERROR, err.status.as_str());
+                headers_map.insert(NATS_SERVICE_ERROR_CODE, err.code.to_string().as_str());
                 self.client
-                    .publish_with_headers(reply, headers, "".into())
+                    .publish_with_headers(reply, headers_map, "".into())
                     .await
             }
         };
