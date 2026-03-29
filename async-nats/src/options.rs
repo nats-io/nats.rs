@@ -21,9 +21,9 @@ use base64::engine::Engine;
 use futures_util::Future;
 use std::fmt::Formatter;
 use std::net::SocketAddr;
-use std::{fmt, path::PathBuf, pin::Pin, time::Duration};
 #[cfg(feature = "nkeys")]
-use std::{path::Path, sync::Arc};
+use std::path::Path;
+use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 #[cfg(feature = "nkeys")]
 use tokio::io;
 use tokio_rustls::rustls;
@@ -41,6 +41,7 @@ use tokio_rustls::rustls;
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Clone)]
 pub struct ConnectOptions {
     pub(crate) name: Option<String>,
     pub(crate) no_echo: bool,
@@ -63,7 +64,7 @@ pub struct ConnectOptions {
     pub(crate) ignore_discovered_servers: bool,
     pub(crate) retain_servers_order: bool,
     pub(crate) read_buffer_capacity: u16,
-    pub(crate) reconnect_delay_callback: Box<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
+    pub(crate) reconnect_delay_callback: Arc<dyn Fn(usize) -> Duration + Send + Sync + 'static>,
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) skip_subject_validation: bool,
     pub(crate) local_address: Option<SocketAddr>,
@@ -115,7 +116,7 @@ impl Default for ConnectOptions {
             ignore_discovered_servers: false,
             retain_servers_order: false,
             read_buffer_capacity: 65535,
-            reconnect_delay_callback: Box::new(|attempts| {
+            reconnect_delay_callback: Arc::new(|attempts| {
                 connector::reconnect_delay_callback_default(attempts)
             }),
             auth: Default::default(),
@@ -203,7 +204,7 @@ impl ConnectOptions {
         Fut: Future<Output = std::result::Result<Auth, AuthError>> + 'static + Send + Sync,
     {
         let mut options = ConnectOptions::new();
-        options.auth_callback = Some(CallbackArg1::<Vec<u8>, Result<Auth, AuthError>>(Box::new(
+        options.auth_callback = Some(CallbackArg1::<Vec<u8>, Result<Auth, AuthError>>(Arc::new(
             move |nonce| Box::pin(callback(nonce)),
         )));
         options
@@ -390,7 +391,7 @@ impl ConnectOptions {
     {
         let sign_cb = Arc::new(sign_cb);
 
-        let jwt_sign_callback = CallbackArg1(Box::new(move |nonce: String| {
+        let jwt_sign_callback = CallbackArg1(Arc::new(move |nonce: String| {
             let sign_cb = sign_cb.clone();
             Box::pin(async move {
                 let sig = sign_cb(nonce.as_bytes().to_vec())
@@ -747,7 +748,7 @@ impl ConnectOptions {
         F: Fn(Event) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + 'static + Send + Sync,
     {
-        self.event_callback = Some(CallbackArg1::<Event, ()>(Box::new(move |event| {
+        self.event_callback = Some(CallbackArg1::<Event, ()>(Arc::new(move |event| {
             Box::pin(cb(event))
         })));
         self
@@ -773,7 +774,7 @@ impl ConnectOptions {
     where
         F: Fn(usize) -> Duration + Send + Sync + 'static,
     {
-        self.reconnect_delay_callback = Box::new(cb);
+        self.reconnect_delay_callback = Arc::new(cb);
         self
     }
 
@@ -994,8 +995,9 @@ impl ConnectOptions {
 }
 
 pub(crate) type AsyncCallbackArg1<A, T> =
-    Box<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
+    Arc<dyn Fn(A) -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
 
+#[derive(Clone)]
 pub(crate) struct CallbackArg1<A, T>(AsyncCallbackArg1<A, T>);
 
 impl<A, T> CallbackArg1<A, T> {
