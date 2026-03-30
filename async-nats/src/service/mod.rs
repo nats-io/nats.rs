@@ -756,10 +756,10 @@ impl Request {
     /// # }
     /// ```
     pub async fn respond(&self, response: Result<Bytes, error::Error>) -> Result<(), PublishError> {
-        self.respond_with_headers(response, None).await
+        self.respond_with_headers(response, HeaderMap::new()).await
     }
 
-    /// Sends response for the request with optional headers.
+    /// Sends response for the request with headers.
     ///
     /// # Examples
     ///
@@ -776,7 +776,7 @@ impl Request {
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("x-success", "true");
     /// request
-    ///     .respond_with_headers(Ok("hello".into()), Some(headers))
+    ///     .respond_with_headers(Ok("hello".into()), headers)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -784,7 +784,7 @@ impl Request {
     pub async fn respond_with_headers(
         &self,
         response: Result<Bytes, error::Error>,
-        headers: Option<HeaderMap>,
+        mut headers: HeaderMap,
     ) -> Result<(), PublishError> {
         let reply = match self.message.reply.clone() {
             None => {
@@ -796,10 +796,15 @@ impl Request {
             Some(subject) => subject,
         };
         let result = match response {
-            Ok(payload) => match headers {
-                None => self.client.publish(reply, payload).await,
-                Some(h) => self.client.publish_with_headers(reply, h, payload).await,
-            },
+            Ok(payload) => {
+                if headers.is_empty() {
+                    self.client.publish(reply, payload).await
+                } else {
+                    self.client
+                        .publish_with_headers(reply, headers, payload)
+                        .await
+                }
+            }
             Err(err) => {
                 self.stats
                     .lock()
@@ -811,15 +816,10 @@ impl Request {
                         stats.errors += 1;
                     })
                     .or_default();
-
-                let mut headers_map = match headers {
-                    Some(h) => h,
-                    None => HeaderMap::new(),
-                };
-                headers_map.insert(NATS_SERVICE_ERROR, err.status.as_str());
-                headers_map.insert(NATS_SERVICE_ERROR_CODE, err.code.to_string().as_str());
+                headers.insert(NATS_SERVICE_ERROR, err.status.as_str());
+                headers.insert(NATS_SERVICE_ERROR_CODE, err.code.to_string().as_str());
                 self.client
-                    .publish_with_headers(reply, headers_map, "".into())
+                    .publish_with_headers(reply, headers, "".into())
                     .await
             }
         };
