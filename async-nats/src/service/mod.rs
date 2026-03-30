@@ -775,7 +775,9 @@ impl Request {
     /// let request = endpoint.next().await.unwrap();
     /// let mut headers = async_nats::HeaderMap::new();
     /// headers.insert("x-success", "true");
-    /// request.respond_with_headers(Ok("hello".into()), Some(headers)).await?;
+    /// request
+    ///     .respond_with_headers(Ok("hello".into()), Some(headers))
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
