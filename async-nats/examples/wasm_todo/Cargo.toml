@@ -1,0 +1,18 @@
+[package]
+name = "wasm_todo"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ramon Berrutti"]
+description = "A simple todo app using async-nats and WebAssembly"
+license = "MIT"
+
+[dependencies]
+console_error_panic_hook = "0.1.7"
+leptos = { version = "0.8.17", features = ["csr"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+nuid = "0.6"
+chrono = { version = "0.4", features = ["serde"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+async-nats = { path = "../../" }

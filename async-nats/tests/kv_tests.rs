@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "kv")]
+#[cfg(all(feature = "kv", not(target_arch = "wasm32")))]
 mod kv {
     use std::{collections::HashMap, error::Error, str::from_utf8, time::Duration};
 

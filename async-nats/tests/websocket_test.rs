@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "websockets")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
 mod websockets {
     use std::path::PathBuf;
 
@@ -74,5 +74,63 @@ mod websockets {
         let mut sub = client.subscribe("foo").await.unwrap();
         client.publish("foo", "hello".into()).await.unwrap();
         assert_eq!(sub.next().await.unwrap().payload, "hello");
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+mod websockets {
+    use futures_util::StreamExt;
+    use wasm_bindgen_test::*;
+    use wasmtimer::tokio::sleep;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    async fn core() {
+        let client = async_nats::ConnectOptions::new()
+            .retry_on_initial_connect()
+            .connect("ws://127.0.0.1:8444")
+            .await
+            .unwrap();
+
+        sleep(std::time::Duration::from_secs(2)).await;
+
+        // Simple pub/sub
+        let mut sub = client.subscribe("foo").await.unwrap();
+        client.publish("foo", "hello".into()).await.unwrap();
+        assert_eq!(sub.next().await.unwrap().payload, "hello");
+    }
+
+    #[wasm_bindgen_test]
+    async fn kv() {
+        use async_nats::jetstream;
+        use bytes::Bytes;
+        use std::str::from_utf8;
+
+        let client = async_nats::ConnectOptions::new()
+            .retry_on_initial_connect()
+            .connect("ws://127.0.0.1:8444")
+            .await
+            .unwrap();
+
+        sleep(std::time::Duration::from_secs(2)).await;
+
+        let js = jetstream::new(client);
+        let kv = js
+            .create_key_value(jetstream::kv::Config {
+                bucket: "kv".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload: Bytes = "data".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
+        let payload: Bytes = "data2".into();
+        kv.put("key", payload.clone()).await.unwrap();
+        let value = kv.get("key").await.unwrap();
+        assert_eq!(from_utf8(&value.unwrap()).unwrap(), payload);
     }
 }

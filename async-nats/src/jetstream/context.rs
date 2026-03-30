@@ -34,10 +34,20 @@ use std::pin::Pin;
 use std::str::from_utf8;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, TryAcquireError};
-use tokio::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::timeout as tokio_timeout;
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::tokio::timeout as tokio_timeout;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::spawn as tokio_spawn;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as tokio_spawn;
 
 use super::consumer::{self, Consumer, FromConsumer, IntoConsumerConfig};
 use super::errors::ErrorCode;
@@ -125,15 +135,15 @@ fn spawn_acker(
     rx: ReceiverStream<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
     ack_timeout: Duration,
     concurrency: Option<usize>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+) {
+    tokio_spawn(async move {
         rx.for_each_concurrent(concurrency, |(subscription, permit)| async move {
-            tokio::time::timeout(ack_timeout, subscription).await.ok();
+            tokio_timeout(ack_timeout, subscription).await.ok();
             drop(permit);
         })
         .await;
         debug!("Acker task exited");
-    })
+    });
 }
 
 use std::marker::PhantomData;
@@ -524,7 +534,7 @@ impl Context {
             })
             .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err));
 
-        tokio::time::timeout(self.timeout, send_fut)
+        tokio_timeout(self.timeout, send_fut)
             .map_err(|_elapsed| PublishError::new(PublishErrorKind::TimedOut))
             .await??;
 
@@ -1865,7 +1875,7 @@ impl Drop for PublishAckFuture {
 
 impl PublishAckFuture {
     async fn next_with_timeout(mut self) -> Result<PublishAck, PublishError> {
-        let next = tokio::time::timeout(self.timeout, self.subscription.take().unwrap())
+        let next = tokio_timeout(self.timeout, self.subscription.take().unwrap())
             .await
             .map_err(|_| PublishError::new(PublishErrorKind::TimedOut))?;
         next.map_or_else(

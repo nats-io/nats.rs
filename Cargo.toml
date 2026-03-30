@@ -4,7 +4,9 @@ resolver = "2"
 
 members = [
   "async-nats",
-  "nats-server"
+  "nats-server",
+  "web",
+  "async-nats/examples/wasm_todo"
 ]
 
 exclude = [

@@ -23,13 +23,25 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-#[cfg(feature = "websockets")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
 use {
     futures_util::{SinkExt, StreamExt},
     pin_project::pin_project,
-    tokio::io::ReadBuf,
     tokio_websockets::WebSocketStream,
 };
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+use {
+    js_sys::{ArrayBuffer, Uint8Array},
+    send_wrapper::SendWrapper,
+    std::sync::Mutex,
+    tokio::sync::{mpsc, oneshot},
+    wasm_bindgen::{closure::Closure, JsCast, JsValue},
+    web_sys::{BinaryType, CloseEvent, Event, MessageEvent, WebSocket},
+};
+
+#[cfg(feature = "websockets")]
+use tokio::io::ReadBuf;
 
 use bytes::{Buf, Bytes, BytesMut};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
@@ -760,7 +772,7 @@ impl Connection {
     }
 }
 
-#[cfg(feature = "websockets")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
 #[pin_project]
 pub(crate) struct WebSocketAdapter<T> {
     #[pin]
@@ -768,7 +780,7 @@ pub(crate) struct WebSocketAdapter<T> {
     pub(crate) read_buf: BytesMut,
 }
 
-#[cfg(feature = "websockets")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
 impl<T> WebSocketAdapter<T> {
     pub(crate) fn new(inner: WebSocketStream<T>) -> Self {
         Self {
@@ -778,7 +790,213 @@ impl<T> WebSocketAdapter<T> {
     }
 }
 
-#[cfg(feature = "websockets")]
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+enum WebSocketState {
+    Connecting,
+    Open,
+    Closed {
+        kind: io::ErrorKind,
+        message: String,
+    },
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+#[derive(Debug, Default)]
+struct WebSocketWakers {
+    read: Option<std::task::Waker>,
+    write: Option<std::task::Waker>,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+#[derive(Debug)]
+struct WebSocketShared {
+    state: Mutex<WebSocketState>,
+    wakers: Mutex<WebSocketWakers>,
+    connect_tx: Mutex<Option<oneshot::Sender<io::Result<()>>>>,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+impl WebSocketShared {
+    fn new(connect_tx: oneshot::Sender<io::Result<()>>) -> Self {
+        Self {
+            state: Mutex::new(WebSocketState::Connecting),
+            wakers: Mutex::new(WebSocketWakers::default()),
+            connect_tx: Mutex::new(Some(connect_tx)),
+        }
+    }
+
+    fn wake_read(&self) {
+        if let Some(waker) = self.wakers.lock().unwrap().read.take() {
+            waker.wake();
+        }
+    }
+
+    fn wake_write(&self) {
+        if let Some(waker) = self.wakers.lock().unwrap().write.take() {
+            waker.wake();
+        }
+    }
+
+    fn register_read(&self, waker: &std::task::Waker) {
+        self.wakers.lock().unwrap().read = Some(waker.clone());
+    }
+
+    fn register_write(&self, waker: &std::task::Waker) {
+        self.wakers.lock().unwrap().write = Some(waker.clone());
+    }
+
+    fn set_open(&self) {
+        *self.state.lock().unwrap() = WebSocketState::Open;
+        if let Some(tx) = self.connect_tx.lock().unwrap().take() {
+            let _ = tx.send(Ok(()));
+        }
+        self.wake_read();
+        self.wake_write();
+    }
+
+    fn set_closed(&self, kind: io::ErrorKind, message: String) {
+        let mut state = self.state.lock().unwrap();
+        if matches!(*state, WebSocketState::Closed { .. }) {
+            return;
+        }
+        *state = WebSocketState::Closed {
+            kind,
+            message: message.clone(),
+        };
+        drop(state);
+
+        if let Some(tx) = self.connect_tx.lock().unwrap().take() {
+            let _ = tx.send(Err(io::Error::new(kind, message.clone())));
+        }
+        self.wake_read();
+        self.wake_write();
+    }
+
+    fn io_error(&self) -> Option<io::Error> {
+        match &*self.state.lock().unwrap() {
+            WebSocketState::Closed { kind, message } => {
+                Some(io::Error::new(*kind, message.clone()))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+pub(crate) struct WebSocketAdapter {
+    inner: SendWrapper<WebSocket>,
+    read_buf: BytesMut,
+    read_rx: mpsc::UnboundedReceiver<io::Result<Vec<u8>>>,
+    shared: std::sync::Arc<WebSocketShared>,
+    _on_open: SendWrapper<Closure<dyn FnMut(Event)>>,
+    _on_error: SendWrapper<Closure<dyn FnMut(Event)>>,
+    _on_close: SendWrapper<Closure<dyn FnMut(CloseEvent)>>,
+    _on_message: SendWrapper<Closure<dyn FnMut(MessageEvent)>>,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+impl Drop for WebSocketAdapter {
+    fn drop(&mut self) {
+        self.inner.set_onopen(None);
+        self.inner.set_onerror(None);
+        self.inner.set_onclose(None);
+        self.inner.set_onmessage(None);
+        let _ = self.inner.close();
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+impl WebSocketAdapter {
+    pub(crate) async fn connect(url: &str) -> io::Result<Self> {
+        let socket = WebSocket::new(url).map_err(websocket_js_error)?;
+        socket.set_binary_type(BinaryType::Arraybuffer);
+
+        let (connect_tx, connect_rx) = oneshot::channel();
+        let shared = std::sync::Arc::new(WebSocketShared::new(connect_tx));
+        let (read_tx, read_rx) = mpsc::unbounded_channel();
+
+        let on_open_shared = shared.clone();
+        let on_open = SendWrapper::new(Closure::wrap(Box::new(move |_event: Event| {
+            on_open_shared.set_open();
+        }) as Box<dyn FnMut(_)>));
+        socket.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+
+        let on_error_shared = shared.clone();
+        let on_error_tx = read_tx.clone();
+        let on_error = SendWrapper::new(Closure::wrap(Box::new(move |_event: Event| {
+            let message = "websocket error".to_string();
+            on_error_shared.set_closed(io::ErrorKind::ConnectionAborted, message.clone());
+            let _ = on_error_tx.send(Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                message,
+            )));
+        }) as Box<dyn FnMut(_)>));
+        socket.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+
+        let on_close_shared = shared.clone();
+        let on_close_tx = read_tx.clone();
+        let on_close = SendWrapper::new(Closure::wrap(Box::new(move |event: CloseEvent| {
+            let message = format!(
+                "WebSocket closed (code {}, clean: {}, reason: {})",
+                event.code(),
+                event.was_clean(),
+                event.reason()
+            );
+            on_close_shared.set_closed(io::ErrorKind::UnexpectedEof, message.clone());
+            let _ = on_close_tx.send(Err(io::Error::new(io::ErrorKind::UnexpectedEof, message)));
+        }) as Box<dyn FnMut(_)>));
+        socket.set_onclose(Some(on_close.as_ref().unchecked_ref()));
+
+        let on_message_shared = shared.clone();
+        let on_message_tx = read_tx;
+        let on_message = SendWrapper::new(Closure::wrap(Box::new(move |event: MessageEvent| {
+            let data = event.data();
+            let payload = if let Some(text) = data.as_string() {
+                Ok(text.into_bytes())
+            } else if let Ok(buffer) = data.dyn_into::<ArrayBuffer>() {
+                Ok(Uint8Array::new(&buffer).to_vec())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported websocket message type",
+                ))
+            };
+
+            let _ = on_message_tx.send(payload);
+            on_message_shared.wake_read();
+        }) as Box<dyn FnMut(_)>));
+        socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+
+        let adapter = Self {
+            inner: SendWrapper::new(socket),
+            read_buf: BytesMut::new(),
+            read_rx,
+            shared,
+            _on_open: on_open,
+            _on_error: on_error,
+            _on_close: on_close,
+            _on_message: on_message,
+        };
+
+        connect_rx.await.map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "websocket connection setup was cancelled",
+            )
+        })??;
+
+        Ok(adapter)
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+fn websocket_js_error(error: JsValue) -> io::Error {
+    let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
+    io::Error::new(io::ErrorKind::Other, message)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
 impl<T> AsyncRead for WebSocketAdapter<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -819,7 +1037,7 @@ where
     }
 }
 
-#[cfg(feature = "websockets")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "websockets"))]
 impl<T> AsyncWrite for WebSocketAdapter<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -857,6 +1075,92 @@ where
             .inner
             .poll_close_unpin(cx)
             .map_err(std::io::Error::other)
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+impl AsyncRead for WebSocketAdapter {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+
+        loop {
+            if !this.read_buf.is_empty() {
+                let len = std::cmp::min(buf.remaining(), this.read_buf.len());
+                buf.put_slice(&this.read_buf.split_to(len));
+                return Poll::Ready(Ok(()));
+            }
+
+            match this.read_rx.poll_recv(cx) {
+                Poll::Ready(Some(Ok(message))) => {
+                    this.read_buf.extend_from_slice(&message);
+                }
+                Poll::Ready(Some(Err(err))) => return Poll::Ready(Err(err)),
+                Poll::Ready(None) => {
+                    return Poll::Ready(Err(this.shared.io_error().unwrap_or_else(|| {
+                        io::Error::new(io::ErrorKind::UnexpectedEof, "WebSocket closed")
+                    })))
+                }
+                Poll::Pending => {
+                    if let Some(err) = this.shared.io_error() {
+                        return Poll::Ready(Err(err));
+                    }
+                    this.shared.register_read(cx.waker());
+                    return Poll::Pending;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "websockets"))]
+impl AsyncWrite for WebSocketAdapter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let this = self.get_mut();
+
+        match this.inner.ready_state() {
+            WebSocket::OPEN => match this.inner.send_with_u8_array(buf) {
+                Ok(()) => Poll::Ready(Ok(buf.len())),
+                Err(err) => Poll::Ready(Err(websocket_js_error(err))),
+            },
+            WebSocket::CONNECTING => {
+                this.shared.register_write(cx.waker());
+                Poll::Pending
+            }
+            _ => Poll::Ready(Err(this.shared.io_error().unwrap_or_else(|| {
+                io::Error::new(io::ErrorKind::BrokenPipe, "WebSocket is not open")
+            }))),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+
+        match this.inner.ready_state() {
+            WebSocket::OPEN => Poll::Ready(Ok(())),
+            WebSocket::CONNECTING => {
+                this.shared.register_write(cx.waker());
+                Poll::Pending
+            }
+            _ => Poll::Ready(Err(this.shared.io_error().unwrap_or_else(|| {
+                io::Error::new(io::ErrorKind::BrokenPipe, "WebSocket is not open")
+            }))),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        match this.inner.close() {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(err) => Poll::Ready(Err(websocket_js_error(err))),
+        }
     }
 }
 
@@ -1161,7 +1465,7 @@ mod read_op {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod write_op {
     use std::sync::Arc;
 
