@@ -22,10 +22,11 @@ use futures_util::Future;
 use std::fmt::Formatter;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
-#[cfg(feature = "nkeys")]
-use std::path::Path;
 #[cfg(all(not(target_arch = "wasm32"), feature = "nkeys"))]
-use std::{fmt, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+use std::{fmt, pin::Pin, sync::Arc, time::Duration};
 #[cfg(feature = "nkeys")]
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
