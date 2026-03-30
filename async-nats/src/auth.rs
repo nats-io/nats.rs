@@ -1,6 +1,6 @@
 use crate::{options::CallbackArg1, AuthError};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Auth {
     pub jwt: Option<String>,
     pub nkey: Option<String>,
