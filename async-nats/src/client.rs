@@ -799,6 +799,35 @@ impl Client {
         Ok(())
     }
 
+    /// Calculates the round trip time between this client and the server by sending a PING and
+    /// waiting for a PONG response.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let rtt = client.rtt().await?;
+    /// println!("server rtt: {:?}", rtt);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rtt(&self) -> Result<std::time::Duration, RttError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let start = std::time::Instant::now();
+
+        self.sender
+            .send(Command::Rtt { sender: tx })
+            .await
+            .map_err(|e| RttError::with_source(RttErrorKind::SendError, e))?;
+
+        rx.await
+            .map_err(|e| RttError::with_source(RttErrorKind::RecvError, e))?;
+
+        Ok(start.elapsed())
+    }
+
     /// Drains all subscriptions, stops any new messages from being published, and flushes any remaining
     /// messages, then closes the connection. Once completed, any streams associated with the
     /// connection and its [Clients](crate::Client) will be closed, and further [crate::Client] commands will fail.
@@ -1098,6 +1127,25 @@ impl Display for FlushErrorKind {
 }
 
 pub type FlushError = Error<FlushErrorKind>;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum RttErrorKind {
+    /// Failed to send the RTT Command to the handler
+    SendError,
+    /// Failed to receive the rtt
+    RecvError,
+}
+
+impl Display for RttErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SendError => write!(f, "failed to send ping request"),
+            Self::RecvError => write!(f, "failed to get rtt"),
+        }
+    }
+}
+
+pub type RttError = Error<RttErrorKind>;
 
 /// Represents statistics for the instance of the client throughout its lifecycle.
 #[derive(Default, Debug)]
