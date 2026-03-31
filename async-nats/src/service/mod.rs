@@ -761,6 +761,12 @@ impl Request {
 
     /// Sends response for the request with headers.
     ///
+    /// On error responses, [Nats-Service-Error][NATS_SERVICE_ERROR] and
+    /// [Nats-Service-Error-Code][NATS_SERVICE_ERROR_CODE] are always set from the provided
+    /// [`error::Error`]. If the provided [HeaderMap] already contains values for either
+    /// of those headers, they will be overriden. All other user-supplied headers
+    /// are preserved.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -960,5 +966,102 @@ mod tests {
 
         assert_eq!(new_group.prefix, "test.v1");
         assert_eq!(new_group.queue_group, "custom_queue");
+    }
+
+    #[tokio::test]
+    async fn test_respond_with_headers_overrides_error_headers() {
+        let server = nats_server::run_basic_server();
+        let client = crate::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .start("test-service", "1.0.0")
+            .await
+            .unwrap();
+
+        let subject = "test.subject";
+        let mut endpoint = service.endpoint(subject).await.unwrap();
+
+        let handler = async {
+            if let Some(request) = endpoint.next().await {
+                let mut resp_headers = HeaderMap::new();
+                resp_headers.insert("x-success", "false");
+                resp_headers.insert(NATS_SERVICE_ERROR, "user-supplied-value");
+                resp_headers.insert(NATS_SERVICE_ERROR_CODE, "999");
+
+                let err = error::Error {
+                    status: "internal-error".to_string(),
+                    code: 500,
+                };
+
+                request
+                    .respond_with_headers(Err(err), resp_headers)
+                    .await
+                    .expect("failed to send response");
+            }
+        };
+
+        let requester = crate::connect(server.client_url()).await.unwrap();
+        let request_fut = async { requester.request(subject, "".into()).await.unwrap() };
+
+        let (_, resp) = tokio::join!(handler, request_fut);
+
+        let headers = resp.headers.expect("expected headers on reply");
+        assert_eq!(headers.get("x-success").unwrap().as_str(), "false");
+        assert_eq!(
+            headers.get(NATS_SERVICE_ERROR).unwrap().as_str(),
+            "internal-error"
+        );
+        assert_eq!(
+            headers.get(NATS_SERVICE_ERROR_CODE).unwrap().as_str(),
+            "500"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_respond_with_headers_preserves_headers_on_success() {
+        let server = nats_server::run_basic_server();
+        let client = crate::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .start("test-service", "1.0.0")
+            .await
+            .unwrap();
+
+        let subject = "test.subject";
+        let mut endpoint = service.endpoint(subject).await.unwrap();
+
+        let handler = async {
+            if let Some(request) = endpoint.next().await {
+                let mut resp_headers = HeaderMap::new();
+                resp_headers.insert("x-success", "false");
+                resp_headers.insert("x-request-id", "req-123");
+                resp_headers.insert(NATS_SERVICE_ERROR, "user-supplied-value");
+                resp_headers.insert(NATS_SERVICE_ERROR_CODE, "999");
+
+                request
+                    .respond_with_headers(Ok("ok".into()), resp_headers)
+                    .await
+                    .unwrap();
+            }
+        };
+
+        let requester = crate::connect(server.client_url()).await.unwrap();
+        let request_fut = async { requester.request(subject, "".into()).await.unwrap() };
+
+        let (_, resp) = tokio::join!(handler, request_fut);
+
+        let headers = resp.headers.expect("expected headers on reply");
+        assert_eq!(headers.get("x-success").unwrap().as_str(), "false");
+        assert_eq!(headers.get("x-request-id").unwrap().as_str(), "req-123");
+        assert_eq!(
+            headers.get(NATS_SERVICE_ERROR).unwrap().as_str(),
+            "user-supplied-value"
+        );
+        assert_eq!(
+            headers.get(NATS_SERVICE_ERROR_CODE).unwrap().as_str(),
+            "999"
+        );
     }
 }
