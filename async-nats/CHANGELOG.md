@@ -1,3 +1,38 @@
+# v0.47.0
+
+This release adds subject validation (with opt-out possibility) and wraps while connect attempt in timeout, making it more robust.
+
+## Added
+* Add Subject Validation by @Jarema in https://github.com/nats-io/nats.rs/pull/1525
+* Add respond_with_headers method to handle responses with custom headers by @giddyos in https://github.com/nats-io/nats.rs/pull/1554
+* Add local_address option to bind client to a specific local IP by @wallyqs in https://github.com/nats-io/nats.rs/pull/1539
+* Implement Clone for ConnectOptions by @MattPatchava in https://github.com/nats-io/nats.rs/pull/1552
+
+## Fixed
+* Fix invalid consumer rate limit json by @Totodore in https://github.com/nats-io/nats.rs/pull/1536
+* Return error instead of panic when reply subject is empty by @liamkinne in https://github.com/nats-io/nats.rs/pull/1514
+* Use proper doc comments by @Xaeroxe in https://github.com/nats-io/nats.rs/pull/1543
+* Fix connection_timeout to cover full NATS handshake by @rahsonaw in https://github.com/nats-io/nats.rs/pull/1544
+
+## Changed
+* Update rustls-native-certs from 0.7 to 0.8 by @FreeMasen in https://github.com/nats-io/nats.rs/pull/1507
+* Remove `once_cell` and use std::sync::LazyLock instead by @Jarema in https://github.com/nats-io/nats.rs/pull/1534
+* Bump bytes crate by @Jarema in https://github.com/nats-io/nats.rs/pull/1540
+* Bump msrv by @Jarema in https://github.com/nats-io/nats.rs/pull/1509
+* Update rustls-webpki to 0.103.10 by @JohnMoon-Voyager in https://github.com/nats-io/nats.rs/pull/1550
+* Update dictionary by @Jarema in https://github.com/nats-io/nats.rs/pull/1556
+
+## New Contributors
+* @FreeMasen made their first contribution in https://github.com/nats-io/nats.rs/pull/1507
+* @Xaeroxe made their first contribution in https://github.com/nats-io/nats.rs/pull/1543
+* @MattPatchava made their first contribution in https://github.com/nats-io/nats.rs/pull/1552
+* @JohnMoon-Voyager made their first contribution in https://github.com/nats-io/nats.rs/pull/1550
+* @giddyos made their first contribution in https://github.com/nats-io/nats.rs/pull/1554
+* @rahsonaw made their first contribution in https://github.com/nats-io/nats.rs/pull/1544
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.46.0...async-nats/v0.47.0
+
+
 # v0.46.0
 
 This release introduces disabled by default feature-gating of features and modules.
