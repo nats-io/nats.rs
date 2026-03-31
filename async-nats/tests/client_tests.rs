@@ -1368,4 +1368,82 @@ mod client {
         // Connection succeeded, meaning the bind to port 19898 worked.
         // If the port was already in use or bind failed, connect would have errored.
     }
+
+    // Tests that connection_timeout covers the full NATS handshake, not just TCP connect.
+    // This verifies the fix for https://github.com/nats-io/nats.rs/issues/1526.
+
+    #[tokio::test]
+    async fn handshake_timeout_no_info() {
+        // Server accepts TCP but never sends INFO — the client should time out.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Accept connections but never write anything (no INFO sent).
+        let handle = tokio::spawn(async move {
+            let (_stream, _peer) = listener.accept().await.unwrap();
+            // Hold the connection open without sending INFO.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let start = Instant::now();
+        let result = ConnectOptions::new()
+            .connection_timeout(Duration::from_millis(500))
+            .connect(format!("nats://127.0.0.1:{}", addr.port()))
+            .await;
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            result.unwrap_err().kind(),
+            ConnectErrorKind::TimedOut,
+            "should time out when server never sends INFO"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout should fire near 500ms, but took {:?}",
+            elapsed,
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn handshake_timeout_no_pong() {
+        // Server accepts TCP and sends INFO, but never responds with PONG
+        // after the client sends CONNECT+PING.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (mut stream, _peer) = listener.accept().await.unwrap();
+            // Send a valid INFO line so the client proceeds past INFO read.
+            let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{},\"max_payload\":1048576}}\r\n", addr.port());
+            tokio::io::AsyncWriteExt::write_all(&mut stream, info.as_bytes())
+                .await
+                .unwrap();
+            // Now hold the connection open without reading CONNECT+PING or sending PONG.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let start = Instant::now();
+        let result = ConnectOptions::new()
+            .connection_timeout(Duration::from_millis(500))
+            .connect(format!("nats://127.0.0.1:{}", addr.port()))
+            .await;
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            result.unwrap_err().kind(),
+            ConnectErrorKind::TimedOut,
+            "should time out when server never sends PONG"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout should fire near 500ms, but took {:?}",
+            elapsed,
+        );
+
+        handle.abort();
+    }
 }
