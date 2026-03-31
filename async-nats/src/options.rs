@@ -13,7 +13,8 @@
 
 use crate::auth::Auth;
 use crate::connector;
-use crate::{Client, ConnectError, Event, ToServerAddrs};
+use crate::connector::{ReconnectToServer, ReconnectToServerCallback, Server};
+use crate::{Client, ConnectError, Event, ServerInfo, ToServerAddrs};
 #[cfg(feature = "nkeys")]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 #[cfg(feature = "nkeys")]
@@ -68,6 +69,7 @@ pub struct ConnectOptions {
     pub(crate) auth_callback: Option<CallbackArg1<Vec<u8>, Result<Auth, AuthError>>>,
     pub(crate) skip_subject_validation: bool,
     pub(crate) local_address: Option<SocketAddr>,
+    pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -123,6 +125,7 @@ impl Default for ConnectOptions {
             auth_callback: None,
             skip_subject_validation: false,
             local_address: None,
+            reconnect_to_server_callback: None,
         }
     }
 }
@@ -777,6 +780,48 @@ impl ConnectOptions {
         F: Fn(usize) -> Duration + Send + Sync + 'static,
     {
         self.reconnect_delay_callback = Arc::new(cb);
+        self
+    }
+
+    /// Sets a callback invoked on each reconnect attempt to select a specific
+    /// server from the pool.
+    ///
+    /// The callback receives a snapshot of available servers (with per-server
+    /// metadata such as reconnect count) and the last known [`ServerInfo`].
+    /// It should return a [`ReconnectToServer`] specifying which server to try
+    /// and how long to wait, or `None` to use default server selection.
+    ///
+    /// If the returned server address is not in the pool, the library falls back
+    /// to default selection and emits a [`ClientError`][crate::ClientError] event.
+    ///
+    /// When this callback returns `Some`, its delay takes precedence over
+    /// [`reconnect_delay_callback`][ConnectOptions::reconnect_delay_callback].
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// async_nats::ConnectOptions::new()
+    ///     .reconnect_to_server_callback(|servers, _info| async move {
+    ///         // Always try the first available server immediately.
+    ///         servers.first().map(|s| async_nats::ReconnectToServer {
+    ///             addr: s.addr.clone(),
+    ///             delay: std::time::Duration::ZERO,
+    ///         })
+    ///     })
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reconnect_to_server_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn(Vec<Server>, ServerInfo) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Option<ReconnectToServer>> + Send + Sync + 'static,
+    {
+        self.reconnect_to_server_callback = Some(CallbackArg1(Arc::new(move |(servers, info)| {
+            Box::pin(cb(servers, info))
+        })));
         self
     }
 

@@ -870,6 +870,88 @@ impl Client {
             .map_err(Into::into)
     }
 
+    /// Replaces the server pool used for reconnection attempts.
+    ///
+    /// The new pool takes effect on the next reconnect attempt; it does not
+    /// trigger an immediate reconnect. To force an immediate reconnect with
+    /// the new pool, call [`Client::force_reconnect`] after this method.
+    ///
+    /// Per-server state (failed attempt count, connection history) is preserved
+    /// for servers that appear in both the old and new pools.
+    ///
+    /// This also resets the global reconnection attempt counter, so any
+    /// progress toward [`ConnectOptions::max_reconnects`](crate::ConnectOptions::max_reconnects)
+    /// is cleared.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// client
+    ///     .set_server_pool(&["nats://server1:4222", "nats://server2:4222"])
+    ///     .await?;
+    /// // Optionally force reconnect to apply immediately:
+    /// client.force_reconnect().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_server_pool<A: crate::ToServerAddrs>(
+        &self,
+        addrs: A,
+    ) -> Result<(), SetServerPoolError> {
+        let servers: Vec<crate::ServerAddr> = addrs
+            .to_server_addrs()
+            .map_err(|err| {
+                SetServerPoolError::with_source(SetServerPoolErrorKind::InvalidAddress, err)
+            })?
+            .collect();
+
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Command::SetServerPool {
+                servers,
+                result: tx,
+            })
+            .await
+            .map_err(|err| SetServerPoolError::with_source(SetServerPoolErrorKind::Send, err))?;
+
+        rx.await
+            .map_err(|err| SetServerPoolError::with_source(SetServerPoolErrorKind::Send, err))?
+            .map_err(|err| {
+                SetServerPoolError::with_source(SetServerPoolErrorKind::MixedSchemes, err)
+            })
+    }
+
+    /// Returns a snapshot of the current server pool.
+    ///
+    /// The returned list includes both explicitly configured and discovered
+    /// servers, along with per-server metadata such as reconnect count and
+    /// connection history.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let pool = client.server_pool().await?;
+    /// for server in &pool {
+    ///     println!("{}: {} reconnects", server.addr, server.reconnects);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn server_pool(&self) -> Result<Vec<crate::Server>, ServerPoolError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Command::ServerPool { result: tx })
+            .await
+            .map_err(|err| ServerPoolError::with_source(ServerPoolErrorKind::Send, err))?;
+
+        rx.await
+            .map_err(|err| ServerPoolError::with_source(ServerPoolErrorKind::Send, err))
+    }
+
     /// Returns struct representing statistics of the whole lifecycle of the client.
     /// This includes number of bytes sent/received, number of messages sent/received,
     /// and number of times the connection was established.
@@ -996,6 +1078,50 @@ pub struct ReconnectError(#[source] crate::Error);
 impl From<tokio::sync::mpsc::error::SendError<Command>> for ReconnectError {
     fn from(err: tokio::sync::mpsc::error::SendError<Command>) -> Self {
         ReconnectError(Box::new(err))
+    }
+}
+
+/// An error returned from [`Client::set_server_pool`].
+pub type SetServerPoolError = Error<SetServerPoolErrorKind>;
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SetServerPoolErrorKind {
+    /// Failed to send command to the connection handler.
+    Send,
+    /// One or more server addresses could not be parsed.
+    InvalidAddress,
+    /// The pool contains a mix of websocket (`ws://`, `wss://`) and
+    /// non-websocket (`nats://`, `tls://`) URLs, which is not allowed.
+    MixedSchemes,
+}
+
+impl Display for SetServerPoolErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Send => write!(f, "failed to send set_server_pool command"),
+            Self::InvalidAddress => write!(f, "invalid server address"),
+            Self::MixedSchemes => write!(
+                f,
+                "cannot mix websocket and non-websocket URLs in server pool"
+            ),
+        }
+    }
+}
+
+/// An error returned from [`Client::server_pool`].
+pub type ServerPoolError = Error<ServerPoolErrorKind>;
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ServerPoolErrorKind {
+    /// Failed to send command to the connection handler.
+    Send,
+}
+
+impl Display for ServerPoolErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Send => write!(f, "failed to send server_pool command"),
+        }
     }
 }
 
