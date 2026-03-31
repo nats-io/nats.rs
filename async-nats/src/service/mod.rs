@@ -764,7 +764,7 @@ impl Request {
     /// On error responses, [Nats-Service-Error][NATS_SERVICE_ERROR] and
     /// [Nats-Service-Error-Code][NATS_SERVICE_ERROR_CODE] are always set from the provided
     /// [`error::Error`]. If the provided [HeaderMap] already contains values for either
-    /// of those headers, they will be overriden. All other user-supplied headers
+    /// of those headers, they will be overridden. All other user-supplied headers
     /// are preserved.
     ///
     /// # Examples
