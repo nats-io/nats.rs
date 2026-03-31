@@ -1368,4 +1368,22 @@ mod client {
         // Connection succeeded, meaning the bind to port 19898 worked.
         // If the port was already in use or bind failed, connect would have errored.
     }
+
+    #[tokio::test]
+    async fn rtt_concurrent() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let mut handles = Vec::new();
+
+        for _ in 0..5 {
+            let c = client.clone();
+            handles.push(tokio::spawn(async move { c.rtt().await.unwrap() }));
+        }
+        for handle in handles {
+            let duration = handle.await.unwrap();
+            println!("{:?}", duration);
+            assert!(duration > Duration::ZERO);
+            assert!(duration < Duration::from_secs(1));
+        }
+    }
 }
