@@ -936,7 +936,10 @@ impl Client {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let pool = client.server_pool().await?;
     /// for server in &pool {
-    ///     println!("{:?}: {} failed attempts", server.addr, server.failed_attempts);
+    ///     println!(
+    ///         "{:?}: {} failed attempts",
+    ///         server.addr, server.failed_attempts
+    ///     );
     /// }
     /// # Ok(())
     /// # }
