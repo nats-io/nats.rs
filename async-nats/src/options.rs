@@ -806,7 +806,7 @@ impl ConnectOptions {
     ///         // Always try the first available server immediately.
     ///         servers.first().map(|s| async_nats::ReconnectToServer {
     ///             addr: s.addr.clone(),
-    ///             delay: std::time::Duration::ZERO,
+    ///             delay: Some(std::time::Duration::ZERO),
     ///         })
     ///     })
     ///     .connect("demo.nats.io")

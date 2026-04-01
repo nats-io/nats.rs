@@ -105,11 +105,9 @@ pub struct ReconnectToServer {
     /// The server to connect to. Must be from the pool provided to the callback;
     /// if not, the library falls back to default server selection.
     pub addr: ServerAddr,
-    /// Delay before connecting. When set to [`Duration::ZERO`], the default
-    /// reconnect delay (exponential backoff) is applied instead. Use a
-    /// small non-zero duration (e.g. `Duration::from_millis(1)`) to
-    /// reconnect with minimal delay.
-    pub delay: Duration,
+    /// Delay before connecting. [`None`] uses the default reconnect delay
+    /// (exponential backoff). `Some(Duration::ZERO)` reconnects immediately.
+    pub delay: Option<Duration>,
 }
 
 #[derive(Debug, Clone)]
@@ -331,10 +329,9 @@ impl Connector {
 
                     // Use the callback's delay if specified, otherwise fall back
                     // to the default reconnect delay to prevent tight-loop spinning.
-                    let delay = if target.delay.is_zero() {
-                        (self.options.reconnect_delay_callback)(self.attempts)
-                    } else {
-                        target.delay
+                    let delay = match target.delay {
+                        Some(d) => d,
+                        None => (self.options.reconnect_delay_callback)(self.attempts),
                     };
                     if !delay.is_zero() {
                         sleep(delay).await;
