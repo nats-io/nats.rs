@@ -91,7 +91,7 @@ pub struct Server {
 
 impl fmt::Display for Server {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.addr)
+        write!(f, "{}", self.addr.as_url_str())
     }
 }
 
@@ -105,7 +105,10 @@ pub struct ReconnectToServer {
     /// The server to connect to. Must be from the pool provided to the callback;
     /// if not, the library falls back to default server selection.
     pub addr: ServerAddr,
-    /// Delay before connecting. [`Duration::ZERO`] means connect immediately.
+    /// Delay before connecting. When set to [`Duration::ZERO`], the default
+    /// reconnect delay (exponential backoff) is applied instead. Use a
+    /// small non-zero duration (e.g. `Duration::from_millis(1)`) to
+    /// reconnect with minimal delay.
     pub delay: Duration,
 }
 
