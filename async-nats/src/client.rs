@@ -889,7 +889,7 @@ impl Client {
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// client
-    ///     .set_server_pool(&["nats://server1:4222", "nats://server2:4222"])
+    ///     .set_server_pool(["nats://server1:4222", "nats://server2:4222"].as_slice())
     ///     .await?;
     /// // Optionally force reconnect to apply immediately:
     /// client.force_reconnect().await?;
@@ -936,7 +936,7 @@ impl Client {
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let pool = client.server_pool().await?;
     /// for server in &pool {
-    ///     println!("{}: {} reconnects", server.addr, server.reconnects);
+    ///     println!("{:?}: {} failed attempts", server.addr, server.failed_attempts);
     /// }
     /// # Ok(())
     /// # }
@@ -1090,7 +1090,7 @@ pub enum SetServerPoolErrorKind {
     Send,
     /// One or more server addresses could not be parsed.
     InvalidAddress,
-    /// The pool contains a mix of websocket (`ws://`, `wss://`) and
+    /// The pool contains a mix of WebSocket (`ws://`, `wss://`) and
     /// non-websocket (`nats://`, `tls://`) URLs, which is not allowed.
     MixedSchemes,
 }

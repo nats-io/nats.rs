@@ -66,7 +66,7 @@ use tokio_rustls::rustls;
 /// let pool = client.server_pool().await?;
 /// for server in &pool {
 ///     println!(
-///         "{}: {} failed attempts, connected: {}",
+///         "{:?}: {} failed attempts, connected: {}",
 ///         server.addr, server.failed_attempts, server.did_connect
 ///     );
 /// }
@@ -82,9 +82,9 @@ pub struct Server {
     pub failed_attempts: usize,
     /// Whether the client has ever successfully connected to this server.
     pub did_connect: bool,
-    /// Whether this server was discovered from an INFO message rather than
-    /// explicitly configured.
-    pub is_implicit: bool,
+    /// Whether this server was discovered from a cluster INFO message
+    /// rather than explicitly configured by the user.
+    pub is_discovered: bool,
     /// The last connection error for this server, if any.
     pub last_error: Option<String>,
 }
@@ -114,7 +114,7 @@ pub(crate) struct ServerEntry {
     pub(crate) addr: ServerAddr,
     pub(crate) failed_attempts: usize,
     pub(crate) did_connect: bool,
-    pub(crate) is_implicit: bool,
+    pub(crate) is_discovered: bool,
     pub(crate) last_error: Option<String>,
 }
 
@@ -127,7 +127,7 @@ impl ServerEntry {
             addr,
             failed_attempts: 0,
             did_connect: false,
-            is_implicit: false,
+            is_discovered: false,
             last_error: None,
         }
     }
@@ -137,7 +137,7 @@ impl ServerEntry {
             addr,
             failed_attempts: 0,
             did_connect: false,
-            is_implicit: true,
+            is_discovered: true,
             last_error: None,
         }
     }
@@ -147,7 +147,7 @@ impl ServerEntry {
             addr: self.addr.clone(),
             failed_attempts: self.failed_attempts,
             did_connect: self.did_connect,
-            is_implicit: self.is_implicit,
+            is_discovered: self.is_discovered,
             last_error: self.last_error.clone(),
         }
     }
@@ -224,7 +224,7 @@ impl Connector {
     /// Replaces the server pool. Preserves per-server state for servers that
     /// appear in both the old and new pools.
     ///
-    /// Returns an error if the pool mixes websocket (`ws://`, `wss://`) and
+    /// Returns an error if the pool mixes WebSocket (`ws://`, `wss://`) and
     /// non-websocket (`nats://`, `tls://`) schemes.
     pub(crate) fn set_server_pool(&mut self, addrs: Vec<ServerAddr>) -> Result<(), String> {
         // Validate: cannot mix websocket and non-websocket schemes.
@@ -242,7 +242,7 @@ impl Connector {
                         addr,
                         failed_attempts: existing.failed_attempts,
                         did_connect: existing.did_connect,
-                        is_implicit: false,
+                        is_discovered: false,
                         last_error: existing.last_error.clone(),
                     }
                 } else {
