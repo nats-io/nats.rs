@@ -243,7 +243,7 @@ impl Connector {
 
     /// Returns a snapshot of the current server pool.
     pub(crate) fn server_pool(&self) -> Vec<Server> {
-        self.servers.iter().map(|s| s.clone()).collect()
+        self.servers.to_vec()
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
@@ -275,7 +275,7 @@ impl Connector {
 
         // If a reconnect-to-server callback is set, try it first.
         if let Some(ref callback) = self.options.reconnect_to_server_callback {
-            let pool_snapshot: Vec<Server> = self.servers.iter().map(|s| s.clone()).collect();
+            let pool_snapshot = self.servers.to_vec();
             let info_snapshot = self.last_info.clone();
             let selection = callback.call((pool_snapshot, info_snapshot)).await;
 
