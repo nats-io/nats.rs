@@ -110,21 +110,12 @@ pub struct ReconnectToServer {
     pub delay: Option<Duration>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ServerEntry {
-    pub(crate) addr: ServerAddr,
-    pub(crate) failed_attempts: usize,
-    pub(crate) did_connect: bool,
-    pub(crate) is_discovered: bool,
-    pub(crate) last_error: Option<String>,
-}
-
 pub(crate) type ReconnectToServerCallback =
     CallbackArg1<(Vec<Server>, ServerInfo), Option<ReconnectToServer>>;
 
-impl ServerEntry {
+impl Server {
     fn new(addr: ServerAddr) -> Self {
-        ServerEntry {
+        Server {
             addr,
             failed_attempts: 0,
             did_connect: false,
@@ -133,23 +124,13 @@ impl ServerEntry {
         }
     }
 
-    fn new_implicit(addr: ServerAddr) -> Self {
-        ServerEntry {
+    fn new_discovered(addr: ServerAddr) -> Self {
+        Server {
             addr,
             failed_attempts: 0,
             did_connect: false,
             is_discovered: true,
             last_error: None,
-        }
-    }
-
-    fn to_server(&self) -> Server {
-        Server {
-            addr: self.addr.clone(),
-            failed_attempts: self.failed_attempts,
-            did_connect: self.did_connect,
-            is_discovered: self.is_discovered,
-            last_error: self.last_error.clone(),
         }
     }
 }
@@ -178,7 +159,7 @@ pub(crate) struct ConnectorOptions {
 /// Maintains a list of servers and establishes connections.
 pub(crate) struct Connector {
     /// Server pool with per-server metadata.
-    servers: Vec<ServerEntry>,
+    servers: Vec<Server>,
     options: ConnectorOptions,
     pub(crate) connect_stats: Arc<Statistics>,
     attempts: usize,
@@ -208,7 +189,7 @@ impl Connector {
         max_payload: Arc<AtomicUsize>,
         connect_stats: Arc<Statistics>,
     ) -> Result<Connector, io::Error> {
-        let servers = addrs.to_server_addrs()?.map(ServerEntry::new).collect();
+        let servers = addrs.to_server_addrs()?.map(Server::new).collect();
 
         Ok(Connector {
             attempts: 0,
@@ -243,7 +224,7 @@ impl Connector {
             .into_iter()
             .map(|addr| {
                 if let Some(existing) = self.servers.iter().find(|s| s.addr == addr) {
-                    ServerEntry {
+                    Server {
                         addr,
                         failed_attempts: existing.failed_attempts,
                         did_connect: existing.did_connect,
@@ -251,7 +232,7 @@ impl Connector {
                         last_error: existing.last_error.clone(),
                     }
                 } else {
-                    ServerEntry::new(addr)
+                    Server::new(addr)
                 }
             })
             .collect();
@@ -262,7 +243,7 @@ impl Connector {
 
     /// Returns a snapshot of the current server pool.
     pub(crate) fn server_pool(&self) -> Vec<Server> {
-        self.servers.iter().map(|s| s.to_server()).collect()
+        self.servers.iter().map(|s| s.clone()).collect()
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
@@ -294,7 +275,7 @@ impl Connector {
 
         // If a reconnect-to-server callback is set, try it first.
         if let Some(ref callback) = self.options.reconnect_to_server_callback {
-            let pool_snapshot: Vec<Server> = self.servers.iter().map(|s| s.to_server()).collect();
+            let pool_snapshot: Vec<Server> = self.servers.iter().map(|s| s.clone()).collect();
             let info_snapshot = self.last_info.clone();
             let selection = callback.call((pool_snapshot, info_snapshot)).await;
 
@@ -632,8 +613,7 @@ impl Connector {
                         discovered_url = %url,
                         "adding discovered server"
                     );
-                    self.servers
-                        .push(ServerEntry::new_implicit(discovered_addr));
+                    self.servers.push(Server::new_discovered(discovered_addr));
                 }
             }
         }
