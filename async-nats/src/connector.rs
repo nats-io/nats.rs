@@ -228,6 +228,10 @@ impl Connector {
     /// Returns an error if the pool mixes WebSocket (`ws://`, `wss://`) and
     /// non-websocket (`nats://`, `tls://`) schemes.
     pub(crate) fn set_server_pool(&mut self, addrs: Vec<ServerAddr>) -> Result<(), String> {
+        if addrs.is_empty() {
+            return Err("server pool cannot be empty".to_string());
+        }
+
         // Validate: cannot mix websocket and non-websocket schemes.
         let has_ws = addrs.iter().any(|a| a.is_websocket());
         let has_non_ws = addrs.iter().any(|a| !a.is_websocket());
@@ -291,26 +295,6 @@ impl Connector {
         // If a reconnect-to-server callback is set, try it first.
         if let Some(ref callback) = self.options.reconnect_to_server_callback {
             let pool_snapshot: Vec<Server> = self.servers.iter().map(|s| s.to_server()).collect();
-            if pool_snapshot.is_empty() {
-                self.attempts += 1;
-                if let Some(max_reconnects) = self.options.max_reconnects {
-                    if self.attempts > max_reconnects {
-                        self.events_tx
-                            .try_send(Event::ClientError(ClientError::MaxReconnects))
-                            .ok();
-                        return Err(ConnectError::new(crate::ConnectErrorKind::MaxReconnects));
-                    }
-                }
-                self.events_tx
-                    .try_send(Event::ClientError(ClientError::Other(
-                        "no servers available in pool".to_string(),
-                    )))
-                    .ok();
-                return Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::Io,
-                    "no servers available in pool",
-                ));
-            }
             let info_snapshot = self.last_info.clone();
             let selection = callback.call((pool_snapshot, info_snapshot)).await;
 
@@ -369,26 +353,6 @@ impl Connector {
 
         // Default server selection: shuffle, sort by failure count, iterate.
         let mut servers = self.servers.clone();
-        if servers.is_empty() {
-            self.attempts += 1;
-            if let Some(max_reconnects) = self.options.max_reconnects {
-                if self.attempts > max_reconnects {
-                    self.events_tx
-                        .try_send(Event::ClientError(ClientError::MaxReconnects))
-                        .ok();
-                    return Err(ConnectError::new(crate::ConnectErrorKind::MaxReconnects));
-                }
-            }
-            self.events_tx
-                .try_send(Event::ClientError(ClientError::Other(
-                    "no servers available in pool".to_string(),
-                )))
-                .ok();
-            return Err(ConnectError::with_source(
-                crate::ConnectErrorKind::Io,
-                "no servers available in pool",
-            ));
-        }
         if !self.options.retain_servers_order {
             servers.shuffle(&mut thread_rng());
             // sort_by is stable, meaning it will retain the order for equal elements.

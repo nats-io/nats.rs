@@ -907,6 +907,10 @@ impl Client {
             })?
             .collect();
 
+        if servers.is_empty() {
+            return Err(SetServerPoolError::new(SetServerPoolErrorKind::EmptyPool));
+        }
+
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(Command::SetServerPool {
@@ -1096,6 +1100,8 @@ pub enum SetServerPoolErrorKind {
     /// The pool contains a mix of WebSocket (`ws://`, `wss://`) and
     /// non-websocket (`nats://`, `tls://`) URLs, which is not allowed.
     MixedSchemes,
+    /// The server pool cannot be empty.
+    EmptyPool,
 }
 
 impl Display for SetServerPoolErrorKind {
@@ -1103,6 +1109,7 @@ impl Display for SetServerPoolErrorKind {
         match self {
             Self::Send => write!(f, "failed to send set_server_pool command"),
             Self::InvalidAddress => write!(f, "invalid server address"),
+            Self::EmptyPool => write!(f, "server pool cannot be empty"),
             Self::MixedSchemes => write!(
                 f,
                 "cannot mix websocket and non-websocket URLs in server pool"
