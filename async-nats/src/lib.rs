@@ -977,6 +977,13 @@ impl ConnectionHandler {
                 subject: subscription.subject.to_owned(),
                 queue_group: subscription.queue_group.to_owned(),
             });
+
+            if let Some(max) = subscription.max {
+                self.connection.enqueue_write_op(&ClientOp::Unsubscribe {
+                    sid: *sid,
+                    max: Some(max.saturating_sub(subscription.delivered)),
+                });
+            }
         }
 
         if let Some(multiplexer) = &self.multiplexer {

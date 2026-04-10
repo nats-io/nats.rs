@@ -23,8 +23,12 @@ mod client {
     use futures_util::stream::StreamExt;
     use std::path::PathBuf;
     use std::str::FromStr;
-    use std::sync::atomic::Ordering;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
     use std::time::{Duration, Instant};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn force_reconnect() {
@@ -374,6 +378,160 @@ mod client {
 
         assert!(sub.next().await.is_some());
         assert!(sub.next().await.is_none());
+    }
+
+    // The subscription correctly stops on the client side at max regardless as reconnecting does
+    // not reset the client state. However, this does not prove that the server is not wasting
+    // bandwidth and CPU by continuing to send messages to the dropped subscriber, which are
+    // silently ignored. A TCP proxy is needed to observe the server side behavior here.
+    #[tokio::test]
+    async fn unsubscribe_after_reconnect() {
+        let server = nats_server::run_basic_server();
+        let server_port = server.client_port();
+
+        let listen_fd = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_port = listen_fd.local_addr().unwrap().port();
+
+        let max = 3;
+
+        let spurious = Arc::new(AtomicU64::new(0));
+        let spurious_proxy = Arc::clone(&spurious);
+
+        let delivered = Arc::new(AtomicU64::new(0));
+        let delivered_proxy = Arc::clone(&delivered);
+
+        tokio::task::spawn(async move {
+            loop {
+                let Ok((downstream, _)) = listen_fd.accept().await else {
+                    break;
+                };
+
+                let upstream = tokio::net::TcpStream::connect(format!("127.0.0.1:{server_port}"))
+                    .await
+                    .unwrap();
+
+                let spurious = Arc::clone(&spurious_proxy);
+                let delivered_total = Arc::clone(&delivered_proxy);
+
+                tokio::task::spawn(async move {
+                    let (dr, mut dw) = tokio::io::split(downstream);
+                    let (sr, mut sw) = tokio::io::split(upstream);
+
+                    let c2s = async move {
+                        let mut reader = tokio::io::BufReader::new(dr);
+                        let mut line = String::new();
+                        loop {
+                            line.clear();
+                            let n = reader.read_line(&mut line).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+                            sw.write_all(line.as_bytes()).await.ok();
+                        }
+                    };
+
+                    let s2c = async move {
+                        let mut reader = tokio::io::BufReader::new(sr);
+                        let mut line = String::new();
+
+                        loop {
+                            line.clear();
+                            let n = reader.read_line(&mut line).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+
+                            if line.starts_with("MSG test ") {
+                                let delivered = delivered_total.fetch_add(1, Ordering::Relaxed) + 1;
+                                if delivered > max {
+                                    // server didn't stop after unsub_after
+                                    spurious.fetch_add(1, Ordering::Relaxed);
+                                }
+                            }
+
+                            dw.write_all(line.as_bytes()).await.ok();
+
+                            if line.starts_with("MSG ") {
+                                let num_bytes: usize =
+                                    line.trim().rsplit(' ').next().unwrap().parse().unwrap();
+
+                                let mut payload = vec![0u8; num_bytes + 2]; // for \r\n
+                                reader.read_exact(&mut payload).await.unwrap();
+                                dw.write_all(&payload).await.ok();
+                            }
+                        }
+                    };
+
+                    tokio::select! {
+                        _ = c2s => {},
+                        _ = s2c => {},
+                    }
+                });
+            }
+        });
+
+        let (dctx, mut dcrx) = tokio::sync::mpsc::channel(1);
+        let (rctx, mut rcrx) = tokio::sync::mpsc::channel(1);
+
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(move |event| {
+                let dctx = dctx.clone();
+                let rctx = rctx.clone();
+                async move {
+                    match event {
+                        Event::Disconnected => dctx.send(()).await.unwrap(),
+                        Event::Connected => rctx.send(()).await.unwrap(),
+                        _ => (),
+                    }
+                }
+            })
+            .connect(format!("127.0.0.1:{proxy_port}"))
+            .await
+            .unwrap();
+
+        let mut sub = client.subscribe("test").await.unwrap();
+        sub.unsubscribe_after(max).await.unwrap();
+
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap()
+            .is_some());
+
+        client.force_reconnect().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // initial connect event.
+            rcrx.recv().await.unwrap();
+            dcrx.recv().await.unwrap();
+            rcrx.recv().await.unwrap();
+        })
+        .await
+        .unwrap();
+
+        for _ in 0..5 {
+            client.publish("test", "data".into()).await.unwrap();
+        }
+        client.flush().await.unwrap();
+
+        for _ in 0..(max - 1) {
+            assert!(tokio::time::timeout(Duration::from_secs(5), sub.next())
+                .await
+                .unwrap()
+                .is_some());
+        }
+        assert!(tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap()
+            .is_none());
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            spurious.load(Ordering::Relaxed),
+            0,
+            "server sent messages after UNSUB limit"
+        );
     }
 
     #[tokio::test]
