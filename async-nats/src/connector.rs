@@ -39,8 +39,8 @@ use crate::VERSION;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 #[cfg(feature = "nkeys")]
 use base64::engine::Engine;
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use std::cmp;
 use std::fmt;
 use std::io;
@@ -335,7 +335,7 @@ impl Connector {
         // Default server selection: shuffle, sort by failure count, iterate.
         let mut servers = self.servers.clone();
         if !self.options.retain_servers_order {
-            servers.shuffle(&mut thread_rng());
+            servers.shuffle(&mut rng());
             // sort_by is stable, meaning it will retain the order for equal elements.
             servers.sort_by(|a, b| a.failed_attempts.cmp(&b.failed_attempts));
         }
