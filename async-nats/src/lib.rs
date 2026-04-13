@@ -242,6 +242,7 @@ pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
+pub use connector::{ReconnectToServer, Server};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 pub use subject::{Subject, SubjectError, ToSubject};
 
@@ -254,7 +255,8 @@ mod options;
 
 pub use auth::Auth;
 pub use client::{
-    Client, PublishError, Request, RequestError, RequestErrorKind, Statistics, SubscribeError,
+    Client, PublishError, Request, RequestError, RequestErrorKind, ServerPoolError,
+    ServerPoolErrorKind, SetServerPoolError, SetServerPoolErrorKind, Statistics, SubscribeError,
     SubscribeErrorKind,
 };
 pub use options::{AuthError, ConnectOptions};
@@ -399,6 +401,13 @@ pub(crate) enum Command {
         sid: Option<u64>,
     },
     Reconnect,
+    SetServerPool {
+        servers: Vec<ServerAddr>,
+        result: oneshot::Sender<Result<(), String>>,
+    },
+    ServerPool {
+        result: oneshot::Sender<Vec<connector::Server>>,
+    },
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -952,6 +961,14 @@ impl ConnectionHandler {
             Command::Reconnect => {
                 self.should_reconnect = true;
             }
+
+            Command::SetServerPool { servers, result } => {
+                let _ = result.send(self.connector.set_server_pool(servers));
+            }
+
+            Command::ServerPool { result } => {
+                let _ = result.send(self.connector.server_pool());
+            }
         }
     }
 
@@ -1037,6 +1054,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             auth_callback: options.auth_callback,
             max_reconnects: options.max_reconnects,
             local_address: options.local_address,
+            reconnect_to_server_callback: options.reconnect_to_server_callback,
         },
         events_tx,
         state_tx,
@@ -1448,12 +1466,18 @@ pub enum ServerError {
 pub enum ClientError {
     Other(String),
     MaxReconnects,
+    /// The reconnect-to-server callback returned a server address that is not
+    /// present in the current server pool.
+    ServerNotInPool,
 }
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Other(error) => write!(f, "nats: {error}"),
             Self::MaxReconnects => write!(f, "nats: max reconnects reached"),
+            Self::ServerNotInPool => {
+                write!(f, "nats: reconnect callback returned server not in pool")
+            }
         }
     }
 }
