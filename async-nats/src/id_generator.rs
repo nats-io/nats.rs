@@ -36,11 +36,11 @@ pub(crate) fn next() -> String {
 #[cfg(not(feature = "nuid"))]
 #[inline]
 pub(crate) fn next() -> String {
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::distr::Alphanumeric;
+    use rand::{rng, RngExt};
 
-    thread_rng()
-        .sample_iter(&Alphanumeric)
+    rng()
+        .sample_iter(Alphanumeric)
         .take(22)
         .map(char::from)
         .collect()

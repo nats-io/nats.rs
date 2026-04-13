@@ -24,7 +24,7 @@ mod object_store {
     };
     use base64::Engine;
     use futures_util::StreamExt;
-    use rand::RngCore;
+    use rand::TryRng;
     use tokio::io::AsyncReadExt;
 
     use async_nats::jetstream::object_store::ObjectInfo;
@@ -45,7 +45,7 @@ mod object_store {
             .await
             .unwrap();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut bytes = vec![0; 1024 * 1024 + 22];
         rng.try_fill_bytes(&mut bytes).unwrap();
 
@@ -333,7 +333,7 @@ mod object_store {
             .await
             .unwrap();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut bytes = vec![0; 1024 * 1024 + 22];
         rng.try_fill_bytes(&mut bytes).unwrap();
 
@@ -372,7 +372,7 @@ mod object_store {
             .await
             .unwrap();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut bytes = vec![0; 1024 * 1024 + 22];
         rng.try_fill_bytes(&mut bytes).unwrap();
 
