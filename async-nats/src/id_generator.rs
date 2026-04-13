@@ -32,7 +32,7 @@ pub(crate) fn next() -> String {
 /// Generate a unique ID string using rand-based alphanumeric generation.
 ///
 /// This is used when the `nuid` feature is disabled. Generates a 22-character
-/// alphanumeric string using rand's thread_rng, matching NUID's output length.
+/// alphanumeric string using rand's rng, matching NUID's output length.
 #[cfg(not(feature = "nuid"))]
 #[inline]
 pub(crate) fn next() -> String {
