@@ -234,6 +234,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const MAX_PENDING_PINGS: usize = 2;
 const MULTIPLEXER_SID: u64 = 0;
+pub(crate) const DEFAULT_SERVER_MAX_PAYLOAD: usize = 1024 * 1024;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -456,7 +457,7 @@ pub(crate) struct ConnectionHandler {
     subscriptions: HashMap<u64, Subscription>,
     multiplexer: Option<Multiplexer>,
     pending_pings: usize,
-    info_sender: tokio::sync::watch::Sender<ServerInfo>,
+    info_sender: tokio::sync::watch::Sender<Option<ServerInfo>>,
     ping_interval: Interval,
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
@@ -468,7 +469,7 @@ impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
         connector: Connector,
-        info_sender: tokio::sync::watch::Sender<ServerInfo>,
+        info_sender: tokio::sync::watch::Sender<Option<ServerInfo>>,
         ping_period: Duration,
     ) -> ConnectionHandler {
         let mut ping_interval = interval(ping_period);
@@ -983,7 +984,7 @@ impl ConnectionHandler {
     async fn handle_reconnect(&mut self) -> Result<(), ConnectError> {
         let (info, connection) = self.connector.connect().await?;
         self.connection = connection;
-        let _ = self.info_sender.send(info);
+        let _ = self.info_sender.send(Some(info));
 
         self.subscriptions
             .retain(|_, subscription| !subscription.sender.is_closed());
@@ -1031,7 +1032,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
     // We're setting it to the default server payload size.
-    let max_payload = Arc::new(AtomicUsize::new(1024 * 1024));
+    let max_payload = Arc::new(AtomicUsize::new(DEFAULT_SERVER_MAX_PAYLOAD));
     let statistics = Arc::new(Statistics::default());
 
     let mut connector = Connector::new(
@@ -1063,13 +1064,13 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     )
     .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
-    let mut info: ServerInfo = Default::default();
+    let mut info = None;
     let mut connection = None;
     if !options.retry_on_initial_connect {
         debug!("retry on initial connect failure is disabled");
         let (info_ok, connection_ok) = connector.try_connect().await?;
         connection = Some(connection_ok);
-        info = info_ok;
+        info = Some(info_ok);
     }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info.clone());
@@ -1105,7 +1106,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
                     return;
                 }
             };
-            info_sender.send(info).ok();
+            info_sender.send(Some(info)).ok();
             connection = Some(connection_ok);
         }
         let connection = connection.unwrap();
