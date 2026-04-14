@@ -539,7 +539,7 @@ mod compatibility {
             .unwrap();
 
         let cleanup = tests.next().await.expect("failed to get cleanup");
-        service.stop().await.expect("failed to stop service");
+        service.stop().expect("failed to stop service");
         client
             .publish(cleanup.reply.unwrap(), "".into())
             .await
