@@ -199,7 +199,7 @@ impl Connector {
             state_tx,
             max_payload,
             connect_stats,
-            last_info: ServerInfo::default(),
+            last_info: ServerInfo::initial(),
         })
     }
 
