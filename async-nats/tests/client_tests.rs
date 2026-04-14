@@ -798,11 +798,27 @@ mod client {
             .await
             .unwrap();
 
+        assert!(
+            client.try_server_info().is_none(),
+            "server info should not be available before the first INFO frame"
+        );
+        assert_eq!(
+            client.server_info().max_payload,
+            1024 * 1024,
+            "compatibility fallback should match the default server payload limit"
+        );
+
         let mut sub = client.subscribe("DATA").await.unwrap();
         client.publish("DATA", "payload".into()).await.unwrap();
         tokio::time::sleep(Duration::from_secs(2)).await;
         let _server = nats_server::run_server_with_port("", Some("7779"));
         sub.next().await.unwrap();
+
+        let info = client
+            .try_server_info()
+            .expect("server info should be available after connecting");
+        assert_eq!(info.port, 7779);
+        assert_eq!(client.server_info(), info);
     }
 
     #[tokio::test]
