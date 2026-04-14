@@ -453,14 +453,14 @@ impl Service {
     /// If there are more instances of [Services][Service] with the same name, the [Service] will
     /// be scaled down by one instance. If it was the only running instance, it will effectively
     /// remove the service entirely.
-    pub async fn stop(self) -> Result<(), Error> {
+    pub fn stop(self) -> Result<(), Error> {
         self.shutdown_tx.send(())?;
         self.handle.abort();
         Ok(())
     }
 
     /// Resets [Stats] of the [Service] instance.
-    pub async fn reset(&mut self) {
+    pub fn reset(&mut self) {
         for value in self.endpoints_state.lock().unwrap().endpoints.values_mut() {
             value.errors = 0;
             value.processing_time = Duration::default();
@@ -470,7 +470,7 @@ impl Service {
     }
 
     /// Returns [Stats] for this service instance.
-    pub async fn stats(&self) -> HashMap<String, endpoint::Stats> {
+    pub fn stats(&self) -> HashMap<String, endpoint::Stats> {
         self.endpoints_state
             .lock()
             .unwrap()
@@ -481,7 +481,7 @@ impl Service {
     }
 
     /// Returns [Info] for this service instance.
-    pub async fn info(&self) -> Info {
+    pub fn info(&self) -> Info {
         self.info.clone()
     }
 

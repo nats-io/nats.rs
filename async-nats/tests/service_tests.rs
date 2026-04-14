@@ -283,13 +283,12 @@ mod service {
 
         assert!(service
             .stats()
-            .await
             .get("products")
             .unwrap()
             .last_error
             .is_some());
 
-        service.stop().await.unwrap();
+        service.stop().unwrap();
 
         assert!(response.next().await.is_some());
         assert!(response.next().await.is_some());
@@ -392,7 +391,7 @@ mod service {
             }
         });
         // Check the stats.
-        let standard_service_stats = standard_service.stats().await;
+        let standard_service_stats = standard_service.stats();
         assert_eq!(
             standard_service_stats
                 .get("group.grouped")
@@ -400,7 +399,7 @@ mod service {
                 .queue_group,
             "group_custom"
         );
-        let custom_service_stats = service_with_custom_queue.stats().await;
+        let custom_service_stats = service_with_custom_queue.stats();
         assert_eq!(
             custom_service_stats
                 .get("group.grouped")
@@ -586,7 +585,7 @@ mod service {
 
         let mut endpoint = service.endpoint("products").await.unwrap();
 
-        service.stop().await.unwrap();
+        service.stop().unwrap();
         client.publish("products", "data".into()).await.unwrap();
         assert!(endpoint.next().await.is_none());
     }
