@@ -1167,7 +1167,7 @@ impl Context {
     /// let client = async_nats::connect("demo.nats.io:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     /// let kv = jetstream
-    ///     .update_key_value(async_nats::jetstream::kv::Config {
+    ///     .create_or_update_key_value(async_nats::jetstream::kv::Config {
     ///         bucket: "kv".to_string(),
     ///         history: 60,
     ///         ..Default::default()
