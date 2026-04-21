@@ -337,7 +337,7 @@ impl Connector {
         if !self.options.retain_servers_order {
             servers.shuffle(&mut rng());
             // sort_by is stable, meaning it will retain the order for equal elements.
-            servers.sort_by(|a, b| a.failed_attempts.cmp(&b.failed_attempts));
+            servers.sort_by_key(|a| a.failed_attempts);
         }
 
         for entry in servers {
