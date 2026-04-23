@@ -77,7 +77,7 @@ impl Display for PublishErrorKind {
 /// [crate::connect] and [crate::ConnectOptions::connect]
 #[derive(Clone, Debug)]
 pub struct Client {
-    info: tokio::sync::watch::Receiver<ServerInfo>,
+    info: tokio::sync::watch::Receiver<Option<ServerInfo>>,
     pub(crate) state: tokio::sync::watch::Receiver<State>,
     pub(crate) sender: mpsc::Sender<Command>,
     poll_sender: PollSender<Command>,
@@ -217,7 +217,7 @@ impl Sink<OutboundMessage> for Client {
 impl Client {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        info: tokio::sync::watch::Receiver<ServerInfo>,
+        info: tokio::sync::watch::Receiver<Option<ServerInfo>>,
         state: tokio::sync::watch::Receiver<State>,
         sender: mpsc::Sender<Command>,
         capacity: usize,
@@ -286,6 +286,30 @@ impl Client {
         self.request_timeout
     }
 
+    /// Returns the last received info from the server if one has been observed.
+    ///
+    /// This is useful when [`ConnectOptions::retry_on_initial_connect`][crate::ConnectOptions::retry_on_initial_connect]
+    /// is enabled and the client is returned before the first server `INFO`
+    /// message arrives.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main () -> Result<(), async_nats::Error> {
+    /// let client = async_nats::ConnectOptions::new()
+    ///     .retry_on_initial_connect()
+    ///     .connect("demo.nats.io")
+    ///     .await?;
+    /// println!("info available: {}", client.try_server_info().is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn try_server_info(&self) -> Option<ServerInfo> {
+        // We ignore notifying the watcher, as that requires mutable client reference.
+        self.info.borrow().clone()
+    }
+
     /// Returns last received info from the server.
     ///
     /// # Examples
@@ -299,8 +323,26 @@ impl Client {
     /// # }
     /// ```
     pub fn server_info(&self) -> ServerInfo {
-        // We ignore notifying the watcher, as that requires mutable client reference.
-        self.info.borrow().to_owned()
+        self.try_server_info().unwrap_or_default()
+    }
+
+    /// Returns the maximum payload size currently used by the client.
+    ///
+    /// Before the first server `INFO` message arrives, this returns the default
+    /// server payload limit used for client-side publish validation.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main () -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// println!("max payload: {:?}", client.max_payload());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn max_payload(&self) -> usize {
+        self.max_payload.load(Ordering::Relaxed)
     }
 
     /// Returns true if the server version is compatible with the version components.

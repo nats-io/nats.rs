@@ -956,11 +956,32 @@ mod client {
             .await
             .unwrap();
 
+        assert!(
+            client.try_server_info().is_none(),
+            "server info should not be available before the first INFO frame"
+        );
+        assert_eq!(
+            client.server_info(),
+            async_nats::ServerInfo::default(),
+            "server_info should preserve the original fallback state"
+        );
+        assert_eq!(
+            client.max_payload(),
+            1024 * 1024,
+            "current max payload should use the default server payload limit"
+        );
+
         let mut sub = client.subscribe("DATA").await.unwrap();
         client.publish("DATA", "payload".into()).await.unwrap();
         tokio::time::sleep(Duration::from_secs(2)).await;
         let _server = nats_server::run_server_with_port("", Some("7779"));
         sub.next().await.unwrap();
+
+        let info = client
+            .try_server_info()
+            .expect("server info should be available after connecting");
+        assert_eq!(info.port, 7779);
+        assert_eq!(client.server_info(), info);
     }
 
     #[tokio::test]
@@ -1102,6 +1123,8 @@ mod client {
         let server = nats_server::run_server("tests/configs/max_payload.conf");
 
         let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        assert_eq!(client.max_payload(), 1024 * 128);
 
         // this exceeds the small payload limit in server config.
         let payload = vec![0u8; 1024 * 1024];
