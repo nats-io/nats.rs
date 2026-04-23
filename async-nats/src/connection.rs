@@ -177,7 +177,8 @@ impl Connection {
         }
 
         if self.read_buf.starts_with(b"MSG ") {
-            let line = str::from_utf8(&self.read_buf[4..len]).unwrap();
+            let line = str::from_utf8(&self.read_buf[4..len])
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
             let mut args = line.split(' ').filter(|s| !s.is_empty());
 
             // Parse the operation syntax: MSG <subject> <sid> [reply-to] <#bytes>
@@ -250,7 +251,8 @@ impl Connection {
 
         if self.read_buf.starts_with(b"HMSG ") {
             // Extract whitespace-delimited arguments that come after "HMSG".
-            let line = std::str::from_utf8(&self.read_buf[5..len]).unwrap();
+            let line = std::str::from_utf8(&self.read_buf[5..len])
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
             let mut args = line.split_whitespace().filter(|s| !s.is_empty());
 
             // <subject> <sid> [reply-to] <# header bytes><# total bytes>
@@ -1158,6 +1160,38 @@ mod read_op {
 
         server.write_all(b"PONG\r\n").await.unwrap();
         connection.read_op().await.unwrap();
+    }
+
+    // Regression for https://github.com/nats-io/nats.rs/issues/1572:
+    // nats-server forwards arbitrary bytes in subjects (no UTF-8 enforcement),
+    // so a publisher sending `balance.\xFF` reaches a `balance.*` subscriber.
+    // The parser must surface an io::Error rather than panicking, otherwise the
+    // ConnectionHandler task dies and the client never reconnects.
+    #[tokio::test]
+    async fn msg_with_non_utf8_subject_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server.write_all(b"MSG balance.\xFF 1 2\r\n").await.unwrap();
+        server.write_all(b"hi\r\n").await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn hmsg_with_non_utf8_subject_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server
+            .write_all(b"HMSG balance.\xFF 1 12 14\r\n")
+            .await
+            .unwrap();
+        server.write_all(b"NATS/1.0\r\n\r\nhi\r\n").await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
 }
 
