@@ -5,8 +5,8 @@ async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("localhost:4222").await?;
 
     // NATS-DOC-START
-    match client.request("no.such.service".into(), "test".into()).await {
-        Err(async_nats::RequestError::NoResponders) => {
+    match client.request("no.such.service", "test".into()).await {
+        Err(err) if err.kind() == async_nats::RequestErrorKind::NoResponders => {
             println!("No services available to handle request");
         }
         Err(e) => println!("Request error: {}", e),

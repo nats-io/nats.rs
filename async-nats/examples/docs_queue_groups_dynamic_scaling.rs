@@ -14,11 +14,16 @@ async fn main() -> Result<(), async_nats::Error> {
     }
 
     let new_worker = |client: async_nats::Client, id: String| async move {
-        let mut sub = client.queue_subscribe("tasks", "workers").await?;
+        let mut sub = client.queue_subscribe("tasks", "workers".to_string()).await?;
 
+        let worker_id = id.clone();
         let handle = tokio::spawn(async move {
             while let Some(msg) = sub.next().await {
-                println!("Worker {} processing: {}", id, String::from_utf8_lossy(&msg.payload));
+                println!(
+                    "Worker {} processing: {}",
+                    worker_id,
+                    String::from_utf8_lossy(&msg.payload)
+                );
                 // Simulate work
                 sleep(Duration::from_millis(100)).await;
             }
@@ -38,6 +43,7 @@ async fn main() -> Result<(), async_nats::Error> {
 
     // Scale down
     if let Some(worker) = workers.pop() {
+        println!("Stopping worker {}", worker.id);
         worker.handle.abort();
     }
     // NATS-DOC-END
