@@ -1,9 +1,10 @@
 use crate::{options::CallbackArg1, AuthError};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Auth {
     pub jwt: Option<String>,
     pub nkey: Option<String>,
+    #[allow(dead_code)]
     pub(crate) signature_callback: Option<CallbackArg1<String, Result<String, AuthError>>>,
     pub signature: Option<Vec<u8>>,
     pub username: Option<String>,

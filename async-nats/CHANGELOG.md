@@ -1,3 +1,158 @@
+# v0.47.0
+
+This release adds subject validation (with opt-out possibility) and wraps while connect attempt in timeout, making it more robust.
+
+## Added
+* Add Subject Validation by @Jarema in https://github.com/nats-io/nats.rs/pull/1525
+* Add respond_with_headers method to handle responses with custom headers by @giddyos in https://github.com/nats-io/nats.rs/pull/1554
+* Add local_address option to bind client to a specific local IP by @wallyqs in https://github.com/nats-io/nats.rs/pull/1539
+* Implement Clone for ConnectOptions by @MattPatchava in https://github.com/nats-io/nats.rs/pull/1552
+
+## Fixed
+* Fix invalid consumer rate limit json by @Totodore in https://github.com/nats-io/nats.rs/pull/1536
+* Return error instead of panic when reply subject is empty by @liamkinne in https://github.com/nats-io/nats.rs/pull/1514
+* Use proper doc comments by @Xaeroxe in https://github.com/nats-io/nats.rs/pull/1543
+* Fix connection_timeout to cover full NATS handshake by @rahsonaw in https://github.com/nats-io/nats.rs/pull/1544
+
+## Changed
+* Update rustls-native-certs from 0.7 to 0.8 by @FreeMasen in https://github.com/nats-io/nats.rs/pull/1507
+* Remove `once_cell` and use std::sync::LazyLock instead by @Jarema in https://github.com/nats-io/nats.rs/pull/1534
+* Bump bytes crate by @Jarema in https://github.com/nats-io/nats.rs/pull/1540
+* Bump msrv by @Jarema in https://github.com/nats-io/nats.rs/pull/1509
+* Update rustls-webpki to 0.103.10 by @JohnMoon-Voyager in https://github.com/nats-io/nats.rs/pull/1550
+* Update dictionary by @Jarema in https://github.com/nats-io/nats.rs/pull/1556
+
+## New Contributors
+* @FreeMasen made their first contribution in https://github.com/nats-io/nats.rs/pull/1507
+* @Xaeroxe made their first contribution in https://github.com/nats-io/nats.rs/pull/1543
+* @MattPatchava made their first contribution in https://github.com/nats-io/nats.rs/pull/1552
+* @JohnMoon-Voyager made their first contribution in https://github.com/nats-io/nats.rs/pull/1550
+* @giddyos made their first contribution in https://github.com/nats-io/nats.rs/pull/1554
+* @rahsonaw made their first contribution in https://github.com/nats-io/nats.rs/pull/1544
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.46.0...async-nats/v0.47.0
+
+
+# v0.46.0
+
+This release introduces disabled by default feature-gating of features and modules.
+Users can now disable `nkeys`, `object-store`, or others, to limit the size of the final binary and dependency pulled in.
+
+## Added
+* Hide features & modules behind feature flags by @Jarema in https://github.com/nats-io/nats.rs/pull/1494
+
+## Fixed
+* Eliminate build-time warnings for `async-nats` by @vkolomeyko in https://github.com/nats-io/nats.rs/pull/1489
+* Fix error deserialization when err_code is absent by @Jarema in https://github.com/nats-io/nats.rs/pull/1497
+* Fix slow subscription shutdown after drain by @Jarema in https://github.com/nats-io/nats.rs/pull/1504
+
+## Changed
+* Relax type constraints around `ServiceBuilder::start` by @vkolomeyko in https://github.com/nats-io/nats.rs/pull/1486
+* Use with_source for CreateError to maintain original error source by @LouiseSianEvans in https://github.com/nats-io/nats.rs/pull/1495
+* Switch to rustls-pki-types by @Jarema in https://github.com/nats-io/nats.rs/pull/1492
+* Tidy-up `async-nats/src/service/mod.rs` by @vkolomeyko in https://github.com/nats-io/nats.rs/pull/1487
+* Make some consumer/stream config accept `omitempty` case by @Jarema in https://github.com/nats-io/nats.rs/pull/1493
+* Improve the `drain` docs for better clarity by @Jarema in https://github.com/nats-io/nats.rs/pull/1484
+
+## New Contributors
+* @vkolomeyko made their first contribution in https://github.com/nats-io/nats.rs/pull/1489
+* @LouiseSianEvans made their first contribution in https://github.com/nats-io/nats.rs/pull/1495
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.45.0...async-nats/v0.46.0
+
+# v0.45.0
+## Overview
+
+A smaller release adding missing `value` field to `pub_ack` and some additional fixes.
+
+## Added
+* Add pub ack `value` field by @Jarema in https://github.com/nats-io/nats.rs/pull/1473
+* Add `double_ack_with` method to JetStream Messages by @OtaK in https://github.com/nats-io/nats.rs/pull/1474
+
+## Fixed
+* Fix object store headers serde by @Jarema in https://github.com/nats-io/nats.rs/pull/1472
+* Fix Kv limit markers in watches by @Jarema in https://github.com/nats-io/nats.rs/pull/1475
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.44.2...async-nats/v0.45.0
+
+
+# v0.44.2
+## Overview
+This PR adds a new method to Context traits and fixes the docs build
+
+## What's Changed
+* Add send_request method to JetStream Context by @Jarema in https://github.com/nats-io/nats.rs/pull/1466
+* Fix docs by @Jarema in https://github.com/nats-io/nats.rs/pull/1468
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.44.1...async-nats/v0.44.2
+
+# v0.44.1
+## What's Changed
+* Add missing errors types by @Jarema in https://github.com/nats-io/nats.rs/pull/1464
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.44.0...async-nats/v0.44.1
+
+# v0.44.0
+## Overview
+A release that focuses on reorganization of types and improvement of extension traits for [orbit](https://github.com/synadia-io/orbit.rs)
+
+## What's Changed
+* Enable service API by default by @Jarema in https://github.com/nats-io/nats.rs/pull/1461
+* Extend client traits by @Jarema in https://github.com/nats-io/nats.rs/pull/1456
+* Reorganize `message` types by @Jarema in https://github.com/nats-io/nats.rs/pull/1462
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.43.1...async-nats/v0.44.0
+
+# v0.43.1
+
+## Overview
+
+A hotfix for bugs and regressions introduced with recent release.
+
+## Fixed
+* Fix direct get with nats-server 2.11 & improve testing against older servers by @Jarema in https://github.com/nats-io/nats.rs/pull/1458
+* Properly handle acker cleanup by @Jarema in https://github.com/nats-io/nats.rs/pull/1460
+
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.43.0...async-nats/v0.43.13.0
+
+## Overview
+
+This release adds support for 2.12 server features and adds JetStream backpressure control to publishing.
+
+## Added
+* Add `allow_atomic_publish` by @Jarema in https://github.com/nats-io/nats.rs/pull/1448
+* Add prioritized PriorityPolicy by @Jarema in https://github.com/nats-io/nats.rs/pull/1440
+* Add messages counters stream config by @Jarema in https://github.com/nats-io/nats.rs/pull/1453
+* Add messages schedules stream config field by @Jarema in https://github.com/nats-io/nats.rs/pull/1452
+* Add peristence mode to the stream config by @Jarema in https://github.com/nats-io/nats.rs/pull/1449
+* Add new fields to `ClusterInfo` by @Jarema in https://github.com/nats-io/nats.rs/pull/1439
+* Add more fields to ServerInfo by @OtaK in https://github.com/nats-io/nats.rs/pull/1434
+* Add backpressure to publish by @Jarema in https://github.com/nats-io/nats.rs/pull/1286
+* Add port/path support for WebSockets by @AleTopp in https://github.com/nats-io/nats.rs/pull/1426
+* Add test to confirm user can promote mirror to a stream by @Jarema in https://github.com/nats-io/nats.rs/pull/1438
+* Add Direct get builder by @Jarema in https://github.com/nats-io/nats.rs/pull/1442
+* Add TryFrom<Bytes> support for subject by @Sibz in https://github.com/nats-io/nats.rs/pull/1390
+
+## Fixed
+* Fix linter issues by @Jarema in https://github.com/nats-io/nats.rs/pull/1427
+* Improve push ordered consumer by @Jarema in https://github.com/nats-io/nats.rs/pull/1445
+
+## Changed
+* Expose get_info for consumer by @nitsky in https://github.com/nats-io/nats.rs/pull/1428
+* Make errors methods public by @Jarema in https://github.com/nats-io/nats.rs/pull/1431
+* Replace futures by futures-util by @Totodore in https://github.com/nats-io/nats.rs/pull/1424
+
+## New Contributors
+* @nitsky made their first contribution in https://github.com/nats-io/nats.rs/pull/1428
+* @AleTopp made their first contribution in https://github.com/nats-io/nats.rs/pull/1426
+* @Sibz made their first contribution in https://github.com/nats-io/nats.rs/pull/1390
+* @OtaK made their first contribution in https://github.com/nats-io/nats.rs/pull/1434
+* @Totodore made their first contribution in https://github.com/nats-io/nats.rs/pull/1424
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.42.0...async-nats/v0.43.0
+
 # v0.42.0
 
 This releases focuses on some fixes and addition of Client traits that allow for easier extension of the client.

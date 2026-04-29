@@ -1,5 +1,5 @@
 use async_nats::jetstream::{self, consumer::PushConsumer};
-use futures::StreamExt;
+use futures_util::StreamExt;
 use std::{env, str::from_utf8, time::Duration};
 
 #[tokio::main]

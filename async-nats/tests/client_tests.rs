@@ -19,12 +19,16 @@ mod client {
         ConnectErrorKind, ConnectOptions, Event, RequestErrorKind, ServerAddr, Subject,
     };
     use bytes::Bytes;
-    use futures::future::join_all;
-    use futures::stream::StreamExt;
+    use futures_util::future::join_all;
+    use futures_util::stream::StreamExt;
     use std::path::PathBuf;
     use std::str::FromStr;
-    use std::sync::atomic::Ordering;
-    use std::time::Duration;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
+    use std::time::{Duration, Instant};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn force_reconnect() {
@@ -374,6 +378,160 @@ mod client {
 
         assert!(sub.next().await.is_some());
         assert!(sub.next().await.is_none());
+    }
+
+    // The subscription correctly stops on the client side at max regardless as reconnecting does
+    // not reset the client state. However, this does not prove that the server is not wasting
+    // bandwidth and CPU by continuing to send messages to the dropped subscriber, which are
+    // silently ignored. A TCP proxy is needed to observe the server side behavior here.
+    #[tokio::test]
+    async fn unsubscribe_after_reconnect() {
+        let server = nats_server::run_basic_server();
+        let server_port = server.client_port();
+
+        let listen_fd = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_port = listen_fd.local_addr().unwrap().port();
+
+        let max = 3;
+
+        let spurious = Arc::new(AtomicU64::new(0));
+        let spurious_proxy = Arc::clone(&spurious);
+
+        let delivered = Arc::new(AtomicU64::new(0));
+        let delivered_proxy = Arc::clone(&delivered);
+
+        tokio::task::spawn(async move {
+            loop {
+                let Ok((downstream, _)) = listen_fd.accept().await else {
+                    break;
+                };
+
+                let upstream = tokio::net::TcpStream::connect(format!("127.0.0.1:{server_port}"))
+                    .await
+                    .unwrap();
+
+                let spurious = Arc::clone(&spurious_proxy);
+                let delivered_total = Arc::clone(&delivered_proxy);
+
+                tokio::task::spawn(async move {
+                    let (dr, mut dw) = tokio::io::split(downstream);
+                    let (sr, mut sw) = tokio::io::split(upstream);
+
+                    let c2s = async move {
+                        let mut reader = tokio::io::BufReader::new(dr);
+                        let mut line = String::new();
+                        loop {
+                            line.clear();
+                            let n = reader.read_line(&mut line).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+                            sw.write_all(line.as_bytes()).await.ok();
+                        }
+                    };
+
+                    let s2c = async move {
+                        let mut reader = tokio::io::BufReader::new(sr);
+                        let mut line = String::new();
+
+                        loop {
+                            line.clear();
+                            let n = reader.read_line(&mut line).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+
+                            if line.starts_with("MSG test ") {
+                                let delivered = delivered_total.fetch_add(1, Ordering::Relaxed) + 1;
+                                if delivered > max {
+                                    // server didn't stop after unsub_after
+                                    spurious.fetch_add(1, Ordering::Relaxed);
+                                }
+                            }
+
+                            dw.write_all(line.as_bytes()).await.ok();
+
+                            if line.starts_with("MSG ") {
+                                let num_bytes: usize =
+                                    line.trim().rsplit(' ').next().unwrap().parse().unwrap();
+
+                                let mut payload = vec![0u8; num_bytes + 2]; // for \r\n
+                                reader.read_exact(&mut payload).await.unwrap();
+                                dw.write_all(&payload).await.ok();
+                            }
+                        }
+                    };
+
+                    tokio::select! {
+                        _ = c2s => {},
+                        _ = s2c => {},
+                    }
+                });
+            }
+        });
+
+        let (dctx, mut dcrx) = tokio::sync::mpsc::channel(1);
+        let (rctx, mut rcrx) = tokio::sync::mpsc::channel(1);
+
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(move |event| {
+                let dctx = dctx.clone();
+                let rctx = rctx.clone();
+                async move {
+                    match event {
+                        Event::Disconnected => dctx.send(()).await.unwrap(),
+                        Event::Connected => rctx.send(()).await.unwrap(),
+                        _ => (),
+                    }
+                }
+            })
+            .connect(format!("127.0.0.1:{proxy_port}"))
+            .await
+            .unwrap();
+
+        let mut sub = client.subscribe("test").await.unwrap();
+        sub.unsubscribe_after(max).await.unwrap();
+
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap()
+            .is_some());
+
+        client.force_reconnect().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // initial connect event.
+            rcrx.recv().await.unwrap();
+            dcrx.recv().await.unwrap();
+            rcrx.recv().await.unwrap();
+        })
+        .await
+        .unwrap();
+
+        for _ in 0..5 {
+            client.publish("test", "data".into()).await.unwrap();
+        }
+        client.flush().await.unwrap();
+
+        for _ in 0..(max - 1) {
+            assert!(tokio::time::timeout(Duration::from_secs(5), sub.next())
+                .await
+                .unwrap()
+                .is_some());
+        }
+        assert!(tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap()
+            .is_none());
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            spurious.load(Ordering::Relaxed),
+            0,
+            "server sent messages after UNSUB limit"
+        );
     }
 
     #[tokio::test]
@@ -798,11 +956,32 @@ mod client {
             .await
             .unwrap();
 
+        assert!(
+            client.try_server_info().is_none(),
+            "server info should not be available before the first INFO frame"
+        );
+        assert_eq!(
+            client.server_info(),
+            async_nats::ServerInfo::default(),
+            "server_info should preserve the original fallback state"
+        );
+        assert_eq!(
+            client.max_payload(),
+            1024 * 1024,
+            "current max payload should use the default server payload limit"
+        );
+
         let mut sub = client.subscribe("DATA").await.unwrap();
         client.publish("DATA", "payload".into()).await.unwrap();
         tokio::time::sleep(Duration::from_secs(2)).await;
         let _server = nats_server::run_server_with_port("", Some("7779"));
         sub.next().await.unwrap();
+
+        let info = client
+            .try_server_info()
+            .expect("server info should be available after connecting");
+        assert_eq!(info.port, 7779);
+        assert_eq!(client.server_info(), info);
     }
 
     #[tokio::test]
@@ -944,6 +1123,8 @@ mod client {
         let server = nats_server::run_server("tests/configs/max_payload.conf");
 
         let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        assert_eq!(client.max_payload(), 1024 * 128);
 
         // this exceeds the small payload limit in server config.
         let payload = vec![0u8; 1024 * 1024];
@@ -1180,5 +1361,270 @@ mod client {
         let _client2 = async_nats::connect(server.client_url())
             .await
             .expect("Expected to be able to create a new client");
+    }
+
+    #[tokio::test]
+    async fn subject_validation_rejects_bad_subjects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // publish should reject a subject with spaces
+        client
+            .publish("bad subject", "data".into())
+            .await
+            .expect_err("publish should reject subject with spaces");
+
+        // subscribe should reject a subject with spaces
+        client
+            .subscribe("bad subject")
+            .await
+            .expect_err("subscribe should reject subject with spaces");
+
+        // publish_with_reply should reject an invalid reply subject
+        client
+            .publish_with_reply("valid", "bad reply", "data".into())
+            .await
+            .expect_err("publish_with_reply should reject reply subject with spaces");
+
+        // request should also reject a subject with spaces
+        let err = client
+            .request("bad subject", "data".into())
+            .await
+            .expect_err("request should reject subject with spaces");
+        // Verify it's actually a validation error, not a timeout or no-responders error
+        assert_ne!(
+            err.kind(),
+            RequestErrorKind::TimedOut,
+            "expected a subject validation error, got timeout: {err:?}"
+        );
+        assert_ne!(
+            err.kind(),
+            RequestErrorKind::NoResponders,
+            "expected a subject validation error, got no-responders: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_validates_subject() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // request should reject a subject with spaces
+        let err = client
+            .request("bad subject", "data".into())
+            .await
+            .expect_err("request should reject subject with spaces");
+        assert_eq!(err.kind(), RequestErrorKind::InvalidSubject);
+
+        // request_with_headers should reject a subject with spaces
+        let err = client
+            .request_with_headers("bad subject", async_nats::HeaderMap::new(), "data".into())
+            .await
+            .expect_err("request_with_headers should reject subject with spaces");
+        assert_eq!(err.kind(), RequestErrorKind::InvalidSubject);
+    }
+
+    #[tokio::test]
+    async fn queue_subscribe_validates_queue_group() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        // queue_subscribe should reject a queue group with spaces
+        client
+            .queue_subscribe("events", "bad group".into())
+            .await
+            .expect_err("queue_subscribe should reject queue group with spaces");
+
+        // queue_subscribe should reject a queue group with CRLF
+        client
+            .queue_subscribe("events", "bad\r\ngroup".into())
+            .await
+            .expect_err("queue_subscribe should reject queue group with CRLF");
+
+        // queue_subscribe should reject a queue group with tab
+        client
+            .queue_subscribe("events", "bad\tgroup".into())
+            .await
+            .expect_err("queue_subscribe should reject queue group with tab");
+
+        // queue_subscribe should reject an empty queue group
+        client
+            .queue_subscribe("events", "".into())
+            .await
+            .expect_err("queue_subscribe should reject empty queue group");
+
+        // valid queue group should succeed
+        client
+            .queue_subscribe("events", "workers".into())
+            .await
+            .expect("queue_subscribe should accept valid queue group");
+    }
+
+    #[tokio::test]
+    async fn skip_subject_validation_allows_bad_publish_subjects() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::ConnectOptions::new()
+            .skip_subject_validation(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // Publish validation is skippable — double dots are allowed through.
+        client
+            .publish("foo..bar", "data".into())
+            .await
+            .expect("publish should allow double dots when validation is skipped");
+    }
+
+    #[tokio::test]
+    async fn skip_subject_validation_still_validates_subscribe() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::ConnectOptions::new()
+            .skip_subject_validation(true)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        // Subscribe validation always runs (matching Go/Java behavior).
+        client
+            .subscribe("foo..bar")
+            .await
+            .expect_err("subscribe should reject double dots even when skip is enabled");
+    }
+
+    #[tokio::test]
+    async fn drain_subscription_deadlock() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut subscriber = client.subscribe("test").await.unwrap();
+        client.flush().await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        let start = Instant::now();
+        subscriber.drain().await.unwrap();
+
+        // With the bug: next() would block until the server sends a ping (~60s)
+        // With the fix: next() returns None immediately after drain completes
+        subscriber.next().await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_secs() < 5,
+            "drain took too long: {:?} - bug likely present",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn local_address() {
+        let server = nats_server::run_basic_server();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let client = ConnectOptions::new()
+            .local_address(addr)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn local_address_with_port() {
+        let server = nats_server::run_basic_server();
+
+        let addr: std::net::SocketAddr = "127.0.0.1:19898".parse().unwrap();
+        let client = ConnectOptions::new()
+            .local_address(addr)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client.publish("test", "data".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        // Connection succeeded, meaning the bind to port 19898 worked.
+        // If the port was already in use or bind failed, connect would have errored.
+    }
+
+    // Tests that connection_timeout covers the full NATS handshake, not just TCP connect.
+    // This verifies the fix for https://github.com/nats-io/nats.rs/issues/1526.
+
+    #[tokio::test]
+    async fn handshake_timeout_no_info() {
+        // Server accepts TCP but never sends INFO — the client should time out.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Accept connections but never write anything (no INFO sent).
+        let handle = tokio::spawn(async move {
+            let (_stream, _peer) = listener.accept().await.unwrap();
+            // Hold the connection open without sending INFO.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let start = Instant::now();
+        let result = ConnectOptions::new()
+            .connection_timeout(Duration::from_millis(500))
+            .connect(format!("nats://127.0.0.1:{}", addr.port()))
+            .await;
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            result.unwrap_err().kind(),
+            ConnectErrorKind::TimedOut,
+            "should time out when server never sends INFO"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout should fire near 500ms, but took {:?}",
+            elapsed,
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn handshake_timeout_no_pong() {
+        // Server accepts TCP and sends INFO, but never responds with PONG
+        // after the client sends CONNECT+PING.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (mut stream, _peer) = listener.accept().await.unwrap();
+            // Send a valid INFO line so the client proceeds past INFO read.
+            let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{},\"max_payload\":1048576}}\r\n", addr.port());
+            tokio::io::AsyncWriteExt::write_all(&mut stream, info.as_bytes())
+                .await
+                .unwrap();
+            // Now hold the connection open without reading CONNECT+PING or sending PONG.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let start = Instant::now();
+        let result = ConnectOptions::new()
+            .connection_timeout(Duration::from_millis(500))
+            .connect(format!("nats://127.0.0.1:{}", addr.port()))
+            .await;
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(
+            result.unwrap_err().kind(),
+            ConnectErrorKind::TimedOut,
+            "should time out when server never sends PONG"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout should fire near 500ms, but took {:?}",
+            elapsed,
+        );
+
+        handle.abort();
     }
 }

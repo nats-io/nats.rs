@@ -1,7 +1,7 @@
 [package]
 name = "nats"
-version = "0.25.0"
-description = "A Rust NATS client"
+version = "0.26.0"
+description = "A Rust NATS client (deprecated — use async-nats instead)"
 authors = ["Derek Collison <derek@nats.io>", "Tyler Neely <tyler@nats.io>", "Stjepan Glavina <stjepan@nats.io>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ features = ["unstable"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [badges]
-maintenance = { status = "actively-developed" }
+maintenance = { status = "deprecated" }
 
 [dependencies]
 base64 = "0.13.0"
@@ -67,7 +67,6 @@ nats_test_server = { path = "nats_test_server" }
 quicli = "0.4.0"
 smol = "1.2.5"
 structopt = "0.3.21"
-nats_016 = { package = "nats", version = "0.16.0" }
 nats-server = { path = "../nats-server" }
 
 [[bench]]

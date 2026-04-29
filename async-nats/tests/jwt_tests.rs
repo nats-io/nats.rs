@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use futures::stream::StreamExt;
+    use futures_util::stream::StreamExt;
     use std::path::PathBuf;
 
     #[tokio::test]

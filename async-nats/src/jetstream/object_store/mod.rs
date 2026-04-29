@@ -22,11 +22,11 @@ use crate::{HeaderMap, HeaderValue};
 use base64::engine::general_purpose::URL_SAFE;
 use base64::engine::Engine;
 use bytes::BytesMut;
-use futures::future::BoxFuture;
-use once_cell::sync::Lazy;
+use futures_util::future::BoxFuture;
+use std::sync::LazyLock;
 use tokio::io::AsyncReadExt;
 
-use futures::{Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -43,8 +43,10 @@ const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const NATS_ROLLUP: &str = "Nats-Rollup";
 const ROLLUP_SUBJECT: &str = "sub";
 
-static BUCKET_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
-static OBJECT_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
+static BUCKET_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[a-zA-Z0-9_-]+\z").unwrap());
+static OBJECT_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[-/_=\.a-zA-Z0-9]+\z").unwrap());
 
 pub(crate) fn is_valid_bucket_name(bucket_name: &str) -> bool {
     BUCKET_NAME_RE.is_match(bucket_name)
@@ -294,7 +296,7 @@ impl ObjectStore {
         // Fetch any existing object info, if there is any for later use.
         let maybe_existing_object_info = (self.info(&object_meta.name).await).ok();
 
-        let object_nuid = nuid::next();
+        let object_nuid = crate::id_generator::next();
         let chunk_subject = Subject::from(format!("$O.{}.C.{}", &self.name, &object_nuid));
 
         let mut object_chunks = 0;
@@ -418,7 +420,7 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -468,7 +470,7 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -506,7 +508,7 @@ impl ObjectStore {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("demo.nats.io").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -718,7 +720,7 @@ impl ObjectStore {
                 max_chunk_size: None,
             }),
             bucket: self.name.clone(),
-            nuid: nuid::next().to_string(),
+            nuid: crate::id_generator::next(),
             size: 0,
             chunks: 0,
             modified: Some(OffsetDateTime::now_utc()),
@@ -783,7 +785,7 @@ impl ObjectStore {
                 max_chunk_size: None,
             }),
             bucket: self.name.clone(),
-            nuid: nuid::next().to_string(),
+            nuid: crate::id_generator::next(),
             size: 0,
             chunks: 0,
             modified: Some(OffsetDateTime::now_utc()),

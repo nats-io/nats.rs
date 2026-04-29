@@ -58,6 +58,9 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// Retrieves `info` about [Consumer] from the server, updates the cached `info` inside
     /// [Consumer] and returns it.
     ///
+    /// When possible, use [`Message::info()`][crate::jetstream::Message::info] instead.
+    /// message metadata often already contains the needed information and does not require a server call.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -84,6 +87,9 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     }
 
     /// Retrieves `info` about [Consumer] from the server. Does not update the cache.
+    ///
+    /// When possible, use [`Message::info()`][crate::jetstream::Message::info] instead.
+    /// message metadata often already contains the needed information and does not require a server call.
     ///
     /// # Examples
     ///
@@ -285,6 +291,7 @@ pub struct Config {
     #[serde(flatten)]
     pub deliver_policy: DeliverPolicy,
     /// How messages should be acknowledged
+    #[serde(default)]
     pub ack_policy: AckPolicy,
     /// How long to allow messages to remain un-acknowledged before attempting redelivery
     #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
@@ -300,9 +307,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subjects: Vec<String>,
     /// Whether messages are sent as quickly as possible or at the rate of receipt
+    #[serde(default)]
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(rename = "rate_limit_bps", default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
@@ -381,6 +389,9 @@ pub enum PriorityPolicy {
     /// Consumer configurations that used [PriorityPolicy::PinnedClient].
     #[serde(rename = "pinned_client")]
     PinnedClient,
+    #[cfg(feature = "server_2_12")]
+    #[serde(rename = "prioritized")]
+    Prioritized,
     #[serde(rename = "none")]
     #[default]
     None,

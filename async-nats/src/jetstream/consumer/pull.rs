@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use futures::{
+use futures_util::{
     future::{BoxFuture, Either},
     FutureExt, StreamExt,
 };
@@ -54,8 +54,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -99,6 +99,8 @@ impl Consumer<Config> {
                 min_pending: None,
                 min_ack_pending: None,
                 group: None,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             self,
         )
@@ -114,7 +116,7 @@ impl Consumer<Config> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -174,8 +176,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -225,8 +227,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -271,8 +273,8 @@ impl Consumer<Config> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -361,7 +363,7 @@ impl Batch {
     }
 }
 
-impl futures::Stream for Batch {
+impl futures_util::Stream for Batch {
     type Item = Result<jetstream::Message, crate::Error>;
 
     fn poll_next(
@@ -442,7 +444,7 @@ pub struct Sequence {
     next: Option<BoxFuture<'static, Result<Batch, MessagesError>>>,
 }
 
-impl futures::Stream for Sequence {
+impl futures_util::Stream for Sequence {
     type Item = Result<Batch, MessagesError>;
 
     fn poll_next(
@@ -516,8 +518,8 @@ impl Consumer<OrderedConfig> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn mains() -> Result<(), async_nats::Error> {
-    /// use futures::StreamExt;
-    /// use futures::TryStreamExt;
+    /// use futures_util::StreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -565,6 +567,8 @@ impl Consumer<OrderedConfig> {
                 min_pending: None,
                 min_ack_pending: None,
                 group: None,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             &config,
         )
@@ -609,7 +613,7 @@ pub struct OrderedConfig {
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(rename = "rate_limit_bps", default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
@@ -629,20 +633,20 @@ pub struct OrderedConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub max_waiting: i64,
     #[cfg(feature = "server_2_10")]
-    // Additional consumer metadata.
+    /// Additional consumer metadata.
     #[serde(default, skip_serializing_if = "is_default")]
     pub metadata: HashMap<String, String>,
-    // Maximum number of messages that can be requested in single Pull Request.
-    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
-    // [stream]
+    /// Maximum number of messages that can be requested in single Pull Request.
+    /// This is used explicitly by [Consumer::batch] and [Consumer::fetch], but also, under the hood, by [Consumer::messages] and
+    /// [Consumer::stream]
     pub max_batch: i64,
-    // Maximum number of bytes that can be requested in single Pull Request.
-    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
-    // [stream]
+    /// Maximum number of bytes that can be requested in single Pull Request.
+    /// This is used explicitly by [Consumer::batch] and [Consumer::fetch], but also, under the hood, by [Consumer::messages] and
+    /// [Consumer::stream]
     pub max_bytes: i64,
-    // Maximum expiry that can be set for a single Pull Request.
-    // This is used explicitly by [batch] and [fetch], but also, under the hood, by [messages] and
-    // [stream]
+    /// Maximum expiry that can be set for a single Pull Request.
+    /// This is used explicitly by [Consumer::batch] and [Consumer::fetch], but also, under the hood, by [Consumer::messages] and
+    /// [Consumer::stream]
     pub max_expires: Duration,
 }
 
@@ -766,7 +770,7 @@ pub struct Ordered {
     missed_heartbeats: bool,
 }
 
-impl futures::Stream for Ordered {
+impl futures_util::Stream for Ordered {
     type Item = Result<jetstream::Message, OrderedError>;
 
     fn poll_next(
@@ -1088,7 +1092,7 @@ impl std::fmt::Display for MessagesErrorKind {
 
 pub type MessagesError = Error<MessagesErrorKind>;
 
-impl futures::Stream for Stream {
+impl futures_util::Stream for Stream {
     type Item = Result<jetstream::Message, MessagesError>;
 
     fn poll_next(
@@ -1271,7 +1275,7 @@ impl futures::Stream for Stream {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// use async_nats::jetstream::consumer::PullConsumer;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
@@ -1300,6 +1304,8 @@ pub struct StreamBuilder<'a> {
     group: Option<String>,
     min_pending: Option<usize>,
     min_ack_pending: Option<usize>,
+    #[cfg(feature = "server_2_12")]
+    priority: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1314,6 +1320,8 @@ impl<'a> StreamBuilder<'a> {
             group: None,
             min_pending: None,
             min_ack_pending: None,
+            #[cfg(feature = "server_2_12")]
+            priority: None,
         }
     }
 
@@ -1330,7 +1338,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1372,7 +1380,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1410,7 +1418,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1449,7 +1457,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1488,7 +1496,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1519,6 +1527,14 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
+    /// Sets the priority at which this stream will get messages. If there are any requests with
+    /// lower priority number, this stream will not get messages until those are satisfied.
+    #[cfg(feature = "server_2_12")]
+    pub fn priority(mut self, priority: usize) -> Self {
+        self.priority = Some(priority);
+        self
+    }
+
     /// Sets overflow threshold for minimum pending acknowledgements before this stream will start getting
     /// messages for a [Consumer].
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and [PriorityPolicy::Overflow] set.
@@ -1529,7 +1545,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1568,7 +1584,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1607,7 +1623,7 @@ impl<'a> StreamBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1642,6 +1658,8 @@ impl<'a> StreamBuilder<'a> {
                 min_pending: self.min_pending,
                 group: self.group,
                 min_ack_pending: self.min_ack_pending,
+                #[cfg(feature = "server_2_12")]
+                priority: self.priority,
             },
             self.consumer,
         )
@@ -1657,7 +1675,7 @@ impl<'a> StreamBuilder<'a> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
 /// use async_nats::jetstream::consumer::PullConsumer;
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
@@ -1719,7 +1737,7 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1756,7 +1774,7 @@ impl<'a> FetchBuilder<'a> {
     /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1790,7 +1808,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -1829,7 +1847,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1870,7 +1888,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1902,6 +1920,14 @@ impl<'a> FetchBuilder<'a> {
         self
     }
 
+    /// Sets the priority at which this stream will get messages. If there are any requests with
+    /// lower priority number, this stream will not get messages until those are satisfied.
+    #[cfg(feature = "server_2_12")]
+    pub fn priority(mut self, priority: usize) -> Self {
+        self.batch = priority;
+        self
+    }
+
     /// Sets overflow threshold for minimum pending acknowledgments before this stream will start getting
     /// messages.
     /// To use overflow, [Consumer] needs to have enabled [Config::priority_groups] and
@@ -1913,7 +1939,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1953,7 +1979,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -1993,7 +2019,7 @@ impl<'a> FetchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2024,6 +2050,8 @@ impl<'a> FetchBuilder<'a> {
                 min_pending: self.min_pending,
                 min_ack_pending: self.min_ack_pending,
                 group: self.group,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             self.consumer,
         )
@@ -2039,7 +2067,7 @@ impl<'a> FetchBuilder<'a> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), async_nats::Error>  {
 /// use async_nats::jetstream::consumer::PullConsumer;
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 /// let client = async_nats::connect("localhost:4222").await?;
 /// let jetstream = async_nats::jetstream::new(client);
 ///
@@ -2102,7 +2130,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2140,7 +2168,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2174,7 +2202,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2214,7 +2242,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -2257,7 +2285,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -2297,7 +2325,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
@@ -2339,7 +2367,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2376,7 +2404,7 @@ impl<'a> BatchBuilder<'a> {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error>  {
     /// use async_nats::jetstream::consumer::PullConsumer;
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
     ///
@@ -2406,6 +2434,8 @@ impl<'a> BatchBuilder<'a> {
             min_pending: self.min_pending,
             min_ack_pending: self.min_ack_pending,
             group: self.group,
+            #[cfg(feature = "server_2_12")]
+            priority: None,
         };
         Batch::batch(config, self.consumer).await
     }
@@ -2439,6 +2469,8 @@ pub struct BatchConfig {
     pub min_pending: Option<usize>,
     pub min_ack_pending: Option<usize>,
     pub group: Option<String>,
+    #[cfg(feature = "server_2_12")]
+    pub priority: Option<usize>,
 }
 
 fn is_default<T: Default + Eq>(t: &T) -> bool {
@@ -2492,7 +2524,7 @@ pub struct Config {
     /// Whether messages are sent as quickly as possible or at the rate of receipt
     pub replay_policy: ReplayPolicy,
     /// The rate of message delivery in bits per second
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(rename = "rate_limit_bps", default, skip_serializing_if = "is_default")]
     pub rate_limit: u64,
     /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(
@@ -2787,6 +2819,8 @@ async fn recreate_consumer_stream(
                 min_pending: None,
                 min_ack_pending: None,
                 group: None,
+                #[cfg(feature = "server_2_12")]
+                priority: None,
             },
             &config,
         ),

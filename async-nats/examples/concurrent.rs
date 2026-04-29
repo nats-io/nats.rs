@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::stream::StreamExt;
-use rand::Rng;
+use futures_util::stream::StreamExt;
+use rand::RngExt;
 use std::{env, str::from_utf8, time::Duration};
 
 #[tokio::main]
@@ -43,7 +43,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // message immediately.
     subscription
         .for_each_concurrent(25, |message| async move {
-            let num = rand::thread_rng().gen_range(0..500);
+            let num = rand::rng().random_range(0..500);
             tokio::time::sleep(Duration::from_millis(num)).await;
             println!(
                 "received message: {:?}",

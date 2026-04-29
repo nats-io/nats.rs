@@ -13,11 +13,13 @@
 
 #[cfg(feature = "service")]
 mod service {
-    use std::{collections::HashMap, str::from_utf8};
-
+    use async_nats::client::PublishErrorKind;
     use async_nats::service::{self, Info, ServiceExt, Stats};
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use jsonschema::JSONSchema;
+    use std::error::Error;
+    use std::fmt::Display;
+    use std::{collections::HashMap, str::from_utf8};
     use tracing::debug;
 
     #[tokio::test]
@@ -458,9 +460,28 @@ mod service {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
+        struct SemVer {
+            major: i32,
+            minor: i32,
+            patch: i32,
+        }
+
+        impl Display for SemVer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+            }
+        }
+
         let service = client
             .service_builder()
-            .start("service", "1.0.0")
+            .start(
+                "service",
+                SemVer {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+            )
             .await
             .unwrap();
 
@@ -607,5 +628,29 @@ mod service {
         });
 
         Command::new("deno").args(["run", "-A", "--unstable", "https://raw.githubusercontent.com/nats-io/nats.deno/main/tests/helpers/service-check.ts", "--server", &server.client_url(), "--name", "cross"]).output().unwrap();
+    }
+
+    #[tokio::test]
+    async fn missing_reply_subject() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .queue_group("service")
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+
+        let mut endpoint = service.endpoint("endpoint").await.unwrap();
+
+        // publish without reply
+        client.publish("endpoint", "request".into()).await.unwrap();
+
+        let request = endpoint.next().await.unwrap();
+        let err = request.respond(Ok("ok".into())).await.unwrap_err();
+        // check the correct error was returned
+        assert_eq!(err.kind(), PublishErrorKind::InvalidSubject);
+        assert!(err.source().is_some());
     }
 }

@@ -13,7 +13,7 @@
 
 #[cfg(feature = "compatibility_tests")]
 mod compatibility {
-    use futures::{pin_mut, stream::Peekable, StreamExt};
+    use futures_util::{pin_mut, stream::Peekable, StreamExt};
     use ring::digest::{self, SHA256};
 
     use core::panic;
@@ -36,9 +36,6 @@ mod compatibility {
 
     #[tokio::test]
     async fn object_store() {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .init();
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".to_string());
         tracing::info!("staring client for object store tests at {}", url);
         let client = async_nats::ConnectOptions::new()

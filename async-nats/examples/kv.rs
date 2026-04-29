@@ -14,7 +14,7 @@
 use std::{env, str::from_utf8};
 
 use async_nats::jetstream;
-use futures::{StreamExt, TryStreamExt};
+use futures_util::{StreamExt, TryStreamExt};
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {

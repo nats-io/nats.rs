@@ -39,7 +39,7 @@
 //!
 //! ```no_run
 //! use bytes::Bytes;
-//! use futures::StreamExt;
+//! use futures_util::StreamExt;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), async_nats::Error> {
@@ -98,7 +98,7 @@
 //!
 //! ```no_run
 //! # use bytes::Bytes;
-//! # use futures::StreamExt;
+//! # use futures_util::StreamExt;
 //! # use std::error::Error;
 //! # use std::time::Instant;
 //! # #[tokio::main]
@@ -151,7 +151,7 @@
 //! # Ok(())
 //! # }
 //! ```
-//! ### Object Store store
+//! ### Object Store
 //!
 //! Object [Store][jetstream::object_store::ObjectStore] is accessed through [jetstream::Context].
 //!
@@ -192,17 +192,18 @@
 #![deny(rustdoc::private_intra_doc_links)]
 #![deny(rustdoc::invalid_codeblock_attributes)]
 #![deny(rustdoc::invalid_rust_codeblocks)]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use thiserror::Error;
 
-use futures::stream::Stream;
+use futures_util::stream::Stream;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use core::fmt;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::future::Future;
 use std::iter;
@@ -233,6 +234,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const MAX_PENDING_PINGS: usize = 2;
 const MULTIPLEXER_SID: u64 = 0;
+pub(crate) const DEFAULT_SERVER_MAX_PAYLOAD: usize = 1024 * 1024;
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
@@ -241,8 +243,9 @@ pub use tokio_rustls::rustls;
 
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
+pub use connector::{ReconnectToServer, Server};
 pub use header::{HeaderMap, HeaderName, HeaderValue};
-pub use subject::Subject;
+pub use subject::{Subject, SubjectError, ToSubject};
 
 mod auth;
 pub(crate) mod auth_utils;
@@ -253,16 +256,24 @@ mod options;
 
 pub use auth::Auth;
 pub use client::{
-    Client, PublishError, Request, RequestError, RequestErrorKind, Statistics, SubscribeError,
+    Client, PublishError, Request, RequestError, RequestErrorKind, ServerPoolError,
+    ServerPoolErrorKind, SetServerPoolError, SetServerPoolErrorKind, Statistics, SubscribeError,
+    SubscribeErrorKind,
 };
 pub use options::{AuthError, ConnectOptions};
 
+#[cfg(feature = "crypto")]
+#[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
 pub mod error;
 pub mod header;
+mod id_generator;
+#[cfg(feature = "jetstream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jetstream")))]
 pub mod jetstream;
 pub mod message;
 #[cfg(feature = "service")]
+#[cfg_attr(docsrs, doc(cfg(feature = "service")))]
 pub mod service;
 pub mod status;
 pub mod subject;
@@ -324,6 +335,15 @@ pub struct ServerInfo {
     /// Whether server goes into lame duck mode.
     #[serde(default, rename = "ldm")]
     pub lame_duck_mode: bool,
+    /// Name of the cluster if the server is in cluster-mode
+    #[serde(default)]
+    pub cluster: Option<String>,
+    /// The configured NATS domain of the server.
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// Whether the server supports JetStream.
+    #[serde(default)]
+    pub jetstream: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -345,19 +365,19 @@ pub(crate) enum ServerOp {
     },
 }
 
-/// `PublishMessage` represents a message being published
-#[derive(Debug)]
-pub struct PublishMessage {
-    pub subject: Subject,
-    pub payload: Bytes,
-    pub reply: Option<Subject>,
-    pub headers: Option<HeaderMap>,
-}
+/// An alias. This is done to avoid breaking changes
+/// in the public API. However this will get deprecated in the future in favor of
+/// [crate::message::OutboundMessage].
+#[deprecated(
+    since = "0.44.0",
+    note = "use `async_nats::message::OutboundMessage` instead"
+)]
+pub type PublishMessage = crate::message::OutboundMessage;
 
 /// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]
 pub(crate) enum Command {
-    Publish(PublishMessage),
+    Publish(OutboundMessage),
     Request {
         subject: Subject,
         payload: Bytes,
@@ -382,6 +402,13 @@ pub(crate) enum Command {
         sid: Option<u64>,
     },
     Reconnect,
+    SetServerPool {
+        servers: Vec<ServerAddr>,
+        result: oneshot::Sender<Result<(), String>>,
+    },
+    ServerPool {
+        result: oneshot::Sender<Vec<connector::Server>>,
+    },
 }
 
 /// `ClientOp` represents all actions of `Client`.
@@ -414,7 +441,6 @@ struct Subscription {
     queue_group: Option<String>,
     delivered: u64,
     max: Option<u64>,
-    is_draining: bool,
 }
 
 #[derive(Debug)]
@@ -431,18 +457,19 @@ pub(crate) struct ConnectionHandler {
     subscriptions: HashMap<u64, Subscription>,
     multiplexer: Option<Multiplexer>,
     pending_pings: usize,
-    info_sender: tokio::sync::watch::Sender<ServerInfo>,
+    info_sender: tokio::sync::watch::Sender<Option<ServerInfo>>,
     ping_interval: Interval,
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
     is_draining: bool,
+    drain_pings: VecDeque<u64>,
 }
 
 impl ConnectionHandler {
     pub(crate) fn new(
         connection: Connection,
         connector: Connector,
-        info_sender: tokio::sync::watch::Sender<ServerInfo>,
+        info_sender: tokio::sync::watch::Sender<Option<ServerInfo>>,
         ping_period: Duration,
     ) -> ConnectionHandler {
         let mut ping_interval = interval(ping_period);
@@ -459,6 +486,7 @@ impl ConnectionHandler {
             should_reconnect: false,
             flush_observers: Vec::new(),
             is_draining: false,
+            drain_pings: VecDeque::new(),
         }
     }
 
@@ -543,7 +571,9 @@ impl ConnectionHandler {
                 // Note: safe to assume subscription drain has completed at this point, as we would have flushed
                 // all outgoing UNSUB messages in the previous call to this fn, and we would have processed and
                 // delivered any remaining messages to the subscription in the loop above.
-                self.handler.subscriptions.retain(|_, s| !s.is_draining);
+                while let Some(sid) = self.handler.drain_pings.pop_front() {
+                    self.handler.subscriptions.remove(&sid);
+                }
 
                 if self.handler.is_draining {
                     // The entire connection is draining. This means we flushed outgoing messages in the previous
@@ -809,24 +839,25 @@ impl ConnectionHandler {
                 self.flush_observers.push(observer);
             }
             Command::Drain { sid } => {
-                let mut drain_sub = |sid: u64, sub: &mut Subscription| {
-                    sub.is_draining = true;
+                let mut drain_sub = |sid: u64| {
+                    self.drain_pings.push_back(sid);
                     self.connection
                         .enqueue_write_op(&ClientOp::Unsubscribe { sid, max: None });
                 };
 
                 if let Some(sid) = sid {
-                    if let Some(sub) = self.subscriptions.get_mut(&sid) {
-                        drain_sub(sid, sub);
+                    if self.subscriptions.get_mut(&sid).is_some() {
+                        drain_sub(sid);
                     }
                 } else {
                     // sid isn't set, so drain the whole client
                     self.connector.events_tx.try_send(Event::Draining).ok();
                     self.is_draining = true;
-                    for (&sid, sub) in self.subscriptions.iter_mut() {
-                        drain_sub(sid, sub);
+                    for (&sid, _) in self.subscriptions.iter_mut() {
+                        drain_sub(sid);
                     }
                 }
+                self.connection.enqueue_write_op(&ClientOp::Ping);
             }
             Command::Subscribe {
                 sid,
@@ -840,7 +871,6 @@ impl ConnectionHandler {
                     max: None,
                     subject: subject.to_owned(),
                     queue_group: queue_group.to_owned(),
-                    is_draining: false,
                 };
 
                 self.subscriptions.insert(sid, subscription);
@@ -863,7 +893,7 @@ impl ConnectionHandler {
                 let multiplexer = if let Some(multiplexer) = self.multiplexer.as_mut() {
                     multiplexer
                 } else {
-                    let prefix = Subject::from(format!("{}.{}.", prefix, nuid::next()));
+                    let prefix = Subject::from(format!("{}.{}.", prefix, id_generator::next()));
                     let subject = Subject::from(format!("{prefix}*"));
 
                     self.connection.enqueue_write_op(&ClientOp::Subscribe {
@@ -897,7 +927,7 @@ impl ConnectionHandler {
                 self.connection.enqueue_write_op(&pub_op);
             }
 
-            Command::Publish(PublishMessage {
+            Command::Publish(OutboundMessage {
                 subject,
                 payload,
                 reply: respond,
@@ -932,6 +962,14 @@ impl ConnectionHandler {
             Command::Reconnect => {
                 self.should_reconnect = true;
             }
+
+            Command::SetServerPool { servers, result } => {
+                let _ = result.send(self.connector.set_server_pool(servers));
+            }
+
+            Command::ServerPool { result } => {
+                let _ = result.send(self.connector.server_pool());
+            }
         }
     }
 
@@ -946,7 +984,7 @@ impl ConnectionHandler {
     async fn handle_reconnect(&mut self) -> Result<(), ConnectError> {
         let (info, connection) = self.connector.connect().await?;
         self.connection = connection;
-        let _ = self.info_sender.send(info);
+        let _ = self.info_sender.send(Some(info));
 
         self.subscriptions
             .retain(|_, subscription| !subscription.sender.is_closed());
@@ -957,6 +995,13 @@ impl ConnectionHandler {
                 subject: subscription.subject.to_owned(),
                 queue_group: subscription.queue_group.to_owned(),
             });
+
+            if let Some(max) = subscription.max {
+                self.connection.enqueue_write_op(&ClientOp::Unsubscribe {
+                    sid: *sid,
+                    max: Some(max.saturating_sub(subscription.delivered)),
+                });
+            }
         }
 
         if let Some(multiplexer) = &self.multiplexer {
@@ -994,7 +1039,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (events_tx, mut events_rx) = mpsc::channel(128);
     let (state_tx, state_rx) = tokio::sync::watch::channel(State::Pending);
     // We're setting it to the default server payload size.
-    let max_payload = Arc::new(AtomicUsize::new(1024 * 1024));
+    let max_payload = Arc::new(AtomicUsize::new(DEFAULT_SERVER_MAX_PAYLOAD));
     let statistics = Arc::new(Statistics::default());
 
     let mut connector = Connector::new(
@@ -1016,6 +1061,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             reconnect_delay_callback: options.reconnect_delay_callback,
             auth_callback: options.auth_callback,
             max_reconnects: options.max_reconnects,
+            local_address: options.local_address,
+            reconnect_to_server_callback: options.reconnect_to_server_callback,
         },
         events_tx,
         state_tx,
@@ -1024,13 +1071,13 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     )
     .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
 
-    let mut info: ServerInfo = Default::default();
+    let mut info = None;
     let mut connection = None;
     if !options.retry_on_initial_connect {
         debug!("retry on initial connect failure is disabled");
         let (info_ok, connection_ok) = connector.try_connect().await?;
         connection = Some(connection_ok);
-        info = info_ok;
+        info = Some(info_ok);
     }
 
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info.clone());
@@ -1045,6 +1092,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         options.request_timeout,
         max_payload,
         statistics,
+        options.skip_subject_validation,
     );
 
     task::spawn(async move {
@@ -1065,7 +1113,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
                     return;
                 }
             };
-            info_sender.send(info).ok();
+            info_sender.send(Some(info)).ok();
             connection = Some(connection_ok);
         }
         let connection = connection.unwrap();
@@ -1221,7 +1269,7 @@ impl From<io::Error> for ConnectError {
 
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
-/// Implements [futures::stream::Stream] for ergonomic async message processing.
+/// Implements [futures_util::stream::Stream] for ergonomic async message processing.
 ///
 /// # Examples
 /// ```
@@ -1283,7 +1331,7 @@ impl Subscriber {
     ///
     /// # Examples
     /// ```
-    /// # use futures::StreamExt;
+    /// # use futures_util::StreamExt;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -1318,7 +1366,7 @@ impl Subscriber {
     ///
     /// # Examples
     /// ```no_run
-    /// # use futures::StreamExt;
+    /// # use futures_util::StreamExt;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -1426,12 +1474,18 @@ pub enum ServerError {
 pub enum ClientError {
     Other(String),
     MaxReconnects,
+    /// The reconnect-to-server callback returned a server address that is not
+    /// present in the current server pool.
+    ServerNotInPool,
 }
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Other(error) => write!(f, "nats: {error}"),
             Self::MaxReconnects => write!(f, "nats: max reconnects reached"),
+            Self::ServerNotInPool => {
+                write!(f, "nats: reconnect callback returned server not in pool")
+            }
         }
     }
 }
@@ -1714,12 +1768,51 @@ impl<T: ToServerAddrs + ?Sized> ToServerAddrs for &T {
     }
 }
 
-pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
-    let subject_str = subject.as_ref();
-    !subject_str.starts_with('.')
-        && !subject_str.ends_with('.')
-        && subject_str.bytes().all(|c| !c.is_ascii_whitespace())
+/// Checks if a subject contains only protocol-safe characters.
+/// Rejects empty subjects and subjects containing whitespace characters
+/// (space, tab, CR, LF) which would break protocol framing.
+/// Used for publish paths. Matches nats.go `validateSubject`.
+pub(crate) fn is_valid_publish_subject<T: AsRef<str>>(subject: T) -> bool {
+    let bytes = subject.as_ref().as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none() && memchr::memchr(b'\t', bytes).is_none()
 }
+
+/// Checks if a subject is structurally valid for subscribing.
+/// In addition to protocol-framing checks, also rejects invalid dot structure
+/// (leading/trailing dots, consecutive dots). Matches nats.go `badSubject`.
+pub(crate) fn is_valid_subject<T: AsRef<str>>(subject: T) -> bool {
+    let bytes = subject.as_ref().as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    bytes[0] != b'.'
+        && bytes[bytes.len() - 1] != b'.'
+        && memchr::memmem::find(bytes, b"..").is_none()
+        && memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none()
+        && memchr::memchr(b'\t', bytes).is_none()
+}
+
+/// Checks if a queue group name is valid for the NATS protocol.
+/// Queue groups must not be empty and must not contain whitespace characters
+/// (space, tab, CR, LF) which would break protocol framing.
+pub(crate) fn is_valid_queue_group(queue_group: &str) -> bool {
+    let bytes = queue_group.as_bytes();
+
+    if bytes.is_empty() {
+        return false;
+    }
+
+    memchr::memchr3(b' ', b'\r', b'\n', bytes).is_none() && memchr::memchr(b'\t', bytes).is_none()
+}
+
+#[allow(unused_macros)]
 macro_rules! from_with_timeout {
     ($t:ty, $k:ty, $origin: ty, $origin_kind: ty) => {
         impl From<$origin> for $t {
@@ -1732,9 +1825,11 @@ macro_rules! from_with_timeout {
         }
     };
 }
+#[allow(unused_imports)]
 pub(crate) use from_with_timeout;
 
 use crate::connection::ShouldFlush;
+use crate::message::OutboundMessage;
 
 #[cfg(test)]
 mod tests {

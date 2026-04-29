@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "kv")]
 mod kv {
-    use std::{collections::HashMap, str::from_utf8, time::Duration};
+    use std::{collections::HashMap, error::Error, str::from_utf8, time::Duration};
 
     use async_nats::{
         jetstream::{
@@ -23,7 +24,7 @@ mod kv {
         ConnectOptions,
     };
     use bytes::Bytes;
-    use futures::{StreamExt, TryStreamExt};
+    use futures_util::{StreamExt, TryStreamExt};
 
     #[tokio::test]
     async fn create_bucket() {
@@ -82,6 +83,10 @@ mod kv {
 
         let create = kv.create("key", payload.clone()).await;
         assert!(create.is_err());
+        assert_eq!(
+            create.as_ref().unwrap_err().kind(),
+            async_nats::jetstream::kv::CreateErrorKind::AlreadyExists
+        );
 
         kv.delete("key").await.unwrap();
         let create = kv.create("key", payload.clone()).await;
@@ -90,6 +95,42 @@ mod kv {
         kv.purge("key").await.unwrap();
         let create = kv.create("key", payload.clone()).await;
         assert!(create.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_with_failure() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .event_callback(|event| async move { println!("event: {event:?}") })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "test".into(),
+                description: "test_description".into(),
+                history: 10,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let payload: Bytes = "data".into();
+
+        let create = kv.create("", payload.clone()).await;
+        assert!(create.is_err());
+        assert_eq!(
+            create.as_ref().unwrap_err().kind(),
+            async_nats::jetstream::kv::CreateErrorKind::InvalidKey
+        );
+        // Verify the source error contains the expected message
+        let source = create.as_ref().unwrap_err().source().unwrap();
+        assert!(source.to_string().contains("key cannot be empty"));
     }
 
     #[tokio::test]
@@ -1484,6 +1525,65 @@ mod kv {
         assert_eq!(Operation::Purge, entry.operation);
     }
 
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn watch_with_limit_markers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        // Create a bucket with a very short max_age to trigger automatic expiration
+        // and limit_markers enabled to generate marker messages
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "maxage".into(),
+                description: "test maxage markers".into(),
+                history: 10,
+                max_age: Duration::from_millis(500),
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(10)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Start watching all keys (this will watch for new updates)
+        let mut watcher = kv.watch_all().await.unwrap();
+
+        // Put a key that will age out
+        kv.put("expiring_key", "value".into()).await.unwrap();
+
+        // First entry should be the Put operation we just did
+        let entry = watcher.next().await.unwrap().unwrap();
+        assert_eq!(entry.key, "expiring_key");
+        assert_eq!(entry.operation, Operation::Put);
+        assert_eq!(entry.value.as_ref(), b"value");
+
+        // Wait for the key to age out - the server will emit a marker message
+        // We need to wait longer than max_age (500ms) for the server to process expiration
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        // The next entry should be the MaxAge marker with Operation::Purge
+        // This is the key assertion - before the fix, this would be Operation::Put with empty payload
+        let entry = watcher.next().await.unwrap().unwrap();
+        assert_eq!(entry.key, "expiring_key");
+        assert_eq!(
+            entry.operation,
+            Operation::Purge,
+            "MaxAge marker should result in Operation::Purge, not Operation::Put"
+        );
+        assert_eq!(
+            entry.value.as_ref(),
+            b"",
+            "MaxAge marker should have empty payload"
+        );
+    }
+
     #[tokio::test]
     async fn create_or_update_key_value() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -1546,5 +1646,56 @@ mod kv {
             bucket.stream.cached_info().config.max_messages_per_subject,
             50
         );
+    }
+
+    #[tokio::test]
+    async fn test_direct_get_with_long_bucket_names() {
+        // Regression test for issue #1457
+        // Tests that KV get operations work correctly with long bucket names containing hyphens
+        // The issue was that direct_get_last_for_subject was sending a JSON payload when the subject
+        // was embedded in the URL, causing InvalidSubject errors
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        // Create KV bucket with a long name containing hyphens (as in the issue)
+        let bucket_name = "local-test-stream-rust-jetstream-bucket-local-test-cluster";
+        let store = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: bucket_name.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Use a key with hyphens as in the issue
+        let key = "local-test-stream-rust-key";
+        let value = "test_value_12345";
+
+        // PUT operation
+        store.put(key, value.into()).await.unwrap();
+
+        // Small delay to ensure write is propagated
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // GET operation - this would fail with InvalidSubject before the fix
+        let get_result = store.get(key).await;
+
+        match get_result {
+            Ok(Some(entry)) => {
+                let retrieved_value = String::from_utf8_lossy(&entry);
+                assert_eq!(retrieved_value, value, "Retrieved value doesn't match");
+            }
+            Ok(None) => {
+                panic!("Key not found, but we just put it!");
+            }
+            Err(e) => {
+                panic!("KV get failed with error: {:?}", e);
+            }
+        }
     }
 }

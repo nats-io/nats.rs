@@ -8,8 +8,10 @@ compile_error!("Please enable the `aws-lc-rs` or `ring` feature");
 
 use crypto_backend::digest::{Context, SHA256};
 
+#[allow(dead_code)]
 pub(crate) struct Sha256(Context);
 
+#[allow(dead_code)]
 impl Sha256 {
     pub(crate) fn new() -> Self {
         Self(Context::new(&SHA256))
