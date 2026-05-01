@@ -23,7 +23,11 @@ async fn main() -> Result<(), async_nats::Error> {
     let mut metrics_sub = client.subscribe("orders.>").await?;
     tokio::spawn(async move {
         while let Some(msg) = metrics_sub.next().await {
-            update_metrics(&msg.subject);
+            println!(
+                "[METRICS] {}: {}",
+                msg.subject,
+                String::from_utf8_lossy(&msg.payload)
+            );
         }
     });
 
@@ -52,7 +56,8 @@ async fn main() -> Result<(), async_nats::Error> {
 
     // Publish order
     client.publish("orders.new", "Order 123".into()).await?;
-    // Audit and metrics see it, one worker processes it
+    client.publish("orders.new", "Order 124".into()).await?;
+    // Audit and metrics see them, one worker processes each
     // NATS-DOC-END
 
     sleep(Duration::from_millis(100)).await;
